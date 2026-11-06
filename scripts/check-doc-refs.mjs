@@ -32,10 +32,43 @@
 //   · MALFORMED —— 抽取出来的串根本不是路径（散文 / 表格残片）⇒ 丢弃，只计数
 //                  实证：`bash.rs:266/:293` 这类写法旁边若还有裸 `:293`，归并时会拼出含
 //                  反引号 / 中文的怪物串。判成 BROKEN 只会给基线灌垃圾（桶就指不回真实风险了）。
+//   · SYMDRIFT —— （2026-11-05 追加，任务 #182 ②）**独立的第二层计数，不改动上面任何一个桶**：
+//                  上面各桶只回答「**指不指得到**」（文件存在 + 行号在范围内），
+//                  不回答「**那一行是不是所述符号**」。实测反例：
+//                    `docs/plans/PLAN-shell-plus-plugins.md:1936` 引 `src/types/index.ts:2123`
+//                    并称那是 `PluginPagesInfoDto` —— 该声明实际在 `:2135`，`:2123` 落在
+//                    `PluginPageAssetLocationDto` 体内 ⇒ 行号仍在文件行数内 ⇒ 既有判据报
+//                    `PASS`（长期假绿）。判据与保守口径见下方「行内符号一致性」注释块。
 //
 // 退出码：0 = 无新增 BROKEN / STALE；1 = 有新增（或 selftest 失败）；
 //         2 = 脚本自身失效（扫描面 0 篇文档 / 基线不可读）。
 //   ⚠ ABBREV 首轮**只报告**（存量未知且量级可能很大）；判据未放宽 —— 它只是还没被提升为红。
+//   ⚠ SYMDRIFT 同样**默认只报告**（存量已实测，见下），且**不进棘轮基线**（基线键面仍是
+//     BROKEN/STALE，不改）；要让它退非 0 必须显式给 `--require-symbol-match`，
+//     升与不升由对账批裁定 —— CI 与 `ci-check.mjs` 的命令行**都不带**该开关。
+//
+// ── 行内符号一致性（SYMDRIFT）的判据 ────────────────────────────────
+// 五条，**逐条都是往「宁可漏报」的方向收敛**（散文里绝大多数反引号不是符号，
+// 硬要比对就是结构性假阳性）：
+//   ① 只检既有桶为 **OK** 的引用（STALE / BROKEN / NONLOC / … 已有自己的语义，不叠第二层红）；
+//   ② 符号必须**可机械比对**：与引用**同一行**、列距离 ≤ `MAX_SYM_GAP` 的反引号簇里，
+//      剥掉前导属性 `#[...]`、把 `::` 归一为 `.` 后**恰好只剩一个**标识符链
+//      （`foo` / `Foo::bar` / `pub fn foo` / `list_x()`）；
+//      含数字 / 含 `/` 或 `\` / 以文件扩展名结尾 / 剩下 ≥2 个标识符 / 含非 ASCII
+//      ⇒ 判「句中无可比对符号」⇒ **不检也不判红**（最重要的一条护栏）；
+//      ⚠ **点号链 `notify.channel` 一类默认也排除**（判据修正，2026-11-05 实测）：本仓的
+//      能力登记表把这类**接缝名**（= `scripts/capability-register.json` 的键）放在表格首列、
+//      `文件:行` 放在次列，它不是「该行有此符号」的断言；当成符号比对的实测后果是把
+//      `docs/plans/PLAN-shell-plus-plugins.md` 等整表拖进红（占该档读数的主要部分）。
+//      故默认走「接缝名 ⇒ 未检」，只计数自陈（`--sym-include-dotted` 可放回，供对账）；
+//      `::` 路径形态（`Foo::bar`）**不受此影响**，仍按符号比对。
+//   ③ 该符号必须**在目标文件里存在**（零存在 ⇒ 跳过：那是重命名或口语，属另一道题，
+//      不是「行号漂了但没出界」）；
+//   ④ 命中窗口 = `[start, end + WINDOW_BELOW]`，默认 **2 行**，理由：rustfmt / prettier 的
+//      折行只会把名字推到紧邻的下一行（`impl Trait for Type` 断行、长泛型 `where`），
+//      再往下进函数体了；**上方不留 0 行** —— `start-1` 通常是属性行或 doc 注释，
+//      算它命中会让「符号只写在注释里」的引用白赚。窗口可用 `--sym-window=N` 现场放大复核；
+//   ⑤ 多个候选符号里**任一命中即视为一致**（保守），全不命中才成一条 SYMDRIFT。
 //
 // 棘轮基线 `scripts/doc-refs-baseline.json`（**只减不增**）：
 //   键 = `<文档相对路径>::<引用串>:<起始行>[-<结束行>]`（**不含文档行号** —— 文档增删会让
@@ -50,6 +83,9 @@
 //   node scripts/check-doc-refs.mjs --dump-doc-refs        # 逐条打印 + 判定 + 命中的真实文件
 //   node scripts/check-doc-refs.mjs --init-baseline        # 首轮冻结存量（仅当基线不存在）
 //   node scripts/check-doc-refs.mjs --update-baseline      # 存量修复后收紧基线
+//   node scripts/check-doc-refs.mjs --require-symbol-match # 把 SYMDRIFT 提升为红（**默认不开**）
+//   node scripts/check-doc-refs.mjs --sym-include-dotted   # 把点号接缝名也算符号（读数虚高，仅对账）
+//   node scripts/check-doc-refs.mjs --sym-window=5         # 放大折行窗口复核（只影响 SYMDRIFT 读数）
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -77,6 +113,16 @@ const SELFTEST = args.includes("--selftest");
 const DUMP = args.includes("--dump-doc-refs");
 const INIT_BASELINE = args.includes("--init-baseline");
 const UPDATE_BASELINE = args.includes("--update-baseline");
+// SYMDRIFT 的**唯一**升硬开关。默认关 ⇒ 既有退出码与桶计数逐字不变（CI 与 ci-check.mjs
+// 的命令行都不带它，所以本地绿 / CI 绿口径不受本批影响）。
+const REQUIRE_SYMBOL_MATCH = args.includes("--require-symbol-match");
+// 把 `notify.channel` 这类**点号接缝名**也当符号比对（默认 **否**，理由见 `comparableSymbolSpan`）。
+// 只是读数口径开关：开着它 SYMDRIFT 会虚高（本仓实测主要是能力登记表那一族），不进 CI 命令行。
+const INCLUDE_DOTTED = args.includes("--sym-include-dotted");
+// 折行窗口（下方行数）。`--sym-window=N` 只放大 SYMDRIFT 的**读数**，不改其它任何判据；
+// 非法值（格式不对 / >50）⇒ 退 2 自陈，不静默按默认跑（判据 #7：未检查与通过长得一样）。
+// 解析放在下方常量块之后（`WINDOW_BELOW_DEFAULT` 的 TDZ），真正取值在 main 里。
+const WINDOW_FLAG = args.find((a) => a.startsWith("--sym-window"));
 
 // ── 文档面扩展名白名单 ───────────────────────────────────────────────
 // 比源码面（`DEFAULT_REF_EXTS`）宽：文档引用的目标常是 `.json` / `.css` / `.html` /
@@ -212,30 +258,285 @@ export function isMalformedRef(refFile) {
 /**
  * 行数（按 `\n` 切；末尾换行**不多算一行** —— 否则 `:N+1` 会被当成合法行）。
  * 结果缓存由调用方持有（同一目标文件常被多条引用命中）。
+ * ⚠ 2026-11-05 起 `lineCache` 缓存的是**行数组**（`readLines`）而非行数 —— 符号一致性判据
+ * 需要逐行内容。语义逐字不变：读不到（ENOENT）⇒ `null` ⇒ 调用方判 BROKEN。
  */
 function lineCount(abs, cache) {
-  if (!cache.has(abs)) {
-    let text;
-    try {
-      text = fs.readFileSync(abs, "utf8");
-    } catch (e) {
-      // 文件索引来自 `git ls-files --cached`：工作区里**已删除但尚未提交**的文件仍在索引中
-      // （实测：opc 子树搬迁期间，文档仍指向旧路径 ⇒ readFileSync 抛 ENOENT 把整道门禁打崩）。
-      // 盘上不存在 = 引用不可定位 ⇒ 与「仓内无此文件」同判 BROKEN，不能抛异常。
-      if (e.code !== "ENOENT") throw e;
-      cache.set(abs, null);
-      return null;
-    }
-    const lines = text.split(/\r?\n/);
-    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-    cache.set(abs, lines.length);
+  const lines = readLines(abs, cache);
+  return lines === null ? null : lines.length;
+}
+
+/**
+ * 读目标文件正文并按行切（LRU，上限 `LINES_CACHE_MAX` 个文件 —— 不设上限等于把整仓读进内存）。
+ * 负缓存（读不到的文件记 `null`）与 `lineCount` 原有一致，不重复抛。
+ */
+export function readLines(abs, cache) {
+  if (cache.has(abs)) {
+    const hit = cache.get(abs);
+    cache.delete(abs); // 重新插入 ⇒ 移到队尾（LRU）
+    cache.set(abs, hit);
+    return hit;
   }
-  return cache.get(abs);
+  let lines = null;
+  try {
+    const text = fs.readFileSync(abs, "utf8");
+    lines = text.split(/\r?\n/);
+    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  } catch (e) {
+    // 文件索引来自 `git ls-files --cached`：工作区里**已删除但尚未提交**的文件仍在索引中
+    // （实测：opc 子树搬迁期间，文档仍指向旧路径 ⇒ readFileSync 抛 ENOENT 把整道门禁打崩）。
+    // 盘上不存在 = 引用不可定位 ⇒ 与「仓内无此文件」同判 BROKEN，不能抛异常。
+    if (e.code !== "ENOENT") throw e;
+    lines = null;
+  }
+  cache.set(abs, lines);
+  if (cache.size > LINES_CACHE_MAX) cache.delete(cache.keys().next().value);
+  return lines;
+}
+
+// ── 行内符号一致性（SYMDRIFT）───────────────────────────────────────
+// 判据全文见文件头「行内符号一致性」注释块。这里只放**纯函数**，便于 selftest 逐条命中。
+
+/** 折行窗口下方行数（④）。取 2：rustfmt / prettier 只把名字推到紧邻下一行，再往下是函数体。 */
+const WINDOW_BELOW_DEFAULT = 2;
+/** ②：符号簇与引用 token 的最大列距离。`| \`file.rs:12\` | \`Sym\` |` 的间隔实测 5 列。 */
+const MAX_SYM_GAP = 24;
+/** 缓存的目标文件数上限（LRU）。 */
+const LINES_CACHE_MAX = 400;
+/** 单个符号最多记多少个出现行（超出即截断，只影响「实际在第几行」的展示，不影响命中判定）。 */
+const MAX_OCCURRENCES = 400;
+
+/** 以文件扩展名结尾的簇（`index.ts` / `lib.rs`）是**文件名**不是符号。 */
+const EXT_TAIL_RE = new RegExp(String.raw`^(?:.+\.)?(?:${DOC_REF_EXTS})$`, "i");
+
+/**
+ * 修饰词 / 关键字表：反引号簇里**只剩一个**非本表标识符时才算「给出了可比对符号」。
+ * 用途见 `comparableSymbolSpan`（②）。表里没有 `new` / `default` 这类**可能真是符号名**的词。
+ * ⚠ 后半段是 **prelude / 内置类型名**（`None` / `Option` / `Vec` / `Result` …）：
+ *   它们在仓内几乎每个 `.rs` 里都「存在于别处」，判据③ 的零存在护栏拦不住，
+ *   而散文里写 `` `None` `` 通常是在说**值**而不是说「该行定义了这个符号」。
+ *   实测（2026-11-05，1046 条读数里）这一族贡献 28 条（`None` 16 / `Result` 4 / `Option` 3 /
+ *   `Err` 2 / `Some` 1 / `Vec` 1 / `Arc` 1），故一并排除。
+ */
+const CODE_KEYWORDS = new Set(
+  `pub crate async unsafe extern let var val const static fn func function class interface type enum
+   struct trait impl mod macro record union abstract this self Self return if else for while loop match
+   mut ref use where as dyn in of get set true false null undefined nil void string number boolean
+   export import declare from throw try catch finally package private protected override virtual
+   await yield typeof instanceof public internal
+   none some ok err vec option result boxed box arc rc cell mutex rwlock hashmap hashset btreemap
+   set list map dict tuple unit char float int uint isize usize i8 i16 i32 i64 u8 u16 u32 u64 f32 f64`
+    .split(/\s+/)
+    .filter(Boolean),
+);
+
+/** 反引号簇 `` `...` ``（不跨行）。返回内容与其**列区间**（不含两侧反引号）。 */
+export function backtickSpans(line) {
+  const out = [];
+  for (const m of line.matchAll(/`([^`\r\n]+)`/g)) {
+    out.push({ text: m[1], col: m.index + 1, endCol: m.index + 1 + m[1].length });
+  }
+  return out;
+}
+
+/**
+ * 纯函数（判据②）：一个反引号簇是否是「可机械比对的符号」，并给出它的**形态**。
+ *
+ * @returns {{form:string, syms:string[]}}
+ *   `form`：`ident`（裸标识符）｜ `decl`（`pub fn foo` 这类带关键字的声明形态）｜
+ *   `path`（`Foo::bar` 路径）｜ `dotted`（`notify.channel` 点号链）｜ `none`（不是符号）
+ *   `syms`：比对用的标识符（**末段在前**，路径首段作兜底）。
+ *
+ * ⚠ `dotted` 形态在本仓**不是「该行有这个符号」的断言**（实测 2026-11-05）：
+ *   `docs/plans/PLAN-shell-plus-plugins.md` 的能力登记表把 `notify.channel` / `workflow.reflector` /
+ *   `platform.adapter` / `session.store` 这类**接缝名**放在表格首列，`文件:行` 在次列 ——
+ *   这些点号串是 `scripts/capability-register.json` 里的**登记表键**（逐条可查），
+ *   不是目标文件里的符号。把它们当符号比对 ⇒ 整表成批假阳性。
+ *   故默认（判据②）**排除 `dotted`**，只把 `::` 路径形态当作路径符号；
+ *   需要把它们也计入时用 `--sym-include-dotted`（读数会虚高，仅供对账）。
+ */
+export function comparableSymbolSpan(spanText) {
+  const none = { form: "none", syms: [] };
+  const raw = spanText.trim();
+  if (raw.length < 2 || raw.length > 80) return none;
+  if (!/^[\x20-\x7e]+$/.test(raw)) return none; // 含中文 / 全角 ⇒ 散文
+  if (/[\\/]/.test(raw)) return none; // 含路径分隔 ⇒ 是文件
+  if (/\d/.test(raw)) return none; // 含数字 ⇒ 行号 / 版本 / 序号，不作符号比对（保守）
+  const stripped = raw.replace(/^#\[[^\]]*\]\s*/, "");
+  const s = stripped.replace(/::/g, "."); // 路径归一为点，便于整条链当一个符号
+  const chains = s.match(/[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/g) ?? [];
+  const kept = chains.filter((c) => {
+    const segs = c.split(".");
+    const last = segs[segs.length - 1];
+    if (CODE_KEYWORDS.has(last.toLowerCase())) return false;
+    return !EXT_TAIL_RE.test(c); // `mod.rs` 这种「点号链」其实是文件名
+  });
+  if (kept.length !== 1) return none; // 0 = 散文；≥2 = 归属不明 ⇒ 不猜
+  const chain = kept[0].split(".");
+  const primary = chain[chain.length - 1];
+  if (primary.length < 3) return none; // `id` / `x` 这类短名撞车率太高
+  let form;
+  if (chain.length > 1) form = raw.includes("::") ? "path" : "dotted";
+  else form = /\s/.test(stripped.trim()) ? "decl" : "ident";
+  const first = chain[0];
+  const syms = first !== primary ? [primary, first] : [primary];
+  return { form, syms };
+}
+
+/** 兼容包装：只要符号列表（selftest 与调用方按数组用）。 */
+export function comparableSymbols(spanText) {
+  return comparableSymbolSpan(spanText).syms;
+}
+
+/**
+ * 纯函数（判据②的归属）：给**同一行**里的每条引用 token 归因「它自己那簇反引号里给出的符号」。
+ * 规则：跳过与任何引用列区间重叠的簇（那就是引用本体 / 同行另一条引用）；其余簇归给**列距离最近**
+ * 且 ≤ `MAX_SYM_GAP` 的那条引用；超出距离 ⇒ 归属不明 ⇒ 谁都不给（宁可漏报）。
+ * 就地写 `r.symCandidates`（数组，每条 = `{ text, form, syms }`：原簇文本 / 形态 / 比对标识符）。
+ */
+export function attributeSymbolsToLine(refsOnLine) {
+  if (refsOnLine.length === 0) return;
+  const line = refsOnLine[0].docText ?? "";
+  for (const r of refsOnLine) r.symCandidates = [];
+  for (const sp of backtickSpans(line)) {
+    let owner = null;
+    let best = Infinity;
+    for (const r of refsOnLine) {
+      if (r.col === undefined) continue;
+      if (sp.col < r.colEnd && r.col < sp.endCol) continue; // 与引用本体重叠 ⇒ 不是符号簇
+      const gap = sp.endCol <= r.col ? r.col - sp.endCol : sp.col - r.colEnd;
+      if (gap <= MAX_SYM_GAP && gap < best) {
+        best = gap;
+        owner = r;
+      }
+    }
+    if (!owner) continue;
+    const { form, syms } = comparableSymbolSpan(sp.text);
+    if (syms.length > 0) owner.symCandidates.push({ text: sp.text, form, syms });
+  }
+}
+
+/** 词边界匹配（`_`/字母/数字之外才算边界）；同一符号只编译一次。 */
+const wordReCache = new Map();
+function wordRegex(tok) {
+  if (!wordReCache.has(tok)) {
+    wordReCache.set(tok, new RegExp(`(?<![A-Za-z0-9_])${tok.replace(/[$^.*+?()|{}[\]\\]/g, "\\$&")}(?![A-Za-z0-9_])`));
+  }
+  return wordReCache.get(tok);
+}
+
+/** 符号在目标文件里的出现行（1-based，上限 `MAX_OCCURRENCES`）；按 (文件, 符号) 缓存。 */
+function occurrenceLines(lines, abs, tok, occCache) {
+  const k = `${abs}\u0000${tok}`;
+  if (occCache.has(k)) return occCache.get(k);
+  const re = wordRegex(tok);
+  const out = [];
+  for (let i = 0; i < lines.length && out.length < MAX_OCCURRENCES; i++) {
+    if (re.test(lines[i])) out.push(i + 1);
+  }
+  occCache.set(k, out);
+  return out;
+}
+
+/**
+ * 第二层判据（SYMDRIFT）。就地给命中的引用写 `r.symDrift = { symbols, window, actual, forms }`。
+ * @param {{refs:object[], windowBelow?:number, lineCache?:Map<string, string[]|null>,
+ *          includeDotted?:boolean}} opts
+ * @returns {{drift:object[], withSymbol:number, checked:number, absent:number, dottedSkipped:number,
+ *            byForm:Record<string,number>, windowBelow:number}}
+ *   · `withSymbol`     —— 句中给出可比对符号的引用条数（判据②，**不含**被排除的点号接缝名）
+ *   · `checked`        —— 其中符号确实存在于目标文件、真正进入行窗比对的条数（判据③）
+ *   · `absent`         —— 符号在目标文件里零出现 ⇒ **跳过**（不是「通过」，是「未检」）
+ *   · `dottedSkipped`  —— 只给出 `notify.channel` 这类点号接缝名的引用条数 ⇒ 判据② 排除（未检）
+ *   · `byForm`         —— 漂移按形态计数（`ident` / `decl` / `path` / `dotted`），供对账升硬时取舍
+ */
+export function auditSymbolDrift({
+  refs,
+  windowBelow = WINDOW_BELOW_DEFAULT,
+  lineCache = new Map(),
+  includeDotted = false,
+}) {
+  const occCache = new Map();
+  attributeAllLines(refs);
+  const byTarget = new Map();
+  const dottedOnly = [];
+  for (const r of refs) {
+    if (r.bucket !== "OK" || !r.abs) continue; // classifyRef 只给可定位的引用写 abs
+    if (!r.symCandidates || r.symCandidates.length === 0) continue;
+    const usable = r.symCandidates.filter((c) => includeDotted || c.form !== "dotted");
+    if (usable.length === 0) {
+      r.symDottedOnly = true; // 只给了 `notify.channel` 这类接缝名 ⇒ 未检，不是通过
+      dottedOnly.push(r);
+      continue;
+    }
+    if (!byTarget.has(r.abs)) byTarget.set(r.abs, []);
+    byTarget.get(r.abs).push({ r, usable });
+  }
+  const drift = [];
+  const byForm = {};
+  let withSymbol = 0;
+  let checked = 0;
+  let absent = 0;
+  for (const [abs, list] of byTarget) {
+    const lines = readLines(abs, lineCache);
+    if (lines === null) continue; // 盘上已删 ⇒ 既有桶已判 BROKEN，不在此叠第二层
+    for (const { r, usable } of list) {
+      withSymbol++;
+      const toks = [...new Set(usable.flatMap((c) => c.syms))];
+      const occ = new Map(toks.map((t) => [t, occurrenceLines(lines, abs, t, occCache)]));
+      const present = toks.filter((t) => occ.get(t).length > 0);
+      if (present.length === 0) {
+        absent++;
+        r.symAbsent = true;
+        continue; // 判据③：文件里根本没这个符号 ⇒ 不是行号漂移，另属「重命名/口语」那道题
+      }
+      checked++;
+      const lo = Math.max(1, r.start);
+      const hi = Math.min(lines.length, Math.max(r.end, r.start) + windowBelow);
+      // 判据⑤：任一候选命中即视为一致（保守）
+      if (present.some((t) => occ.get(t).some((l) => l >= lo && l <= hi))) continue;
+      const forms = [...new Set(usable.map((c) => c.form))];
+      for (const f of forms) byForm[f] = (byForm[f] ?? 0) + 1;
+      const actual = occ
+        .get(present[0])
+        .slice()
+        .sort((a, b) => Math.abs(a - r.start) - Math.abs(b - r.start))
+        .slice(0, 3);
+      r.symDrift = { symbols: present, window: [lo, hi], actual, forms, spans: usable.map((c) => c.text) };
+      drift.push(r);
+    }
+  }
+  return { drift, withSymbol, checked, absent, dottedSkipped: dottedOnly.length, byForm, windowBelow };
+}
+
+/** 按（文档, 文档行）分组后逐行做符号归属（`attributeSymbolsToLine` 需要同行上下文）。 */
+function attributeAllLines(refs) {
+  const byLine = new Map();
+  for (const r of refs) {
+    if (r.srcLine === undefined) continue;
+    const k = `${r.doc}\u0000${r.srcLine}`;
+    if (!byLine.has(k)) byLine.set(k, []);
+    byLine.get(k).push(r);
+  }
+  for (const list of byLine.values()) attributeSymbolsToLine(list);
+}
+
+/** 纯函数：SYMDRIFT 是否进退出码。**默认关** ⇒ 恒空数组 ⇒ 退码与改前逐字相同。 */
+export function symbolHardViolations(drift, requireSymbolMatch) {
+  return requireSymbolMatch ? drift : [];
+}
+
+/** 纯函数：`--sym-window=N` 的解析（非法 ⇒ null ⇒ main 退 2 自陈）。 */
+export function parseSymWindowFlag(flag) {
+  if (flag === undefined) return WINDOW_BELOW_DEFAULT;
+  const m = flag.match(/^--sym-window=(\d+)$/);
+  if (!m || Number(m[1]) > 50) return null;
+  return Number(m[1]);
 }
 
 /**
  * 单条引用判定（纯函数：文件系统只经 `lineCount` / `index` 访问）。
- * @returns {{bucket:string, target?:string, candidates?:string[], kind?:string, lines?:number}}
+ * @returns {{bucket:string, target?:string, abs?:string, candidates?:string[], kind?:string, lines?:number}}
  */
 export function classifyRef(ref, ctx) {
   const { refFile, start, end } = ref;
@@ -260,6 +561,8 @@ export function classifyRef(ref, ctx) {
   return {
     bucket: overflow ? "STALE" : "OK",
     target: ctx.repoRel(loc.abs),
+    // `abs` 只给第二层（SYMDRIFT）判据定位目标文件用；**不参与**桶判定、键、输出行 ⇒ 既有读数不变
+    abs: loc.abs,
     lines: n,
   };
 }
@@ -297,7 +600,9 @@ function expandRefFile(ref) {
  *          resolve?:(refFile:string)=>(string|null)}} opts
  *   `resolve` 缺省走 `locateRef` 的逐条 stat 解析（selftest 用）；批量跑必须传内存解析器
  *   （见 `makeFileSetResolver`，理由：SMB 上逐条 stat ~190ms）。
- * @returns {{refs:object[], counts:Record<string,number>, docs:number}}
+ * @returns {{refs:object[], counts:Record<string,number>, docs:number, lineCache:Map<string,string[]|null>}}
+ *   ⚠ `counts` 的**桶口径不含 SYMDRIFT** —— 第二层判据（`auditSymbolDrift`）只往引用对象上挂
+ *   `symDrift` / `symAbsent` 字段，**不改 `bucket`**，所以既有各桶计数与退出码逐字不变。
  */
 export function auditDocs({ root, docs, index, repoRel, resolve }) {
   const lineCache = new Map();
@@ -319,27 +624,54 @@ export function auditDocs({ root, docs, index, repoRel, resolve }) {
     // `extractRefs` 把 `:A-B` 拆成两条（起点 + 终点），`:A/B` 拆成两条多行清单。
     // 同一个 token（同一列区间）归并成**一条**引用：区间终点只是边界，不是另一条引用。
     const toks = new Map();
+    const lineTexts = new Map();
     for (const r of extractRefs(text, DOC_REF_EXTS)) {
       const k = `${r.srcLine}:${r.col}`;
       if (!toks.has(k)) {
-        toks.set(k, { file: expandRefFile(r), srcLine: r.srcLine, start: r.line, end: r.line });
+        // `col` / `colEnd` = 引用 token 在本行里的列区间（第二层判据要靠它做符号归属）；
+        // `docText` 只截前 2000 字符，够覆盖一行散文，也避免把整篇文档留在内存里。
+        toks.set(k, {
+          file: expandRefFile(r),
+          srcLine: r.srcLine,
+          start: r.line,
+          end: r.line,
+          col: r.col,
+          colEnd: r.end,
+          text: (r.text ?? "").slice(0, 2000),
+        });
       }
       const t = toks.get(k);
       t.start = Math.min(t.start, r.line);
       t.end = Math.max(t.end, r.line);
+      lineTexts.set(r.srcLine, t.text);
     }
     for (const t of [...toks.values()].sort((a, b) => a.srcLine - b.srcLine || a.start - b.start)) {
       const refFile = t.file;
       const key = `${docRel}::${refFile}:${t.start}${t.end !== t.start ? `-${t.end}` : ""}`;
-      if (seen.has(key)) continue; // 同一文档内重复引用 ⇒ 只判一次（输出不被淹）
+      if (seen.has(key)) continue; // 同一文档内重复引用 ⇒ 只判一次（输出不被淹）。
+      // ⚠ 被丢掉的重复 token 也就不参与第二层的「同行符号归属」上下文 —— 它判定与幸存那条完全相同，
+      //   归属只会落到同文件的同一行号上，不影响结论。
       seen.add(key);
       const verdict = classifyRef({ refFile, start: t.start, end: t.end }, ctx);
-      refs.push({ key, doc: docRel, docLine: t.srcLine + 1, refFile, start: t.start, end: t.end, ...verdict });
+      refs.push({
+        key,
+        doc: docRel,
+        docLine: t.srcLine + 1,
+        srcLine: t.srcLine,
+        refFile,
+        start: t.start,
+        end: t.end,
+        col: t.col,
+        colEnd: t.colEnd,
+        docText: lineTexts.get(t.srcLine) ?? "",
+        ...verdict,
+      });
     }
   }
   const counts = {};
   for (const r of refs) counts[r.bucket] = (counts[r.bucket] ?? 0) + 1;
-  return { refs, counts, docs: docs.length };
+  // `lineCache` 一并返回：第二层（SYMDRIFT）复用同一份正文缓存，避免 SMB 上把目标文件读两遍。
+  return { refs, counts, docs: docs.length, lineCache };
 }
 
 /** 纯函数：与基线比对。返回 {newViolations, fixedCount, baseSize}。 */
@@ -493,8 +825,202 @@ function runSelftest() {
   return true;
 }
 
+// ── selftest（第二层）：行内符号一致性 SYMDRIFT ────────────────────
+// 独立的临时目录，**不碰上面那套桶判据的靶面** ⇒ 既有用例的每个期望值都原样不动。
+function runSymbolSelftest() {
+  let fail = 0;
+  const check = (cond, msg, extra) => {
+    if (!cond) {
+      console.error(`SELFTEST FAIL：${msg}${extra === undefined ? "" : `（实际 ${JSON.stringify(extra)}）`}`);
+      fail++;
+    }
+  };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "doc-refs-symtest-"));
+  try {
+    const write = (rel, content) => {
+      const abs = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf8");
+    };
+    // rust 靶（行号逐字可数）
+    write(
+      "src/engine.rs",
+      [
+        "// 头部注释", // 1
+        "pub struct EngineState {", // 2
+        "    pub tick: u64,", // 3
+        "}", // 4
+        "", // 5
+        "impl EngineState {", // 6
+        "    pub fn snapshot_all(&self) -> u64 {", // 7
+        "        self.tick", // 8
+        "    }", // 9
+        "}", // 10
+        "", // 11
+        "pub fn resolve_gap_width(a: u64, b: u64) -> u64 {", // 12
+        "    a.max(b)", // 13
+        "}", // 14
+        "", // 15
+        "impl NamedThing", // 16
+        "    for EngineState", // 17  ← rustfmt 折行：名字在引用行的**下一行**
+        "{", // 18
+        "    fn wide(x: u64) -> u64 { x }", // 19
+        "}", // 20
+        "",
+      ].join("\n"),
+    );
+    // ts 靶（复刻 leader 实测的 `src/types/index.ts` 表格行形态）
+    write(
+      "src/pages.ts",
+      [
+        "/**", // 1
+        " * 返回形状。", // 2
+        " */", // 3
+        "export interface PluginPagesInfoDto {", // 4
+        "  pages: PluginPageDto[];", // 5
+        "  tick: number;", // 6
+        "}", // 7
+        "",
+      ].join("\n"),
+    );
+    write(
+      "docs/syms.md",
+      [
+        "见 `src/engine.rs:12` 的 `resolve_gap_width`（正控：符号确在所指行）", // 1
+        "见 `src/engine.rs:7` 的 `resolve_gap_width`（负控：漂到同文件另一处 ⇒ 须点名 12）", // 2 ⇒ 漂移
+        "见 `src/engine.rs:16` 的 `EngineState`（折行窗口内命中 17 行 ⇒ 不报）", // 3
+        "见 `src/engine.rs:13` 的 `EngineState`（出窗 ⇒ 报，实际最近 17）", // 4 ⇒ 漂移
+        "见 `src/engine.rs:8` 的 `EngineState::tick`（rust 路径形态：末段 tick 命中）", // 5
+        "见 `src/engine.rs:2` 的 `rename_all = camelCase`（一簇里剩 2 个标识符 ⇒ 归属不明，不检）", // 6
+        "见 `src/engine.rs:3` 的 `TotallyAbsentIface`（符号在目标文件零出现 ⇒ 跳过，不是漂移）", // 7
+        "见 `src/engine.rs:5`（句中没有可机械比对符号 ⇒ 不检也不许退红）", // 8
+        "| `src/pages.ts:4` | `PluginPagesInfoDto`（ts 正控） |", // 9
+        "| `src/pages.ts:7` | `PluginPagesInfoDto`，`pages` 复用 `PluginPageDto` |（ts 负控）", // 10 ⇒ 漂移
+        "见 `src/pages.ts:6` 的 `engine.tick`（点号接缝名形态 ⇒ 判据② 默认排除，不检）", // 11
+        "见 `src/engine.rs:2-4` 的 `EngineState`（区间引用：窗口覆盖全区间）", // 12
+        "见 `src/engine.rs:19-20` 的 `EngineState`（区间内确实没有 ⇒ 报，实际最近 17）", // 13 ⇒ 漂移
+        "见 `src/engine.rs:9` 与一段中文填充文字，跨度超过二十四个字符才出现的符号 `resolve_gap_width` 不该被归属", // 14
+        "| `src/pages.ts:2` | 接缝 `pages.tick`（同为点号形态；`--sym-include-dotted` 时才报） |", // 15
+        "",
+      ].join("\n"),
+    );
+
+    const index = buildBasenameIndex(tmp, SKIP_DIRS);
+    const repoRel = (abs) => path.relative(tmp, abs).split(path.sep).join("/");
+    const symDocs = [path.join(tmp, "docs", "syms.md")];
+    const { refs, counts, lineCache } = auditDocs({ root: tmp, docs: symDocs, index, repoRel });
+    const sym = auditSymbolDrift({ refs, windowBelow: 2, lineCache });
+
+    // 前置：全部引用必须仍是 OK（第二层**不许**改桶），既有判红面仍是 0 ⇒ 默认退码不变
+    check(counts.OK === 15, "靶面：15 条引用都应仍判 OK（SYMDRIFT 不进桶）", counts);
+    check(hardViolations(refs).length === 0, "第二层判据不得改动桶：既有判红面必须仍为 0");
+    check(symRefsAllOk(refs), "SYMDRIFT 条目自身 bucket 仍为 OK（独立计数，不与 BROKEN/STALE 混桶）");
+
+    // 抽样面计数：可比对符号 / 进入行窗比对 / 零出现跳过 / 点号接缝名排除
+    check(sym.withSymbol === 10, "判据②：10 条引用给出可比对符号（多标识符 / 无符号 / 超距离 / 点号接缝名 共 5 条不检）", sym.withSymbol);
+    check(sym.absent === 1, "判据③：符号零出现的那条应记为「跳过（未检）」而非漂移", sym.absent);
+    check(sym.checked === 9, "真正进入行窗比对的应恰为 9 条", sym.checked);
+    check(sym.dottedSkipped === 2, "点号接缝名形态（`engine.tick` / `pages.tick`）必须被排除并**计数自陈**", sym.dottedSkipped);
+
+    // 负控：行号漂到同文件另一处 ⇒ 报进新桶，且点名实际行
+    check(sym.drift.length === 4, "漂移应恰为 4 条（rs 两条 + ts 表格行一条 + 区间一条）", sym.drift.length);
+    check(sym.byForm.ident === 4 && Object.keys(sym.byForm).length === 1, "漂移按形态计数：4 条全是裸标识符", sym.byForm);
+    const d2 = sym.drift.find((r) => r.start === 7);
+    check(!!d2 && d2.symDrift.actual[0] === 12, "负控：漂移到同文件另一处必须点名实际行 12", d2?.symDrift?.actual);
+    const d4 = sym.drift.find((r) => r.start === 13);
+    check(!!d4 && d4.symDrift.actual[0] === 17, "负控：出窗样本必须点名最近的真实出现行 17", d4?.symDrift?.actual);
+    const d10 = sym.drift.find((r) => r.docLine === 10);
+    check(!!d10 && d10.symDrift.symbols.includes("PluginPagesInfoDto"), "ts 表格行负控必须被抓到（leader 实测形态）");
+    check(!!d10 && d10.symDrift.actual[0] === 4, "ts 负控：实际声明行应点名 4", d10?.symDrift?.actual);
+
+    // 正控：三类「不许报」
+    for (const [at, why] of [
+      [1, "符号确在所指行"],
+      [3, "折行窗口内命中（下一行）"],
+      [5, "rust 路径形态（::）取末段命中"],
+      [9, "ts 正控"],
+      [12, "区间引用覆盖全区间"],
+      [14, "符号离引用超 24 列 ⇒ 不归属"],
+    ]) {
+      check(!sym.drift.some((r) => r.docLine === at), `正控（第 ${at} 行，${why}）不得报漂移`);
+    }
+    // 最重要的一条：句中无可比对符号 ⇒ 不检、也不许退红
+    check(!sym.drift.some((r) => r.docLine === 8), "句中无可比对符号 ⇒ 不检（这条若误报，整篇散文都会红）");
+    check(!sym.drift.some((r) => r.docLine === 6), "一簇里剩 ≥2 个标识符 ⇒ 归属不明，不检");
+    check(!sym.drift.some((r) => r.docLine === 7), "符号在目标文件零出现 ⇒ 判「跳过」不判漂移");
+    check(!sym.drift.some((r) => r.docLine === 11), "点号接缝名形态默认排除 ⇒ 不检（本仓实测主要是它，误检会整表假阳性）");
+
+    // 读数口径开关：`--sym-include-dotted` 只把点号形态放回来（第 15 行由此转红，第 11 行仍命中）
+    const wide = auditSymbolDrift({ refs: [...refs], windowBelow: 2, lineCache, includeDotted: true });
+    check(wide.dottedSkipped === 0, "打开 --sym-include-dotted 后不应再有「接缝名排除」");
+    check(wide.withSymbol === 12, "打开后给出符号的引用应是 12 条（多出第 11、15 两行）", wide.withSymbol);
+    check(
+      wide.drift.length === 5 && wide.drift.some((r) => r.docLine === 15),
+      "打开后只应多报第 15 行那条（第 11 行的 tick 确在所指行 ⇒ 仍不报）",
+      wide.drift.map((r) => r.docLine),
+    );
+    check(wide.byForm.dotted === 1, "新增那条必须记在 dotted 形态下（自陈它是接缝名而非符号）", wide.byForm);
+
+    // 窗口收紧只多报不少报（折行窗口取值 2 的反证：0 行时第 3 条正控会变红）
+    check(
+      auditSymbolDrift({ refs: [...refs], windowBelow: 0, lineCache }).drift.length === 5,
+      "窗口取 0 时只应多报那 1 条折行样本（⇒ 默认取 2 是在往漏报方向收敛）",
+    );
+
+    // 升硬开关：关 ⇒ 违规恒空（退码与改前逐字相同）；开 ⇒ 全部成为违规
+    check(symbolHardViolations(sym.drift, false).length === 0, "--require-symbol-match 关闭时 SYMDRIFT 不进退出码");
+    check(symbolHardViolations(sym.drift, true).length === 4, "--require-symbol-match 打开时 SYMDRIFT 全部判红（⇒ 退非 0）");
+    check(parseSymWindowFlag(undefined) === 2, "缺省窗口 = 2");
+    check(parseSymWindowFlag("--sym-window=5") === 5, "--sym-window=5 应解析成 5");
+    check(parseSymWindowFlag("--sym-window=x") === null, "非法窗口值必须返回 null（main 据此退 2）");
+    check(parseSymWindowFlag("--sym-window=99") === null, "超出 0..50 的窗口值必须返回 null");
+
+    // 符号形态单测（判据②的护栏逐条）
+    check(comparableSymbols("PluginPagesInfoDto").join() === "PluginPagesInfoDto", "单个 PascalCase 标识符 = 可比对符号");
+    check(comparableSymbols("pub fn resolve_gap_width").join() === "resolve_gap_width", "声明形态取名字");
+    check(comparableSymbols("EngineState::tick")[0] === "tick", "rust 路径取末段");
+    check(comparableSymbols("engine.tick")[0] === "tick", "点号链取末段（形态由 comparableSymbolSpan 判）");
+    check(comparableSymbols("list_plugin_pages()")[0] === "list_plugin_pages", "带括号调用形态");
+    check(comparableSymbols("src/types/index.ts:2123").length === 0, "引用本体（含路径与数字）不是符号");
+    check(comparableSymbols("mod.rs").length === 0, "文件名（以扩展名结尾）不是符号");
+    check(comparableSymbols("rename_all = camelCase").length === 0, "剩 2 个标识符 ⇒ 归属不明");
+    check(comparableSymbols("无 新增").length === 0, "含非 ASCII ⇒ 散文");
+    check(comparableSymbols("v2").length === 0, "短于 3 字符的末段不比对（撞车率太高）");
+    check(comparableSymbols("impl EngineState").join() === "EngineState", "impl 形态剥掉关键字");
+    check(comparableSymbolSpan("notify.channel").form === "dotted", "点号链 = 接缝名形态（默认排除的依据）");
+    check(comparableSymbolSpan("SessionManager::new").form === "path", ":: 路径形态仍按符号比对");
+    check(comparableSymbolSpan("pub fn foo").form === "decl", "带关键字的声明形态");
+    check(comparableSymbolSpan("PluginPagesInfoDto").form === "ident", "裸标识符形态");
+    check(comparableSymbolSpan("见 foo 说明").form === "none", "散文形态 ⇒ none");
+    check(comparableSymbolSpan("Foo::Bar::baz").syms.join() === "baz,Foo", "多级路径：末段在前 + 首段兜底");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  if (fail > 0) return false;
+  console.log(
+    "SELFTEST OK（第二层 SYMDRIFT）：符号在行 ⇒ 不报；漂到同文件另一处 ⇒ 报并点名实际行；" +
+      "折行窗口内命中 ⇒ 不报（窗口取 0 时该条转红，故 2 是漏报方向收敛）；" +
+      "句中无符号 / 多标识符 / 超距离 / 符号零出现 / 点号接缝名 ⇒ 不检也不退红；rs 与 ts 两形态各覆盖；" +
+      "--sym-include-dotted 只放回接缝名读数；开关关闭 ⇒ 违规恒空（既有退码不变），打开 ⇒ 全部判红；" +
+      "桶计数仍为 OK（不与 BROKEN/STALE 混桶）",
+  );
+  return true;
+}
+
+/** 纯函数：SYMDRIFT 条目是否**没有**污染既有桶（第二层的语义护栏）。 */
+export function symRefsAllOk(refs) {
+  return refs.every((r) => !r.symDrift || r.bucket === "OK");
+}
+
 // ── main ────────────────────────────────────────────────────────────
-if (SELFTEST) process.exit(runSelftest() ? 0 : 1);
+if (SELFTEST) process.exit(runSelftest() && runSymbolSelftest() ? 0 : 1);
+
+const SYM_WINDOW = parseSymWindowFlag(WINDOW_FLAG);
+if (SYM_WINDOW === null) {
+  console.error(`✖ 参数非法：${JSON.stringify(WINDOW_FLAG)} —— 只接受 --sym-window=<0..50>（第二层判据的折行窗口）`);
+  process.exit(2);
+}
 
 const repoFiles = listRepoFiles(ROOT, SKIP_DIRS);
 const index = indexFromFileList(repoFiles.files);
@@ -505,8 +1031,11 @@ if (docs.length === 0) {
 }
 const repoRel = (abs) => path.relative(ROOT, abs).split(path.sep).join("/");
 const resolveRef = makeFileSetResolver(ROOT, repoFiles.files);
-const { refs, counts } = auditDocs({ root: ROOT, docs, index, repoRel, resolve: resolveRef });
+const { refs, counts, lineCache } = auditDocs({ root: ROOT, docs, index, repoRel, resolve: resolveRef });
 const hard = hardViolations(refs);
+// 第二层（SYMDRIFT）：复用同一份正文缓存；**不改桶、不改键**，只往引用对象上挂 symDrift/symAbsent。
+const sym = auditSymbolDrift({ refs, windowBelow: SYM_WINDOW, lineCache, includeDotted: INCLUDE_DOTTED });
+const symHard = symbolHardViolations(sym.drift, REQUIRE_SYMBOL_MATCH);
 
 const BASELINE_NOTE =
   "棘轮基线：键 = <文档>::<引用串>:<起始行>[-<结束行>]（不含文档行号，防漂移）。" +
@@ -536,7 +1065,13 @@ const summary =
   ` ｜ OK ${counts.OK ?? 0} ｜ NONLOC（未检查）${counts.NONLOC ?? 0} ｜ BROKEN ${counts.BROKEN ?? 0}` +
   ` ｜ ABBREV ${counts.ABBREV ?? 0} ｜ STALE ${counts.STALE ?? 0}` +
   ` ｜ EXTERNAL ${counts.EXTERNAL ?? 0} ｜ EPHEMERAL ${counts.EPHEMERAL ?? 0}` +
-  ` ｜ MALFORMED ${counts.MALFORMED ?? 0}`;
+  ` ｜ MALFORMED ${counts.MALFORMED ?? 0}` +
+  // 第二层是**并列独立计数**（上面各桶的读数与它无关）：给出可比对符号的引用里，
+  // 符号不在所指行（±窗口）的条数。窗口 0 行时上面这些数字不变，只有这个数会变。
+  ` ｜ SYMDRIFT ${sym.drift.length}（第二层·符号不在所指行${REQUIRE_SYMBOL_MATCH ? "**判红**" : "只报告"}；` +
+  `可比对符号 ${sym.withSymbol} 条 / 进入比对 ${sym.checked} 条 / 符号零存在跳过 ${sym.absent} 条 /` +
+  ` 点号接缝名排除 ${sym.dottedSkipped} 条 / 窗口 +${sym.windowBelow} 行` +
+  `；漂移按形态 ${Object.entries(sym.byForm).map(([k, v]) => `${k} ${v}`).join(" / ") || "无"}）`;
 
 if (DUMP) {
   for (const r of refs) {
@@ -551,6 +1086,16 @@ if (DUMP) {
     else if (r.bucket === "EXTERNAL") detail = "→ 跨仓 / 绝对路径（免检，只报告）";
     else if (r.bucket === "EPHEMERAL") detail = "→ 环境相关目录（免检，只报告）";
     else if (r.bucket === "MALFORMED") detail = "→ 不是路径形态（散文 / 表格残片，已丢弃）";
+    // 第二层附注（不改上面任何桶的读数）：符号一致 / 符号漂移 / 符号零存在（未检）/ 仅接缝名（未检）
+    if (r.symDrift) {
+      detail +=
+        ` ⇒ SYMDRIFT 簇 \`${r.symDrift.spans.join("` / `")}\`（形态 ${r.symDrift.forms.join("/")}）` +
+        `的符号 ${r.symDrift.symbols.join("/")} 不在 ${r.symDrift.window.join("-")} 行` +
+        `（实际 ${r.symDrift.actual.join("/")}`;
+      detail += r.symDrift.symbols.length > 1 ? `；候选共 ${r.symDrift.symbols.length} 个）` : "）";
+    } else if (r.symAbsent) detail += ` ⇒ 符号零存在（未检，属重命名/口语那道题）`;
+    else if (r.symDottedOnly) detail += ` ⇒ 仅点号接缝名（未检，见 comparableSymbolSpan 注释）`;
+    else if (r.symCandidates && r.symCandidates.length > 0 && r.bucket === "OK") detail += ` ⇒ 符号一致`;
     console.log(`${at}  ${ref.padEnd(64)} ${r.bucket.padEnd(9)} ${detail}`);
   }
   console.log(`\n${summary}`);
@@ -604,6 +1149,29 @@ if (nonloc.length > 0) {
   if (nonloc.length > 10) console.log(`   … 其余 ${nonloc.length - 10} 条省略`);
 }
 
+// ── 第二层（SYMDRIFT）报告面 ───────────────────────────────────────
+// 语义与 ABBREV 同档：**默认只报告**，不影响退出码。`--require-symbol-match` 才判红。
+// 逐条必须点到「符号实际在第几行」，否则这条判据指不回真实风险（同 ABBREV 的自证要求）。
+if (sym.drift.length > 0) {
+  console.log(
+    `\n~ SYMDRIFT ${sym.drift.length} 条（引用可定位、但**所指那一行不是句中所述符号**，行号仍在范围内 ⇒` +
+      `既有 BROKEN/STALE 全绿的那种腐烂。${REQUIRE_SYMBOL_MATCH ? "**已判红**" : "默认只报告，加 --require-symbol-match 才退非 0"}）：`,
+  );
+  for (const r of sym.drift.slice(0, 30)) {
+    const ref = r.end !== r.start ? `${r.refFile}:${r.start}-${r.end}` : `${r.refFile}:${r.start}`;
+    console.log(
+      `   ~ ${r.doc}:${r.docLine} → ${ref} 簇 \`${r.symDrift.spans.join("` / `")}\`` +
+        `（形态 ${r.symDrift.forms.join("/")}）的符号 \`${r.symDrift.symbols.join("` / `")}\`` +
+        ` 不在 ${r.symDrift.window[0]}..${r.symDrift.window[1]} 行（实际 ${r.symDrift.actual.join(" / ")}）`,
+    );
+  }
+  if (sym.drift.length > 30) console.log(`   … 其余 ${sym.drift.length - 30} 条省略（--dump-doc-refs 看全量）`);
+  console.log(
+    `   修法：把行号订正到「实际」那一行（或把符号名改成所指行上的真符号）。\n` +
+      `   复核窗口：--sym-window=N 放大折行窗口，可分辨「折行没吃进」与「真漂移」。`,
+  );
+}
+
 if (newViolations.length > 0) {
   console.error(`\n✖ ${newViolations.length} 条基线外新增（BROKEN / STALE —— 文档引用的客观错，修法唯一：改引用）：`);
   for (const v of newViolations.slice(0, 40)) {
@@ -615,6 +1183,16 @@ if (newViolations.length > 0) {
   console.error(
     `\n  · BROKEN：把引用改成**段对齐**写法（完整路径 / 唯一后缀 / 唯一 basename）；\n` +
       `  · STALE ：按目标文件当前行数订正行号（引用腐烂，编译与单测都看不见）。`,
+  );
+  process.exit(1);
+}
+
+// 升硬开关：**只有显式给了 --require-symbol-match 才会走到这里退 1**（symHard 关时恒空）。
+// ⚠ 不进棘轮基线 —— 基线键面仍是 BROKEN/STALE（`writeBaseline` 未改），升硬前需另立符号漂移基线。
+if (symHard.length > 0) {
+  console.error(
+    `\n✖ --require-symbol-match：SYMDRIFT ${symHard.length} 条判红（引用可定位但所指行不是所述符号）。` +
+      `上面已逐条点名实际行；不带该开关时本桶只报告、退码与既往逐字相同。`,
   );
   process.exit(1);
 }

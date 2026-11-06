@@ -180,14 +180,14 @@ mod tests {
     #[test]
     fn limit_gate_pins_the_contract_range() {
         let (low, high) = OPC_BLOG_POST_LIST_LIMIT_RANGE;
-        assert_eq!(resolve_limit(Some(low)), Ok(low));
-        assert_eq!(resolve_limit(Some(high)), Ok(high));
+        assert_eq!(resolve_limit(Some(low)).unwrap(), low);
+        assert_eq!(resolve_limit(Some(high)).unwrap(), high);
         for bad in [0, high + 1, usize::MAX] {
             let err = resolve_limit(Some(bad)).expect_err("越界应拒收，不该夹取");
             assert!(matches!(err, AxAgentError::Validation(_)), "越界应落成 Validation：{err:?}");
         }
         // 缺省取契约层那一份（不是本文件另抄的数字）。
-        assert_eq!(resolve_limit(None), Ok(OPC_BLOG_POST_LIST_DEFAULT_LIMIT));
+        assert_eq!(resolve_limit(None).unwrap(), OPC_BLOG_POST_LIST_DEFAULT_LIMIT);
     }
 
     /// 键集合逐字钉住：多一个键 = 有大字段漏过线；少一个键 = 消费方（`SitesTab` 的列表列）

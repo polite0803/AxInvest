@@ -205,23 +205,23 @@ mod tests {
     #[test]
     fn limit_gate_pins_the_contract_range() {
         let (low, high) = ANALYSIS_RECORD_LIST_LIMIT_RANGE;
-        assert_eq!(resolve_limit(Some(low)), Ok(low));
-        assert_eq!(resolve_limit(Some(high)), Ok(high));
+        assert_eq!(resolve_limit(Some(low)).unwrap(), low);
+        assert_eq!(resolve_limit(Some(high)).unwrap(), high);
         for bad in [0, high + 1, usize::MAX] {
             let err = resolve_limit(Some(bad)).expect_err("越界应拒收，不该夹取");
             assert!(matches!(err, AxAgentError::Validation(_)), "越界应落成 Validation：{err:?}");
         }
         // 缺省取契约层那一份（不是本文件另抄的数字）。
-        assert_eq!(resolve_limit(None), Ok(ANALYSIS_RECORD_LIST_DEFAULT_LIMIT));
+        assert_eq!(resolve_limit(None).unwrap(), ANALYSIS_RECORD_LIST_DEFAULT_LIMIT);
     }
 
     #[test]
     fn offset_gate_rejects_beyond_u32() {
-        assert_eq!(resolve_offset(None), Ok(0), "缺省 offset = 0");
-        assert_eq!(resolve_offset(Some(100)), Ok(100));
+        assert_eq!(resolve_offset(None).unwrap(), 0, "缺省 offset = 0");
+        assert_eq!(resolve_offset(Some(100)).unwrap(), 100);
         assert_eq!(
-            resolve_offset(Some(u32::MAX as usize)),
-            Ok(u32::MAX),
+            resolve_offset(Some(u32::MAX as usize)).unwrap(),
+            u32::MAX,
             "边界值本身合法（不静默截断）"
         );
         // u32::MAX + 1 若被 `as u32` 截断会变成 0 ⇒ 必须拒收而不是回到第一页。

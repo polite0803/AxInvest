@@ -51,12 +51,25 @@
 //                    `PluginPageAssetLocationDto` 体内 ⇒ 行号仍在文件行数内 ⇒ 既有判据报
 //                    `PASS`（长期假绿）。判据与保守口径见下方「行内符号一致性」注释块。
 //
-// 退出码：0 = 无新增 BROKEN / STALE；1 = 有新增（或 selftest 失败）；
+// 退出码：0 = 无新增 BROKEN / STALE；1 = 有新增（或 selftest 失败 / 第二层棘轮判红）；
 //         2 = 脚本自身失效（扫描面 0 篇文档 / **一篇文档都没读成功** / 基线不可读 / 参数非法）。
 //   ⚠ ABBREV 首轮**只报告**（存量未知且量级可能很大）；判据未放宽 —— 它只是还没被提升为红。
-//   ⚠ SYMDRIFT 同样**默认只报告**（存量已实测，见下），且**不进棘轮基线**（基线键面仍是
-//     BROKEN/STALE，不改）；要让它退非 0 必须显式给 `--require-symbol-match`，
-//     升与不升由对账批裁定 —— CI 与 `ci-check.mjs` 的命令行**都不带**该开关。
+//   ⚠ SYMDRIFT（第二层）**靶面按「文档类别」收窄**（任务 #202 ①，判据⑥ + `SNAPSHOT_DOC_RULES`）：
+//     只有**活文档**参与第二层收口；**时点快照**（`docs/audits/AUDIT-*-<YYYY-MM-DD>.md`）
+//     **一律不订正、不进棘轮、永不判红** —— 快照里的旧读数是「当时的世界」，腐烂是正常且应保留的。
+//     快照面仍**计数并打印**（判据 #7：免检与检查通过长得一样）。
+//     ⚠ 第一层各桶**不随本条收窄**：对快照与活文档按原口径同跑（2026-11-04 建门时的既有裁定，
+//       本批一字未动 —— 桶判定、键、`hardViolations` 都没改）。
+//   ⚠ SYMDRIFT 的**退码**（任务 #202 ②）分两档，默认都**只报告**：
+//     · 基线里没有 `symEntries`（= 第二层从未冻结）⇒ 恒不判红，但**自陈「棘轮未生效」**，
+//       并给出冻结命令 —— 「没武装」必须是看得见的状态，不能伪装成「查过了、没问题」。
+//     · 已冻结 ⇒ 活文档面中**基线外新增的键**判红（这才叫收口）；基线内条目只报告。
+//     · 全量升硬开关仍是 `--require-symbol-match`（**不看基线**，整个活文档面判红），
+//       CI 与 `ci-check.mjs` 的命令行**都不带**该开关。
+//   ⚠ 自动回写（任务 #202 ③）**默认不存在**：`--suggest-fix` 只出「建议清单」（dry-run，零写盘）；
+//     真写盘要 `--fix` **且** `--i-attest-quiet-window` **且** `writeModeGate` 六道闸全过（见下方「自动回写」：
+//     写盘自检当场跑且非零断言、标注语料精确率 100%、棘轮已武装、无未检查面、逐条写前验证、
+//     改后行四条不变式）。任一道不过 ⇒ 退 2 自陈并一行盘都不写。
 //   ⚠ UNVERIFIED（读盘失败）**默认也只报告**，理由与本仓既有两道巡检门同型：
 //     把「盘的抖动」变成红灯会把排查方向引向不存在的文档缺陷（本会话已实证一次），
 //     而巡检门的价值在于**读数可信 + 覆盖面自陈**。但两件事必须硬：
@@ -66,7 +79,7 @@
 //          `--require-no-unverified`（CI 与 `ci-check.mjs` 的命令行**都不带**，加严由对账批裁定）。
 //
 // ── 行内符号一致性（SYMDRIFT）的判据 ────────────────────────────────
-// 五条，**逐条都是往「宁可漏报」的方向收敛**（散文里绝大多数反引号不是符号，
+// 六条，**逐条都是往「宁可漏报」的方向收敛**（散文里绝大多数反引号不是符号，
 // 硬要比对就是结构性假阳性）：
 //   ① 只检既有桶为 **OK** 的引用（STALE / BROKEN / NONLOC / … 已有自己的语义，不叠第二层红）；
 //   ② 符号必须**可机械比对**：与引用**同一行**、列距离 ≤ `MAX_SYM_GAP` 的反引号簇里，
@@ -87,16 +100,53 @@
 //      再往下进函数体了；**上方不留 0 行** —— `start-1` 通常是属性行或 doc 注释，
 //      算它命中会让「符号只写在注释里」的引用白赚。窗口可用 `--sym-window=N` 现场放大复核；
 //   ⑤ 多个候选符号里**任一命中即视为一致**（保守），全不命中才成一条 SYMDRIFT。
+//   ⑥ **靶面只收活文档**（任务 #202 ①，2026-11-06）：`docLifecycle(docRel)` 判成 `snapshot` 的
+//      文档**不参与第二层**（不判漂移、不进棘轮、不进建议、永不判红）。
+//      规范依据：`AGENTS.md`「文档放置」表把 `docs/audits/` 定为「审计 / 体检 / 对比 /
+//      根因定位报告（**时点快照**）」，而 `docs/plans/` 等是「计划 / 提案 / 修复清单」（活文档）。
+//      快照记录的是**当时的世界**，其行号腐烂是正常且应保留的证据 —— 拿第二层去「订正」快照
+//      等于销毁取证现场（第一层不在此列：它查的是「这串还能不能指到文件」，与订正无关）。
+//      ⚠ 代价（必须写明）：快照面从此**没有**第二层保护，其符号漂移只以计数形式可见。
+//      ⚠ 判据集中在 `SNAPSHOT_DOC_RULES` 一处，**默认判活文档**（fail-toward-checking）：
+//        未来新增快照目录 ⇒ 在该表**追加一条** `{dirPrefix, baseRe, basis}`，`basis` 必须写
+//        规范出处（`AGENTS.md` 的哪一句）；未登记的目录一律按活文档收口，不许靠命名猜。
 //
 // 棘轮基线 `scripts/doc-refs-baseline.json`（**只减不增**）：
-//   键 = `<文档相对路径>::<引用串>:<起始行>[-<结束行>]`（**不含文档行号** —— 文档增删会让
-//   文档行号整体漂移，那正是本门禁要抓的腐烂形态，拿它当键会自己先烂）。
+//   第一层键 = `entries`：`<文档相对路径>::<引用串>:<起始行>[-<结束行>]`（**不含文档行号** ——
+//   文档增删会让文档行号整体漂移，那正是本门禁要抓的腐烂形态，拿它当键会自己先烂）。
+//   第二层键 = `symEntries`（任务 #202 ② 新增）：`<文档相对路径>::<被引文件> → <被引符号>`，
+//   **刻意不含行号** —— 第二层的病灶就是行号，把它钉进键会让「源码里符号挪了一行」直接变成
+//   「基线外新增」，红得与文档无关（同族先例：`component-neutrality-baseline.json` 的键设计
+//   与 `AGENTS.md`「白名单不含行号」的理由）。符号取 `symDrift.symbols[0]` = 报告里点名
+//   「实际在第几行」的那个符号 ⇒ 每条键都能指回一行真实读数。
 //   · 常规运行：基线内的存量不拦，基线外新增 → 红；基线内已消失 → 打印「可收紧」，不红；
-//   · `--init-baseline`：**仅当基线文件不存在**时建立（首轮冻结存量；存在则拒绝，不许洗白）；
-//   · `--update-baseline`：收紧（先跑常规运行确认无新增，否则拒绝执行）。
+//   · `--init-baseline`：**仅当基线文件不存在**时建立（首轮冻结存量；存在则拒绝，不许洗白）。
+//     第二层同理：`symEntries` 缺失时由本模式**首冻**（此时 `entries` 逐字保留，不重建）；
+//     两层都已存在 ⇒ 拒绝。
+//   · `--update-baseline`：收紧（先跑常规运行确认**两层都**无新增，否则拒绝执行）。
 //   · ⚠ 两个写基线的开关都**在未检查面非空时无条件拒绝**（退 2，见 `refuseBaselineWrite`）：
 //     读不到的引用会从本轮读数里消失，而「消失」正是基线认定「已修复」的口径 —— 不放这道闸，
 //     一次 SMB 抖动就能静默删掉一批仍然有效的存量条目（那是盘的抖动代劳的洗白）。
+//   · ⚠ 第二层**首冻必须等安静窗口**：并行期跑 `--init-baseline` 会把别的 lane 未提交的
+//     中间态钉进棘轮（本仓踩过）。自检用合成靶面证明三个分支，不碰真实基线。
+//
+// 自动回写（任务 #202 ③，**默认零写盘**）：
+//   · `--suggest-fix`：只打印「建议清单」（dry-run）。判据 `suggestSymbolFix` 刻意保守 ——
+//     只有「单行引用 + 句中恰一个可比对符号 + 该符号在目标文件里**恰一处声明形态命中**」才给建议；
+//     区间引用 / 多符号 / 声明命中 0 处或 ≥2 处 / 符号只出现在注释 ⇒ **判歧义 ⇒ 不出建议**，
+//     并计数自陈（「歧义 M 条」就是精确率的分母，不许把它算成已解决）。
+//   · `--fix`：真写盘。**必须**同时给 `--i-attest-quiet-window`，且 `writeModeGate` 六道闸全过：
+//     ① 写盘路径的自检（`runSymFixSelftest`）**当场跑、执行断言数 > 0、全绿** —— 无自检覆盖即拒绝；
+//     ② 精确率闸（`fixPrecisionGate`）在自检标注语料上实测 = 要求值（当前 **100%**），
+//        且歧义负控必须**一条建议都不出**（错了要能被发现：`verifyProposedFix` 对故意写错的
+//        行号必须返回 false，这条本身也在自检里）；
+//     ③ 第二层棘轮**已武装**（基线里有 `symEntries`）—— 没有 before/after 对照面时，
+//        写错一条永远不会被发现 ⇒ 未首冻就写盘等于盲改；
+//     ④ 本轮无未检查面（与写基线同型的闸）；
+//     ⑤ 每条建议写前逐条验证「新行号上确实有该符号」（`verifyProposedFix`）；
+//     ⑥ 改后的行必须过 `verifyPatchedLine` 四条不变式（只动那一段数字 + 抽取器复读得到新行号）。
+//     任一道不过 ⇒ 退 2 自陈，**一行盘都不写**（且拒绝时**不产生部分写**：任一建议被拒 ⇒ 整批放弃）。
+//     写盘只碰活文档（判据⑥ 排除快照面）。
 //
 // 用法：
 //   node scripts/check-doc-refs.mjs
@@ -108,6 +158,8 @@
 //   node scripts/check-doc-refs.mjs --sym-include-dotted   # 把点号接缝名也算符号（读数虚高，仅对账）
 //   node scripts/check-doc-refs.mjs --sym-window=5         # 放大折行窗口复核（只影响 SYMDRIFT 读数）
 //   node scripts/check-doc-refs.mjs --require-no-unverified # 把 UNVERIFIED（读盘失败）提升为红（**默认不开**）
+//   node scripts/check-doc-refs.mjs --suggest-fix          # 只出建议清单（dry-run，零写盘）
+//   node scripts/check-doc-refs.mjs --fix --i-attest-quiet-window  # 写盘（六道闸，见上方「自动回写」）
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -146,6 +198,12 @@ const REQUIRE_NO_UNVERIFIED = args.includes("--require-no-unverified");
 // 把 `notify.channel` 这类**点号接缝名**也当符号比对（默认 **否**，理由见 `comparableSymbolSpan`）。
 // 只是读数口径开关：开着它 SYMDRIFT 会虚高（本仓实测主要是能力登记表那一族），不进 CI 命令行。
 const INCLUDE_DOTTED = args.includes("--sym-include-dotted");
+// ── 自动回写（任务 #202 ③）：dry-run 与写盘**必须是两个开关**，且写盘要额外的人为确认 ──
+// `--suggest-fix` 只打印建议清单（零写盘，任何窗口都可跑）；`--fix` 才写盘，且必须**同时**给
+// `--i-attest-quiet-window`（「我知道现在没有别的 lane 在改 docs/」）。六道闸见 `writeModeGate`。
+const SUGGEST_FIX = args.includes("--suggest-fix");
+const FIX = args.includes("--fix");
+const QUIET_WINDOW_ATTESTED = args.includes("--i-attest-quiet-window");
 // 折行窗口（下方行数）。`--sym-window=N` 只放大 SYMDRIFT 的**读数**，不改其它任何判据；
 // 非法值（格式不对 / >50）⇒ 退 2 自陈，不静默按默认跑（判据 #7：未检查与通过长得一样）。
 // 解析放在下方常量块之后（`WINDOW_BELOW_DEFAULT` 的 TDZ），真正取值在 main 里。
@@ -596,6 +654,67 @@ export function readLines(abs, cache, notes) {
   return lines;
 }
 
+// ── 活文档 / 时点快照 的分类判据（任务 #202 ①，第二层判据⑥）────────────
+// ⚠ 只有**第二层**用得到它。第一层（`classifyRef` / `hardViolations` / `entries` 基线）
+//   对快照与活文档按原口径同跑，本批一字未改 —— 那是 2026-11-04 建门时的既有裁定。
+//
+// ⚠ **禁区 12 查重结果（为什么不复用）**：`check-single-source-facts.mjs` 的
+//   `collectDocFiles()`（该文件 :663）**已有**一套同语义的三栏分档（`live` / `memory` / `hist`），
+//   但① 它**不可导入** —— 那个脚本是顶层可执行过程，被 import 会整段跑扫描并 `process.exit`
+//      （同一件事在 `scripts/lib/doc-refs.mjs` 头部已写死，抽取/定位原语正是因此才下沉的）；
+//   ② 两处的**处置方向不同**：那边是取证分栏（`live` 只含 `docs/plans/**` + 根级 `*.md`，
+//      `docs/features/`、`docs/reference/`、`docs/INDEX.md`、`docs/marketing/` 全进 `hist`
+//      ⇒ 取证上「不许动」），本处的排除面**只有一条**（`docs/audits/AUDIT-*-<日期>`）⇒
+//      本门的第二层收口面比那边**更宽**（还多收 `marketing/` `features/` `reference/` `architecture/`
+//      `proposals/` 五个目录 + `docs/INDEX.md` + `docs/gate-coverage-ledger.md`；其中 marketing
+//      在 AGENTS.md 表里逐字写作「非规范类**活文档**」），因为第二层是
+//      「判红 + 棘轮」而不是「列可疑」。两边若强行合并成一个谓词，本门会跟着**放宽**，
+//      而放宽判据是禁区级禁止项。
+//   ⇒ 待办（不在本 lane 归属内，见汇报的未做清单）：把「目录语义 ⇒ 史料 / 活文档」
+//     下沉到 `scripts/lib/doc-refs.mjs`，两道门各取所需的**映射**留在本侧，
+//     共享的是**判据**而非处置。
+
+/**
+ * 快照目录登记表 —— **封闭白名单，判据只在这一处**（不散落字符串比较）。
+ * 每条必须给 `basis`（规范出处），且必须**同时**命中目录前缀与文件名形态才算快照：
+ *   · 只登记目录 ⇒ `docs/audits/README.md` 这类「目录说明」会被误当快照免检；
+ *   · 只认日期形态 ⇒ 任何 `PLAN-x-2026-09-01.md` 都会被误当快照（活文档从此失守）。
+ * 命中判据是「`dirPrefix` 是路径前缀 **且** `baseRe` 匹配 basename」，两者缺一不可。
+ *
+ * **新增快照目录怎么登记**（照本表追加一行，别在别处写 `if (doc.includes("audits"))`）：
+ *   1. `dirPrefix`：以 `/` 结尾的仓库相对目录前缀（posix 分隔，与 `repoRel` 同口径）；
+ *   2. `baseRe`：该目录里**快照文件**的 basename 形态（必须含日期戳；无日期戳的文件按活文档收口）；
+ *   3. `basis`：规范出处一句话（`AGENTS.md`「文档放置」表的哪一行 / 哪一句）。
+ *   追加后必须补一对正负控到 `runLifecycleSelftest()`（登记的目录内**带日期**判快照、
+ *   **不带日期**判活文档），否则该条登记等于没登记。
+ */
+export const SNAPSHOT_DOC_RULES = [
+  {
+    id: "docs/audits/AUDIT-<主题>-<YYYY-MM-DD>",
+    dirPrefix: "docs/audits/",
+    baseRe: /^AUDIT-.+-20\d\d-\d\d-\d\d(?:-\d{3,4})?\.md$/i,
+    basis:
+      'AGENTS.md「文档放置」表：docs/audits/ = 「审计 / 体检 / 对比 / 根因定位报告（**时点快照**）」，' +
+      "命名 `AUDIT-<主题>-<YYYY-MM-DD>.md`；实测本仓另有 `-HHMM` 时刻后缀（audit-l1-blockers 一族），" +
+      "同为快照，故正则把可选时刻段一并认下。",
+  },
+];
+
+/**
+ * 纯函数（判据⑥）：这篇文档是**活文档**还是**时点快照**。
+ * 兜底方向刻意是 `live`：认不准 ⇒ 照样收口检查（多查不是漏查）。
+ * @param {string} docRel 仓库相对路径（`\` 与 `/` 都接受）
+ * @returns {"live"|"snapshot"}
+ */
+export function docLifecycle(docRel) {
+  const p = String(docRel ?? "").split("\\").join("/").replace(/^\.\//, "");
+  const base = p.slice(p.lastIndexOf("/") + 1);
+  for (const rule of SNAPSHOT_DOC_RULES) {
+    if (p.startsWith(rule.dirPrefix) && rule.baseRe.test(base)) return "snapshot";
+  }
+  return "live";
+}
+
 // ── 行内符号一致性（SYMDRIFT）───────────────────────────────────────
 // 判据全文见文件头「行内符号一致性」注释块。这里只放**纯函数**，便于 selftest 逐条命中。
 
@@ -741,16 +860,23 @@ function occurrenceLines(lines, abs, tok, occCache) {
 }
 
 /**
- * 第二层判据（SYMDRIFT）。就地给命中的引用写 `r.symDrift = { symbols, window, actual, forms }`。
+ * 第二层判据（SYMDRIFT）。就地给命中的引用写 `r.symDrift = { symbols, window, actual, forms }`，
+ * 并按判据⑥ 写 `r.symFace`（`live` / `snapshot`）。
  * @param {{refs:object[], windowBelow?:number, lineCache?:Map<string, string[]|null|symbol>,
  *          includeDotted?:boolean, notes?:object}} opts
- * @returns {{drift:object[], withSymbol:number, checked:number, absent:number, dottedSkipped:number,
- *            byForm:Record<string,number>, windowBelow:number, unreadableTargets:number}}
- *   · `withSymbol`     —— 句中给出可比对符号的引用条数（判据②，**不含**被排除的点号接缝名）
+ * @returns {{drift:object[], driftSnapshot:object[], face:Record<string,{withSymbol:number,checked:number,absent:number,drift:number}>,
+ *            withSymbol:number, checked:number, absent:number, dottedSkipped:number,
+ *            byForm:Record<string,number>, byFormSnapshot:Record<string,number>,
+ *            windowBelow:number, unreadableTargets:number}}
+ *   · `drift`          —— **活文档面**的漂移（= 棘轮 / 升硬靶面；判据⑥ 把快照排除在外）
+ *   · `driftSnapshot`  —— **快照面**的漂移：**只报告**，不进 `drift`、不进基线、永不判红、永不写盘
+ *   · `face`           —— 两个面各自的抽样计数（「免检了多少」必须能算出来，见判据 #7）
+ *   · `withSymbol`     —— 句中给出可比对符号的引用条数（判据②，**不含**被排除的点号接缝名；**两个面合计**）
  *   · `checked`        —— 其中符号确实存在于目标文件、真正进入行窗比对的条数（判据③）
  *   · `absent`         —— 符号在目标文件里零出现 ⇒ **跳过**（不是「通过」，是「未检」）
  *   · `dottedSkipped`  —— 只给出 `notify.channel` 这类点号接缝名的引用条数 ⇒ 判据② 排除（未检）
- *   · `byForm`         —— 漂移按形态计数（`ident` / `decl` / `path` / `dotted`），供对账升硬时取舍
+ *   · `byForm`         —— **活文档面**漂移按形态计数（`ident` / `decl` / `path` / `dotted`），供对账升硬时取舍
+ *   · `byFormSnapshot` —— 快照面同口径计数（只为让两面读数能各自复算，不参与任何判定）
  *   · `unreadableTargets` —— （任务 #203）第一层已判 OK、但第二层重读正文时读不到的目标文件
  *     **所覆盖的引用条数** ⇒ 第二层未检。必须计数自陈：`lineCache` 是 LRU（上限 400 个文件，
  *     实测扫描面 ~1900 个目标文件），条目会被逐出后重读，SMB 上重读**确实可能**失败。
@@ -779,12 +905,20 @@ export function auditSymbolDrift({
     byTarget.get(r.abs).push({ r, usable });
   }
   const drift = [];
+  const driftSnapshot = [];
   const byForm = {};
+  const byFormSnapshot = {};
   let withSymbol = 0;
   let checked = 0;
   let absent = 0;
   let unreadable = 0;
   const ioNotes = notes ?? makeIoNotes();
+  // 分面抽样计数（判据⑥ 的自陈面）：`drift` 只收活文档，但两面的 withSymbol / checked /
+  // absent 都必须各自有数 —— 否则「快照面到底免检了多少」无法复算（判据 #7）。
+  const fc = {
+    live: { withSymbol: 0, checked: 0, absent: 0, drift: 0 },
+    snapshot: { withSymbol: 0, checked: 0, absent: 0, drift: 0 },
+  };
   for (const [abs, list] of byTarget) {
     const lines = readLines(abs, lineCache, ioNotes);
     // 读盘失败的目标文件：`null` = 盘上确无（既有桶已判 BROKEN），`UNREADABLE` = 没读到
@@ -796,15 +930,22 @@ export function auditSymbolDrift({
     }
     for (const { r, usable } of list) {
       withSymbol++;
+      // 判据⑥：按文档类别分面。**两面都照样抽样计数**（快照面若一条不计，就等于
+      // 「悄悄少查了 282 条而读数看不出来」），区别只在 drift 归属与后续判定。
+      const face = docLifecycle(r.doc);
+      r.symFace = face;
+      fc[face].withSymbol++;
       const toks = [...new Set(usable.flatMap((c) => c.syms))];
       const occ = new Map(toks.map((t) => [t, occurrenceLines(lines, abs, t, occCache)]));
       const present = toks.filter((t) => occ.get(t).length > 0);
       if (present.length === 0) {
         absent++;
+        fc[face].absent++;
         r.symAbsent = true;
         continue; // 判据③：文件里根本没这个符号 ⇒ 不是行号漂移，另属「重命名/口语」那道题
       }
       checked++;
+      fc[face].checked++;
       const lo = Math.max(1, r.start);
       const hi = Math.min(lines.length, Math.max(r.end, r.start) + windowBelow);
       // 判据⑤：任一候选命中即视为一致（保守）
@@ -812,18 +953,39 @@ export function auditSymbolDrift({
       const forms = [...new Set(usable.map((c) => c.form))];
       // 按该条**第一个候选簇**的形态计数（一条只计一次；一行常同时给 ident + path 两簇，
       // 逐形态各计会让 ΣbyForm > drift.length，读数就对不上账了）。
-      byForm[forms[0]] = (byForm[forms[0]] ?? 0) + 1;
       const actual = occ
         .get(present[0])
         .slice()
         .sort((a, b) => Math.abs(a - r.start) - Math.abs(b - r.start))
         .slice(0, 3);
-      r.symDrift = { symbols: present, window: [lo, hi], actual, forms, spans: usable.map((c) => c.text) };
-      drift.push(r);
+      // 第二层需要的比对材料**一并挂在 drift 条目上**（`occ` / `toks` / `lines`）：
+      // 回写建议 `suggestSymbolFix` 因此是**纯计算**，不再读盘、不再猜。
+      r.symDrift = {
+        symbols: present,
+        window: [lo, hi],
+        actual,
+        forms,
+        spans: usable.map((c) => c.text),
+        occ,
+        toks,
+        targetLines: lines,
+      };
+      if (face === "snapshot") {
+        byFormSnapshot[forms[0]] = (byFormSnapshot[forms[0]] ?? 0) + 1;
+        fc.snapshot.drift++;
+        driftSnapshot.push(r);
+      } else {
+        byForm[forms[0]] = (byForm[forms[0]] ?? 0) + 1;
+        fc.live.drift++;
+        drift.push(r);
+      }
     }
   }
   return {
     drift,
+    driftSnapshot,
+    face: fc,
+    byFormSnapshot,
     withSymbol,
     checked,
     absent,
@@ -846,9 +1008,261 @@ function attributeAllLines(refs) {
   for (const list of byLine.values()) attributeSymbolsToLine(list);
 }
 
-/** 纯函数：SYMDRIFT 是否进退出码。**默认关** ⇒ 恒空数组 ⇒ 退码与改前逐字相同。 */
+/**
+ * 纯函数：`--require-symbol-match` 档的判红集合（#182 语义：**不看基线**，整个靶面判红）。
+ * 默认关 ⇒ 恒空数组 ⇒ 退码与该档落地前逐字相同。
+ * ⚠ 常规档的判红**不在这里**，在 `symRatchetDiff`（棘轮：只看基线外新增）——
+ *   两档各有消费方，别把它们读成同一个开关。`drift` 传入的必须是**活文档面**（判据⑥）。
+ */
 export function symbolHardViolations(drift, requireSymbolMatch) {
   return requireSymbolMatch ? drift : [];
+}
+
+// ── 第二层棘轮（任务 #202 ②）───────────────────────────────────────
+
+/**
+ * 纯函数：第二层的基线键 —— `<文档>::<被引文件> → <被引符号>`，**刻意不含行号**。
+ * 理由（与第一层键相反）：第一层的病灶是「文档里写死的引用串」，引用串本身含行号 ⇒ 键必须含；
+ * 第二层的病灶**就是行号**，把行号钉进键会让「源码里符号挪了一行」直接变成「基线外新增」，
+ * 红得不属于文档缺陷（同族先例：`component-neutrality-baseline.json` 键 = file + target，
+ * 与 `AGENTS.md`「白名单不含行号 —— 行号随编辑漂移」）。
+ * 符号取 `symbols[0]` = 报告里点名「实际在第几行」的那个 ⇒ 每条键都能指回一行真实读数。
+ * ⚠ 代价：同一「文档 + 被引文件 + 符号」的**多处**漂移共用一个条目（键去重），
+ *   修掉其中一部分不会让条目消失 —— 条目消失的唯一形态是这个组合不再漂移。
+ */
+export function symDriftKey(r) {
+  const sym = r && r.symDrift && r.symDrift.symbols.length > 0 ? r.symDrift.symbols[0] : "?";
+  return `${r.doc}::${r.refFile} → ${sym}`;
+}
+
+/**
+ * 纯函数：第二层与基线比对。**三种状态必须分得开**：
+ *   · `symKeys === null` —— 基线里从来没有 `symEntries` ⇒ **棘轮未武装**：不判红，
+ *     但必须由调用方自陈「未生效」并给出首冻命令（「没武装」与「查过没问题」不许长得一样）；
+ *   · 已武装 ⇒ 键面去重后：基线外新增 ⇒ 红；基线内已消失 ⇒ 可收紧；
+ *   · `requireSymbolMatch` ⇒ 整个活文档面判红，**不看基线**（#182 的全量对账档，语义不变）。
+ */
+export function symRatchetDiff(drift, symKeys, requireSymbolMatch = false) {
+  const uniq = [];
+  const seen = new Set();
+  for (const r of drift) {
+    const key = symDriftKey(r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniq.push({ key, ref: r });
+  }
+  const armed = symKeys !== null && symKeys !== undefined;
+  const cur = new Set(uniq.map((u) => u.key));
+  return {
+    armed,
+    current: uniq,
+    keyCount: uniq.length,
+    baseSize: armed ? symKeys.size : 0,
+    newViolations: armed ? uniq.filter((u) => !symKeys.has(u.key)) : [],
+    fixedCount: armed ? [...symKeys].filter((k) => !cur.has(k)).length : 0,
+  };
+}
+
+/**
+ * 纯函数：基线 JSON ⇒ 两层键。`symKeys === null` 表示**第二层从未冻结**（区别于空集
+ * 「冻结过、当时一条没有」）—— 这个区别是「武装 / 未武装」的唯一数据来源，不许混同。
+ * @returns {{ok:boolean, refKeys:Set<string>, symKeys:Set<string>|null, why?:string}}
+ */
+export function parseBaselineShape(raw) {
+  if (raw === null || raw === undefined) return { ok: true, refKeys: new Set(), symKeys: null };
+  const refKeys = new Set(Array.isArray(raw.entries) ? raw.entries : []);
+  if (raw.symEntries === undefined) return { ok: true, refKeys, symKeys: null };
+  if (!Array.isArray(raw.symEntries)) {
+    return { ok: false, refKeys, symKeys: null, why: "symEntries 存在但不是数组（基线被手改坏了 ⇒ 拒绝猜）" };
+  }
+  return { ok: true, refKeys, symKeys: new Set(raw.symEntries) };
+}
+
+// ── 自动回写的建议 / 验证 / 三道闸（任务 #202 ③；**默认零写盘**）──────────
+/**
+ * 声明形态词表：`isDeclarationOf` 用它判断「这一行是不是**定义**了这个符号」。
+ * 分两档，缺一不可 —— 这一处就是回写精确率的地基：
+ *   · `DECL_LEAD` —— 可跳过的**前导词**（可见性 / 修饰符 / 异步…），本身不定义任何东西；
+ *   · `DECL_KEYWORDS` —— **定义词**：符号必须是「最后一个定义词」后面的第一个标识符。
+ * ⚠ `impl` 刻意**不在**定义词里：`impl Foo {` 是「给 Foo 加实现」而不是 Foo 的定义处。
+ *   算进去有两种坏结局：`struct Foo` + `impl Foo` ⇒ 「两处声明 ⇒ 歧义放弃」（覆盖率损失，可接受），
+ *   或（若取首个命中）把文档订正到 impl 行（**假读数**，不可接受）。
+ * ⚠ `new` / `for` / `use` / `from` / `in` / `match` / `return` 同样不在：
+ *   它们的后随标识符是调用点 / 循环变量 / 导入项，把它们当定义就是拿假阳性写盘。
+ */
+const DECL_LEAD = new Set(
+  `pub crate async unsafe extern readonly mutable shared public protected private internal
+   abstract final open override virtual declare export default inline friend volatile`.split(/\s+/),
+);
+const DECL_KEYWORDS = new Set(
+  `fn func function struct enum trait type class interface record union mod module macro namespace
+   package def proc let var val property get set define const static`.split(/\s+/),
+);
+/** 注释行首形态：符号只写在注释里 **不算**声明（与判据④「上方不留 0 行」同一个理由）。 */
+const COMMENT_HEAD_RE = /^\s*(?:\/\/|\/\*|\*+\s|\*\/|--(?!-)|#|%|"""|'''|;;)/;
+
+/**
+ * 纯函数：`lineText` 这一行是否是 `symTok` 的**定义行**。
+ * 判据（机械、可复算）：① 非注释行；② 剥缩进与前导属性 `#[...]` / `@dec`；
+ * ③ 从左扫标识符：前导只允许 `DECL_LEAD`；④ 符号必须紧跟在**至少一个** `DECL_KEYWORDS` 之后；
+ * ⑤ 符号后紧跟 `.` / `::` ⇒ 是接收者 / 路径前缀，不是定义（`self.tick` 由此落空）。
+ * 于是这些形态全部**不算**定义：`foo(3);`（调用点）、`use crate::foo;`、`crate::foo(x);`、
+ * `impl Foo {`、`tick: u64,`（字段，无定义词）、`// foo`（注释）。
+ * 这些算：`pub fn foo(`、`pub struct EngineState {`、`export interface X {`、`const X: u64 = 1`。
+ */
+export function isDeclarationOf(symTok, lineText) {
+  const s = String(lineText ?? "");
+  if (!s.trim() || !symTok) return false;
+  if (COMMENT_HEAD_RE.test(s)) return false;
+  const stripped = s.replace(/^\s*(?:#\[[^\]]*\]\s*|@[A-Za-z_][\w.]*\s*)?/, "");
+  let sawKeyword = false;
+  for (const m of stripped.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
+    const p = m[0];
+    if (p === symTok) {
+      if (!sawKeyword) return false;
+      return !/^\s*(?:\.|::)/.test(stripped.slice(m.index + p.length));
+    }
+    const low = p.toLowerCase();
+    if (DECL_KEYWORDS.has(low)) {
+      sawKeyword = true;
+      continue;
+    }
+    if (DECL_LEAD.has(low)) continue;
+    return false; // 前导里冒出别的标识符 ⇒ 符号不在「定义词 + 名字」的位置
+  }
+  return false;
+}
+
+/**
+ * 纯函数：给一条 SYMDRIFT 算**唯一无歧义**的订正（改到第几行）。
+ * 「宁可不出建议」的闸共 8 个 `code`，任一命中 ⇒ `{ok:false, code, why}`
+ * （`code` 用于计数分档，`why` 逐条打印 ⇒ 精确率的分母必须可见）：
+ *   `snapshot`（判据⑥）｜`range`（区间 / 多行清单）｜`multi-symbol`（句中 ≥2 个可比对符号）｜
+ *   `no-material`（缺 occ / targetLines）｜`no-decl`（出现全是调用点 / 注释）｜
+ *   `multi-decl`（同名 ≥2 处定义 ⇒ 歧义）｜`same`（建议 == 现值）｜`verify`（写前验证不通过）。
+ * 精确率就建立在这八条上：它们把「猜」全部挡在门外，代价是覆盖率低（自陈，不掩饰）。
+ */
+export function suggestSymbolFix(r) {
+  const no = (code, why) => ({ ok: false, code, why });
+  const d = r && r.symDrift;
+  if (!d) return no("not-drift", "非 SYMDRIFT 条目");
+  if (docLifecycle(r.doc) === "snapshot") return no("snapshot", "时点快照（判据⑥ 不订正）");
+  if (r.start !== r.end) return no("range", "区间 / 多行清单引用 ⇒ 端点语义不明");
+  if (!Array.isArray(d.symbols) || d.symbols.length !== 1) {
+    return no("multi-symbol", `句中有 ${d.symbols ? d.symbols.length : 0} 个可比对符号 ⇒ 归属不明`);
+  }
+  const sym = d.symbols[0];
+  const occ = d.occ && d.occ.get(sym);
+  const lines = d.targetLines;
+  if (!Array.isArray(occ) || !Array.isArray(lines)) return no("no-material", "缺少比对材料（occ / targetLines）");
+  const decl = occ.filter((l) => l >= 1 && l <= lines.length && isDeclarationOf(sym, lines[l - 1]));
+  if (decl.length === 0) return no("no-decl", `符号 \`${sym}\` 的 ${occ.length} 处出现没有一处是声明形态 ⇒ 不知该指到哪行`);
+  if (decl.length > 1) return no("multi-decl", `符号 \`${sym}\` 有 ${decl.length} 处声明（${decl.slice(0, 4).join("/")}）⇒ 歧义`);
+  const to = decl[0];
+  if (to === r.start) return no("same", "建议与现值相同 ⇒ 无需写盘");
+  if (!verifyProposedFix(sym, lines, to)) return no("verify", "写前验证不通过（内部不一致）");
+  return { ok: true, code: "decl", to, sym, via: "decl" };
+}
+
+/**
+ * 纯函数：**独立**复核「第 to 行确实是 sym 的声明行」。
+ * 与 `suggestSymbolFix` 用的是同一个谓词，但它是**写盘前逐条必过**的一道闸 ⇒
+ * 自检里必须用「故意写错的行号」（调用点 / 注释 / 越界）证明它会返回 false，
+ * 否则这道闸就是装饰（任务要求「错了能不能被发现」）。
+ */
+export function verifyProposedFix(sym, lines, to) {
+  if (!sym || !Array.isArray(lines)) return false;
+  if (!Number.isInteger(to) || to < 1 || to > lines.length) return false;
+  return isDeclarationOf(sym, lines[to - 1]);
+}
+
+/** 精确率要求：标注语料上 100%（回写是**改文档正文**，错一条就是新的假读数）。 */
+export const FIX_PRECISION_REQUIRED = 1;
+
+/**
+ * 纯函数：精确率闸。`stats` = 自检标注语料的实测计数
+ * `{emitted, correct, emittedOnAmbiguous}`。三条硬判据，缺一即闸不过：
+ *   · `emitted === 0` ⇒ **不过**（无分母的「100%」是空洞通过，同 #199「扫 0 文件仍退 0」）；
+ *   · `emittedOnAmbiguous > 0` ⇒ **不过**（歧义负控上还敢出建议 ⇒ 判据不保守）；
+ *   · `correct / emitted < required` ⇒ **不过**。
+ */
+export function fixPrecisionGate(stats, required = FIX_PRECISION_REQUIRED) {
+  const s = stats || { emitted: 0, correct: 0, emittedOnAmbiguous: 0 };
+  if (!s.emitted) return { ok: false, precision: 0, why: "自检语料一条建议都没产出 ⇒ 精确率没有分母（空洞通过）" };
+  if (s.emittedOnAmbiguous > 0) {
+    return { ok: false, precision: s.correct / s.emitted, why: `歧义负控上仍产出 ${s.emittedOnAmbiguous} 条建议 ⇒ 判据不保守` };
+  }
+  const p = s.correct / s.emitted;
+  if (p < required) {
+    return { ok: false, precision: p, why: `实测精确率 ${(p * 100).toFixed(1)}%（${s.correct}/${s.emitted}）< 要求 ${(required * 100).toFixed(0)}%` };
+  }
+  return { ok: true, precision: p, why: `精确率 ${(p * 100).toFixed(1)}%（${s.correct}/${s.emitted}），歧义负控零建议` };
+}
+
+/**
+ * 纯函数：写盘模式（`--fix`）的闸。**「开关在无自检覆盖时拒绝执行」就落在这一处**：
+ * 自检不是「平时碰巧跑过一次」，而是 `--fix` 当场跑一遍并把条数交进来。
+ * @param {{fix:boolean, attested:boolean, selftestRan:boolean, selftestAsserts:number,
+ *          selftestPassed:boolean, precisionOk:boolean, precisionWhy:string,
+ *          unverifiedAny:boolean, armed:boolean}} f
+ * @returns {{ok:boolean, code:number, why:string}}
+ */
+export function writeModeGate(f) {
+  const no = (code, why) => ({ ok: false, code, why });
+  if (!f.fix) return no(2, "未请求写盘模式");
+  if (!f.attested) {
+    return no(2, "写盘必须**同时**给 --i-attest-quiet-window：并行期改 docs/ 正文会把别的 lane 的中间态钉进文档（本仓踩过）");
+  }
+  if (!f.selftestRan) return no(2, "回写判据无自检覆盖（自检没跑）⇒ 拒绝写盘");
+  if (!(f.selftestAsserts > 0)) return no(2, `回写自检跑了但执行断言数 = ${f.selftestAsserts} ⇒ 等于没覆盖 ⇒ 拒绝写盘`);
+  if (!f.selftestPassed) return no(2, "回写自检有失败项 ⇒ 拒绝写盘");
+  if (!f.precisionOk) return no(2, `精确率闸未过：${f.precisionWhy}`);
+  // 「先验精确率」的另一半：真实仓**没有对照基线**（第二层从未冻结）⇒ 改错了无从发现。
+  // 自检标注语料只证明判据本身对，不证明这一批真实建议对；有 `symEntries` 才有 before/after 账。
+  if (!f.armed) return no(2, "第二层棘轮未武装（基线无 symEntries）⇒ 拒绝写盘：改错一条没有对照面可发现，先跑 --init-baseline 首冻");
+  if (f.unverifiedAny) return no(2, "本轮存在未检查面（读盘失败）⇒ 拒绝写盘（与 refuseBaselineWrite 同型：盘的抖动不该代劳改文档）");
+  return { ok: true, code: 0, why: "写盘六道闸全过" };
+}
+
+/**
+ * 纯函数：把文档某一行里**这一个**引用 token 的起始行号改成 `toLine`，返回新行文本。
+ * 只认「列区间内确实是一个 `文件:行号` token」的形态，其余一律放弃（不猜、不模糊替换）：
+ *   · 裸 `:行号`（承接前一文件名）⇒ 列区间不含文件名 ⇒ 放弃（替换目标不唯一）；
+ *   · token 内的数字与读数不符 ⇒ 放弃（说明列区间/文本已被并发改动）；
+ *   · 行号后紧跟 `-` 或 `/`（区间 / 多行清单）⇒ 放弃。
+ * 保证**只动那一个数字段**：数字段以外的所有列逐字不变（长度差异只可能来自数字本身位数）。
+ */
+export function patchRefStartNumber(lineText, ref, toLine) {
+  const s = String(lineText ?? "");
+  const seg = s.slice(ref.col, ref.colEnd);
+  if (!seg) return { ok: false, why: "列区间读不到（文档行已变短？）" };
+  if (seg.trimStart().startsWith(":")) return { ok: false, why: "裸 `:行号`（文件名在别处）⇒ 放弃" };
+  const m = seg.match(/^([A-Za-z0-9_./-]+[ \t]*:[ \t]*)(\d+)/);
+  if (!m) return { ok: false, why: `token 形态不符：${JSON.stringify(seg.slice(0, 40))}` };
+  if (m[2] !== String(ref.start)) return { ok: false, why: `token 内是 ${m[2]}、读数是 ${ref.start} ⇒ 已被改动，放弃` };
+  const tail = seg.slice(m[0].length);
+  if (/^[-/]/.test(tail.trimStart())) return { ok: false, why: "区间 / 多行清单尾 ⇒ 放弃" };
+  const patched = `${m[1]}${toLine}${tail}`;
+  return { ok: true, text: s.slice(0, ref.col) + patched + s.slice(ref.colEnd) };
+}
+
+/**
+ * 纯函数：**写盘前**逐条复核改后的行文本（任务要求「错了要能被发现」的那一半）。
+ * 四条机械不变式，任一不符 ⇒ 拒绝（不写、不部分写）：
+ *   ① 真的改动了；② 引用列**之前**的文本逐字不变；③ 引用列**之后**的文本逐字不变；
+ *   ④ 用**同一个抽取器**在改后文本上能读出 `toLine`，且该行引用**条数不变**。
+ * ⚠ ④ 用抽取器复验而不是自己拼正则：判据必须与读数同源，否则「写进去的」和
+ *   「下一轮读出来的」可能是两套语法（本仓「产物与判据不同源」的反复形态）。
+ */
+export function verifyPatchedLine(orig, patched, ref, toLine) {
+  if (orig === patched) return { ok: false, why: "未产生任何改动" };
+  if (!patched.startsWith(orig.slice(0, ref.col))) return { ok: false, why: "引用列之前的文本被改动" };
+  if (!patched.endsWith(orig.slice(ref.colEnd))) return { ok: false, why: "引用列之后的文本被改动" };
+  const before = extractRefs(`${orig.slice(ref.col)}\n`, DOC_REF_EXTS).length;
+  const after = extractRefs(`${patched.slice(ref.col)}\n`, DOC_REF_EXTS);
+  if (after.length !== before) return { ok: false, why: `该行引用条数由 ${before} 变成 ${after.length}` };
+  if (!after.some((t) => t.line === toLine)) return { ok: false, why: `抽取器在改后文本里读不到 ${toLine}` };
+  return { ok: true };
 }
 
 /** 纯函数：`--sym-window=N` 的解析（非法 ⇒ null ⇒ main 退 2 自陈）。 */
@@ -942,7 +1356,8 @@ function expandRefFile(ref) {
  * @returns {{refs:object[], counts:Record<string,number>, docs:number, docsRead:number,
  *            lineCache:Map<string,string[]|null|symbol>, notes:object}}
  *   ⚠ `counts` 的**桶口径不含 SYMDRIFT** —— 第二层判据（`auditSymbolDrift`）只往引用对象上挂
- *   `symDrift` / `symAbsent` 字段，**不改 `bucket`**，所以既有各桶计数与退出码逐字不变。
+ *   `symDrift` / `symAbsent` / `symFace`（判据⑥ 的活文档/快照归属）字段，**不改 `bucket`**，
+ *   所以既有各桶计数与退出码逐字不变（快照与活文档在第一层完全同口径）。
  *   ⚠ `docsRead` = 正文真的读到手的文档篇数。**只统计成功**，不靠 `docs.length` 反推 ——
  *   改动前读不到一篇文档会让 `refs` 变少而 `docs` 不变，summary 看上去毫无异常（假绿形态）。
  */
@@ -1602,9 +2017,469 @@ function runIoSelftest() {
   return true;
 }
 
+// ── selftest（第四段，任务 #202 ①②）：活文档 / 快照分面 + 第二层棘轮 ──────
+// 独立临时目录：不碰前三段的靶面 ⇒ 既有期望值原样不动。
+function runLifecycleSelftest() {
+  let fail = 0;
+  const check = (cond, msg, extra) => {
+    ASSERT_RUN++;
+    if (!cond) {
+      console.error(`SELFTEST FAIL：${msg}${extra === undefined ? "" : `（实际 ${JSON.stringify(extra)}）`}`);
+      fail++;
+      ASSERT_FAIL++;
+    }
+  };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "doc-refs-lifetest-"));
+  try {
+    const write = (rel, content) => {
+      const abs = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf8");
+    };
+    write(
+      "src/engine.rs",
+      [
+        "// 头部注释：EngineState 出现在注释里（不该被算作命中）", // 1
+        "pub struct EngineState {", // 2
+        "    pub tick: u64,", // 3
+        "}", // 4
+        "", // 5
+        "impl EngineState {", // 6
+        "    pub fn snapshot_all(&self) -> u64 {", // 7
+        "        self.tick", // 8
+        "    }", // 9
+        "}", // 10
+        "", // 11
+        "pub fn resolve_gap_width(a: u64, b: u64) -> u64 {", // 12
+        "    a.max(b)", // 13
+        "}", // 14
+        "", // 15
+      ].join("\n"),
+    );
+    // 活文档三篇（其中一篇含**同键两条**漂移，验键去重）
+    write(
+      "docs/plans/PLAN-thing-2026-09-01.md",
+      [
+        "见 `src/engine.rs:9` 的 `EngineState`（活文档漂移 A）", // 1 ⇒ 漂移
+        "见 `src/engine.rs:13` 的 `EngineState`（活文档漂移 B：同键，去重后只有一个条目）", // 2 ⇒ 漂移
+        "见 `src/engine.rs:2` 的 `EngineState`（符号在行 ⇒ 不漂）", // 3 ⇒ 一致
+        "",
+      ].join("\n"),
+    );
+    write("docs/audits/README.md", "见 `src/engine.rs:13` 的 `resolve_gap_width`（登记目录里的**非快照形态** ⇒ 活文档）\n");
+    write("docs/audits/NOTES.md", "见 `ghost_in_notes.rs:6`（第一层对活文档判 BROKEN）\n");
+    // 快照两篇（日期形态 + 时刻后缀形态）
+    write(
+      "docs/audits/AUDIT-drift-2026-09-13.md",
+      ["见 `src/engine.rs:9` 的 `EngineState`（快照面漂移 ⇒ 不订正）", "见 `ghost_in_snapshot.rs:6`（**第一层仍照旧判 BROKEN**）", ""].join("\n"),
+    );
+    write("docs/audits/AUDIT-l1-blockers-2026-11-05-0944.md", "见 `src/engine.rs:13` 的 `EngineState`（带时刻后缀也是快照）\n");
+    // 未登记目录里带日期 ⇒ **仍是活文档**（负控：只认日期形态会把活文档洗成免检）
+    write("docs/plans/PLAN-dated-2026-09-01.md", "见 `src/engine.rs:9` 的 `EngineState`（未登记目录 ⇒ 活文档）\n");
+
+    const index = buildBasenameIndex(tmp, SKIP_DIRS);
+    const repoRel = (abs) => path.relative(tmp, abs).split(path.sep).join("/");
+    const docs = listDocFiles(tmp);
+    check(docs.length === 6, "靶面：应收到 6 篇文档（4 篇活文档 + 2 篇快照）", docs.length);
+    const { refs, counts } = auditDocs({ root: tmp, docs, index, repoRel });
+    const sym = auditSymbolDrift({ refs, windowBelow: 2, lineCache: new Map() });
+
+    // ── docLifecycle 单测（正控 + 负控逐条）──
+    check(docLifecycle("docs/audits/AUDIT-drift-2026-09-13.md") === "snapshot", "正控：docs/audits + AUDIT-*-<ISO 日期> ⇒ 快照");
+    check(docLifecycle("docs/audits/AUDIT-l1-blockers-2026-11-05-0944.md") === "snapshot", "正控：带 -HHMM 时刻后缀 ⇒ 快照（实测形态）");
+    check(docLifecycle("docs\\audits\\AUDIT-win-2026-09-13.md") === "snapshot", "正控：反斜杠路径同样判快照（repoRel 之外的入口也要稳）");
+    check(docLifecycle("docs/audits/README.md") === "live", "负控：登记目录里的**无日期形态** ⇒ 活文档（否则目录说明会跟着免检）");
+    check(docLifecycle("docs/audits/NOTES.md") === "live", "负控：登记目录里非 AUDIT- 前缀 ⇒ 活文档");
+    check(docLifecycle("docs/plans/PLAN-dated-2026-09-01.md") === "live", "负控：**未登记目录**里带日期也判活文档（分类靠登记而非命名猜）");
+    check(docLifecycle("docs/INDEX.md") === "live", "正控：docs/INDEX.md ⇒ 活文档");
+    check(docLifecycle("AGENTS.md") === "live", "正控：根目录白名单 .md ⇒ 活文档（兜底方向是「照查」）");
+    check(SNAPSHOT_DOC_RULES.every((r) => r.dirPrefix.endsWith("/") && r.baseRe && r.basis.length > 10), "登记表每条都必须有规范依据（basis）");
+
+    // ── 分面读数（活文档 4 条漂移 / 快照 2 条；键去重后 3 个条目）──
+    check(sym.drift.length === 4, "活文档面漂移应恰为 4 条（PLAN 两条 + README 一条 + PLAN-dated 一条）", sym.drift.length);
+    check(sym.driftSnapshot.length === 2, "快照面漂移应恰为 2 条（两篇 AUDIT-*-<日期>）", sym.driftSnapshot.length);
+    check(sym.drift.every((r) => r.symFace === "live"), "活文档面每条都标 symFace=live");
+    check(sym.driftSnapshot.every((r) => r.symFace === "snapshot"), "快照面每条都标 symFace=snapshot");
+    check(
+      !sym.drift.some((r) => r.doc.startsWith("docs/audits/AUDIT-")),
+      "判据⑥：快照文档的漂移**不得**出现在活文档面（进棘轮 / 进红 / 进建议的那个数组）",
+    );
+    // 分面自陈计数：两面各自的抽样数必须都能看到（合计 = 全量 ⇒ 「少查了多少」可复算）
+    check(sym.face.live.drift === 4 && sym.face.snapshot.drift === 2, "face 计数与两个数组一致", sym.face);
+    check(
+      sym.face.live.withSymbol + sym.face.snapshot.withSymbol === sym.withSymbol,
+      "两面的 withSymbol 合计必须等于总读数（不许有第三条面蒸发掉）",
+      [sym.face, sym.withSymbol],
+    );
+
+    // ── 第一层口径**未被本批改动**（硬对照：快照里的 BROKEN 照旧红）──
+    check(counts.BROKEN === 2, "第一层：快照里的 ghost_in_snapshot.rs 与活文档里的 ghost_in_notes.rs 都仍判 BROKEN", counts.BROKEN);
+    check(
+      refs.some((r) => r.bucket === "BROKEN" && r.doc === "docs/audits/AUDIT-drift-2026-09-13.md"),
+      "第一层不许按文档类别收窄（只有第二层收窄）：快照内的 BROKEN 必须仍在红面",
+    );
+    check(hardViolations(refs).some((r) => r.bucket === "BROKEN"), "判红面（第一层）仍包含快照里的 BROKEN");
+
+    // ── 第二层棘轮：三个分支 ──
+    const keys = new Set(sym.drift.map(symDriftKey));
+    check(
+      keys.size === 3,
+      "同「文档 + 被引文件 + 符号」的两处漂移共用一个条目（键**不含行号**）⇒ 4 条漂移 = 3 个键",
+      [...keys],
+    );
+    check(
+      [...keys].every((k) => !/:\d+/.test(k.split(" → ")[1] ?? "")) && [...keys].every((k) => k.includes(" → ")),
+      "键形态自证：含 ` → 符号` 且**不含行号**（含行号会让源码位移变成基线外新增）",
+    );
+    check(
+      ![...keys].some((k) => k.startsWith("docs/audits/AUDIT-")),
+      "负控：快照键绝不进第二层键面（快照不订正 = 也不冻结）",
+      [...keys],
+    );
+    const rNull = symRatchetDiff(sym.drift, null);
+    check(rNull.armed === false && rNull.newViolations.length === 0, "分支一：未冻结（symKeys=null）⇒ 不判红（但 main 必须自陈未武装）", rNull);
+    const rIn = symRatchetDiff(sym.drift, keys);
+    check(
+      rIn.armed === true && rIn.newViolations.length === 0 && rIn.fixedCount === 0,
+      "分支二：基线内存量 ⇒ 不判红、也不算「已消失可收紧」",
+      rIn,
+    );
+    const fakeKey = "docs/plans/PLAN-new.md::src/engine.rs → EngineState";
+    const rNew = symRatchetDiff([...sym.drift, { doc: "docs/plans/PLAN-new.md", refFile: "src/engine.rs", symDrift: { symbols: ["EngineState"] } }], keys);
+    check(
+      rNew.newViolations.length === 1 && rNew.newViolations[0].key === fakeKey,
+      "分支三：新出现的、不在基线里的漂移 ⇒ 判红（这才是收口）",
+      rNew.newViolations.map((v) => v.key),
+    );
+    // 「拒绝洗白」= 收紧时若存在基线外新增则拒绝：判据就是上面这个 newViolations 非空
+    check(rNew.newViolations.length > 0, "收紧拒绝洗白的触发条件与判红同源（同一个数组，不是两套口径）");
+    const rTighter = symRatchetDiff(sym.drift.slice(0, 2), keys);
+    check(rTighter.newViolations.length === 0 && rTighter.fixedCount === 1, "收紧档：条目消失 ⇒ fixedCount 1（只减，合法）", rTighter);
+    // --require-symbol-match 语义：不看基线，整个活文档面判红（含基线内条目）
+    check(symbolHardViolations(sym.drift, true).length === 4 && symbolHardViolations(sym.drift, false).length === 0, "全量升硬档仍与基线无关");
+
+    // ── 基线形态：三种状态分得开 ──
+    check(parseBaselineShape(null).symKeys === null, "文件不存在 ⇒ symKeys=null（未冻结）");
+    check(parseBaselineShape({ entries: ["x"] }).symKeys === null, "只有 entries ⇒ 第二层未冻结（区别于空集）");
+    const armedShape = parseBaselineShape({ entries: ["x"], symEntries: [] });
+    check(armedShape.symKeys instanceof Set && armedShape.symKeys.size === 0, "symEntries=[] ⇒ **已武装且零存量**（与未冻结必须不同）", armedShape);
+    check(armedShape.refKeys.size === 1, "第一层键照常读入（两层互不牵连）");
+    check(parseBaselineShape({ symEntries: "乱改的字符串" }).ok === false, "负控：symEntries 形态不符 ⇒ 拒绝（不许静默当空集 = 棘轮失守）");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  if (fail > 0) return false;
+  console.log(
+    "SELFTEST OK（第四段 活文档/快照 + 第二层棘轮）：docs/audits + AUDIT-*-<日期> ⇒ 快照、其余一律活文档（含未登记目录里带日期的）；" +
+      "第二层只收活文档面，快照面仍计数自陈；第一层口径一字未动（快照里的 BROKEN 照旧红）；" +
+      "棘轮键「文档::被引文件 → 符号」**不含行号**且同键去重；未冻结不判红、基线内不判红、基线外新增判红、条目消失算收紧；" +
+      "基线形态三态分得开（缺 symEntries ≠ 空数组 ≠ 形态不符）",
+  );
+  return true;
+}
+
+// ── selftest（第五段，任务 #202 ③）：自动回写的建议 / 验证 / 精确率闸 / 写盘闸 ──
+// ⚠ 本段**只在临时目录里写盘**，绝不碰真实 `docs/**`；`--fix` 的 main 路径也仅此一段自检
+//   作为前置闸（跑不过 ⇒ 退 2 且一行不写）。
+function runSymFixSelftest() {
+  let fail = 0;
+  const check = (cond, msg, extra) => {
+    ASSERT_RUN++;
+    if (!cond) {
+      console.error(`SELFTEST FAIL：${msg}${extra === undefined ? "" : `（实际 ${JSON.stringify(extra)}）`}`);
+      fail++;
+      ASSERT_FAIL++;
+    }
+  };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "doc-refs-fixtest-"));
+  const stats = { emitted: 0, correct: 0, emittedOnAmbiguous: 0 };
+  // 语料：标注**期望订正行**（`label` 数组），正控 = 该出建议且出对；
+  //       负控 = 该判歧义、一条建议都不许出。
+  const LABELS = {
+    "docs/fixes.md:1": { kind: "ok", to: 2 },
+    "docs/fixes.md:2": { kind: "ambiguous" },
+    "docs/fixes.md:3": { kind: "ambiguous" },
+    "docs/fixes.md:4": { kind: "ambiguous" },
+    "docs/fixes.md:5": { kind: "ambiguous" },
+    "docs/fixes.md:6": { kind: "ok", to: 2 },
+    "docs/audits/AUDIT-fixer-2026-09-13.md:1": { kind: "snapshot" },
+  };
+  try {
+    const write = (rel, content) => {
+      const abs = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf8");
+    };
+    write(
+      "src/fixme.rs",
+      [
+        "// FixmeStruct 的说明（注释里出现 ⇒ 不算定义）", // 1
+        "pub struct FixmeStruct {", // 2  ← 唯一定义行
+        "    pub tick: u64,", // 3
+        "}", // 4
+        "impl FixmeStruct {", // 5     ← impl 块不算定义（词表里刻意没有 impl）
+        "    pub fn fixme_run(&self) -> u64 { self.tick }", // 6
+        "}", // 7
+        "pub fn trailing_helper() {}", // 8 ← 保证 `:8` 仍是**文件内**行号（越界 ⇒ 第一层判 STALE ⇒ 第二层根本不跑）
+        "", // （尾空行，readLines 会 pop）
+      ].join("\n"),
+    );
+    write(
+      "src/dup.rs",
+      [
+        "pub fn dup_thing(a: u64) -> u64 { a }", // 1 ← 两处同名定义 ⇒ 歧义
+        "pub fn other_one() {}", // 2
+        "pub fn other_two() {}", // 3
+        "pub fn dup_thing(b: u64) -> u64 { b }", // 4
+        "pub fn other_three() {}", // 5
+        "pub fn other_four() {}", // 6  ← 引用指在这里
+        "",
+      ].join("\n"),
+    );
+    write(
+      "src/only.rs",
+      [
+        "pub fn host_a() { only_helper(1); }", // 1 调用点
+        "pub fn host_b() { only_helper(2); }", // 2
+        "pub fn host_c() { only_helper(3); }", // 3
+        "// only_helper 定义在别的文件", // 4   注释
+        "pub fn host_d() {}", // 5
+        "pub fn host_e() {}", // 6
+        "pub fn host_f() {}", // 7
+        "pub fn host_g() {}", // 8  ← 引用指在这里
+        "",
+      ].join("\n"),
+    );
+    write(
+      "src/ranged.rs",
+      [
+        "pub struct RangedThing {", // 1
+        "    pub tick: u64,", // 2
+        "}", // 3
+        "pub fn other_a() {}", // 4
+        "pub fn other_b() {}", // 5
+        "pub fn other_c() {}", // 6
+        "pub fn other_d() {}", // 7
+        "",
+      ].join("\n"),
+    );
+    write(
+      "docs/fixes.md",
+      [
+        "见 `src/fixme.rs:7` 的 `FixmeStruct`（正控：唯一定义行 ⇒ 建议 2）", // 1 ⇒ ok → 2
+        "见 `src/dup.rs:6` 的 `dup_thing`（负控：两处同名定义 ⇒ multi-decl 放弃）", // 2 ⇒ multi-decl
+        "见 `src/only.rs:8` 的 `only_helper`（负控：只有调用点与注释 ⇒ no-decl 放弃）", // 3 ⇒ no-decl
+        "见 `src/ranged.rs:5-7` 的 `RangedThing`（负控：区间引用 ⇒ range 放弃）", // 4 ⇒ range
+        "见 `src/fixme.rs:8` 的 `FixmeStruct`，其 `tick` 字段另说（负控：两个符号 ⇒ multi-symbol）", // 5 ⇒ multi-symbol
+        "见 `src/fixme.rs:6` 的 `FixmeStruct`（正控二：另一处漂移，同样该指 2）", // 6 ⇒ ok → 2
+        "",
+      ].join("\n"),
+    );
+    write("docs/audits/AUDIT-fixer-2026-09-13.md", "见 `src/fixme.rs:7` 的 `FixmeStruct`（快照 ⇒ 永不进建议面）\n");
+
+    const index = buildBasenameIndex(tmp, SKIP_DIRS);
+    const repoRel = (abs) => path.relative(tmp, abs).split(path.sep).join("/");
+    const { refs, lineCache } = auditDocs({ root: tmp, docs: listDocFiles(tmp), index, repoRel });
+    const sym = auditSymbolDrift({ refs, windowBelow: 2, lineCache });
+    check(sym.drift.length === 6, "回写靶面：活文档面应恰有 6 条漂移（快照那条不在内）", sym.drift.length);
+    check(sym.driftSnapshot.length === 1, "回写靶面：快照面 1 条（不订正）", sym.driftSnapshot.length);
+
+    const byLine = new Map(sym.drift.map((r) => [`${r.doc}:${r.docLine}`, r]));
+    const codes = {};
+    for (const [at, label] of Object.entries(LABELS)) {
+      const r = byLine.get(at) ?? sym.driftSnapshot.find((x) => `${x.doc}:${x.docLine}` === at);
+      check(!!r, `语料缺条目 ${at} ⇒ 标注与靶面不符（自检不能空跑）`);
+      if (!r) continue;
+      const sug = suggestSymbolFix(r);
+      if (label.kind === "ok") {
+        check(sug.ok === true, `正控 ${at} 必须出建议（实际 code=${sug.code}：${sug.why}）`);
+        if (sug.ok) {
+          stats.emitted++;
+          if (sug.to === label.to) stats.correct++;
+          check(sug.to === label.to, `正控 ${at} 的建议行必须恰为 ${label.to}`, sug.to);
+        }
+      } else if (label.kind === "snapshot") {
+        check(sug.ok === false && sug.code === "snapshot", `负控 ${at}：快照必须判 snapshot 且**不出建议**`, [sug.ok, sug.code]);
+      } else {
+        check(sug.ok === false, `负控 ${at}：歧义面一条建议都不许出`, sug);
+        if (sug.ok) stats.emittedOnAmbiguous++;
+        else codes[sug.code] = (codes[sug.code] ?? 0) + 1;
+      }
+    }
+    check(
+      codes["multi-decl"] === 1 && codes["no-decl"] === 1 && codes.range === 1 && codes["multi-symbol"] === 1,
+      "四类歧义各被抓到一次（放弃原因分档必须对得上语料，否则是「蒙对」不是「判对」）",
+      codes,
+    );
+    // ── 直接调用的正负控：不依赖漂移也能验判据 ──
+    const fakeSame = {
+      doc: "docs/fixes.md",
+      start: 2,
+      end: 2,
+      symDrift: { symbols: ["FixmeStruct"], occ: new Map([["FixmeStruct", [2]]]), targetLines: ["x", "pub struct FixmeStruct {"] },
+    };
+    check(suggestSymbolFix(fakeSame).code === "same", "正控：建议 == 现值 ⇒ 放弃（same），不许写一份与现状相同的盘");
+    check(suggestSymbolFix({ doc: "docs/fixes.md", start: 1, end: 1 }).code === "not-drift", "负控：非漂移条目不进建议面");
+    check(suggestSymbolFix(null).code === "not-drift", "负控：null 输入不崩、判 not-drift");
+    check(
+      suggestSymbolFix({ doc: "docs/fixes.md", start: 1, end: 1, symDrift: { symbols: ["A"], occ: new Map([["A", [9]]]), targetLines: ["x"] } })
+        .code === "no-decl",
+      "负控：occ 越界 ⇒ 越界行被**过滤掉** ⇒ 判 no-decl，绝不产出一条越界建议（`verify` 档是防御性兜底，同谓词下正常路径不可达）",
+    );
+    check(
+      suggestSymbolFix({ doc: "docs/fixes.md", start: 1, end: 1, symDrift: { symbols: ["A"], occ: new Map([["A", [1]]]), targetLines: ["pub fn A() {}"] } })
+        .code === "same",
+      "正控：材料齐备但建议 == 现值 ⇒ 放弃（不许写一份与现状相同的盘）",
+    );
+
+    // ── isDeclarationOf：逐形态正负控（回写精确率的地基）──
+    const L = {
+      struct: "pub struct FixmeStruct {",
+      impl: "impl FixmeStruct {",
+      fn: "    pub fn fixme_run(&self) -> u64 { self.tick }",
+      call: "        fixme_run(1);",
+      use: "use crate::fixme_run;",
+      pathCall: "    crate::fixme_run(1);",
+      comment: "// fixme_run 的说明",
+      field: "    pub tick: u64,",
+      tsIface: "export interface PluginPagesInfoDto {",
+      tsMethod: "  listPluginPages(): void {",
+      constLine: "pub const GAP_WIDTH_MAX: u64 = 3;",
+      wrappedImpl: "impl NamedThing",
+      attrThenDef: "#[derive(Clone)] struct FixmeStruct;",
+    };
+    check(isDeclarationOf("FixmeStruct", L.struct), "正控：pub struct ⇒ 定义");
+    check(isDeclarationOf("fixme_run", "    pub fn fixme_run(&self) -> u64 { self.tick }"), "正控：pub fn ⇒ 定义");
+    check(isDeclarationOf("PluginPagesInfoDto", L.tsIface), "正控：export interface ⇒ 定义");
+    check(isDeclarationOf("GAP_WIDTH_MAX", L.constLine), "正控：pub const ⇒ 定义");
+    check(isDeclarationOf("dup_thing", "pub fn dup_thing(a: u64) -> u64 { a }"), "正控：定义词后紧跟名字 ⇒ 定义（即使同行有调用）");
+    check(!isDeclarationOf("FixmeStruct", L.impl), "负控：impl 块**不是**定义处（算进去会订正到实现行）");
+    check(!isDeclarationOf("NamedThing", L.wrappedImpl), "负控：`impl Foo` 续行（rustfmt 折行）不算定义 —— 命中由第二层窗口负责，回写不猜");
+    check(!isDeclarationOf("fixme_run", L.call), "负控：裸调用点不是定义");
+    check(!isDeclarationOf("fixme_run", L.use), "负控：use 导入项不是定义");
+    check(!isDeclarationOf("fixme_run", L.pathCall), "负控：crate::path 调用不是定义");
+    check(!isDeclarationOf("fixme_run", L.comment), "负控：注释里的名字不是定义");
+    check(!isDeclarationOf("tick", L.field), "负控：无定义词的字段 ⇒ 不猜（宁缺毋滥，代价是覆盖率）");
+    check(!isDeclarationOf("listPluginPages", L.tsMethod), "负控：TS 方法简写（行首即名字）不算定义 —— 与字段同档，代价同上");
+    check(!isDeclarationOf("tick", "self.tick"), "负控：接收者位置不算");
+    check(!isDeclarationOf("FixmeStruct", L.attrThenDef), "负控：属性 + 定义挤在同一串里 ⇒ 前导里冒出非前导词（derive）⇒ 放弃");
+    check(!isDeclarationOf("FixmeStruct", ""), "负控：空行不算");
+    check(!isDeclarationOf("", L.struct), "负控：空符号不算");
+
+    // ── verifyProposedFix：故意写错的行号必须被抓出（「错了能不能被发现」）──
+    const fixmeLines = fs.readFileSync(path.join(tmp, "src", "fixme.rs"), "utf8").split(/\r?\n/);
+    check(verifyProposedFix("FixmeStruct", fixmeLines, 2) === true, "正控：定义行 2 通过");
+    check(verifyProposedFix("FixmeStruct", fixmeLines, 1) === false, "负控：注释行 1 被拒");
+    check(verifyProposedFix("FixmeStruct", fixmeLines, 5) === false, "负控：impl 行 5 被拒");
+    check(verifyProposedFix("FixmeStruct", fixmeLines, 6) === false, "负控：方法行 6 被拒");
+    check(verifyProposedFix("FixmeStruct", fixmeLines, 99) === false, "负控：越界行号被拒");
+    check(verifyProposedFix("FixmeStruct", fixmeLines, 0) === false && verifyProposedFix("", fixmeLines, 2) === false, "负控：行号 0 / 空符号被拒");
+
+    // ── patchRefStartNumber + verifyPatchedLine：写盘形态的正负控 ──
+    // 列区间一律**由同一个抽取器现算**（手写列号会让负控测到的是「列号写错」而不是判据本身）。
+    const refOf = (line, wantLine) => {
+      const t = extractRefs(line, DOC_REF_EXTS).filter((x) => x.line === wantLine).pop();
+      return { col: t.col, colEnd: t.end, start: t.line, refFile: t.file };
+    };
+    const docLine = "见 `src/fixme.rs:7` 的 `FixmeStruct`（正控：唯一定义行 ⇒ 建议 2）";
+    const toks = extractRefs(docLine, DOC_REF_EXTS);
+    check(toks.length === 1, "形态自证：靶行应恰好抽出 1 条引用", toks.length);
+    const fakeRef = refOf(docLine, 7);
+    const patched = patchRefStartNumber(docLine, fakeRef, 2);
+    check(patched.ok === true && patched.text.includes("src/fixme.rs:2"), "正控：把 :7 换成 :2", patched);
+    check(
+      patched.ok && verifyPatchedLine(docLine, patched.text, fakeRef, 2).ok === true,
+      "正控：写前验证通过（前缀/后缀未动 + 抽取器读得出 2）",
+      patched.ok ? verifyPatchedLine(docLine, patched.text, fakeRef, 2) : patched,
+    );
+    check(verifyPatchedLine(docLine, docLine, fakeRef, 2).ok === false, "负控：改后 == 改前 ⇒ 拒绝");
+    check(verifyPatchedLine(docLine, docLine.replace("见 `", "见 X`"), fakeRef, 2).ok === false, "负控：引用之前的文本被动 ⇒ 拒绝");
+    check(verifyPatchedLine(docLine, patched.text.replace("）", "）多余"), fakeRef, 2).ok === false, "负控：引用之后的文本被动 ⇒ 拒绝");
+    check(verifyPatchedLine(docLine, patched.text, fakeRef, 77).ok === false, "负控：验证目标行与文本不符 ⇒ 拒绝");
+    check(patchRefStartNumber("见 `src/fixme.rs:7-9` 的说明", refOf("见 `src/fixme.rs:7-9` 的说明", 7), 2).ok === false, "负控：区间尾形态放弃");
+    const bareLine = "见 `src/fixme.rs:7` 与 `:8` 两处";
+    check(patchRefStartNumber(bareLine, refOf(bareLine, 8), 2).ok === false, "负控：裸 `:行号`（列区间不含文件名）放弃");
+    check(patchRefStartNumber(docLine, { ...fakeRef, start: 8 }, 2).ok === false, "负控：token 数字与读数不符 ⇒ 放弃（说明盘已被人改过）");
+    check(patchRefStartNumber("散文里没有引用", { col: 0, colEnd: 3, start: 1 }, 2).ok === false, "负控：列区间里不是引用形态 ⇒ 放弃");
+
+    // ── 合成写盘（只写临时目录）：改完复跑第二层，漂移必须消失；写错必须被拒 ──
+    const docAbs = path.join(tmp, "docs", "fixes.md");
+    const rawBefore = fs.readFileSync(docAbs, "utf8");
+    const linesArr = rawBefore.split(/\r?\n/);
+    let wrote = 0;
+    for (const r of sym.drift) {
+      const sug = suggestSymbolFix(r);
+      if (!sug.ok) continue;
+      const idx = r.docLine - 1;
+      const p = patchRefStartNumber(linesArr[idx], r, sug.to);
+      if (!p.ok) continue;
+      const v = verifyPatchedLine(linesArr[idx], p.text, r, sug.to);
+      if (!v.ok) continue;
+      linesArr[idx] = p.text;
+      wrote++;
+    }
+    check(wrote === 2, "正控：两条正控都通过写前验证并落盘（其余四条被歧义闸挡住）", wrote);
+    fs.writeFileSync(docAbs, linesArr.join("\n"), "utf8");
+    const { refs: refs2 } = auditDocs({ root: tmp, docs: listDocFiles(tmp), index, repoRel });
+    const sym2 = auditSymbolDrift({ refs: refs2, windowBelow: 2, lineCache: new Map() });
+    check(sym2.drift.length === 4, "复跑：写盘后活文档面漂移由 6 降到 4（订正真的生效，不是只算了没改）", sym2.drift.length);
+    check(
+      refs2.filter((r) => r.bucket === "BROKEN" || r.bucket === "STALE").length === 0,
+      "回写不许动第一层：改前改后第一层红面都必须仍是 0",
+    );
+    const wrong = patchRefStartNumber("见 `src/fixme.rs:7` 的 `FixmeStruct`", fakeRef, 1);
+    check(
+      wrong.ok && verifyProposedFix("FixmeStruct", fixmeLines, 1) === false,
+      "负控：若把正控改成注释行 1，写前验证必须拒（证明闸有牙，不是装饰）",
+    );
+
+    // ── 精确率闸与写盘闸 ──
+    check(stats.emitted === 2 && stats.correct === 2 && stats.emittedOnAmbiguous === 0, "标注语料实测：2 出 2 对、歧义面零建议", stats);
+    const gate = fixPrecisionGate(stats);
+    check(gate.ok === true, "正控：精确率闸放行", gate);
+    check(fixPrecisionGate({ emitted: 0, correct: 0, emittedOnAmbiguous: 0 }).ok === false, "负控：无分母 ⇒ 拒绝（空洞通过）");
+    check(fixPrecisionGate({ emitted: 2, correct: 1, emittedOnAmbiguous: 0 }).ok === false, "负控：错一条 ⇒ 拒绝（要求 100%）");
+    check(fixPrecisionGate({ emitted: 2, correct: 2, emittedOnAmbiguous: 1 }).ok === false, "负控：歧义面上还敢出建议 ⇒ 拒绝");
+    check(FIX_PRECISION_REQUIRED === 1, "精确率要求必须是 100%（改这个数就等于放宽判据，需要显式裁定）");
+    const okCall = {
+      fix: true,
+      attested: true,
+      selftestRan: true,
+      selftestAsserts: 30,
+      selftestPassed: true,
+      precisionOk: true,
+      precisionWhy: "x",
+      unverifiedAny: false,
+      armed: true,
+    };
+    check(writeModeGate(okCall).ok === true, "正控：六道闸全过才允许写盘");
+    check(writeModeGate({ ...okCall, fix: false }).ok === false, "负控：没给 --fix ⇒ 不写");
+    check(writeModeGate({ ...okCall, attested: false }).ok === false, "负控：只给 --fix 不给 --i-attest-quiet-window ⇒ 拒绝（并行期保护）");
+    check(writeModeGate({ ...okCall, selftestRan: false }).ok === false, "负控：无自检覆盖 ⇒ 拒绝执行（任务硬要求）");
+    check(writeModeGate({ ...okCall, selftestAsserts: 0 }).ok === false, "负控：自检跑了但零断言 ⇒ 等于没覆盖 ⇒ 拒绝");
+    check(writeModeGate({ ...okCall, selftestPassed: false }).ok === false, "负控：自检有失败 ⇒ 拒绝");
+    check(writeModeGate({ ...okCall, precisionOk: false }).ok === false, "负控：精确率闸未过 ⇒ 拒绝");
+    check(writeModeGate({ ...okCall, armed: false }).ok === false, "负控：第二层未冻结 ⇒ 改错无从对照 ⇒ 拒绝写盘");
+    check(writeModeGate({ ...okCall, unverifiedAny: true }).ok === false, "负控：本轮有未检查面 ⇒ 拒绝写盘");
+    check(writeModeGate({ ...okCall, fix: false }).code === 2, "拒绝一律退 2（门自身没干活，不是文档缺陷）");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  const precision = fixPrecisionGate(stats);
+  if (fail > 0) return { passed: false, precision };
+  console.log(
+    `SELFTEST OK（第五段 回写判据）：正控 2 条（唯一 pub struct 定义行 ⇒ 建议 2，实测精确率 ${(precision.precision * 100).toFixed(0)}%）；` +
+      "负控 4 类歧义（multi-decl / no-decl / range / multi-symbol）+ 快照 ⇒ 一条建议都不出；" +
+      "impl 块 / 调用点 / use / 注释 / 字段 / TS 方法简写 / 接收者 全部不算定义行；写前验证对「故意写错的行号」返回 false；" +
+      "合成写盘只落临时目录，改后复跑活文档面 6→4 且第一层红面不动；" +
+      "writeModeGate 八个负控（缺开关 / 缺安静窗口确认 / 无自检覆盖 / 零断言 / 自检失败 / 精确率不足 / 有未检查面 / 退码档）全部拒绝",
+  );
+  return { passed: true, precision };
+}
+
 // ── main ────────────────────────────────────────────────────────────
 if (SELFTEST) {
-  // ⚠ 三段**都要跑**再合并结果（原式 `runSelftest() && runSymbolSelftest()` 短路：第一段红就
+  // ⚠ 五段**都要跑**再合并结果（原式 `runSelftest() && runSymbolSelftest()` 短路：第一段红就
   // 看不到后两段的失败）。断言条数按**执行**口径打印，并**逐段拆分** —— 自证要求
   // 「原 N + 补 M = 总 K」必须能被第三方逐字核对，只打印「OK」或只打印总数都核不了。
   const segA = ASSERT_RUN;
@@ -1613,11 +2488,16 @@ if (SELFTEST) {
   const r2 = runSymbolSelftest();
   const segC = ASSERT_RUN;
   const r3 = runIoSelftest();
+  const segD = ASSERT_RUN;
+  const r4 = runLifecycleSelftest();
+  const segE = ASSERT_RUN;
+  const r5 = runSymFixSelftest();
   console.log(
     `SELFTEST 断言合计 ${ASSERT_RUN} 条（执行口径，含循环展开）= 基础判据 ${segB - segA}` +
-      ` + 第二层 SYMDRIFT ${segC - segB} + 第三层 I/O 兜底 ${ASSERT_RUN - segC}；失败 ${ASSERT_FAIL} 条`,
+      ` + 第二层 SYMDRIFT ${segC - segB} + 第三层 I/O 兜底 ${segD - segC}` +
+      ` + 第四层 活文档/快照+第二层棘轮 ${segE - segD} + 第五层 回写判据 ${ASSERT_RUN - segE}；失败 ${ASSERT_FAIL} 条`,
   );
-  process.exit(r1 && r2 && r3 ? 0 : 1);
+  process.exit(r1 && r2 && r3 && r4 && r5.passed ? 0 : 1);
 }
 
 const SYM_WINDOW = parseSymWindowFlag(WINDOW_FLAG);
@@ -1649,36 +2529,68 @@ if (scanProducedNothing(docs.length, docsRead)) {
   process.exit(2);
 }
 const hard = hardViolations(refs);
-// 第二层（SYMDRIFT）：复用同一份正文缓存；**不改桶、不改键**，只往引用对象上挂 symDrift/symAbsent。
+// 第二层（SYMDRIFT）：复用同一份正文缓存；**不改桶、不改第一层键**，只往引用对象上挂
+// symDrift / symAbsent / symFace（判据⑥ 的面归属）/ occ + targetLines（回写建议的材料）。
 const sym = auditSymbolDrift({ refs, windowBelow: SYM_WINDOW, lineCache, includeDotted: INCLUDE_DOTTED, notes: ioNotes });
-const symHard = symbolHardViolations(sym.drift, REQUIRE_SYMBOL_MATCH);
+// ⚠ `symbolHardViolations` 保留为**纯函数档**（#182 的「全量升硬」语义，selftest 钉着），
+//   main 侧的判红改由 `symViolations` 统一给出（开关档 / 棘轮档 / 未武装三态，见下方退出码块）。
 
 const BASELINE_NOTE =
   "棘轮基线：键 = <文档>::<引用串>:<起始行>[-<结束行>]（不含文档行号，防漂移）。" +
   "只许减少不许增加；新增 BROKEN/STALE 必须改文档引用，不许改基线洗白。";
-function loadBaselineKeys() {
-  if (!fs.existsSync(BASELINE_PATH)) return new Set();
+const SYM_BASELINE_NOTE =
+  "第二层（SYMDRIFT）棘轮基线：键 = <文档>::<被引文件> → <被引符号>（**不含行号** —— 本层的病灶就是行号，" +
+  "含行号会让「源码里符号挪了一行」变成基线外新增）。只收**活文档**（判据⑥：docs/audits/AUDIT-*-<日期>.md " +
+  "是时点快照，永不订正、永不进本表）。只许减少不许增加；新增 = 该活文档新出现「符号不在所指行」，改文档或改引用。";
+/**
+ * 基线读取（**一次读、两层解**）。原 `loadBaselineKeys` 只回 `entries`，
+ * 现改回 `parseBaselineShape` 的产物：`symKeys === null` ⇒ 第二层从未冻结（≠ 空集）。
+ * 基线 JSON 语法错 / `symEntries` 形态不符 ⇒ 退 2（不可读 = 门自身失效，与既有裁定同档）。
+ */
+function loadBaseline() {
+  if (!fs.existsSync(BASELINE_PATH)) return { refKeys: new Set(), symKeys: null, exists: false };
+  let raw;
   try {
-    const b = JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8"));
-    return new Set(b.entries ?? []);
+    raw = JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8"));
   } catch (e) {
     console.error(`✖ 基线不可读（${BASELINE_PATH}）：${e.message}`);
     process.exit(2);
   }
+  const shape = parseBaselineShape(raw);
+  if (!shape.ok) {
+    console.error(`✖ 基线形态不符（${BASELINE_PATH}）：${shape.why} —— 拒绝按「空第二层」猜测，那会让棘轮静默失守`);
+    process.exit(2);
+  }
+  return { refKeys: shape.refKeys, symKeys: shape.symKeys, exists: true };
 }
-function writeBaseline(keys) {
+/**
+ * 写基线。**两层分开传**，且 `symKeys === undefined` 表示「本轮不碰第二层」（保持缺失，
+ * 由调用方走「未冻结」自陈分支）；传数组 ⇒ 写入。`entries` 永不被第二层的读写牵连。
+ */
+function writeBaseline(keys, symKeyList) {
   const countsNow = {};
   for (const r of refs) if (r.bucket === "BROKEN" || r.bucket === "STALE") countsNow[r.bucket] = (countsNow[r.bucket] ?? 0) + 1;
-  fs.writeFileSync(
-    BASELINE_PATH,
-    JSON.stringify({ note: BASELINE_NOTE, version: 1, counts: countsNow, entries: [...keys].sort() }, null, 2) + "\n",
-    "utf8",
-  );
+  const obj = { note: BASELINE_NOTE, version: 2, counts: countsNow, entries: [...keys].sort() };
+  if (symKeyList !== undefined) {
+    obj.symNote = SYM_BASELINE_NOTE;
+    obj.symCounts = {
+      live: sym.drift.length,
+      snapshot: sym.driftSnapshot.length,
+      keys: new Set(sym.drift.map(symDriftKey)).size,
+    };
+    obj.symEntries = [...symKeyList].sort();
+  }
+  fs.writeFileSync(BASELINE_PATH, JSON.stringify(obj, null, 2) + "\n", "utf8");
 }
 
 // 未检查面（读盘失败）的覆盖面摘要 —— **无条件进 summary**，因为「这条门有没有真的跑完」
 // 本身就是读数的一部分：只在出错时才打印的自陈，等于让正常路径与全盲路径长得一样。
 const cov = ioCoverageSummary(ioNotes, counts.UNVERIFIED ?? 0);
+
+// 基线（两层一次读）+ 第二层棘轮比对。
+// ⚠ `base.symKeys === null` = 第二层**从未冻结** ⇒ 棘轮未武装 ⇒ 不判红，但必须自陈（见 summary）。
+const base = loadBaseline();
+const symRatchet = symRatchetDiff(sym.drift, base.symKeys, REQUIRE_SYMBOL_MATCH);
 
 const summary =
   `扫描 ${docs.length} 篇文档 · 引用 ${refs.length} 条` +
@@ -1688,10 +2600,15 @@ const summary =
   ` ｜ MALFORMED ${counts.MALFORMED ?? 0}` +
   // 第二层是**并列独立计数**（上面各桶的读数与它无关）：给出可比对符号的引用里，
   // 符号不在所指行（±窗口）的条数。窗口 0 行时上面这些数字不变，只有这个数会变。
-  ` ｜ SYMDRIFT ${sym.drift.length}（第二层·符号不在所指行${REQUIRE_SYMBOL_MATCH ? "**判红**" : "只报告"}；` +
-  `可比对符号 ${sym.withSymbol} 条 / 进入比对 ${sym.checked} 条 / 符号零存在跳过 ${sym.absent} 条 /` +
-  ` 点号接缝名排除 ${sym.dottedSkipped} 条 / 窗口 +${sym.windowBelow} 行` +
+  // ⚠ 按判据⑥ **分两面**报：活文档面（棘轮 / 升硬靶面）与快照面（永不订正）——
+  //   只报合计会让「收窄了多少靶面」不可复算（判据 #7：未检查与检查通过长得一样）。
+  ` ｜ SYMDRIFT 活文档面 ${sym.drift.length}` +
+  `（第二层·符号不在所指行，${REQUIRE_SYMBOL_MATCH ? "**--require-symbol-match 判红**" : symRatchet.armed ? (symRatchet.newViolations.length > 0 ? "**基线外新增 ${symRatchet.newViolations.length} 条判红**" : "棘轮已武装·无新增") : "**棘轮未武装**（基线无 symEntries ⇒ 只报告）"}；` +
+  `可比对符号 ${sym.face.live.withSymbol} 条 / 进入比对 ${sym.face.live.checked} 条 / 符号零存在跳过 ${sym.face.live.absent} 条` +
   `；漂移按形态 ${Object.entries(sym.byForm).map(([k, v]) => `${k} ${v}`).join(" / ") || "无"}）` +
+  ` / 快照面 ${sym.driftSnapshot.length}（docs/audits 时点快照·**不订正、不进棘轮、永不判红**；` +
+  `可比对 ${sym.face.snapshot.withSymbol} / 比对 ${sym.face.snapshot.checked} / 零存在 ${sym.face.snapshot.absent}）` +
+  ` ｜ 点号接缝名排除 ${sym.dottedSkipped} 条 / 窗口 +${sym.windowBelow} 行` +
   // 第三层（任务 #203）：读盘失败 = **未检查**，与上面任何桶都不混同，也不改它们的读数。
   // 四个来源分档给数：引用条数（判进 UNVERIFIED 桶）／目标文件个数／文档篇数／文档目录个数。
   // ⚠ 后面三项为 0 时也照样打印 —— 「没读到」这件事必须永远可见。
@@ -1720,12 +2637,19 @@ if (DUMP) {
     //   整体位移，而 `--dump-doc-refs` 的形态有别的文档在抄（见 AGENTS.md「段对齐」一节）。
     else if (r.bucket === "UNVERIFIED") detail = `→ ${r.target} ${r.why} ⇒ **未检查**（不是通过，也不是引用坏了）`;
     // 第二层附注（不改上面任何桶的读数）：符号一致 / 符号漂移 / 符号零存在（未检）/ 仅接缝名（未检）
+    // ⚠ 漂移条目必须**自陈属于哪个面**（判据⑥）：否则「活文档面 N / 快照面 M」这个读数
+    //   只能靠 summary 的合计去反推，逐条复算就没了依据（本仓「合计对不上明细」的反复形态）。
     if (r.symDrift) {
       detail +=
-        ` ⇒ SYMDRIFT 簇 \`${r.symDrift.spans.join("` / `")}\`（形态 ${r.symDrift.forms.join("/")}）` +
+        ` ⇒ SYMDRIFT【${r.symFace === "snapshot" ? "快照面·不订正" : "活文档面·进棘轮"}】簇 \`${r.symDrift.spans.join("` / `")}\`` +
+        `（形态 ${r.symDrift.forms.join("/")}）` +
         `的符号 ${r.symDrift.symbols.join("/")} 不在 ${r.symDrift.window.join("-")} 行` +
         `（实际 ${r.symDrift.actual.join("/")}`;
       detail += r.symDrift.symbols.length > 1 ? `；候选共 ${r.symDrift.symbols.length} 个）` : "）";
+      if (r.symFace !== "snapshot") {
+        const sug = suggestSymbolFix(r);
+        detail += sug.ok ? ` ⇒ 回写建议 :${r.start}→:${sug.to}（${sug.sym} 的声明行）` : ` ⇒ 回写放弃（${sug.code}）`;
+      }
     } else if (r.symAbsent) detail += ` ⇒ 符号零存在（未检，属重命名/口语那道题）`;
     else if (r.symDottedOnly) detail += ` ⇒ 仅点号接缝名（未检，见 comparableSymbolSpan 注释）`;
     else if (r.symCandidates && r.symCandidates.length > 0 && r.bucket === "OK") detail += ` ⇒ 符号一致`;
@@ -1735,11 +2659,14 @@ if (DUMP) {
   process.exit(0);
 }
 
-const baseKeys = loadBaselineKeys();
-const { newViolations, fixedCount, baseSize } = diffAgainstBaseline(baseKeys, hard);
+const { newViolations, fixedCount, baseSize } = diffAgainstBaseline(base.refKeys, hard);
+// 第二层棘轮的违规：`--require-symbol-match` 时整个活文档面（不看基线），
+// 否则「基线外新增的活文档面键」（未武装 ⇒ 恒空，但 summary 会自陈「未武装」）。
+const symViolations = REQUIRE_SYMBOL_MATCH ? symRatchet.current : symRatchet.newViolations;
 
 // 未检查面非空 ⇒ **无条件拒绝**动基线（判据见 `refuseBaselineWrite`）：读不到的引用会让
 // 本轮读数变小，而基线收紧正是拿「本轮没有」当「已修复」—— 盘的抖动不该代劳洗白。
+// ⚠ 这条闸对**两层同时**生效（任务 #202 ②：第二层沿用既有判据，不另开口径）。
 if ((INIT_BASELINE || UPDATE_BASELINE) && refuseBaselineWrite(cov)) {
   console.error(
     `\n✖ ${INIT_BASELINE ? "--init-baseline" : "--update-baseline"} 拒绝执行：本轮有未检查面` +
@@ -1751,31 +2678,81 @@ if ((INIT_BASELINE || UPDATE_BASELINE) && refuseBaselineWrite(cov)) {
 }
 
 if (INIT_BASELINE) {
-  if (fs.existsSync(BASELINE_PATH)) {
-    console.error(`✖ --init-baseline 拒绝执行：${BASELINE_PATH} 已存在。收紧存量请用 --update-baseline，不要重建基线洗白。`);
+  const symKeysNow = [...new Set(sym.drift.map(symDriftKey))];
+  if (base.exists && base.symKeys !== null) {
+    console.error(
+      `✖ --init-baseline 拒绝执行：${BASELINE_PATH} 已有 symEntries（${base.symKeys.size} 条）。` +
+        `收紧存量请用 --update-baseline，不要重建第二层基线洗白。`,
+    );
     process.exit(1);
   }
-  writeBaseline(new Set(hard.map((r) => r.key)));
+  if (base.exists) {
+    // 只补第二层首冻：`entries` **逐字保留**（重建第一层 = 洗白，正是本模式要防的）。
+    const preserved = base.refKeys;
+    writeBaseline(preserved, symKeysNow);
+    console.log(`\n${summary}`);
+    console.log(
+      `第二层基线已首冻：活文档面 ${sym.drift.length} 条漂移 ⇒ ${symKeysNow.length} 个键（快照面 ${sym.driftSnapshot.length} 条**不进本表**）。\n` +
+        `第一层 entries 未动（${preserved.size} 条逐字保留）。之后两层都只减不增。`,
+    );
+    process.exit(0);
+  }
+  writeBaseline(new Set(hard.map((r) => r.key)), symKeysNow);
   console.log(`\n${summary}`);
-  console.log(`基线已建立：冻结 BROKEN/STALE 存量 ${hard.length} 条（之后只减不增）。`);
+  console.log(
+    `基线已建立：第一层冻结 BROKEN/STALE 存量 ${hard.length} 条；` +
+      `第二层冻结活文档面 ${symKeysNow.length} 个键（快照面 ${sym.driftSnapshot.length} 条不订正）。之后只减不增。`,
+  );
   process.exit(0);
 }
 
 if (UPDATE_BASELINE) {
-  if (newViolations.length > 0) {
-    console.error(`\n✖ --update-baseline 拒绝执行：当前有 ${newViolations.length} 条基线外新增，先修引用（不许用基线洗白）：`);
-    for (const v of newViolations.slice(0, 20)) console.error(`  + ${v.key}（${v.doc}:${v.docLine}）`);
+  // 「为凑绿往基线里塞新条目」的形态在这一层同样存在 ⇒ 两个面一起拦，缺一个就是洗白口子。
+  const bad1 = newViolations.length > 0;
+  const bad2 = symRatchet.newViolations.length > 0;
+  if (bad1 || bad2) {
+    if (bad1) {
+      console.error(`\n✖ --update-baseline 拒绝执行：第一层有 ${newViolations.length} 条基线外新增，先修引用（不许用基线洗白）：`);
+      for (const v of newViolations.slice(0, 20)) console.error(`  + ${v.key}（${v.doc}:${v.docLine}）`);
+    }
+    if (bad2) {
+      console.error(
+        `\n✖ --update-baseline 拒绝执行：第二层（SYMDRIFT 活文档面）有 ${symRatchet.newViolations.length} 条基线外新增` +
+          `（收紧只允许条目消失，塞新条目 = 洗白）：`,
+      );
+      for (const v of symRatchet.newViolations.slice(0, 20)) console.error(`  + ${v.key}（${v.ref.doc}:${v.ref.docLine}）`);
+    }
     process.exit(1);
   }
-  writeBaseline(new Set(hard.map((r) => r.key)));
+  if (base.symKeys === null) {
+    console.error(
+      `\n⚠ 第二层从未冻结（基线无 symEntries）⇒ 本次 --update-baseline **只收紧第一层**，` +
+        `symEntries 保持缺失（首冻请用 --init-baseline，且必须等安静窗口：并行期首冻会把别人的未提交中间态钉进棘轮）。`,
+    );
+    writeBaseline(new Set(hard.map((r) => r.key)));
+    console.log(`\n${summary}`);
+    console.log(`第一层基线已收紧：${baseSize} → ${hard.length} 条（本轮修复 ${fixedCount} 条）。`);
+    process.exit(0);
+  }
+  const symKeysNow = [...new Set(sym.drift.map(symDriftKey))];
+  writeBaseline(new Set(hard.map((r) => r.key)), symKeysNow);
   console.log(`\n${summary}`);
-  console.log(`基线已收紧：${baseSize} → ${hard.length} 条（本轮修复 ${fixedCount} 条）。`);
+  console.log(
+    `基线已收紧：第一层 ${baseSize} → ${hard.length} 条（修复 ${fixedCount} 条）；` +
+      `第二层 ${base.symKeys.size} → ${symKeysNow.length} 条（修复 ${symRatchet.fixedCount} 条）。`,
+  );
   process.exit(0);
 }
 
 console.log(`\n${summary}`);
 console.log(`目标索引来源：${repoFiles.source === "git" ? "git ls-files（已跟踪 + 未忽略的新文件）" : "文件系统遍历（未找到 git，口径可能与 CI 不同）"}`);
-if (baseSize > 0) console.log(`棘轮基线 ${baseSize} 条；本轮已消失 ${fixedCount} 条（可择机 --update-baseline 收紧）。`);
+if (baseSize > 0) console.log(`第一层棘轮基线 ${baseSize} 条；本轮已消失 ${fixedCount} 条（可择机 --update-baseline 收紧）。`);
+console.log(
+  base.symKeys === null
+    ? `第二层棘轮**未武装**（基线无 symEntries）⇒ 活文档面 ${sym.drift.length} 条漂移本轮只报告。` +
+        `安静窗口首冻：node scripts/check-doc-refs.mjs --init-baseline（并行期禁止：会把别的 lane 的未提交中间态钉进棘轮）`
+    : `第二层棘轮基线 ${base.symKeys.size} 条（活文档面键 ${symRatchet.keyCount} 个）；本轮已消失 ${symRatchet.fixedCount} 条（可择机收紧）。`,
+);
 
 // ABBREV 逐条自证（报告面）：每条都必须点到它缩写的真实文件，找不到候选的不许进本桶
 const abbrev = refs.filter((r) => r.bucket === "ABBREV");
@@ -1825,12 +2802,15 @@ if (cov.any) {
   );
 }
 // ── 第二层（SYMDRIFT）报告面 ───────────────────────────────────────
-// 语义与 ABBREV 同档：**默认只报告**，不影响退出码。`--require-symbol-match` 才判红。
+// 语义与 ABBREV 同档：**默认只报告**，不影响退出码。判红有两条独立路径（见 `symViolations`）：
+//   · `--require-symbol-match` ⇒ 整个活文档面判红（#182 的全量对账档，不看基线）；
+//   · 基线已首冻（有 `symEntries`）⇒ 只有**基线外新增**判红（棘轮档）。
 // 逐条必须点到「符号实际在第几行」，否则这条判据指不回真实风险（同 ABBREV 的自证要求）。
 if (sym.drift.length > 0) {
   console.log(
-    `\n~ SYMDRIFT ${sym.drift.length} 条（引用可定位、但**所指那一行不是句中所述符号**，行号仍在范围内 ⇒` +
-      `既有 BROKEN/STALE 全绿的那种腐烂。${REQUIRE_SYMBOL_MATCH ? "**已判红**" : "默认只报告，加 --require-symbol-match 才退非 0"}）：`,
+    `\n~ SYMDRIFT 活文档面 ${sym.drift.length} 条（键面去重后 ${symRatchet.keyCount} 个条目）：引用可定位、但**所指那一行不是句中所述符号**，` +
+      `行号仍在范围内 ⇒ 既有 BROKEN/STALE 全绿的那种腐烂。` +
+      `${REQUIRE_SYMBOL_MATCH ? "本档**已判红**（--require-symbol-match）。" : symRatchet.armed ? `棘轮已武装 ⇒ 基线外新增 ${symRatchet.newViolations.length} 条判红。` : "棘轮**未武装**（基线无 symEntries）⇒ 本轮只报告。"}`,
   );
   for (const r of sym.drift.slice(0, 30)) {
     const ref = r.end !== r.start ? `${r.refFile}:${r.start}-${r.end}` : `${r.refFile}:${r.start}`;
@@ -1843,8 +2823,116 @@ if (sym.drift.length > 0) {
   if (sym.drift.length > 30) console.log(`   … 其余 ${sym.drift.length - 30} 条省略（--dump-doc-refs 看全量）`);
   console.log(
     `   修法：把行号订正到「实际」那一行（或把符号名改成所指行上的真符号）。\n` +
-      `   复核窗口：--sym-window=N 放大折行窗口，可分辨「折行没吃进」与「真漂移」。`,
+      `   复核窗口：--sym-window=N 放大折行窗口，可分辨「折行没吃进」与「真漂移」。\n` +
+      `   建议清单（零写盘）：--suggest-fix；首冻棘轮：--init-baseline（**必须等安静窗口**）。`,
   );
+}
+// 快照面：**永不订正**，但必须让「免检了多少」可复算（判据 #7）—— 只报告、不进棘轮、不进建议。
+if (sym.driftSnapshot.length > 0) {
+  console.log(
+    `\nℹ SYMDRIFT 快照面 ${sym.driftSnapshot.length} 条（` +
+      `docs/audits/AUDIT-*-<YYYY-MM-DD>.md 等**时点快照**，判据⑥ 排除）：` +
+      `按 AGENTS.md「文档放置」，快照里的旧读数记录的是**当时的世界**，腐烂是正常且应保留的 ⇒` +
+      ` 本层**不判红、不进基线、不出订正建议**。第一层（BROKEN/STALE/…）对快照仍按原口径跑。\n` +
+      `   复算：--dump-doc-refs 里这些条目带「快照面」字样（合计 ${sym.face.snapshot.withSymbol} 条给出符号 / 比对 ${sym.face.snapshot.checked} / 零存在 ${sym.face.snapshot.absent}）。`,
+  );
+}
+
+// ── 自动回写（任务 #202 ③）：dry-run 与写盘**分离**，写盘要显式开关 + 六道闸 ──
+if (SUGGEST_FIX || FIX) {
+  const plans = new Map();
+  const whyCodes = {};
+  let suggested = 0;
+  for (const r of sym.drift) {
+    const sug = suggestSymbolFix(r);
+    if (!sug.ok) {
+      whyCodes[sug.code] = (whyCodes[sug.code] ?? 0) + 1;
+      continue;
+    }
+    suggested++;
+    if (!plans.has(r.doc)) plans.set(r.doc, []);
+    plans.get(r.doc).push({ r, sug });
+  }
+  console.log(
+    `\n${FIX ? "✚" : "~"} 回写${SUGGEST_FIX && !FIX ? "建议（dry-run，零写盘）" : "模式"}：` +
+      `活文档面 ${sym.drift.length} 条漂移 ⇒ 无歧义建议 ${suggested} 条 / 判歧义放弃 ${sym.drift.length - suggested} 条` +
+      `（放弃原因 ${Object.entries(whyCodes).map(([k, v]) => `${k} ${v}`).join(" / ") || "无"}）` +
+      `；快照面 ${sym.driftSnapshot.length} 条**永不进入**（判据⑥）。`,
+  );
+  for (const [doc, list] of [...plans.entries()].sort()) {
+    for (const { r, sug } of list) console.log(`   → ${doc}:${r.docLine} ${r.refFile}:${r.start} ⇒ :${sug.to}（符号 ${sug.sym} 的声明行）`);
+  }
+  if (SUGGEST_FIX && !FIX) {
+    console.log(`   dry-run 到此为止：一行盘都没写。要写盘请给 --fix，并同时给 --i-attest-quiet-window。`);
+  }
+  if (FIX) {
+    // 写盘模式**当场**跑回写自检（不是「平时碰巧跑过」）：无覆盖 / 零断言 / 有失败 ⇒ 一律拒绝。
+    const before = ASSERT_RUN;
+    const st = runSymFixSelftest();
+    const gate = writeModeGate({
+      fix: true,
+      attested: QUIET_WINDOW_ATTESTED,
+      selftestRan: true,
+      selftestAsserts: ASSERT_RUN - before,
+      selftestPassed: st.passed,
+      precisionOk: st.precision.ok,
+      precisionWhy: st.precision.why,
+      unverifiedAny: cov.any,
+      armed: base.symKeys !== null,
+    });
+    if (!gate.ok) {
+      console.error(`\n✖ --fix 拒绝写盘（退 2）：${gate.why}`);
+      console.error(`   上面列出的只是**建议**；未写任何文件。判据与六道闸见文件头「自动回写」。`);
+      process.exit(2);
+    }
+    let wrote = 0;
+    const failures = [];
+    for (const [doc, list] of [...plans.entries()].sort()) {
+      const abs = path.join(ROOT, doc.split("/").join(path.sep));
+      let raw;
+      try {
+        raw = fs.readFileSync(abs, "utf8");
+      } catch (e) {
+        failures.push(`${doc} 读盘失败：${e.code ?? e.message}`);
+        continue;
+      }
+      const eol = raw.includes("\r\n") ? "\r\n" : "\n"; // 不改行尾（禁区 14 由别的门管，本门不许顺手换）
+      const linesArr = raw.split(/\r\n|\n/);
+      let touched = 0;
+      for (const { r, sug } of list) {
+        const idx = r.docLine - 1;
+        const orig = linesArr[idx];
+        const patched = patchRefStartNumber(orig, r, sug.to);
+        if (!patched.ok) {
+          failures.push(`${doc}:${r.docLine} 补丁失败：${patched.why}`);
+          continue;
+        }
+        if (orig.split(/\r?\n/).length !== 1 || patched.text.split(/\r?\n/).length !== 1) {
+          failures.push(`${doc}:${r.docLine} 补丁跨越行边界 ⇒ 放弃`);
+          continue;
+        }
+        const v = verifyPatchedLine(orig, patched.text, r, sug.to);
+        if (!v.ok) {
+          failures.push(`${doc}:${r.docLine} 写前验证不通过：${v.why}`);
+          continue;
+        }
+        linesArr[idx] = patched.text;
+        touched++;
+      }
+      if (touched > 0) {
+        fs.writeFileSync(abs, linesArr.join(eol), "utf8");
+        wrote += touched;
+      }
+    }
+    if (failures.length > 0) {
+      console.error(`\n✖ --fix：${failures.length} 条建议在写前验证里被拒 ⇒ 已放弃**全部**写盘（不留半套改动）：`);
+      for (const f of failures.slice(0, 20)) console.error(`   ✖ ${f}`);
+      process.exit(2);
+    }
+    console.log(`\n✔ --fix 完成：写入 ${wrote} 处订正（覆盖 ${plans.size} 篇活文档；快照面一条未碰）。`);
+    console.log(`   复验：重跑 node scripts/check-doc-refs.mjs —— 建议数应下降，第一层读数**必须不变**（回写不许动桶）。`);
+    process.exit(0);
+  }
 }
 
 if (newViolations.length > 0) {
@@ -1862,12 +2950,27 @@ if (newViolations.length > 0) {
   process.exit(1);
 }
 
-// 升硬开关：**只有显式给了 --require-symbol-match 才会走到这里退 1**（symHard 关时恒空）。
-// ⚠ 不进棘轮基线 —— 基线键面仍是 BROKEN/STALE（`writeBaseline` 未改），升硬前需另立符号漂移基线。
-if (symHard.length > 0) {
+// 第二层判红的**两条**路径（`symViolations` 已在上方按开关/武装状态算好）：
+//   · `--require-symbol-match` ⇒ 整个活文档面（不看基线）；
+//   · 基线已首冻 ⇒ 只有基线外新增的键。
+// 未冻结时 `symViolations` 恒空 ⇒ **退码与 #182 落地后逐字相同**（不因为本批把靶面收窄就变红，
+// 也不因为加了棘轮就凭空变红 —— 武装与否由「基线里有没有 symEntries」这一个事实决定）。
+if (symViolations.length > 0) {
   console.error(
-    `\n✖ --require-symbol-match：SYMDRIFT ${symHard.length} 条判红（引用可定位但所指行不是所述符号）。` +
-      `上面已逐条点名实际行；不带该开关时本桶只报告、退码与既往逐字相同。`,
+    `\n✖ SYMDRIFT 判红 ${symViolations.length} 条（活文档面，${REQUIRE_SYMBOL_MATCH ? "--require-symbol-match 全量档" : `棘轮基线外新增 ${symViolations.length} 个键`}）：`,
+  );
+  for (const v of symViolations.slice(0, 20)) {
+    const r = v.ref;
+    const ref = r.end !== r.start ? `${r.refFile}:${r.start}-${r.end}` : `${r.refFile}:${r.start}`;
+    console.error(
+      `   ✖ ${v.key}（${r.doc}:${r.docLine} → ${ref}，符号实际在 ${r.symDrift.actual.join(" / ")}；` +
+        `修法：订正行号，或确认该引用确属活文档后跑 --update-baseline 前先修）`,
+    );
+  }
+  if (symViolations.length > 20) console.error(`   … 其余 ${symViolations.length - 20} 条省略（--dump-doc-refs 看全量）`);
+  console.error(
+    `\n  · 不许把新增键写进基线来凑绿（--update-baseline 在存在新增时**拒绝执行**，这是设计不是缺陷）；\n` +
+      `  · 快照（docs/audits/AUDIT-*-<日期>.md）根本不进本档 ⇒ 若这里出现快照键，说明判据⑥ 失效，请当 bug 报。`,
   );
   process.exit(1);
 }
@@ -1885,5 +2988,11 @@ if (unverifiedHardFail(cov, REQUIRE_NO_UNVERIFIED)) {
   process.exit(1);
 }
 
-console.log(`PASS: 无新增 BROKEN / STALE。`);
+console.log(
+  `PASS: 无新增 BROKEN / STALE` +
+    (base.symKeys === null
+      ? `；第二层棘轮未武装（活文档面 ${sym.drift.length} 条只报告，快照面 ${sym.driftSnapshot.length} 条不订正）`
+      : `；第二层棘轮已武装（基线外新增 0 / 基线 ${base.symKeys.size} 条，靶面只收活文档）`) +
+    `。`,
+);
 process.exit(0);

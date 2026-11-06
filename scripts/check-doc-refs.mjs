@@ -299,7 +299,7 @@ export function readLines(abs, cache) {
 
 /** 折行窗口下方行数（④）。取 2：rustfmt / prettier 只把名字推到紧邻下一行，再往下是函数体。 */
 const WINDOW_BELOW_DEFAULT = 2;
-/** ②：符号簇与引用 token 的最大列距离。`| \`file.rs:12\` | \`Sym\` |` 的间隔实测 5 列。 */
+/** ②：符号簇与引用 token 的最大列距离。表格行「引 | 符号」的间隔实测 5 列，24 列覆盖中文连接词。 */
 const MAX_SYM_GAP = 24;
 /** 缓存的目标文件数上限（LRU）。 */
 const LINES_CACHE_MAX = 400;

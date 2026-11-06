@@ -127,7 +127,11 @@ impl OpcStoreProvider for HostOpcStore {
             .map_err(|e| {
                 AxAgentError::Provider(format!("opc.store::publish_blog_post 发布失败: {e}"))
             })?;
-        Ok(if found { PublishBlogPostOutcome::Published } else { PublishBlogPostOutcome::NotFound })
+        Ok(if found {
+            PublishBlogPostOutcome::Published
+        } else {
+            PublishBlogPostOutcome::NotFound
+        })
     }
 }
 

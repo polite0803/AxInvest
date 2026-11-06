@@ -6647,7 +6647,7 @@ TS 侧曾在 `UpdateArtifactInput` 里多声明 `language` / `previewMode` / `me
 ### 128.8 未做（本批诚实清单）
 
 1. **全量 CI 三条仍未跑**（`cargo fmt --all --check` / `cargo clippy --workspace --all-targets --all-features -- -D warnings` / `__TAURI_WORKSPACE__=true cargo test --workspace`）：本批改动面 = 主 crate 4 文件 + tools 3 文件，按既有纪律「阶段内定点、全部阶段完成后全量」留到收口批。⚠ 特别保留：`fmt --check` **不带 `--all` 只查根 package**，`clippy` 不带 `--all-features` 会漏 feature-gated 代码 —— 收口时两条参数必须照抄 CI。
-2. **本批派生但未做的六件**：#208（31 处字符串声明，需递增 `TEMPLATE_VERSION`）、#209（真冻结 `symEntries` 基线，待安静窗口）、#210（本批只做了前端类型侧摘除，`update_artifact` 的 `id` 面 fail-closed 仍未做 —— 需要先核 dao 层对未知 id 的真实语义，不许凭猜）、#211（普查扫描形态扩面）、#212（数据源侧两条 NL 命令的 permissions 面）、#213（插件 `ui.json` 安装通道字节上限，先证上游是否已有界限）。
+2. **本批派生但未做的五件**：#208（31 处字符串声明，需递增 `TEMPLATE_VERSION`）、#209（真冻结 `symEntries` 基线，待安静窗口）、#211（普查扫描形态扩面）、#212（数据源侧两条 NL 命令的 permissions 面）、#213（插件 `ui.json` 安装通道字节上限，先证上游是否已有界限）。⚠ #210 的 `id` 面已在本会话后续批补上（见 §128.9 末段），不在未做之列。
 3. **CI 接线未动**：#205（`ci.yml` 补 vitest 步骤）需用户授权；`audit-l1-blockers.mjs --selftest` 与 `--require-no-unverified` 均未接 CI/`ci-check.mjs`。
 4. **`docs/` 侧 241 个未提交文件**（167 改 + 68 新 + 7 删）是前序会话留下的文档元信息批（给每篇文档头部加 `> 状态｜日期｜对应版本` 三行），**我没有动**。后果要如实记：pre-commit 的全树 CRLF 扫描持续命中其中未跟踪的 `docs/reference/skill-manifest-v2-example.json` ⇒ 本会话每一批都只能 `SKIP_SIMPLE_GIT_HOOKS=1` + 自证。这批需要一个专门的收口动作（入库或逐条归因），否则每个批都要重复解释一遍。
 5. **本机无真实数据分布**（sqlite 0 行、活动库是远端 PG）⇒ 本批所有阈值（256 KiB）与「历史 origin="ai" 行」类结论只按代码路径与设计论证给出，**不许写成「按实测」**。
@@ -6672,7 +6672,11 @@ mock 的 `create_artifact` / `update_artifact` 不再写这三样（注释指向
 `artifact.language` / `artifact.previewMode` / `artifact.metadata` / `Artifact["metadata"]` /
 `Artifact["previewMode"]` / `Artifact["language"]` 六种形态在 `src/**` **0 命中**。
 
-**未做（仍在 #210）**：`update_artifact` 的 `id` 面 fail-closed —— 未知 id 时 mock 现在返回 `undefined`，
-而 `artifactStore.updateArtifact` 会把该行覆盖成 `undefined`。**必须先核 dao 层对未知 id 的真实语义**
-（返回 Err 还是 no-op）才能定 mock 该抛还是该 no-op；不凭猜改。另：`Artifact` 的其余字段面（如 `kind`
-的枚举取值域）未逐项与后端字符串常量对齐，属 #192 同族、另批。
+**`id` 面 fail-closed 已补（同一批）**：先核了 dao 层真实语义 —— `update_artifact` 对未知 id 是
+`AxAgentError::NotFound("Artifact {id}")`（`axagent-infra/crates/dao/src/repo/artifact.rs:72-75`，经
+`commands/artifacts.rs:60-67` 映射成结构化错误），**不是静默 no-op** ⇒ mock 改为 `throw`
+（消息形态 `update_artifact: Artifact 不存在: <id>`）。这修掉的是真缺陷：改前 mock 返回 `undefined`，
+调用方 `artifactStore.updateArtifact` 会 `map` 出 `a.id === id ? undefined : a` ⇒ **列表里那一行整行消失**。
+判据：正控 = 已存在 id 仍正常更新并写回；负控 = 未知 id 抛错（调用方走 catch 分支，不再污染列表）。
+另：`Artifact.kind` 的取值域（`draft|note|report|snippet|checklist`）未与后端字符串常量逐项对齐
+（`rag_voice_etc.rs:631` 只是注释，后端实际是 `String` 不收窄）⇒ 归 #192 同族，另批。

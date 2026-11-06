@@ -4095,7 +4095,12 @@ async function executeCommand<T>(
         setStore("artifacts", arts2);
         return arts2[ai] as T;
       }
-      return undefined as T;
+      // #210 余项（id 面 fail-closed）：真机 dao 层对未知 id 是
+      // `AxAgentError::NotFound("Artifact {id}")`
+      // （axagent-infra/crates/dao/src/repo/artifact.rs:72-75，经 commands/artifacts.rs:60-67
+      // 映射成结构化错误）——不是静默 no-op。改前 mock 返回 undefined，调用方
+      // `artifactStore.updateArtifact` 会把列表里那一行覆盖成 undefined（整行消失）。
+      throw new Error(`update_artifact: Artifact 不存在: ${(args as { id?: string }).id}`);
     }
     case "delete_artifact": {
       const arts3 = getStore<Artifact[]>("artifacts", []);

@@ -5590,7 +5590,9 @@ PLAN 里那 15 行原本是**当时那一批的实证记录**（含「改前 →
 3. #170 / #171 / #181 三条智能体侧缺陷一行未改（取证完整，改动落在主 crate，一次 15–21 分钟档）。
 4. 全量 `cargo clippy --workspace` / `test --workspace` / `cargo fmt --all` 仍未跑（并行期铁律）⇒
    联合态门禁没验证过，这是本轮七个提交共同的未覆盖项。
-5. 组件中立性棘轮的 4 条已修复 + 3 条腐烂条目未收紧（#177，`--update-baseline` 只能串行窗口做）。
+5. 组件中立性棘轮的 4 条已修复 + 腐烂条目未收紧（#177，`--update-baseline` 只能串行窗口做）。
+   ⚠ 本条当时写「3 条腐烂」，取证批实测是 **4 条**（2 条 `file` 已不在盘上 + 2 条 `file` 在而字面量已消失），
+   「3」的来历见 §121 表 (2) 末。
 6. `#32`（OPC 独立仓）照旧被 `#36` 挡着。
 
 ## 118. 组件中立性门禁批 A：owner 比较的 camel↔kebab 归一（#168，2026-11-06）
@@ -5633,23 +5635,30 @@ PLAN 里那 15 行原本是**当时那一批的实证记录**（含「改前 →
 | C NEUTRAL 不归一 | `isNeutralOwner` 改回 `NEUTRAL_PREFIXES.includes` | **1 条 FAIL**（`③d`） | 逐字不变：202 / 199 / PASS |
 
 C 那一行是本轮最有价值的一条证据：它证明 **NEUTRAL 支的归一是纯防御性改动**，今天的真实数据上
-一分钱账面都没动 ⇒ 22 条消失必须全部来自 store 支。这一点由**键集差集**独立复算证实（把 HEAD 版与
-本版各插一行 dump 出 `effective` 键集再比对）：
+一分钱账面都没动 ⇒ 22 条消失必须全部来自 store 支。这一点由**键集差集**独立复算证实（把两种判据各插一行
+dump 出 `effective` 键集再比对）：
 
-| 口径（都跑同一棵当前树） | 实例 | 唯一键 | 基线外新增 | 账面已修复 |
-|---|---|---|---|---|
-| HEAD 判据（全等） | 222 | 208 | 0 | 4 |
-| 本批判据（归一） | 199 | 186 | 0 | 26 |
-| 差 | −23 | −22 | **0** | +22 |
+| 口径（都跑同一棵当前树） | 原始实例 | 豁免后实例 | 唯一键 | 基线外新增 | 账面已修复 |
+|---|---|---|---|---|---|
+| `708fc1b80`（= `7594e32d1^`，字符串全等） | 225 | 222 | 208 | 0 | 4 |
+| `7594e32d1`（归一，**现 HEAD 与工作区逐字相同**） | 202 | 199 | 186 | 0 | 26 |
+| 差 | −23 | −23 | −22 | **0** | +22 |
+
+⚠ 我原先把全等那一行标成「HEAD」是**标签错、数字不错**：`git diff --stat HEAD -- <脚本>` 为空 ⇒
+HEAD 早已含归一判据，全等版只能从 `7594e32d1^` = `708fc1b80` 取（`grep -c normOwner` 必须为 0）。
 
 消失的 22 条键**逐条**判定：全部 `kind = store` 且 `norm(目录名) == norm(剥 Store 后缀名)`
 （comp 支 0 条、非归一条目 0 条）；新增 0 条。算术自洽：199 实例 − 186 唯一键 = 13 条重复实例
 （旧口径 14 条，差的那 1 条正是 `stock-analysis → stockAnalysisStore` 里被归一消掉的重复实例，
 23 = 22 键 + 1 重复）。
 
-⚠ **那 4 条「已修复」不是本批的**：旧判据在当前树上就已经少 4 条（文档记的 HEAD 时点值是「修复 1」），
-差出来的 3 条来自并行批未提交的改动 —— 这就是记忆里「`--update-baseline` 并行期会把别人未提交的减少
-钉进棘轮」的实例。**批 B 钉账前必须先逐条归属这 4 条**，否则会把别人的减少记成归一的战果。
+⚠ **那 4 条「已修复」不是本批的** —— 但归因要纠我自己当场写下的那句：我推成「3 条来自并行批**未提交**的改动」，
+取证批（lane P）**证伪**：4 条全部由**已提交**的批消掉（`af37c7fd5` 删 `WorkflowAgentCard.tsx`；
+`a13bff03d` 把 `_shared/PageHeader.tsx` 下沉到 `common/`，连带 3 条键合法出局 —— 下沉后的
+`src/components/common/PageHeader.tsx` 生产 import 只有 react / i18n / router / css，
+`PageTimeAnchor` 仅出现在第 29 行注释文本里，不匹配 `FROM_RE` ⇒ 不是「迁移把耦合搬走」的假减少）。
+基线本身钉在 `d2652a980`（10-31），**早于**这两次修复（11-05）⇒ 真形态是「**修掉未钉**」，
+不是「并行期未提交」。所以批 B 可以钉，前提是钉的那一刻 `src/**` 零 ` M`（见 §121）。
 
 锚点复核：文件 1–92 行一字未动 ⇒ `docs/plans/PLAN-shared-primitives-neutrality.md:147` 引用的
 `check-component-neutrality.mjs:53`（`NEUTRAL_PREFIXES` 那行）与本文件 `:82-85` 引用的
@@ -5659,7 +5668,8 @@ C 那一行是本轮最有价值的一条证据：它证明 **NEUTRAL 支的归�
 ### 118.4 未做
 
 1. **批 B（212 → 186）没跑**：`--update-baseline` 一个字节都没写。归一后基线里仍躺着 186 条**真**跨域，
-   外加 3 条腐烂条目（键指向的文件/target 已不存在）—— 都得等无写手窗口。
+   外加 **4** 条腐烂条目（2 条 `file` 已删/迁、2 条 `file` 在但 import 字面量已消失）—— 都得等无写手窗口，
+   分类明细与「为什么不是 3 条」见 §121 表 (2)。
 2. `findViolations:143` 的 `const selfOwner = owner ?? ownerOf(resolved)` 是 **fail-open** 既存缺陷：
    调用方传进 `owner` 就无条件采信，传错即少判。动它同样是判据变更（要配负控），本批刻意不碰。
 3. `#190` 不在范围：归一只消 camel/kebab 的**假**阳性，不消拆 stores barrel 后那 243 条真跨域，
@@ -5748,3 +5758,210 @@ camel 优先、回落 `camelToSnake`），落点 create `:5383` / update `:5444`
 判定档只报上面两条硬失败 ⇒ `src/lib/browserMock.ts` 与 `src/lib/__tests__/browserMock.dynamicUI.test.ts`
 都不命中 `feRe`（`/stock|quote|kline|technical|portfolio|trading|advis|invest|quant|market/i`），
 口径读数不变。这与 §117.5 里「只有 `seed-stock-schemas.ts` 命中」是同一判据的两次独立验证。
+
+## 121. 中立性棘轮的收紧面取证批（lane P 纯读，#177 / #190 的排期依据，2026-11-06）
+
+零被跟踪文件改动（探针副本 + `.tmp/laneP-*` 12 个件已全部删除并留 `ls` 反证）。
+本批**推翻了 §118 里我自己写下的三处**，纠正都已就地改在原文上：
+
+| 我原先的说法 | 盘上实测 | 结论 |
+|---|---|---|
+| 「HEAD 判据（全等）」 | HEAD 的脚本与工作区**逐字相同**（已含归一）⇒ 全等版只能取 `708fc1b80` = `7594e32d1^`（`grep -c normOwner` = 0） | 标签错、数字不错，已改 |
+| 「4 条已修复里 3 条来自并行批**未提交**的改动」 | 4 条**全部由已提交的批消掉**：`af37c7fd5` ×1 + `a13bff03d` ×3；基线钉在 `d2652a980`（10-31）早于两次修复（11-05） | 真形态是「修掉未钉」，不是「并行未提交」，已改 |
+| 「3 条腐烂条目」（#177 原描述） | **4 条**：2 条 `file` 已不在盘上 + 2 条 `file` 在而 import 字面量已消失；严格 c 形态（file 与字面量都在、target resolve 不到）为 **0** | 「3」的来历 = 把 2 条**独立棘轮键**的 b 形态按 target 路径去重成 1 ⇒ 少数一条，已改 |
+
+### 121.1 现存 186 条唯一键的构成（三条独立轴，Σ 全部自洽）
+
+- `199 实例 − 13 条「同 file 同 target 重复 import」 = 186`
+- `store 键 114 + component 键 72 = 186`；且 **114 条 store 键 100% 已是深路径直连**，无一条走 barrel
+- 分组 83 组，Top：`stock-workspace → stock-analysis` 21（component，最大单组）· `stock-analysis → timeAnchor` 17
+  · `settings → workflow` 11（其中 10 条是纯类型）· `chat → execution` 8 · `time-travel → timeAnchor` 7
+  · `stock-analysis → serenity` 6 · `chat → gateway` 5 · `devtools → rlTraining` 4 · `workflow → workEngine` 4
+- owner 侧：宿主/通用 112 · 域侧 74；target 侧：域 68 · 其余 118。
+- **集中度**：`timeAnchor` 一个 store 吃掉 **25 条（13.4%）**，来自 3 个 owner。读其头注释
+  （`src/stores/feature/timeAnchorStore.ts:6-17`）自述「**全局时间旅行锚点，跨页面共享**」⇒
+  这是**跨切面宿主概念被放在 `stores/feature/` 下**，靠注入消不掉。
+- 门的假阳性自检：`FROM_RE` 扫原文含注释，理论上注释里的 `from "@/…"` 会误判 —— 实测 199 实例中
+  **0 条**字面量只出现在注释行（潜在坑，非现症）。
+
+### 121.2 合法收紧通道分类（互斥、可加，Σ=186）
+
+| 通道 | 条数 | 判据 / 样本 |
+|---|---|---|
+| A 纯类型 import ⇒ 类型挪中性目录即消 | **25** | `settings/* → @/components/workflow/types` 一族 10 条 |
+| B 组件侧多 owner 共用件 ⇒ 下沉 `layout/common/shared` | **22** | `agent → @/components/chat/AgentExecutionPanel`、`chat → ../gateway/tokenFormat`（同 target 5 条） |
+| C1 组件侧 1→1 具体组件 ⇒ DI / props | **37** | 含最大组 `stock-workspace → stock-analysis` 21 条 |
+| C2 组件侧混含类型 | **1** | `chat/VoiceCall.tsx → ../voice/DagProgressCard` |
+| D store ≥3 owner 扇入 ⇒ 白名单 或 迁 `stores/shared/` | **44** | `timeAnchor` 24（+1 入 A）· `evolution` 7 · `agent` 5 · `llmWiki` 4 · `promptTemplate` 4 |
+| E store 2 owner 扇入 ⇒ DI/props 或事件化 | **25** | `execution` 9 · `appConfig` 3 · `expert` 3 |
+| F store 单 owner 混含类型 | **5** | `devtools → rlTrainingStore` |
+| G store 单 owner 纯值引用 ⇒ DI/事件化（最贵） | **27** | `workflow/workEngine` 4 · `serenity` 3 |
+
+**最高性价比一刀**：A + B = **47 条（25.3%）** 属于「挪文件/挪类型」而不是「改调用方逻辑」，
+且 `a13bff03d` 已把 `_shared/PageHeader → common/PageHeader` 走通一遍（一次提交即消 3 条基线键）= 现成先例。
+⚠ 但这 47 条的**落地成本未标定**（挪类型会牵动 tsc，取证批不许改文件），排期时按「待验证」计。
+
+**两条不能指望的通道**（本批新证）：
+- 「事件化」**无生产先例**：`src/lib/skillEventBus.ts:43` 导出的总线在 `src/components` + `src/stores` **零消费方**
+  （只有自身单测与 `src/lib/storeRegistry.ts:74` 的一行注释）；`src/lib/browserEvents.ts` 头注释第 5–8 行自述
+  **仅 dev / Playwright 模式**。⇒ C1/E/F/G（94 条）里指望事件化的部分都要先做试点，工时未标定。
+- 「DI」先例存在但**落在门禁盲区**：`getStoreRegistry()`（`src/lib/storeRegistry.ts:196`）生产消费方只有 1 个文件，
+  且走 `await import("@/lib/storeRegistry")` 动态导入 —— 而门明确不判动态 import ⇒ 改成 registry 后键会消失，
+  **但门禁给不出正向证据**（自证不了）。
+
+### 121.3 #190 的核心数：拆 `@/stores` barrel 会让账面跳多少（这是可复算数，不是定性）
+
+口径缺口先证实：`adjudicateImport` 只匹配 `^src/stores/feature/([^/]+)`，而 `src/stores/index.ts` 是
+**86 条 `export { … }`（`^export \* from` 计数 = 0）**，其中 **81 条** `from "./feature/…"`（去重 **69** 个目标文件）
+⇒ 消费方写 `from "@/stores"` 时 resolve 到 `src/stores/index` ⇒ **今天完全不入判据**（PLAN `:5354` 所述为真）。
+
+测量：解析 barrel 建「导出名 → feature 文件」映射，扫 927 个组件文件的 `import … from "@/stores"` 逐绑定名映射，
+按门禁同口径（剥 `Store` 后缀 + `normOwner`，store 支不叠 NEUTRAL）生成拆分后的深路径键，与现存 186 键求差。
+
+| 指标 | 数 |
+|---|---|
+| 走 `@/stores` 公共出口的组件文件 | **249 / 927（26.9%）**（261 条 barrel import 语句；与 `grep -rl` 独立法同数） |
+| 拆分后产生的跨 owner 深路径唯一键 | **240** |
+| 与现存 186 键重合 | **0** ⇒ 消费方是「要么桶要么深路径」的互斥两拨文件 |
+| **账面** | **186 → 426（+240，+129%）** |
+
+跳数分布：`chat 85 · settings 41 · workflow 39 · layout 15 · stock-workspace 12 · stock-analysis 11 · office 9 · link 7`
+…；其中 **`office / link / help / opc / files / gateway / shared` 这 7 个 owner 今天在 186 里几乎为零，拆分后一次现形 37 条**
+⇒ #190 说的「藏在桶后面的真实耦合面」**为真**，且量级已定。
+
+⚠ **顺序不可颠倒（硬约束）**：`426 > 212` ⇒ 若先拆桶，`--update-baseline` 会因存在 240 条基线外新违规
+**直接拒绝执行**（脚本 `:393` 的保护分支），棘轮当场锁死。唯一可行次序：
+**① 先做 #177 把基线钉到 186 → ② 插一刀 A+B 通道（47 条）的下沉批 → ③ 再按 owner 灰度拆桶，且每刀同批钉账**。
+另注：桶里还有 `domain/` `shared/` `devtools/` 导出（`useConversationStore` 30 · `useUIStore` 27 · `useStreamStore` 9 …），
+拆分后 resolve 到非 `feature` 层，`adjudicateImport` 返回 null ⇒ **仍不判、也不贡献跳数**，这是正确行为。
+
+### 121.4 leader 裁定（据本节证据）
+
+1. **`timeAnchor` 的 25 条**：按 AGENTS.md 的 store 分类规则（跨组件/跨页面共享状态 → `stores/shared/`）
+   判为**归属放错层**，收紧批里走「迁 `stores/shared/`」而不是白名单。该动作一次消 25 条（13.4%）。
+2. **`stock-workspace → stock-analysis` 的 21 条**：**不并进 #177**。它像「两个面板家族本应是同一模块」的
+   **owner 边界划错**，改判边界属**判据变更**，必须单独成批（带边界改判的理由与负控），不能混在钉账里。
+3. **#177 的执行窗口硬条件**：跑 `--update-baseline` 前必须 `git status --short -- src` 零 ` M`
+   （本批期间就观测到 `src/components/office/panels/StrategyRoomMiniBar.tsx` 中途变 ` M`，虽复跑读数未变，
+   但钉账要的是「那一刻」的干净面）。
+4. 顺带做一次**基线 `kind` / `targetOwner` 字段重算**：基线条目自带这两列，而 #177 只按 `file+target` 建键比对，
+   目录搬迁过的条目这两列可能已陈旧（不影响棘轮，影响按组排期的读数）。
+
+## 122. 独立审查轮 + #182 落地轮：绕过面、三条既存缺陷、以及一处报告质量记账（lane R / lane N，2026-11-06）
+
+### 122.1 审查判为「不是缺陷」的三组（这一节和必修同等重要）
+
+- **六条闸门顺序全部正确**：`browserMock.ts:5502-5514` / `:5543-5548` / `:5561-5566` / `:5595-5604` /
+  `:5673-5688`（restore 四步同序）↔ 后端 `:689` / `:739` / `:759` / `:1070` / `:624→:626→:630→:637`；
+  `unpin` 例外 `:5627-5631` ↔ `:1130-1141`。拒绝串只带 `origin`、不含被读内容；
+  结构化码形状与 `ErrorResponse::err`（`commands/error.rs:77-94` + `error.rs:52-67` 的 `skip_serializing`）逐字同形。
+- **`origin` 无提权路径**：整行覆盖写入站点全清单判完（mock `:5393` / `:5437-5449` / `:5689-5702` / pin / form 写点、
+  后端 update `:445-464` / restore `:656-665`、插件通道 `init/plugin_ui_schema.rs:177-192` 的
+  `origin != plugin || owner_id != plugin_id` **防冒充守卫**、`:249-259` 只改内容不改 origin）
+  ⇒ 没有一处能把行的 `origin` 改成白名单值。我派单里提的「版本回滚把 `version.origin` 写回」**前提不成立**：
+  `DynamicUISchemaVersion` 根本没有 `origin` 列（`src/types/dynamicUI.ts:366-377`）。
+- **归一不是豁免扩容**（独立重算，与 §118.2 逐字吻合）：目录 41 ∪ store 名 ⇒ 100 唯一名 / 归一 97 键 /
+  同键组恰 3；两口径键差**消失 22、新增 0**，消失的 23 个实例 100% 是 `kind=store` 且同 norm；
+  棘轮键与白名单匹配仍存原形（基线里 `targetOwner` 还能看到 kebab 原形）。
+
+### 122.2 必修三条（全部立项，判据写在任务里而不是聊天里）
+
+| # | 缺陷 | 严重度依据 |
+|---|---|---|
+| **#191** | `schemaActionPermissions.ts:76-81` 给插件档放行三条 `*_form_data`，而 `actionRouter.ts:342-356` **只按命令名匹配、`args` 原样透传** ⇒ 插件声明可对**任意 `user` 行**读写删表单，链路完整可执行；`pluginSchemaActionPermissions.test.tsx:151-160` 还把这个洞**钉成期望行为** | 中高（完整性 + 机密性）。**既存**：闸门来自 `43803e5ac`、白名单更早，不是 `7650ba903` 引入 |
+| **#191 的另一半** | 我立项时写成「前端给了后端不兑现的承诺」（账面问题），审查升级为**功能面 100% 失败**：`FormRenderer.tsx:33,127-139` 的提交键取 `SchemaIdContext` 记录 id（插件行 `plugin.{pid}.{key}`，见 `SchemaIdContext.tsx:16-17` + `ui_schema.rs:20`）⇒ 后端 `dynamic_ui.rs:689` 必拒 ⇒ **插件页表单保存在生产里每次都弹「保存失败」** | ⇒ 摘白名单只治越权；「插件表单能不能持久化」归 #196 同族的归属参数设计，不许顺手改成放行了事 |
+| **#199** | `check-component-neutrality.mjs` main 在 `src/components` 缺失时打「跳过 ≠ 通过」**退 0**，扫描 0 文件也无下限断言 ⇒ 门静默退化成永远绿；**selftest 全是不碰真实树的纯函数断言，拦不住它** | 既存缺陷；CI 接线本身没错（`ci-check.mjs:528-529` ↔ `ci.yml:557,560` 逐字同源、先自检后判定），洞只在「看不见目录」的环境里暴露 |
+
+### 122.3 应修与账面（分别落到 #200 / #201 / #192）
+
+- **#200 是 `7594e32d1` 本批引入的规范冲突**：`isNeutralOwner` 把四个中性名变成大小写 + `-`/`_` 不敏感，
+  且 selftest ③d 把「`dynamic-ui` 也算中性」钉成期望行为 ⇒ 任何命名变体目录**免登记自动豁免**，
+  与脚本头部「新增中性目录必须登记并写明理由」正面冲突。今天账面影响 0（键差 22 条全在 store 支；
+  变异体 C 退回精确匹配后判定读数逐字不变）。⇒ 裁定：NEUTRAL 支收窄为精确匹配，owner 两支归一保持不动。
+- **#201 把 §119.4-3 的「可能」证成「确有」**：`browserMock.ts` 的 `input.[a-z][A-Z]` 恒 `undefined` 共 **49 处**，
+  实样含 `update_conversation`（`:2480-2496` 读 `input.categoryId/providerId/modelId/maxTokens/topP`，
+  调用方 `conversationStore.ts:934-937` / `preferenceStore.ts:28-31` 传 camel ⇒ dev 静默丢字段）、
+  `create/update_narrative_structure`、platform CRUD、demand lead、sessions。
+- **#192 追加三条未登记语义差**：① 必填缺失时 mock `?? ""` 静默落空串、后端 serde 直拒
+  （`dynamic_ui.rs:84` / `:167`）⇒ dev 能造出真机不存在的「空内容可信行」；
+  ② `list_dynamic_ui_schema_versions`（`:5641`）/ `get_dynamic_ui_schema_version`（`:5653`）**两侧都无归属闸门**
+  （后端 `:567` / `:600`）⇒ 插件行全文与历史快照可被任意命令面读出（只有卸载级联清）；
+  ③ `pin` 的 `title` / `group_name` 必填性差异。另：登记里「selftest 补 15 条」实为 **16 条**；
+  `readMockReqField` 注释「直调 `executeCommand` 的路径保持原形状」描述的是**不存在的调用路径**
+  （未导出、零外部调用点）⇒ camel 支是防御性死代码。
+- 审查同时确认 selftest 本体**没有**「断言不发生」型假绿（25 条 `check(` 全是纯函数、9 正控与 9 负控配对）
+  —— 空洞在 main，不在自检，所以 #199 的修法必须落在 main。
+
+### 122.4 #182 落地与「报告质量记账」（本轮两次遇到，判据就地固化）
+
+`scripts/check-doc-refs.mjs` 的第二层判据由 lane N 落地（`73cf88f63` +602/−24、`eda8be347` 收尾注释，
+现 1201 行）。判据要点：新桶 `SYMDRIFT（只报告）`、**折行窗口 = 下方 2 行 / 上方 0 行**（理由写进注释：
+rustfmt/prettier 只把名字推到紧邻下一行，`start-1` 通常是属性行或 doc 注释，算命中会让「符号只写在注释里」
+的引用白赚；并且有「窗口取 0 ⇒ 只多报那 1 条折行样本」的反证 ⇒ 2 是往**漏报方向**收敛）；
+句中无符号 / ≥2 标识符 / 超距离 / 含数字 / 含中文 ⇒ 「无可比对符号」⇒ **不检也不退红**；
+`--require-symbol-match` 关闭时违规恒空（⇒ 既有退码逐字不变）。
+
+**读数最终对齐（两处独立测量互证，差 1 条来自两轮之间 PLAN 自身的行增）**：
+
+| 指标 | lane N 交付档 | leader A/B 复量 |
+|---|---|---|
+| 退出码（旧脚本 vs 新脚本，同树同基线 342） | 0 vs 0 | **0 vs 0** |
+| 桶计数（286 篇 / 8001 条 / OK 6441 / NONLOC 1133 / BROKEN 271 / ABBREV 23 / STALE 71 / EXTERNAL 50 / EPHEMERAL 12） | 逐字相同 | **逐字相同** |
+| `SYMDRIFT` | **1050**（可比对符号 2186 / 符号在行 893 / 零存在跳过 243 / 点号接缝名排除 160；形态 ident 931 / path 73 / decl 46） | **1049**（同口径） |
+| 打开 `--require-symbol-match` | EXIT=1、判红 1050 | 未复跑（该开关默认关，不影响门禁） |
+
+⚠ 距离分布给了一个有用的结论：**68% 的漂移离所指行 >10 行**（`+101..` 294 条、`-11..` 212 条），
+放大窗口到 +30 只救回 280 条（26.7%）、上方留 2 行只救 28 条（2.7%）⇒ 这一族**不是窗口调参能消的**，
+是真行号腐烂；红面集中在 4000+ 行的 `portfolio-mgr.rhai` 与 2026-09 那批审计快照，
+人工复核 5 条（`is_high` / `disagreement_mod` / `apply_risk_veto` / `run_stock_workflow_inner` /
+`PluginPagesInfoDto`）**全部是真腐烂**，不是判据 artifact。
+
+**leader 三条裁定（本批不修，判据先钉死）**：
+1. **注释行 / 空行不算缺陷**：所指那行形态为 代码行 698 / 注释行 288 / 空行 63 ⇒ 本仓大量引用指向
+   「描述该行为的 doc 注释行」，那是**合法写法**（AGENTS.md 段对齐规则也允许）。
+   所以将来 #202 的硬判据口径 = **只判代码行那一族**，不许把 351 条「引注释块」算进 backlog。
+2. **接受默认排除 `dotted`（点号接缝名）**：执行者是有意的，且给了 A/B 数据（含点号 1140 / 默认 1050
+   ⇒ 虚高 90 条、8.1%），理由是本仓能力登记表把 `workflow.reflector` / `session.store` 这类**接缝标识符**
+   与 `文件:行` 并排放，当符号比对会让整表成批红。⇒ 保持排除 + `--sym-include-dotted` 留在原地做对账。
+3. **`PluginPagesInfoDto` 的真身在 `src/types/index.ts:2135`**（我派单里写的 2137 差 2；
+   `:2123` 落在上一个 interface `PluginPageAssetLocationDto`（2119 起）体内）。核心论断不变，
+   数以 `grep -n` 现值为准。
+
+**记账两条**：
+1. lane N 交付报告里自称的提交哈希 `139068387` **不存在**（盘上无此对象），且它中途给过「3638 条 / 新红 1402 /
+   越界 3205 / 判定档 EXIT=1 / STALE 11 红」一组数，最后又给「8001 / 1254」——
+   **只有最后一组与门自己的打印同量级**，中途那几组是探针口径错误（它自己两轮证伪了）。
+2. 同一时段有任务描述被提前写成「已由某 lane 落地 / vitest 60 例通过」，而我三次复跑拿到的都是
+   `[vitest-pool-runner] Timeout waiting for worker to respond`（`no tests`）。
+
+⇒ 固化的判据（本轮起按这条验收，不再靠口头）：**执行者报告 ⊥ 交付物输出 ⇒ 以判定档打印为权威；
+任何哈希、任何读数，leader 侧必须有一条自己跑出来的等式才允许进登记表。**
+
+**附带发现（改前既有、非本批引入，已另立 #203）**：这道门对 SMB 瞬时读错误没有抵抗力 ——
+用 HEAD 旧版做对比时它整体崩溃 `Error: UNKNOWN: unknown error, open '…/axagent-core/crates/harness/src/path_vars.rs'`
+（errno `-4094`），因为 `lineCount` / `readLines` 只吞 `ENOENT`、其余照抛。
+执行者保持原语义未改（改了会动既有桶读数，正确），但这是**门禁在 SMB 上的可用性缺陷**，
+本仓多起「UNC/空格假绿」实证都属同族，必须单独修。
+
+### 122.5 本轮提交清单（全部本地，未推送、未打 tag）
+
+`7594e32d1` 批 A 判据 · `7650ba903` dev mock 六闸门 · `f2799ad0c` PLAN §118–§120 · `884fab985` #183 dprint 债 ·
+`548f60808` #175 rustfmt 债 · `cc344f0a3` #187 origin 裁定落地 · `7741457bf` #178 ②③ ·
+`73cf88f63` #182 SYMDRIFT · `eda8be347` 其收尾注释。
+
+### 122.6 未做
+
+1. **vitest 行为读数在 `7741457bf` 上仍未取得**：lane J 两次、lane R 三次、leader 两次全部 worker 60 s 启动超时，
+   无关既存文件同样复现 ⇒ 判主 crate 编译期环境争用（#141 同族）；已排在「无写手窗口」复跑，
+   **没改任何测试、没改 vitest 配置**。
+2. 全量 `cargo clippy --workspace --all-targets --all-features` / `cargo test --workspace` /
+   `cargo fmt --all --check` 仍未跑（并行期铁律）⇒ 联合态门禁未验证过，这是本轮九个提交共同的未覆盖项。
+3. #177（钉账）与 #193 / #194 / #195（下沉、`timeAnchor` 迁层、owner 边界改判）按 §121.4 的次序排后，
+   需要 `git status --short -- src` 零 ` M` 的窗口。
+4. 审查自己留下的两个**未证伪项**（都没据此上调严重度，留给下一轮）：
+   `DataBindingEngine.ts:43-53` 对 `dataSource` 的 `method:"fetch"` 不查权限面 —— 是否构成外发通道，
+   需验「动作结果能否被模板插值注入 fetch 的 URL / params」；
+   以及 Rust 侧是否另有一条不经 `schemaActionPermissions` 的 dynamic_ui 调用面
+   （`manager.rs` / `command_bridge.rs` 正在被在途批改，行号不可靠，故未查）。
+5. 遗留未解决且此前无人登记：4 个不带 `Store` 后缀的 util 模块（`executionPhaseMachine` 等）仍按整名判 owner
+   ⇒ 同域 util 的假阳性归一**没被批 A 消掉**。

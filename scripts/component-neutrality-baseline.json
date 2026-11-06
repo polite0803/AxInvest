@@ -290,12 +290,6 @@
       "targetOwner": "voice"
     },
     {
-      "file": "src/components/chat/WorkflowAgentCard.tsx",
-      "target": "@/components/stock-analysis/utils",
-      "kind": "component",
-      "targetOwner": "stock-analysis"
-    },
-    {
       "file": "src/components/devtools/RLCheckpointManager.tsx",
       "target": "@/stores/feature/rlTrainingStore",
       "kind": "store",
@@ -369,12 +363,6 @@
     },
     {
       "file": "src/components/multi-agent/MultiAgentDashboard.tsx",
-      "target": "@/stores/feature/multiAgentStore",
-      "kind": "store",
-      "targetOwner": "multiAgent"
-    },
-    {
-      "file": "src/components/multi-agent/MultiAgentDashboard.tsx",
       "target": "@/stores/feature/providerStore",
       "kind": "store",
       "targetOwner": "provider"
@@ -384,12 +372,6 @@
       "target": "@/components/skill/SkillSandboxContainer",
       "kind": "component",
       "targetOwner": "skill"
-    },
-    {
-      "file": "src/components/quant/QuantLab.tsx",
-      "target": "@/components/stock-analysis/_shared/PageHeader",
-      "kind": "component",
-      "targetOwner": "stock-analysis"
     },
     {
       "file": "src/components/settings/AgentProfileManager.tsx",
@@ -620,12 +602,6 @@
       "targetOwner": "stockWorkflowChatBridge"
     },
     {
-      "file": "src/components/stock-analysis/BacktestPage.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
       "file": "src/components/stock-analysis/BacktestPanel.tsx",
       "target": "@/components/time-travel/ReplayBadge",
       "kind": "component",
@@ -638,82 +614,16 @@
       "targetOwner": "timeAnchor"
     },
     {
-      "file": "src/components/stock-analysis/decision-timeline/DecisionPhaseOverview.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/decision-timeline/TimelineBody.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/decision-timeline/TimelineNodeCard.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/decision-timeline/__tests__/TimelineNodeCard.violations.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
       "target": "@/stores/feature/timeAnchorStore",
       "kind": "store",
       "targetOwner": "timeAnchor"
     },
     {
-      "file": "src/components/stock-analysis/DecisionTimelinePanel.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/dual-view/CompactRiskSummary.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/evolution-ui-utils.ts",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/EvolutionApprovalDrawer.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/EvolutionDriftPanel.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
       "file": "src/components/stock-analysis/EvolutionDriftPanel.tsx",
       "target": "@/stores/feature/timeAnchorStore",
       "kind": "store",
       "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/ExperimentSidebar.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/ExperimentTrail.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
     },
     {
       "file": "src/components/stock-analysis/KLineChart.tsx",
@@ -735,27 +645,9 @@
     },
     {
       "file": "src/components/stock-analysis/PortfolioMonitorPanel.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/PortfolioMonitorPanel.tsx",
       "target": "@/stores/feature/timeAnchorStore",
       "kind": "store",
       "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/PriceAlertPanel.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/RecoHistoryModal.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
     },
     {
       "file": "src/components/stock-analysis/RecommendationPanel.tsx",
@@ -848,42 +740,6 @@
       "targetOwner": "settings"
     },
     {
-      "file": "src/components/stock-analysis/_shared/PageHeader.tsx",
-      "target": "@/components/time-travel/PageTimeAnchor",
-      "kind": "component",
-      "targetOwner": "time-travel"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/DecisionTimelinePanel.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/EvolutionApprovalDrawer.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/EvolutionDriftPanel.failure.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/PriceAlertPanel.alertRow.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/PriceAlertPanel.t0.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
-    },
-    {
       "file": "src/components/stock-analysis/__tests__/RecommendationPanel.asOfDate.test.tsx",
       "target": "@/stores/feature/timeAnchorStore",
       "kind": "store",
@@ -960,12 +816,6 @@
       "target": "@/stores/feature/settingsStore",
       "kind": "store",
       "targetOwner": "settings"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/ValueAssessmentPanel.render.test.tsx",
-      "target": "@/stores/feature/stockAnalysisStore",
-      "kind": "store",
-      "targetOwner": "stockAnalysis"
     },
     {
       "file": "src/components/stock-workspace/ContextSidebar.tsx",
@@ -1122,12 +972,6 @@
       "target": "@/components/tasks/JobCard",
       "kind": "component",
       "targetOwner": "tasks"
-    },
-    {
-      "file": "src/components/time-travel/ReplayWorkbench.tsx",
-      "target": "@/components/stock-analysis/_shared/PageHeader",
-      "kind": "component",
-      "targetOwner": "stock-analysis"
     },
     {
       "file": "src/components/time-travel/ReplayWorkbench.tsx",

@@ -10,9 +10,17 @@
  *
  * 本文件从**真实渲染链**起步（DynamicUIStandalone / DynamicUIRenderer + 真 actionRouter +
  * 真 isWildcardMatch），只把 IPC 换成替身，断言打在「IPC 有没有发生」上：
- * - 插件来源：`dynamic_ui_` 前缀内但不在四条面上的命令（`list_dynamic_ui_pins`）与前缀外的
+ * - 插件来源：`dynamic_ui_` 前缀内但不在面内的命令（`list_dynamic_ui_pins`）与前缀外的
  *   命令同样被拒，且**一次 IPC 都不发**；
- * - 插件来源：面内命令（`get_dynamic_ui_form_data`）放行，且参数原样送达；
+ * - 插件来源：面内命令（`get_dynamic_ui_schema`，2026-11-06 收口后面上只此一条）放行，
+ *   且参数原样送达 —— 这条正控是上面那些「断言不发生」的反假绿锚点：
+ *   先证明过滤逻辑真在跑、渲染树真能发 IPC，才谈得上「被拒」是判据命中；
+ * - 插件来源：**表单数据三条**（`save` / `get` / `delete_dynamic_ui_form_data`）被拒
+ *   （2026-11-06 从插件档摘除）。判据：`args` 不可校验（`src/lib/actionRouter.ts:343` 只按命令名
+ *   查白名单，`:356` 把 `args` 原样透传）⇒ 留着它们唯一的实际效果是让插件把
+ *   `args.schemaId` 填成任意 `user` / `ai` / `builtin` 行、跨边界读写他人表单；
+ *   插件自有行（`origin = "plugin"`）的调用本来 100% 被后端闸门拒
+ *   （`src-tauri/src/commands/dynamic_ui.rs:132`，表单三处 `:689` / `:739` / `:759` 调用）；
  * - 插件来源：`create_dynamic_ui_schema` 被拒 —— 它把 `origin` 硬写成 `"user"`（可信），
  *   放行等于让插件自造一行不受限的 Schema（提权链，2026-11-06 收窄）；
  * - 用户来源：行为与改动前一致（照发）。
@@ -148,15 +156,39 @@ describe("插件页面容器那条链（DynamicUIStandalone）", () => {
     expect(h.invoke).not.toHaveBeenCalled();
   });
 
-  it("插件来源 schema 的面内 invoke：放行，命令与参数原样送达", async () => {
-    const args = { schemaId: SCHEMA_ID, instanceKey: "main" };
+  it("插件来源 schema 的面内 invoke：放行，命令与参数原样送达（正控，锚定过滤逻辑真在跑）", async () => {
+    // 2026-11-06 收口后插件档只剩这一条只读投影；本用例是下面两条「断言不发生」的正控锚点
+    const args = { id: "plugin.own-pack.sub-key" };
     h.getSchema.mockResolvedValue(
-      makeRecord("plugin", invokeAction("get_dynamic_ui_form_data", args)),
+      makeRecord("plugin", invokeAction("get_dynamic_ui_schema", args)),
     );
     renderStandalone();
 
     await waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1));
-    expect(h.invoke).toHaveBeenCalledWith("get_dynamic_ui_form_data", args);
+    expect(h.invoke).toHaveBeenCalledWith("get_dynamic_ui_schema", args);
+  });
+
+  it("插件来源 schema 的表单数据三条：全部被拒且不发 IPC（2026-11-06 从插件档摘除）", async () => {
+    // 绕过链（摘除的唯一理由）：`args` 不经校验原样透传 ⇒ 插件把 schemaId 填成别人的宿主行，
+    // 后端闸门只看那一行的 origin（user/ai/builtin ⇒ 放行），前端却把命令名当唯一判据。
+    for (
+      const command of [
+        "save_dynamic_ui_form_data",
+        "get_dynamic_ui_form_data",
+        "delete_dynamic_ui_form_data",
+      ]
+    ) {
+      h.invoke.mockClear();
+      h.getSchema.mockClear();
+      h.getSchema.mockResolvedValue(
+        makeRecord("plugin", invokeAction(command, { schemaId: "someone-elses-user-row", instanceKey: "main" })),
+      );
+      renderStandalone();
+      await waitFor(() => expect(h.getSchema).toHaveBeenCalledWith(SCHEMA_ID));
+      await settle();
+
+      expect(h.invoke).not.toHaveBeenCalled();
+    }
   });
 
   it("插件来源 schema 的 create_dynamic_ui_schema：被拒且不发 IPC（提权链）", async () => {
@@ -278,11 +310,18 @@ describe("按 schemaId 兜底（DynamicUIRenderer 直渲染，覆盖路由入口
     expect(h.invoke).not.toHaveBeenCalled();
   });
 
-  it("store 里命中插件来源记录：面内命令放行", async () => {
-    renderWithPluginRecord(invokeAction("get_dynamic_ui_form_data"));
+  it("store 里命中插件来源记录：面内命令放行（正控）", async () => {
+    renderWithPluginRecord(invokeAction("get_dynamic_ui_schema"));
 
     await waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1));
-    expect(h.invoke).toHaveBeenCalledWith("get_dynamic_ui_form_data", {});
+    expect(h.invoke).toHaveBeenCalledWith("get_dynamic_ui_schema", {});
+  });
+
+  it("store 里命中插件来源记录：save_dynamic_ui_form_data 被拒且不发 IPC（负控，与上条正控配对）", async () => {
+    renderWithPluginRecord(invokeAction("save_dynamic_ui_form_data", { schemaId: "someone-elses-user-row" }));
+    await settle();
+
+    expect(h.invoke).not.toHaveBeenCalled();
   });
 
   it("store 里命中插件来源记录：dynamic_ui_ 前缀内但不在面上（list_pins）被拒", async () => {

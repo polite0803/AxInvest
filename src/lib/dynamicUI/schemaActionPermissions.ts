@@ -30,11 +30,52 @@
  *
  * ## 权限面粒度
  *
- * 插件来源只开**四条只读 / 自身表单数据**命令（见 `PLUGIN_SCHEMA_ALLOWED_COMMANDS`），
- * **不再给 `dynamic_ui_*` 通配**。理由是一条完整的提权链：`create_dynamic_ui_schema`
- * 把 `origin` 硬写成 `"user"`、`owner_id` 恒为空（`commands/dynamic_ui.rs` 的 origin 锚），
- * 而 `"user"` 在本判据里属**可信来源** ⇒ 插件 Schema 只要声明一个 invoke 该命令的动作，
- * 就能造出一行「可信」Schema，那一行的动作再执行时拿到 `undefined` 权限面 = 完全不受限。
+ * 插件来源**只开一条**命令 —— `get_dynamic_ui_schema`（不限归属的只读投影，供页面按 id 取自身子
+ * Schema）。**不给 `dynamic_ui_*` 通配，也不开任何 `*_form_data` 命令**（2026-11-06 收口：原先面上的
+ * `save/get/delete_dynamic_ui_form_data` 三条已摘除，理由见「三条 `*_form_data` 为什么是纯负项」）。
+ *
+ * ### 核心判据：`args` 不可校验 ⇒ 白名单只能按**命令粒度**收
+ *
+ * invoke executor 只按**命令名**查白名单，`args` 原样透传：`src/lib/actionRouter.ts:343` 的
+ * `isWildcardMatch(action.command, …)` 命中后，`src/lib/actionRouter.ts:356` 直接
+ * `invoke(action.command, action.args || {})` —— 权限面里**没有「参数归属」这个维度**，
+ * 而命令寻址所需的 id（`schemaId` / `id` / `taskId`）**全部来自 Schema 自己写的 `args`**。
+ * ⇒ 任何一条「按 id 寻址」的命令一旦进面，插件把那个 id 填成任意他人行的 id 就已出界；
+ * 白名单救不了它，唯一有效的收口是「整条命令不进面」。
+ * **后续批要往 `PLUGIN_SCHEMA_ALLOWED_COMMANDS` 加东西，先回答这一句：这条命令的寻址空间
+ * 是不是由请求方自由给出的 `args`？是 ⇒ 不能进插件档**（除非先有「不可自报的调用方身份」）。
+ *
+ * ### 三条 `*_form_data` 为什么是纯负项（绕过链，逐环可定位）
+ *
+ * 1. 插件 Schema 声明 `{type:"invoke", command:"save_dynamic_ui_form_data", args:{schemaId:"<任意 user 行 id>"}}`；
+ * 2. 前端按上面的判据放行（命令名在面上、`args` 不校验）；
+ * 3. 后端闸门只看**宿主行的 `origin`**、不看调用方身份：统一闸门 `load_schema_for_command`
+ *    （`src-tauri/src/commands/dynamic_ui.rs:132` 定义，判据 `plugin_owned_denied` 在
+ *    `src-tauri/src/commands/dynamic_ui.rs:112`），表单三条分别在
+ *    `src-tauri/src/commands/dynamic_ui.rs:689`（save）/
+ *    `src-tauri/src/commands/dynamic_ui.rs:739`（get）/
+ *    `src-tauri/src/commands/dynamic_ui.rs:759`（delete）处过闸 ⇒ 宿主行是 `user` / `ai` / `builtin` 即放行。
+ *
+ * 而**插件自有行**的调用 100% 被同一条闸门拒：插件行的 id 恒为 `plugin.{pluginId}.{key}`、
+ * `origin = "plugin"` 与 `owner_id = pluginId` 由宿主落库时加盖（拼 id 的单点
+ * `axagent-plugins/crates/plugins/src/ui_schema.rs:109`；盖章点
+ * `src-tauri/src/init/plugin_ui_schema.rs:188`）。
+ * ⇒ 这三条白名单项**没有任何一条今天的合法用法**，唯一的实际效果就是让插件跨边界读写 / 删除
+ * **他人** Schema 的表单数据 ⇒ 裁定＝摘掉。
+ *
+ * ❌ 出路「后端改按 `owner_id` 放行插件自有行」**已判不成立**，本批**不许**改成「加参数校验 /
+ * 加 `plugin.` 前缀校验后放行」这类半成品放行：
+ * ① 非插件行的 `owner_id` 恒为空串（`create_dynamic_ui_schema` 硬写空），加它零区分度；
+ * ② 命令面上**不存在不可自报的调用方身份** ⇒ 后端分不清「插件在调用」与「用户在调用」，
+ *    前端校验只能校验「插件自称的归属」那半边，而插件自有行仍然被 origin 闸门拒
+ *    ⇒ 换来的口子**今天没有任何一条调用能成功**，纯增攻击面。
+ *
+ * ### 其余维持原判据
+ *
+ * `create_dynamic_ui_schema` 之所以也拒：它把 `origin` 硬写成 `"user"`、`owner_id` 恒为空
+ * （`commands/dynamic_ui.rs` 的 origin 锚），而 `"user"` 在本判据里属**可信来源**
+ * ⇒ 插件 Schema 只要声明一个 invoke 该命令的动作，就能造出一行「可信」Schema，
+ * 那一行的动作再执行时拿到 `undefined` 权限面 = 完全不受限。
  * `update_dynamic_ui_schema` / `delete_dynamic_ui_schema` 当年的同一风险**后端已闭合**
  * （提交 `43803e5ac`）：两条命令都先过统一闸门 `load_schema_for_command` —— 目标行的 `origin`
  * 不在 `TRUSTED_SCHEMA_ORIGINS` 内即拒绝（`builtin` / `user` / `ai` 放行，`plugin` / 空串 /
@@ -43,7 +84,8 @@
  * 用户／别的插件的 Schema」已不成立。
  * ⚠ 后端**只按 origin 白名单、不看 `owner_id`** 是**有意的正确形态**，不是漏了归属校验：
  * 非插件行的 `owner_id` 恒为空串（`create` 硬写空），加它零区分度 ⇒ 后续批**请勿再来「补
- * owner_id 校验」**。本层仍对这三条写命令拒绝放行：前端权限面是第一道、后端闸门是第二道
+ * owner_id 校验」**。本层仍对这三条 **Schema 写命令**拒绝放行（与上面「表单三条」是两组命令，勿混读）：
+ * 前端权限面是第一道、后端闸门是第二道
  * （纵深防御），且 `create` 造出的行永远是可信的 `user` ⇒「插件自造不受限 Schema」那条路
  * 必须在前端就断掉。
  *
@@ -53,13 +95,11 @@
  * （`DataBindingEngine.assertDataSourceCoveredByPermissions`）—— 它原来只按
  * `dynamic_ui_` 前缀放行，`type: "store"` 的数据源等于直读任意已注册 store。
  *
- * ✅ 曾记为「已知残余（本层不解决）」的那条已由后端闭合（提交 `43803e5ac`）：**三条**
- * `*_form_data` 命令（save / get / delete —— 原文写「四条」是把白名单里的
- * `get_dynamic_ui_schema` 一起算了进去，后端实际只有三条）现在同样先过
- * `load_schema_for_command` ⇒ `schemaId` 指向插件拥有或并不存在的宿主即拒绝，
- * 插件不再能读写他人 Schema 的表单数据。当时的顾虑（后端不做归属校验）正是那次提交补的闸门。
- * ⚠ 仍存的读面残余（本层不管、后端有意放行）：`get_dynamic_ui_schema` 是**不限归属的只读投影**
- * ⇒ 任何来源都能读到他人 Schema 的定义，但**改不动**（写命令全部过闸）。
+ * ⚠ 读面残余（本层不管、后端有意放行）：`get_dynamic_ui_schema` 是**不限归属的只读投影**
+ * ⇒ 任何来源都能读到他人 Schema 的定义，但**改不动**（写命令全部过闸，表单三条在插件档也已摘）。
+ * ✅ 插件页面**自身的表单持久化**不走本面：`FormRenderer` 的保存 / 回填直接调 store
+ * （`src/stores/feature/dynamicUIStore.ts` 的 `saveFormData` / `loadFormData`），只受后端 origin 闸门
+ * 约束 ⇒ 摘白名单不影响那条路（也不修复它：插件行的宿主 `origin = "plugin"`，今天照样被后端拒）。
  */
 
 import { useDynamicUIStore } from "@/stores/feature/dynamicUIStore";
@@ -67,17 +107,19 @@ import { TRUSTED_SCHEMA_ORIGINS } from "@/types";
 import type { DynamicUISchemaRecord, SkillPermissions } from "@/types";
 
 /**
- * 插件来源 Schema 唯一可用的命令面。
+ * 插件来源 Schema 唯一可用的命令面 —— **只剩 `get_dynamic_ui_schema` 一条只读投影**。
  *
  * 逐条列出、不给通配：新增一种 origin 或新增一条 `dynamic_ui_*` 命令时，得到的是
- * 「默认拒绝」而不是「默认放行」。表单数据三条是插件页面向宿主持久化自身状态的唯一通道，
- * `get_dynamic_ui_schema` 供页面按 id 取自身子 Schema。
+ * 「默认拒绝」而不是「默认放行」。
+ *
+ * ⚠ 这里**不放任何 `*_form_data` 命令**，也**不要**再加回去：`args` 不可校验（见文件头
+ * 「核心判据」一节）⇒ 表单三条进了面，插件就能拿 `args.schemaId` 指向任意 `user` / `ai` /
+ * `builtin` 行，跨边界读写、删除他人的表单数据；而插件自有行（`origin = "plugin"`）的调用
+ * 本来就被后端 origin 闸门 100% 拒 ⇒ 这三条**只有绕过效果、没有合法效果**。
+ * 插件页面自身的表单持久化走 store（`saveFormData` / `loadFormData`），不消费本清单。
  */
 export const PLUGIN_SCHEMA_ALLOWED_COMMANDS: readonly string[] = [
   "get_dynamic_ui_schema",
-  "get_dynamic_ui_form_data",
-  "save_dynamic_ui_form_data",
-  "delete_dynamic_ui_form_data",
 ];
 
 /**

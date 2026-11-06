@@ -249,8 +249,12 @@ describe("DataBindingEngine", () => {
    * 才谈得上「拒绝是因为判据命中，不是因为链路没起来」。
    */
   describe("来源受限权限面", () => {
+    // 与 `PLUGIN_SCHEMA_ALLOWED_COMMANDS`（`src/lib/dynamicUI/schemaActionPermissions.ts`）同形：
+    // 2026-11-06 收口后插件档只剩 `get_dynamic_ui_schema` 一条只读投影，表单三条全部摘除
+    // （判据：`args` 不可校验 ⇒ 表单命令进了面就等于让 dataSource 端点借 `params.schemaId`
+    // 指向他人的宿主行）。本夹具断言的是「在面上/不在面上」这套机制，命令名跟着权威清单走。
     const pluginFace = {
-      commands: ["get_dynamic_ui_form_data", "save_dynamic_ui_form_data"],
+      commands: ["get_dynamic_ui_schema"],
       events: [],
       storeRead: [],
       storeWrite: [],
@@ -270,11 +274,11 @@ describe("DataBindingEngine", () => {
       const result = await resolveDataSource(
         {
           type: "api",
-          config: { endpoint: "get_dynamic_ui_form_data", method: "invoke", params: { schemaId: "s-1" } },
+          config: { endpoint: "get_dynamic_ui_schema", method: "invoke", params: { id: "s-1" } },
         },
         pluginFace,
       );
-      expect(invoke).toHaveBeenCalledWith("get_dynamic_ui_form_data", { schemaId: "s-1" });
+      expect(invoke).toHaveBeenCalledWith("get_dynamic_ui_schema", { id: "s-1" });
       expect(result).toEqual({ rows: [] });
     });
 
@@ -293,6 +297,16 @@ describe("DataBindingEngine", () => {
       await expect(
         resolveDataSource(
           { type: "api", config: { endpoint: "delete_dynamic_ui_schema", method: "invoke" } },
+          pluginFace,
+        ),
+      ).rejects.toThrow();
+      // 表单三条（2026-11-06 起不在插件档）同样拒：端点在 dataSource 这条路上也要过面
+      await expect(
+        resolveDataSource(
+          {
+            type: "api",
+            config: { endpoint: "save_dynamic_ui_form_data", method: "invoke", params: { schemaId: "s-1" } },
+          },
           pluginFace,
         ),
       ).rejects.toThrow();

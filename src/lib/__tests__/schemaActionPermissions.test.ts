@@ -44,7 +44,7 @@ describe("来源判定", () => {
     }
   });
 
-  it("插件来源给受限面：只开四条命令，其余维度显式为空", () => {
+  it("插件来源给受限面：只开一条只读命令，其余维度显式为空", () => {
     const perms = permissionsForSchemaOrigin("plugin");
     expect(perms).toEqual({
       commands: [...PLUGIN_SCHEMA_ALLOWED_COMMANDS],
@@ -53,12 +53,9 @@ describe("来源判定", () => {
       storeWrite: [],
       navigate: [],
     });
-    expect(perms!.commands).toEqual([
-      "get_dynamic_ui_schema",
-      "get_dynamic_ui_form_data",
-      "save_dynamic_ui_form_data",
-      "delete_dynamic_ui_form_data",
-    ]);
+    // 2026-11-06 收口：表单三条（save / get / delete_dynamic_ui_form_data）已从面上摘除 ——
+    // `args` 不可校验 ⇒ 它们唯一的实际效果是让插件借 `args.schemaId` 指向他人的宿主行。
+    expect(perms!.commands).toEqual(["get_dynamic_ui_schema"]);
   });
 
   it("判不出来的来源一律按不可信（fail-closed）", () => {
@@ -68,13 +65,13 @@ describe("来源判定", () => {
     }
   });
 
-  it("权限面与 isWildcardMatch 的组合语义：放行四条自身命令，拒绝 Schema CRUD", () => {
+  it("权限面与 isWildcardMatch 的组合语义：只放行那条只读命令，拒绝 Schema CRUD 与表单三条", () => {
     const commands = permissionsForSchemaOrigin("plugin")!.commands!;
-    // 正控：四条放行的命令逐条命中（漏一条即本页无法持久化自身状态）
+    // 正控：面上逐条命中 —— 没有这条正控，下面的「全拒」会因为面本身为空而假绿
     for (const cmd of PLUGIN_SCHEMA_ALLOWED_COMMANDS) {
       expect(isWildcardMatch(cmd, commands)).toBe(true);
     }
-    // 负控：提权链上的三条写命令 + 其余 dynamic_ui_* 一律拒绝。
+    // 负控 A：提权链上的三条写命令 + 其余 dynamic_ui_* 一律拒绝。
     // create 把 origin 硬写成 "user"（可信）⇒ 放行它等于让插件自造一个不受限的 Schema；
     // update / delete 的「只挡 builtin、不限目标」那句旧判据已由后端闭合（提交 43803e5ac：
     // 统一闸门按 origin 白名单 fail-closed，**不看 owner_id** —— 非插件行的 owner_id 恒空、
@@ -90,6 +87,19 @@ describe("来源判定", () => {
         "pin_dynamic_ui_schema",
         "unpin_dynamic_ui_schema",
         "list_dynamic_ui_schemas",
+      ]
+    ) {
+      expect(isWildcardMatch(cmd, commands)).toBe(false);
+    }
+    // 负控 B（2026-11-06 收口）：表单数据三条不进插件档。
+    // 判据是 `args` 不可校验 —— ActionRouter 只按命令名查面、`args` 原样透传，
+    // 于是「插件声明 `args.schemaId = <任意 user/ai/builtin 行 id>」就是跨边界读写；
+    // 而插件自有行（origin = "plugin"）的调用 100% 被后端 origin 闸门拒 ⇒ 面上留着只有绕过效果。
+    for (
+      const cmd of [
+        "save_dynamic_ui_form_data",
+        "get_dynamic_ui_form_data",
+        "delete_dynamic_ui_form_data",
       ]
     ) {
       expect(isWildcardMatch(cmd, commands)).toBe(false);

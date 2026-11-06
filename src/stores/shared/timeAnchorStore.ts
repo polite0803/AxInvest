@@ -9,8 +9,9 @@ import { createJSONStorage, persist } from "zustand/middleware";
  * 单一职责：保存"截至过去的某一天"作为分析世界观。
  * 持久化到 localStorage，跨页面共享，跨刷新存活。
  *
- * 归属 shared 的理由：消费方横跨 `components/stock-analysis`、`components/time-travel`、
- * `components/stock-workspace` 三个组件目录以及 `stores/feature/stockAnalysisStore`，
+ * 归属 shared 的理由：消费方横跨 `components/stock-analysis`（含其 `_workspace` 子域，
+ * 原 `components/stock-workspace`，任务 #195 迁入）与 `components/time-travel` 两个组件目录，
+ * 以及 `stores/feature/stockAnalysisStore`，
  * 没有任何单一 feature 拥有它 —— 按 AGENTS.md「Store 分类规则」的「跨组件 UI 状态（标签页、
  * 侧栏、工作区布局）→ stores/shared/」，它应归 shared 而非 feature（原置于 feature 属归类错误）。
  *

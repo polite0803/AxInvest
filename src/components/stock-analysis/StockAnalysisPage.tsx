@@ -1,6 +1,6 @@
 import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { useShowAdvancedPanels } from "@/components/stock-workspace/_shared/useSimpleMode";
+import { useShowAdvancedPanels } from "@/components/stock-analysis/_workspace/_shared/useSimpleMode";
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { extractLlmField } from "@/lib/agentOutput";
 import { parseDataQualityReport } from "@/lib/dataQualityDiagnosis";

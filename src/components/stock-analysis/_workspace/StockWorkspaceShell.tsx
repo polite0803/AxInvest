@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// 本目录（_workspace/）原为 src/components/stock-workspace，2026-11 任务 #195 整体迁入：
+// 与宿主 stock-analysis 同域，随股票迁出一起出包（任务 #35 / P6.1）。
 
+import { UserModeToggle } from "@/components/stock-analysis/_workspace/_shared/UserModeToggle";
+import { ContextSidebar } from "@/components/stock-analysis/_workspace/ContextSidebar";
+import { DecisionHeroBar } from "@/components/stock-analysis/_workspace/DecisionHeroBar";
+import { MobileTabBar } from "@/components/stock-analysis/_workspace/MobileTabBar";
+import { StockSwitcher } from "@/components/stock-analysis/_workspace/StockSwitcher";
+import { AnalysisView } from "@/components/stock-analysis/_workspace/views/AnalysisView";
+import { BacktestView } from "@/components/stock-analysis/_workspace/views/BacktestView";
+import { CompareView } from "@/components/stock-analysis/_workspace/views/CompareView";
+import { MonitorView } from "@/components/stock-analysis/_workspace/views/MonitorView";
+import { ReviewView } from "@/components/stock-analysis/_workspace/views/ReviewView";
+import { TradeView } from "@/components/stock-analysis/_workspace/views/TradeView";
 import { AgentStockUIHost } from "@/components/stock-analysis/AgentStockUIHost";
-import { UserModeToggle } from "@/components/stock-workspace/_shared/UserModeToggle";
-import { ContextSidebar } from "@/components/stock-workspace/ContextSidebar";
-import { DecisionHeroBar } from "@/components/stock-workspace/DecisionHeroBar";
-import { MobileTabBar } from "@/components/stock-workspace/MobileTabBar";
-import { StockSwitcher } from "@/components/stock-workspace/StockSwitcher";
-import { AnalysisView } from "@/components/stock-workspace/views/AnalysisView";
-import { BacktestView } from "@/components/stock-workspace/views/BacktestView";
-import { CompareView } from "@/components/stock-workspace/views/CompareView";
-import { MonitorView } from "@/components/stock-workspace/views/MonitorView";
-import { ReviewView } from "@/components/stock-workspace/views/ReviewView";
-import { TradeView } from "@/components/stock-workspace/views/TradeView";
 import { useUIStore, useWorkspaceStore } from "@/stores";
 import type { WorkspaceView } from "@/stores";
 import { ArrowLeft, BarChart3, Briefcase, Coins, FlaskConical, GitCompare, RotateCcw } from "lucide-react";

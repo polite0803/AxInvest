@@ -518,8 +518,8 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
 | 前端反向 import（非域 import 域文件） | **56 处 / 43 文件**（2026-11-06 对账批回写：现树 `node scripts/audit-l1-blockers.mjs` 打印即此数。上一登记读数 47 / 34 出自 11-05 21:52 快照（#149 第 3 步删宿主股票源 adapter，`adapters/registry.ts` 与 `__tests__/adapters.test.ts` 各 −1 处 ⇒ 49 / 36 → 47 / 34），其后的 **+9 处 / +9 文件全部由 B8-5 的三刀「拆 barrel / 摘门面」造成**（`@/types` 门面改深路径 `@/types/stock-analysis` ⇒ 每条各计一处），逐提交分解见 §125.7；49 / 36 出自 B8-2 第一刀 #151，再上一读数 51 / 37 出自 B8-1a） | **29 处 / 11 文件**（同批回写；15 处仍集中在 `ContentArea.tsx` ⇒ 文件数不动，+1 处 = `DemandDiscoveryPage.tsx` 1→2 与 `browserMock.ts` 新进 − `types/index.ts` 退出，见 §125.7） |
-| 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 212 文件 / 60 941 行（2026-11-06 第三轮对账：+3 行 = `7741457bf` 的 `DecisionBanner.tsx` +3/−3 与 `d1a1716e6`+`1ce5a135a` 的测试 mock +3/−0，其余 23 文件为 timeAnchor 迁层的 `1/1` 单行改写 ⇒ 净 0；**目录口径对 store 迁层不敏感**，故「中立性违规降 25 条」与「本锚涨 3 行」同时为真。前值 60 938，其 −1 文件 = `a13bff03d` B8-4a 把 `_shared/PageHeader.tsx` 下沉出目录，其后 `d5572fb65` + `4224098b5` 两批在目录内净 +10 行）+ store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 292 文件 / 84 811 行（2026-11-06 第三轮对账：净 **−4**，逐文件算出 = `git diff --numstat 708fc1b80..HEAD -- src` 限定 feRe 命中路径 ⇒ 38 文件 `+45/−49`；同区间**不命中** feRe 的 21 文件净 +712 行一律不计（lane T 的 `schemaActionPermissions.ts` 一族、`browserMock.dynamicUI.test.ts` 等都在其中）；timeAnchor 的 `stores/feature` 与 `stores/shared` 两条路径都不命中 feRe（`store` ≠ `stock`）⇒ 迁层既不减也不增本锚；前值 84 815。2026-11-05 #149 第 3 步：删宿主股票源 adapter（95 行）与详情抽屉（94 行）⇒ −189 行 / −2 文件；同日工作区另有 −209 行 / −2 文件的并行改动，故绝对读数与上一档再差 209 / 2。**2026-11-06 对账批**：再 −44 = B8-5 第二批摘股票域类型门面（`src/types/stock-analysis.ts` 按 split 口径 2 337→2 293，口径内文件数不变）；同日第二轮对账再 +2 = `975652a17` 的 8 个前端文件里只有 `src/lib/seed-stock-schemas.ts`（路径含 `stock`）命中 `feRe`，+4/−2 ⇒ 现值 292 / 84 815；⚠ 上一登记值 84 850 比 `c6c4ce198` 那棵树的实际读数 84 857 少 7 行（该批取的是工作区瞬时态），所以表上差 −37 ≠ 本批代码差 −44） | 40 文件 / 12 797 行 |
+| 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 227 文件 / 62 721 行（**2026-11-06 #195 批：+15 文件 / +1 780 行** = `components/stock-workspace/**` 15 文件整体搬进本目录 `_workspace/` 子层 ⇒ 旧目录实测 1 763 行 + 15 个「每文件 +1」split 口径补偿 + 落点注释 2 行；同批**消除 22 条中立性基线键 161→139** ⇒ 本锚上涨与该族违规下降同批且互不构成否证，详见 §126。上一档 60 941：+3 行 = `7741457bf` 的 `DecisionBanner.tsx` +3/−3 与 `d1a1716e6`+`1ce5a135a` 的测试 mock +3/−0，其余 23 文件为 timeAnchor 迁层的 `1/1` 单行改写 ⇒ 净 0；**目录口径对 store 迁层不敏感**，故「中立性违规降 25 条」与「本锚涨 3 行」同时为真。再前值 60 938，其 −1 文件 = `a13bff03d` B8-4a 把 `_shared/PageHeader.tsx` 下沉出目录，其后 `d5572fb65` + `4224098b5` 两批在目录内净 +10 行）+ store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 292 文件 / 84 813 行（**2026-11-06 #195 批：+2 行、文件数不动** —— `git diff --numstat HEAD -- src` 限定 feRe 命中 ⇒ 17 文件 `+17/−15` = +2，净非零只有 `_workspace/StockWorkspaceShell.tsx`（`13/11`，落点注释），其余 16 文件全是 `1/1` 说明符改写净 0；⚠ **搬家本身不改本锚**：旧路径 `components/stock-workspace` 本来就命中 feRe（含 `stock`），15 文件换目录既不增文件也不增行 ⇒ 与目录口径那一行 **+15 文件 / +1 780 行** 的分叉是这套并行口径第三次显形；同区间不命中 feRe 的并行批 `+412/−59` 一律不计。2026-11-06 第三轮对账：净 **−4**，逐文件算出 = `git diff --numstat 708fc1b80..HEAD -- src` 限定 feRe 命中路径 ⇒ 38 文件 `+45/−49`；同区间**不命中** feRe 的 21 文件净 +712 行一律不计（lane T 的 `schemaActionPermissions.ts` 一族、`browserMock.dynamicUI.test.ts` 等都在其中）；timeAnchor 的 `stores/feature` 与 `stores/shared` 两条路径都不命中 feRe（`store` ≠ `stock`）⇒ 迁层既不减也不增本锚；前值 84 815。2026-11-05 #149 第 3 步：删宿主股票源 adapter（95 行）与详情抽屉（94 行）⇒ −189 行 / −2 文件；同日工作区另有 −209 行 / −2 文件的并行改动，故绝对读数与上一档再差 209 / 2。**2026-11-06 对账批**：再 −44 = B8-5 第二批摘股票域类型门面（`src/types/stock-analysis.ts` 按 split 口径 2 337→2 293，口径内文件数不变）；同日第二轮对账再 +2 = `975652a17` 的 8 个前端文件里只有 `src/lib/seed-stock-schemas.ts`（路径含 `stock`）命中 `feRe`，+4/−2 ⇒ 现值 292 / 84 815；⚠ 上一登记值 84 850 比 `c6c4ce198` 那棵树的实际读数 84 857 少 7 行（该批取的是工作区瞬时态），所以表上差 −37 ≠ 本批代码差 −44） | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -6379,3 +6379,84 @@ lane W 把该文件**移走**了。改指（→ `src/stores/shared/timeAnchorSto
 理由和 §125.2 那条一样是「行号被钉住 ⇒ 不许在中段插行」：本节的追加全部落在文件末尾，
 `§125.2` / `§125.5` 两个新 alsoAt 区段（PLAN:6228–6245 / 6278–6290）的行号因此**一个都没位移**，
 判定档复跑为 `planOld 3 项 · 15 个 alsoAt 区段，健康 15 / 腐烂 0`、硬失败 0。
+
+## §126 并行五道的第一批收口：#195 物理消除 22 条 + #204/#206 合批落地（2026-11-06 下午）
+
+### 126.1 #195：最大单组不是「改判据」消掉的，是搬目录消掉的（lane FC，我复验后采信）
+
+- **先纠正我自己派单漏的一条事实**：我只列了 2 处入站说明符，漏了目录内部还有 **13 行 `@/components/stock-workspace/...` 绝对自引用**
+  （`DecisionHeroBar.tsx` 2 + `StockWorkspaceShell.tsx` 11）—— 旧目录一消失这 13 行**必断**，执行者自己发现并改写。
+  ⇒ 固化一条派单判据：**搬迁批的引用面必须按「说明符字符串」全量扫，不能只扫目录外**（`grep -rn "<旧目录名>" src` 而不是 `grep -rn` 排除自身目录）。
+- 落地形态：`src/components/stock-workspace/**` → `src/components/stock-analysis/_workspace/**`（15 文件，`git mv` 保历史），
+  入站 2 处改指，**22 条基线键定点手工删除**（161 → 139）。没跑 `--update-baseline` —— 本会话 `src` 全程非空，
+  那条命令在并行期会把**别人未提交的减少**一起钉进棘轮（本仓既存教训）。
+- 为什么不走另一条更省事的路（给门禁加「同域 owner 组」把 22 条自动豁免）：那是**放宽判据**，且与
+  中立性批 C（`#200`：NEUTRAL 支收窄为精确匹配、登记面不许被命名形态自动扩）直接冲突；搬目录则是**判据一字未动、耦合真实减少**。
+  `_workspace/` 这层子目录是**必需的**，不是保守：`CompareView.tsx` 两处**同名不同物**（宿主侧 303 行 vs 工作区侧 13 行薄包装）⇒ 平铺即覆盖。
+- 我的独立复核（不采信执行者打印）：`--selftest` EXIT=0（**共 31 条断言 · 失败 0**）、判定档 EXIT=0，
+  读数 `扫描 927 · 原始 177 → 155 · 豁免后 174 → 152 · 基线 139 · 已修复 0` ——
+  **三档同步 −22** 是「删键不多不少」的机械证明（多删会留「已修复」，少删会报新增违规）；
+  旧目录 `ls` 不存在；`grep -rn "components/stock-workspace" src --include=*.ts --include=*.tsx` 只剩 **2 处**，
+  且都是刻意保留的历史注释（`_workspace/StockWorkspaceShell.tsx:2` 的落点说明、`timeAnchorStore.ts:13` 的口径陈述）。
+- **刻意没改**的 5 类 "stock-workspace" 字符串（改了反而是破坏，FC 逐类点名，我核判决成立）：
+  `STOCK_AGENT_UI_TARGET = "stock-workspace"` 运行时标识、CSS 类 `ax-stock-workspace`、`workspaceStore.ts:111` 的
+  persist 键 `"axagent-stock-workspace"`（**改了会让老用户的工作区状态归零**）、集成测试选择器、`scripts/**` 的合成 fixture 与史料注释。
+
+### 126.2 对账：两个体量口径的分叉**第三次**显形
+
+| 锚 | 登记 → 实测 | 机械分解 | 归因 |
+|---|---|---|---|
+| `frontendDirCaliber`（目录口径 227 文件） | 60 941 → **62 721 行 / 212 → 227 文件** | +1 780 = 旧目录原始 `wc -l` **1 763** + 该子树新落 15 个「每文件 +1」split 口径补偿 **+15** + 落点注释 **+2** | 自证两条：旧树 `60 729 + 212 = 60 941`、新树 `62 494 + 227 = 62 721`，同一 split 规则 ⇒ 差额逐元对上，没有余数 |
+| `frontendFileCaliber`（feRe 文件名口径 292 文件） | 84 811 → **84 813 行 / 文件数不动** | `git diff --numstat HEAD -- src` 限定 feRe 命中 ⇒ **17 文件 `+17/−15` = +2**；净非零只有 `StockWorkspaceShell.tsx`（`13/11`），其余 16 文件全是 `1/1` 说明符改写净 0 | **搬家本身不改本锚**：旧路径含 `stock`，本来就命中 feRe ⇒ 换目录既不增文件也不增行。同区间不命中 feRe 的并行改动 `+412/−59`（FA/FB 的 `src/lib/**`）一律不计 |
+
+⇒ 同一次搬迁在两套口径里给出 **+1 780** 与 **+2**，两个都正确。这是继「store 迁层净 0」（§125.3）与
+「摘 barrel 涨 / 门面降」（§125.7）之后**第三次**实证，判据固化：**任何前端批都不许用其中一个口径去否证另一个**。
+
+### 126.3 #204 + #206 合批落地（lane FA）：一条太严、一条太松，改在同一对文件里
+
+**「未证的一环」本轮证成**（这决定 #206 的严重度定性，上一轮只到「未证伪」）：插件 Schema 卡片确实带着受限权限面进入数据源解析 ——
+`src/components/chat/PluginSchemaCard.tsx:106`（`permissionsForSchemaRecord`，origin="plugin" ⇒ 受限面）→ `:136` 传入 renderer
+→ `src/components/dynamicUI/DynamicUIRenderer.tsx:565` `effectiveActionPermissions` → `:592` Context Provider
+→ `:183` `useSchemaActionPermissions()` → `:220-238` `subscribeDataSource(..., actionPermissions)`
+→ `src/lib/dynamicUI/DataBindingEngine.ts:168` → `assertDataSourceCoveredByPermissions`。
+同形态另有两处承接点（`DynamicPageViewer.tsx:121→:131`、`DynamicUIStandalone.tsx:66→:177`）⇒ **fetch 不查权限面在插件路径上真实可达**。
+
+- **#204（太严，恒拒）**：`ALLOWED_INVOKE_PREFIXES = ["dynamic_ui_"]` ⇒ **`ALLOWED_INVOKE_COMMANDS` 显式枚举 16 条**
+  （权威源 = `src-tauri/src/commands/dynamic_ui.rs` 的 `#[tauri::command]`，与 `register_commands.rs:339-354` 投影一致），
+  `startsWith` 前缀形态整体废弃 —— **前缀本身就是这个缺陷的成因**，留它等于留下第二次踩坑的位置。
+  同时删掉「整族都在内」的假话注释，并写明两层语义：道一 = 这 16 条（宿主 schema），道二 = 插件档只剩 `get_dynamic_ui_schema` 一条只读（`#191` / `0bee8898f`）。
+  测试侧：把那条**不存在的**命令名 `dynamic_ui_get_schema` 换成真名做正控，并补一条**回归负控** —— 旧前缀形态的假名现在必须被拒且不打 IPC
+  （这条负控的价值是让 #204 不能靠「把前缀改回去」重新变绿）。
+- **#206（太松，fetch 一条不查）**：守卫不再写死 `method === "invoke"`，invoke 与 fetch **统一按端点**过 `permissions.commands`
+  （`isWildcardMatch` 支持 `https://host/*` 端点族；插件档不含任何 URL ⇒ 插件 fetch 一律 fail-closed）；
+  `params as RequestInit` 全量透传 → `toSafeFetchInit()` 白名单：字段仅 `method/headers/body`，method 仅 GET/POST，
+  headers 仅内容协商类且值为字符串，body 仅字符串且仅配 POST，**白名单外字段显式拒绝、不静默剔除**
+  （静默剔除会让 Schema 作者以为生效 —— 这正是本仓「注释假话」一族的行为版）。新增 3 个 i18n 键 × **11 语言全补**。
+- 我的独立复核：`npm run test:run -- src/lib/__tests__/dataBindingEngine.test.ts` ⇒ **Test Files 1 passed / Tests 34 passed / EXIT=0**（16.12 s，非空跑）；
+  三键 `grep -l` ⇒ **11/11**；`node scripts/check-i18n-key-parity.mjs` ⇒ EXIT=0，11 份语言文件 key 路径集合一致（各 16 285 条）。
+- **写清边界，不当已闭合**：`permissions === undefined` 时第二道整段跳过 —— 这一档是宿主自有 schema（`builtin/user/ai`），
+  此时只剩道一 16 条 + `isAllowedFetchUrl` 协议校验 + CSP。它与 **#196**（历史 `origin="ai"` 行的不受限动作面）是同一个待裁问题，
+  **本批不偷偷扩面**；`#191` 的插件档不受此影响（插件路径永远带面）。
+- `ALLOWED_FETCH_PROTOCOLS` 的 `http:` **未收窄**（仍不分 loopback/内网），`tauri.conf.json` 一字未改：
+  执行者举证「仓内没有任何 Schema 样例声明 http: fetch，CSP 生产放行的 http 只有 `localhost:*` / `127.0.0.1:*`（gateway / ollama 这类本机服务是真实用法）」
+  ⇒ 收窄技术上安全，但那是产品裁定，不是这批改代码的人能替用户点的 ⇒ 列进未做。
+- 边界偏离一条（**是我的派单写窄了，不是执行者越界**）：那条假命令名在 `src/lib/__tests__/dataBindingEngine.test.ts`，
+  而我给的文件面只写了 `src/lib/dynamicUI/**`。执行者改了它并在报告里主动声明偏离与理由 ⇒ 采信。
+
+### 126.4 三道仍在跑 + 一条**不属于本批**的门禁红
+
+R（#184 / #185）、FB（#201）、S（#207）仍在途。第五道门当前唯一硬失败 =
+`tool.set 登记 198 / 实测 197（差 −1）`，盘上成因已确认是 lane R 在 `capability_pack_defs.rs` / `tools/mod.rs`
+把 `OpcSendNotification` **退役**（即 #184 选了两档里的 (B)）⇒ **不由本对账批改**：R 交回时它的对账批必须同批把 198 → 197，
+并回答「工具面是否静默退化」—— 这条判据的先例是 `#169`（删宿主命令的 T1 等价性核查），不许只改数字不答问题。
+
+### 126.5 未做
+
+1. `_workspace/__tests__/DecisionHeroBar.density.test.tsx` 随 `git mv` 搬走了、vitest include glob（`vite.config.ts:294` 的
+   `src/**/*.{test,spec}.{ts,tsx}`）按前缀通配仍命中，但**我没跑过它** —— 本批只取证到 typecheck + 中立性 + i18n parity。测试执行待安静窗口。
+2. 道一 16 条枚举与 `dynamic_ui.rs` 命令面的**机械同源自检**未建（现靠注释声明同步义务 + 漂移即 fail-closed）⇒ 要与 S 道正在做的
+   `scripts/` 改造合批，避免同一目录两批并改。
+3. `http:` 协议收窄待产品裁定（见 126.3 末条）。
+4. `#193`（A 类 25 + B 类 22）与 `#194` D 类四族仍未开 —— 同因：都要改 `src/components/**`，本批刚动过该目录，
+   等 FC 提交落地后再开，避免两批同时改同一目录。
+5. `tool.set` 的对账待 R 交回（见 126.4）。

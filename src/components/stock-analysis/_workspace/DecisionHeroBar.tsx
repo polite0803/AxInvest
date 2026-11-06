@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useSimpleMode } from "@/components/stock-analysis/_workspace/_shared/useSimpleMode";
+import { DecisionConsensusMeter } from "@/components/stock-analysis/_workspace/DecisionConsensusMeter";
 import { DecisionTrustNotice } from "@/components/stock-analysis/DecisionTrustNotice";
 import { useIsMobile } from "@/components/stock-analysis/MobileResponsive";
-import { useSimpleMode } from "@/components/stock-workspace/_shared/useSimpleMode";
-import { DecisionConsensusMeter } from "@/components/stock-workspace/DecisionConsensusMeter";
 import { extractLlmField } from "@/lib/agentOutput";
 import {
   getActionColor,

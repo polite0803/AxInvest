@@ -5665,8 +5665,16 @@ async function executeCommand<T>(
       };
       schemas[idx] = updated;
       saveMockDynamicUIData("schemas", schemas);
-      if (schemaChanged) {
-        saveMockDynamicUIData("versions", versions);
+      // #215：后端 update 末尾调用 `cleanup_old_versions(db, &id, 30)`（dynamic_ui.rs:548，**已核调用点**）
+      // ⇒ 每个 schema 只保留最近 30 份版本。这里同口径剪枝：按 createdAt 倒序留前 30，其余 schema 的行不动。
+      // 无条件执行（不只 schemaChanged）：真机每次 update 都会剪，历史遗留超量也会被这次更新顺带清掉。
+      const survivors = versions
+        .filter((v) => v.schemaId === old.id)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+        .slice(0, 30);
+      const nextVersions = [...versions.filter((v) => v.schemaId !== old.id), ...survivors];
+      if (schemaChanged || nextVersions.length !== versions.length) {
+        saveMockDynamicUIData("versions", nextVersions);
       }
       return updated as T;
     }
@@ -5878,7 +5886,12 @@ async function executeCommand<T>(
       const schemas = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
       const host = mockLoadSchemaForCommand(schemas, schema_id ?? "", "读取版本列表");
       const versions = loadMockDynamicUIData<DynamicUISchemaVersion[]>("versions", []);
-      const filtered = versions.filter((v) => v.schemaId === schema_id);
+      // #215：后端该命令是「按 CreatedAt **倒序** + `.limit(50)`」（dynamic_ui.rs 的 list_versions）
+      // ⇒ 这里同样「新→旧、最多 50 条」（改前 mock 返回全部、且是插入顺序 = 旧→新，两处都不同）。
+      const filtered = versions
+        .filter((v) => v.schemaId === schema_id)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+        .slice(0, 50);
       const response: ListVersionsResponse = {
         versions: filtered,
         currentVersion: host.version,

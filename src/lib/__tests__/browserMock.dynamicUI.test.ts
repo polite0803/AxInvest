@@ -833,4 +833,48 @@ describe("#192 语义对齐", () => {
     expect(storedVersions()).toHaveLength(0);
     expect(storedForm()).toHaveLength(0);
   });
+
+  // ── #215：版本表的两个上限（后端 .limit(50) 与 cleanup_old_versions(…, 30)）──
+  it("list versions：新→旧排序且最多 50 条（后端 .limit(50)）", async () => {
+    seed(makeRecord());
+    const rows = Array.from(
+      { length: 55 },
+      (_, i) => makeVersion({ id: 1000 + i, schemaJson: `{"i":${i}}`, createdAt: i + 1 }),
+    );
+    seedVersions(...rows);
+
+    const list = await handleCommand<{ versions: DynamicUISchemaVersion[] }>(
+      "list_dynamic_ui_schema_versions",
+      { schemaId: "s-1" },
+    );
+    expect(list.versions).toHaveLength(50);
+    expect(list.versions[0]!.createdAt).toBe(55); // 最新在前（后端按 CreatedAt Desc）
+    expect(list.versions[49]!.createdAt).toBe(6); // 只保留最近 50 条
+  });
+
+  it("update：版本表按 schema 保留最近 30 份，且不误伤其它 schema（cleanup_old_versions 语义）", async () => {
+    seed(makeRecord({ version: "2.0.0", schemaJson: '{"v":0}' }));
+    const rows = Array.from(
+      { length: 31 },
+      (_, i) => makeVersion({ id: 2000 + i, schemaJson: `{"old":${i}}`, createdAt: i + 1 }),
+    );
+    // 另一张 schema 的版本：剪枝只按 schemaId 过滤，必须原样保留（正控）
+    const foreign = makeVersion({ id: 2999, schemaId: "s-other", createdAt: 1 });
+    seedVersions(...rows, foreign);
+
+    await handleCommand("update_dynamic_ui_schema", {
+      id: "s-1",
+      req: { schemaJson: '{"v":1}' },
+    });
+
+    const vs = storedVersions();
+    const own = vs.filter((v) => v.schemaId === "s-1");
+    expect(own).toHaveLength(30);
+    // 本次为旧内容落的那条（createdAt = now，最大）必须保留
+    expect(own.some((v) => v.schemaJson === '{"v":0}')).toBe(true);
+    // 最旧的一条被剪掉
+    expect(own.some((v) => v.createdAt === 1)).toBe(false);
+    // 其它 schema 的版本不受影响
+    expect(vs.some((v) => v.id === foreign.id)).toBe(true);
+  });
 });

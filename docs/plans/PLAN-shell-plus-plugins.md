@@ -6827,3 +6827,26 @@ i18n 五道门全绿：`check-i18n-key-parity`（11 语言 key 集合一致）�
 **未做（转 #215）**：`list_dynamic_ui_schema_versions` 的后端 `.limit(50)` 与 `cleanup_old_versions(…, 30)`
 两处版本表上限，mock 都没镜像（前者 dev 返回全部、后者需先证「是否真被 update 调用」再决定要不要对齐 ——
 **不对着死代码对齐**）。另：mock 侧没有 `schema_json` 字节上限（dev 无 DB 列），属 #213 家族但不在其判据面内。
+
+### 128.16 #215：dev mock 补版本表的两个上限（读 50 条 / 每 schema 留 30 份）
+
+**先决核查（不对着死代码对齐）**：`cleanup_old_versions` 虽只是模块内私有函数，但**确实被调用** ——
+`dynamic_ui.rs:548` 在 update 流程末尾 `cleanup_old_versions(db, &id, 30)`；`list_versions` 侧则是
+`.order_by(CreatedAt, Desc).limit(50)`。⇒ 两条都是**活语义**，值得镜像。
+
+**改动**：`list_dynamic_ui_schema_versions` 改为「按 `createdAt` 倒序 + 最多 50 条」（改前返回全部、且是插入顺序 =
+旧→新，排序与上限**两处都不同**）；`update_dynamic_ui_schema` 末尾按 `schemaId` 保留最近 30 份
+（**无条件**执行，不只 `schemaChanged`：真机每次 update 都会剪，历史遗留超量会被这次更新顺带清掉），
+其它 schema 的版本行原样保留。restore 路径后端**不**剪枝 ⇒ mock 也只在 update 剪，保持同源。
+
+**判据（+2 条，共 55 passed）**：
+① 造 55 条版本 ⇒ 列表返回 **50** 条、`[0].createdAt === 55`（最新在前）、`[49].createdAt === 6`（只取最近 50）；
+② 造 31 条 + 其它 schema 1 条，然后做一次带 `schemaJson` 的 update ⇒ 本 schema 剩 **30** 条、
+本次为旧内容落的快照在（`createdAt=now` 最大）、最旧那条（`createdAt=1`）被剪、**其它 schema 那条仍在**（正控）。
+
+**验证**：`npm run test:run -- --pool=forks src/lib/__tests__/browserMock.dynamicUI.test.ts` ⇒ **55 passed (55)**；
+`node scripts/check-tsc.mjs` **EXIT=0**（1477 文件）；`npx dprint check` 两个改动文件 **EXIT=0**。
+
+**边界**：① mock 的版本 `id` 用 `Date.now()`，同一毫秒内连续两次写入会撞 id —— 本批的剪枝/排序都带 `|| b.id - a.id`
+的次级比较把顺序稳定下来，但**没有**改成单调 id（那属于 mock 数据模型问题，另批）；② 剪枝按 `createdAt` 排序，
+与后端 SQL 的 `CreatedAt Desc` 同键，但没有模拟 SQL 的并列处理（后端并列时顺序未定义）。

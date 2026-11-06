@@ -27,7 +27,11 @@ export { ShortcutSettings } from "./ShortcutSettings";
 export { ToolManager } from "./ToolManager";
 export { WebhookSettings } from "./WebhookSettings";
 
-export { PluginMarketplace } from "../chat/PluginMarketplace";
+// 2026-11-07（任务 #193，组件中立性）：此处原有把 `PluginMarketplace`（chat 特性目录的组件）
+// 再导出一遍的写法，让 settings 目录反向依赖 chat 特性目录（门禁违规）。该 re-export 全仓零消费方
+// （`src/pages/SettingsPage.tsx` 一直直连 `@/components/chat/PluginMarketplace`），故直接删除，
+// 不要再加回来 —— 需要时从 `@/components/chat/PluginMarketplace` 直取。
+// ⚠ 本注释刻意不写 import/export 语句形态：中立性门禁按 `from "…"` 字面量扫描、不剥注释。
 export { BackupCenter } from "./BackupCenter";
 export { CacheConfigPanel } from "./CacheConfigPanel";
 export { DynamicPagesSettings } from "./DynamicPagesSettings";

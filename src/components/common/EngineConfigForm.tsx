@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+/**
+ * EngineConfigForm — 字段声明驱动的通用配置表单（纯展示，无 store 依赖）。
+ *
+ * 2026-11-07（任务 #193，组件中立性 B 类）由 `src/components/settings/EngineConfigForm.tsx`
+ * 下沉至中性目录 `common/`：调用方跨两个 feature（`settings/EngineDetailPanel` 与
+ * `devtools/RLTrainingConfig`），而组件本身只吃 `config` + `fields` + `onSave`，
+ * 不读任何 feature store ⇒ 属跨 feature 共用基元。
+ */
+
 import { Button, Form, Input, InputNumber, Select, Switch } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";

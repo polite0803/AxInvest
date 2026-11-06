@@ -1,5 +1,5 @@
-import { formatTokenCount } from "@/components/gateway/tokenFormat";
 import { Tooltip } from "@/components/layout/Tooltip";
+import { formatTokenCount } from "@/lib/tokenFormat";
 import { Space, theme } from "antd";
 import { useTranslation } from "react-i18next";
 

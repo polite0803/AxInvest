@@ -30,7 +30,7 @@ import type { ConversationStats } from "@/types";
 
 import { type DropdownItem, DropdownMenu } from "@/components/layout/DropdownMenu";
 import { Tooltip } from "@/components/layout/Tooltip";
-import { formatDuration, formatSpeed, formatTokenCount } from "../gateway/tokenFormat";
+import { formatDuration, formatSpeed, formatTokenCount } from "@/lib/tokenFormat";
 import { EvolutionConsentModal } from "./EvolutionConsentModal";
 import { ModelSelector } from "./ModelSelector";
 

@@ -80,8 +80,9 @@ function scanRawInits(text: string, filePath: string): string[] {
   const hits: string[] = [];
   text.split("\n").forEach((line, idx) => {
     if (!line.includes("echarts.init(")) { return; }
-    // iframe 的 srcdoc 那份是独立文档（宿主 CSS 变量到不了），单独登记
-    if (filePath.endsWith("ArtifactPreview/ChartPreview.tsx")) { return; }
+    // iframe 的 srcdoc 那份是独立文档（宿主 CSS 变量到不了），单独登记。
+    // 2026-11-07（任务 #193）：ChartPreview 已由 `chat/ArtifactPreview/` 下沉到中性 `shared/`。
+    if (filePath.endsWith("components/shared/ChartPreview.tsx")) { return; }
     hits.push(`${filePath}:${idx + 1}`);
   });
   return hits;

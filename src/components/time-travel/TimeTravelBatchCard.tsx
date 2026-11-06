@@ -1,4 +1,4 @@
-import { JobCard } from "@/components/tasks/JobCard";
+import { JobCard } from "@/components/common/JobCard";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { horizonLabelKey } from "@/lib/stock-analysis-utils";

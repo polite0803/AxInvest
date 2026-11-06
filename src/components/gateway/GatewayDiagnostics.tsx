@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { formatTokenCount } from "@/lib/tokenFormat";
 import { useGatewayStore } from "@/stores";
 import type { GatewayRequestLog } from "@/types";
 import { Button, Empty, Modal, Popconfirm, Table, Tag, theme } from "antd";
@@ -7,7 +8,6 @@ import type { ColumnsType } from "antd/es/table";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { formatTokenCount } from "./tokenFormat";
 
 export function GatewayDiagnostics() {
   const { t } = useTranslation();

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { formatTokenCount } from "@/components/gateway/tokenFormat";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { estimateMessageTokens } from "@/lib/tokenEstimator";
+import { formatTokenCount } from "@/lib/tokenFormat";
 import { Space, Tag, theme } from "antd";
 import { BookOpen, Bot, Brain, Lightbulb, Search, Wrench } from "lucide-react";
 import { useCallback, useMemo } from "react";

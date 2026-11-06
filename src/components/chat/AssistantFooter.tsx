@@ -30,7 +30,7 @@ import { useConversationStore, useStreamStore } from "@/stores";
 import type { Message } from "@/types";
 
 import { Tooltip } from "@/components/layout/Tooltip";
-import { formatDuration, formatSpeed, formatTokenCount } from "../gateway/tokenFormat";
+import { formatDuration, formatSpeed, formatTokenCount } from "@/lib/tokenFormat";
 import { DeleteLastVersionPopover } from "./DeleteLastVersionPopover";
 import { ModelSelector } from "./ModelSelector";
 import { ModelTags } from "./ModelTags";

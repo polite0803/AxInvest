@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { formatTokenCount } from "@/lib/tokenFormat";
 import { useGatewayStore } from "@/stores";
 import { Card, Table } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { formatTokenCount } from "./tokenFormat";
 
 export function GatewayMetrics() {
   const { t } = useTranslation();

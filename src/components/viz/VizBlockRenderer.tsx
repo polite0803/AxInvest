@@ -13,7 +13,7 @@
  * 渲染器在模块加载时自动注册到 vizBlockRegistry，无需手动调用。
  */
 
-import { ChartPreview } from "@/components/chat/ArtifactPreview/ChartPreview";
+import { ChartPreview } from "@/components/shared/ChartPreview";
 import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { cssVar } from "@/lib/cssVar";
 import { SERIES_HUES, seriesColor } from "@/theme/categoricalColors";

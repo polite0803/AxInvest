@@ -1345,13 +1345,10 @@ export interface ToolSemanticCheckResult {
 
 export type ToolReplacementAction = "replace" | "keep" | "upgrade_existing";
 
-export interface ToolUpgradeSuggestion {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown> | null;
-  outputSchema: Record<string, unknown> | null;
-  reasoning: string;
-}
+// ToolUpgradeSuggestion 的权威定义已下沉到 `src/types/workflow.ts`（2026-11-07 任务 #193，A 类）：
+// 唯一消费方 settings/ToolSemanticCheck 不允许反向依赖 components/workflow 的类型模块。
+// 本行只为工作流内部存量消费方保留薄 re-export，新代码请直接从 `@/types` 取。
+export type { ToolUpgradeSuggestion } from "@/types";
 
 export interface ToolUpgradeRequest {
   existingToolName: string;

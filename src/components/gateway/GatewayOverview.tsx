@@ -3,6 +3,7 @@
 import { CopyButton } from "@/components/common/CopyButton";
 import { logIpcError } from "@/lib/invoke";
 import { message } from "@/lib/toast";
+import { formatTokenCount } from "@/lib/tokenFormat";
 import { useGatewayStore } from "@/stores";
 import type { GatewayRequestLog } from "@/types";
 import { Button, Card, Col, Empty, Row, Statistic, Table, Tag, theme } from "antd";
@@ -10,7 +11,6 @@ import type { ColumnsType } from "antd/es/table";
 import { ArrowDown, ArrowUp, PlayCircle, Power, RefreshCw, Router } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { formatTokenCount } from "./tokenFormat";
 
 interface GatewayOverviewProps {
   onViewMoreLogs?: () => void;

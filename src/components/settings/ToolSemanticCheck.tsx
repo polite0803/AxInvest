@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { ToolUpgradeSuggestion } from "@/components/workflow/types/workflow.types";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import { useUIStore } from "@/stores";
-import type { LocalToolGroupInfo, LocalToolInfo } from "@/types";
+import type { LocalToolGroupInfo, LocalToolInfo, ToolUpgradeSuggestion } from "@/types";
 import { Button, Card, Empty, Input, Modal, Spin, Typography } from "antd";
 import { ArrowRight, CheckCircle, Search, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";

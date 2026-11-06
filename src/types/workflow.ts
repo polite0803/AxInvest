@@ -251,3 +251,20 @@ export interface WorkflowToolInput {
 
 // UISchema 类型从 @/types/dynamicUI 导入，此处仅做 forward-declaration
 import type { UISchema } from "./dynamicUI";
+
+/**
+ * AI 语义检查给出的「工具升级建议」（后端 `workflow_tool_semantic_check` 的响应元素）。
+ *
+ * 2026-11-07（任务 #193，组件中立性 A 类）由
+ * `src/components/workflow/types/workflow.types.ts` 下沉至此：唯一消费方是
+ * `src/components/settings/ToolSemanticCheck.tsx`，属跨域共享 DTO，
+ * 不该让 settings 反向依赖 `components/workflow` 的类型模块。
+ * 原位置保留 `export type { ToolUpgradeSuggestion } from "@/types"` 的薄 re-export。
+ */
+export interface ToolUpgradeSuggestion {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown> | null;
+  outputSchema: Record<string, unknown> | null;
+  reasoning: string;
+}

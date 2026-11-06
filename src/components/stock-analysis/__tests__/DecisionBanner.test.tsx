@@ -59,8 +59,7 @@ vi.mock("@/stores", () => ({
   useStockAnalysisStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
   // `highlightedPanel` / `setHighlightedPanel` 自 7741457bf 起住在宿主中性 uiStore（原来在 stockAnalysisStore），
   // 组件现在从 @/stores 取 useUIStore ⇒ 本 mock 不供它会在 render 期抛 TypeError（表现为 26 例全红）。
-  useUIStore: (selector: (s: { highlightedPanel: string | null }) => unknown) =>
-    selector({ highlightedPanel: null }),
+  useUIStore: (selector: (s: { highlightedPanel: string | null }) => unknown) => selector({ highlightedPanel: null }),
   useSettingsStore: (selector: (s: { settings: { theme_mode: string } }) => unknown) =>
     selector({ settings: { theme_mode: "system" } }),
 }));

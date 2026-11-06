@@ -496,7 +496,9 @@ export function auditSymbolDrift({
       // 判据⑤：任一候选命中即视为一致（保守）
       if (present.some((t) => occ.get(t).some((l) => l >= lo && l <= hi))) continue;
       const forms = [...new Set(usable.map((c) => c.form))];
-      for (const f of forms) byForm[f] = (byForm[f] ?? 0) + 1;
+      // 按该条**第一个候选簇**的形态计数（一条只计一次；一行常同时给 ident + path 两簇，
+      // 逐形态各计会让 ΣbyForm > drift.length，读数就对不上账了）。
+      byForm[forms[0]] = (byForm[forms[0]] ?? 0) + 1;
       const actual = occ
         .get(present[0])
         .slice()

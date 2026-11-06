@@ -727,7 +727,10 @@ mod tests {
             "updatedAt": 9_999_999_i64,
             "completedAt": null,
         }));
-        assert!(no_completed_at.get("finishedAt").is_none(), "不得用 updatedAt 冒充：{no_completed_at}");
+        assert!(
+            no_completed_at.get("finishedAt").is_none(),
+            "不得用 updatedAt 冒充：{no_completed_at}"
+        );
 
         // interrupted：算 canceled，且回收时刻不是完成时刻
         let interrupted = task_run_row_from_analysis_record(&json!({

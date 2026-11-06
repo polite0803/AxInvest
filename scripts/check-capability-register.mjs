@@ -482,10 +482,11 @@ export function adjudicateEvidence(ev, contentFor) {
   return null;
 }
 
-/** 数字在文本中的「非行号引用」出现（前后不接数字；左不接 `: . / #`，防 `PLAN:124` 误判）。返回行号列表。 */
+/** 数字在文本中的「非行号引用」出现（前后不接数字；左不接 `: . / # §`，右不接 `.数字`，
+ *  防 `PLAN:124`、章节号 `§124`、**小节号 `124.1`** 被算成读数）。返回行号列表。 */
 export function numberOccurrences(text, num) {
   const hits = [];
-  const re = new RegExp(`(^|[^\\d:.#])${num}(?!\\d)`, "g");
+  const re = new RegExp(`(^|[^\\d:.#§])${num}(?!\\d|\\.\\d)`, "g");
   text.split("\n").forEach((l, i) => {
     re.lastIndex = 0;
     if (re.test(l)) { hits.push(i + 1); }
@@ -499,9 +500,15 @@ export function numberOccurrences(text, num) {
  *  新规则（机械，四条，写死在此处）：
  *   ① 取 planNumber 的数字位，**位与位之间允许 0 或 1 个空格**（半角空格 / NBSP / 窄空格），
  *      兼容 PLAN 的千位空格写法 `84 873`、`60 757`；不允许插入任何其它字符；
- *   ② 命中处右侧不得紧邻数字或小数点，左侧不得紧邻数字/小数点/冒号/斜杠/井号
+ *   ② 命中处右侧不得紧邻数字或小数点，左侧不得紧邻数字/小数点/冒号/斜杠/井号/**节号 `§`**
  *      （沿用 numberOccurrences 的「非行号引用」约定：防 `84873.5`、`1.26`、`PLAN:124`、
- *      以及漂移段 `1534/1541`、`124/83` 这类「斜杠后的配对旧数」被当成正读数控数）；
+ *      以及漂移段 `1534/1541`、`124/83` 这类「斜杠后的配对旧数」被当成正读数控数。
+ *      ⚠ `§` 与 `.数字` 这两条例外三处都要有：`numberOccurrences` / `numberHitLines` /
+ *      `planNumberHits` 必须逐字同步，否则「段内是否仍有旧读数」与「出段列举」会对同一个数
+ *      给出相反答案。三者的**右边界并不完全相同**（既存差异，不是本次引入）：
+ *      `planNumberHits` 用 `(?![\d.])`，句末 `124.` 也不计；另两者只排除 `124.1` 这种
+ *      「点后紧跟数字」的小节号，句末 `124.` 仍计 —— 判 planNumber「登记值有没有写进正文」
+ *      时取严是安全的，判「旧读数出没出段」时取严会把真出段放过，故那里只能到 `.\d` 为止）。
  *   ③ 逐行匹配前先把**日期/时刻上下文整串涂白**（`YYYY-MM-DD`、`YYYY/M/D`、`D.M.YYYY`、`HH:MM(:SS)`
  *      替换为等长空格）⇒ 纯日期行不再贡献命中，日期里的 26/51/83 之类两位数不再假绿；
  *   ④ planNumber 不是纯数字串（若将来出现措辞型锚点）时退回裸子串语义，不放松 ①–③。
@@ -519,7 +526,7 @@ export function planNumberHits(planText, num) {
     /\b\d{1,2}[-/.](?:19|20)\d{2}\b/g,
     /\b\d{1,2}:\d{2}(?::\d{2})?\b/g,
   ];
-  const re = new RegExp(`(?:^|[^\\d.:#/])${digits.split("").join("[ \\u00A0\\u2009]?")}(?![\\d.])`, "g");
+  const re = new RegExp(`(?:^|[^\\d.:#/§])${digits.split("").join("[ \\u00A0\\u2009]?")}(?![\\d.])`, "g");
   const hits = [];
   lines.forEach((raw, i) => {
     let l = raw;
@@ -605,9 +612,10 @@ export function alsoAtRegionStatus(planLines, region, number = null) {
   return { ok: true, start, end, missing: [], reason: "", occurrences, anchored };
 }
 
-/** 按数字边界找旧读数的出现行（与 [`numberOccurrences`] 同一正则，只是输入换成分行数组）。 */
+/** 按数字边界找旧读数的出现行（与 [`numberOccurrences`] **同一正则口径**，只是输入换成分行数组；
+ *  ⚠ 两处必须逐字同步，否则「段内是否仍有旧读数」与「出段列举」会对同一个数给出相反答案）。 */
 export function numberHitLines(planLines, number) {
-  const re = new RegExp(`(^|[^\\d:.#])${number}(?!\\d)`);
+  const re = new RegExp(`(^|[^\\d:.#§])${number}(?!\\d|\\.\\d)`);
   const hits = [];
   planLines.forEach((l, i) => {
     re.lastIndex = 0;
@@ -1788,6 +1796,29 @@ function runSelftest() {
   const f5b = fixture();
   r = reconcile(f5b.register, f5b.readings, f5b.plan.replace("### 0.13 下一节", "### 0.13 下一节\n这里再写一次 9 条就违规了"));
   check(has(r, /旧读数 9 出现在漂移列举段之外/), "负控⑤b：漂移段之后的同节外出现也要红");
+
+  // 正控⑤c / 负控⑤d（2026-11-06，章节号与读数撞号）：`§124` 这类**章节号**不是读数。
+  // 触发实参是本仓真实形态：给 PLAN 追加 `## §124 …` 一节，让 11 行含 `§124` 的正文被
+  // 判成「旧读数 124 出现在漂移列举段之外」⇒ 门红 11 条，而 124 一次都没作为读数出现。
+  // 三个入口（numberOccurrences / numberHitLines / planNumberHits）必须同一口径，逐个数过去：
+  check(numberOccurrences("见 §124 一节，另见 §0.7。", 124).length === 0, "正控⑤c：numberOccurrences 不得把章节号 `§124` 算成读数出现");
+  check(numberOccurrences("该读数现为 124 条。", 124).length === 1, "负控⑤d：裸 `124` 仍必须算命中（加了 § 例外不许把真读数一起放过）");
+  check(numberHitLines(["引用 §124 的结论"], 124).length === 0, "正控⑤e：numberHitLines 与 numberOccurrences 同口径（§ 放过）");
+  check(numberHitLines(["该值 124 已过期"], 124).length === 1, "负控⑤f：numberHitLines 的裸数命中不许一起放过");
+  check(planNumberHits("详见 §9 一节。", "9").length === 0, "正控⑤g：planNumberHits 同样放过章节号");
+  check(planNumberHits("登记值 9 条。", "9").length === 1, "负控⑤h：planNumberHits 的裸数命中仍算（否则 § 例外会顺带放宽 planNumber 判据）");
+  const f5c = fixture();
+  r = reconcile(f5c.register, f5c.readings, "正文里出现旧读数 9 条（无任何漂移字样）。\n");
+  check(has(r, /旧读数 9/), "负控⑤i：reconcile 档的裸读数出段照旧红（§ 例外没有把这一族整体关掉）");
+  const f5d = fixture();
+  r = reconcile(f5d.register, f5d.readings, "本结论见 §9 一节（无任何漂移字样）。\n");
+  check(!has(r, /旧读数 9/), "正控⑤j：reconcile 档不得因 `§9` 判红（本仓追加 §124 一节的真实形态）");
+  // 正控⑤k / 负控⑤l：**小节号** `124.1`（`### 124.1 标题`）同样不是读数 —— 只放过「`.` 后紧跟数字」这一种
+  // 形态，句末的 `124.`（后面不是数字）必须照旧算命中，否则这条例外会顺手放宽真读数的判据。
+  check(numberOccurrences("### 124.1 纠正口径", 124).length === 0, "正控⑤k：小节号 `124.1` 不得算成读数出现");
+  check(numberHitLines(["### 124.1 纠正口径"], 124).length === 0, "正控⑤k2：numberHitLines 与 numberOccurrences 对 `124.1` 判定一致");
+  check(numberOccurrences("该读数现为 124. 句末点号", 124).length === 1, "负控⑤l：句末 `124.`（点后不是数字）仍必须算命中，例外不许顺手放宽真读数");
+  check(numberHitLines(["该读数现为 124. 句末点号"], 124).length === 1, "负控⑤l2：numberHitLines 同样保留句末点号形态的命中");
 
   // 负控⑥：bannedPlanPhrases 命中
   const f6 = fixture();

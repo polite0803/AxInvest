@@ -25,12 +25,21 @@ pub struct Model {
     /// 来源维度（`builtin` / `user` / `ai` / `plugin`）。
     ///
     /// `is_builtin` 是二值，判不开「AI 生成」与「插件注入」—— 二者信任级别不同。
-    /// 本列是**纯展示元数据**，不参与任何权限分支（与 `is_builtin` 的守卫职责分离）。
+    /// ⚠ 本列**是授权锚点，不是展示元数据**（2026-10 起由提交 `43803e5ac` 收口）：
+    /// 所有按 id 寻址的 `dynamic_ui_*` 命令都先过 `commands/dynamic_ui.rs` 的统一闸门
+    /// `load_schema_for_command`，其判据 `plugin_owned_denied` 只看本列 —— 不在
+    /// `TRUSTED_SCHEMA_ORIGINS`（`builtin` / `user` / `ai`）内即拒。前端权限面
+    /// （`src/lib/dynamicUI/schemaActionPermissions.ts`）是另一道，两者不互相替代。
+    /// 展示用的「谁生成的」语义请另加字段，**不要复用本列**。
     #[sea_orm(indexed)]
     #[sea_orm(default_value = "user")]
     pub origin: String,
     /// 来源归属：`origin = "plugin"` 时为 pluginId，用于卸载插件时**精确撤销**其 UI 贡献；
     /// 其余来源为空串。
+    ///
+    /// ⚠ 本列**刻意不参与授权判定**（不是漏了归属校验）：非插件行的 `owner_id` 恒为空串
+    /// （`create_dynamic_ui_schema` 硬写空），拿它比等于零区分度；而命令面上不存在
+    /// 「不可自报的调用方身份」⇒ 加它也挡不住插件自称归属。后续请勿再提「补 owner_id 校验」。
     #[sea_orm(default_value = "")]
     pub owner_id: String,
     pub created_at: String,

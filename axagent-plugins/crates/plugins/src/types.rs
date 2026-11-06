@@ -712,9 +712,12 @@ pub struct PluginCommandManifest {
 /// 为什么不让插件直接产出 `CommandMetadata`（`src-tauri/.../command_bridge.rs`）：
 /// 那边的类型是 `&'static str` + 宿主宏注册表的域/安全档位，属于**编译期**数据；
 /// 插件命令是运行期数据（启停、安装来源都会变），字段必须是拥有所有权的 `String`。
-/// 这里只投影「名称 / 描述 / 授权档位 / 归属插件」，安全级别由宿主桥按
+/// 这里投影「名称 / 描述 / 授权档位 / 归属插件 / 输入 schema」，安全级别由宿主桥按
 /// `required_permission` 映射 —— 插件不得自封 `Safe`。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// ⚠ derive 里没有 `Eq`：`input_schema` 是 `serde_json::Value`（内部 `f64` 非 `Eq`），
+/// 与 [`PluginCommandManifest`] 同一个约束（见其文档），不是漏写。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginAgentCommand {
     pub plugin_id: String,
@@ -722,6 +725,16 @@ pub struct PluginAgentCommand {
     pub description: String,
     /// 见 [`PluginCommandManifest::required_permission`]；`None` = 只读档。
     pub required_permission: Option<String>,
+    /// 见 [`PluginCommandManifest::input_schema`] —— 原样带出，不落定。
+    ///
+    /// **`None` = 清单未声明** ⇒ 语义等价「空 object `{}`」，与执行链
+    /// `manager.rs::resolved_command_input_schema` 的缺省值逐字同（未声明即不约束输入形状）。
+    ///
+    /// 这里刻意保留 `Option` 而不是投影时就落成 `Value`：`None`（插件什么都没写）与
+    /// `Some({})`（插件显式声明了空 object）在**给 LLM 看的参数面文案**上是两件事 ——
+    /// 前者该提示「未声明参数面」，后者该提示「不接受参数」。执行链不需要这个区分
+    /// （两者都放行），所以那边落定；命令面需要，所以这边不落定。
+    pub input_schema: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

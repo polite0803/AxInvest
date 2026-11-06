@@ -835,7 +835,13 @@ pub struct UpdateOutcomeDto {
 /// `PLUGIN_COMMAND_FAILED` / `PLUGIN_COMMAND_NOT_FOUND` /
 /// `PLUGIN_COMMAND_PERMISSION_DENIED` 专码族（清单见任务 #49 交接报告），
 /// 只需把下面的常量换成 `error_code::plugin::*`，分类逻辑不动。
-fn plugin_command_error_response(
+///
+/// `pub(crate)`（任务 #170）：**智能体侧同一个映射的唯一入口**。此前本函数是模块私有，
+/// 于是 `commands/agent/command_bridge.rs::execute_plugin_agent_command` 只能把
+/// `PluginError` 拼成裸中文串，LLM 拿到的是「插件命令执行失败：xxx」这种既无码也无
+/// 分类的文本 —— 同一个失败，前端路径有结构化错误、智能体路径没有。两处共用一份映射
+/// 而不是复制第二份（禁区 12：禁止重复定义）。
+pub(crate) fn plugin_command_error_response(
     error: &axagent_plugins::PluginError,
 ) -> crate::commands::error::ErrorResponse {
     use crate::commands::error::ErrorCategory;

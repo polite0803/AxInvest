@@ -779,6 +779,9 @@ impl PluginManager {
                     name: command.name,
                     description: command.description,
                     required_permission: command.required_permission,
+                    // 参数面原样带出（未声明保持 `None`，不在这里落空 object）：
+                    // 命令面要区分「没声明」与「声明了空 object」，见 types.rs 该字段的文档。
+                    input_schema: command.input_schema,
                 });
             }
         }
@@ -5533,11 +5536,50 @@ mod tests {
         assert_eq!(specs[0].plugin_id, plugin_id);
         assert_eq!(specs[0].required_permission.as_deref(), Some("workspace-write"));
         assert_eq!(specs[0].description, "Greet");
+        // 参数面同样要过投影，且**未声明时保持 `None`**（不落空 object）：本夹具只声明了
+        // requiredPermission，清单里没有 inputSchema 键。
+        assert_eq!(specs[0].input_schema, None, "未声明的参数面不得被投影成某个默认值");
 
         manager.disable(&plugin_id).expect("禁用插件");
         assert!(
             manager.agent_command_specs().expect("禁用后仍可投影").is_empty(),
             "禁用插件不得再向智能体命令面贡献命令"
+        );
+
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+    }
+
+    /// 任务 #171：`agent_command_specs` 必须把清单的 `inputSchema` **原样**带到命令面上。
+    ///
+    /// 这是三跳投影的第一跳。此前该字段在 `PluginCommandManifest`（已解析）到
+    /// `PluginAgentCommand` 的投影里被整段丢弃，导致宿主索引文案无法呈现参数面 ——
+    /// LLM 看得见命令名、看不见该传什么。本测试锁住「带出且不改写」：
+    /// 声明的 properties / required 逐字保留，不排序、不落定、不补默认值。
+    #[test]
+    fn agent_command_specs_carries_declared_input_schema() {
+        let fixture = CommandPluginFixture::new(
+            "agent-cmd-schema",
+            r#"[ "read" ]"#,
+            r#""inputSchema": { "type": "object", "properties": { "symbol": { "type": "string" }, "count": { "type": "integer" } }, "required": [ "symbol" ] }"#,
+            true,
+        );
+        let CommandPluginFixture { manager, plugin_id, config_home, source, .. } = fixture;
+
+        let specs = manager.agent_command_specs().expect("投影插件命令");
+        assert_eq!(specs.len(), 1, "实际 {specs:?}");
+        assert_eq!(specs[0].plugin_id, plugin_id);
+
+        let declared =
+            specs[0].input_schema.as_ref().expect("清单声明了 inputSchema，投影不得丢弃");
+        assert_eq!(declared["type"], "object");
+        assert!(declared["properties"].get("symbol").is_some(), "实际 {declared}");
+        assert!(declared["properties"].get("count").is_some(), "实际 {declared}");
+        assert_eq!(
+            declared["required"].as_array().map(|items| items.len()),
+            Some(1),
+            "required 数组不得被改写，实际 {declared}"
         );
 
         drop(manager);

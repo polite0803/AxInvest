@@ -238,6 +238,13 @@ pub struct PluginCommandSpec {
     pub name: String,
     pub description: String,
     pub safety: CommandSafety,
+    /// 插件清单声明的输入 JSON Schema（`None` = 未声明）。
+    ///
+    /// 三跳投影的最后一跳（#171）：清单 `PluginCommandManifest::inputSchema` →
+    /// `PluginAgentCommand::input_schema` → 本字段 → [`render_plugin_command_index`]。
+    /// 此前在两跳处都被丢弃，LLM 只知道命令名、不知道该传什么参数。
+    /// `None` 与 `Some({})` 的区分保留到此（语义见 `types.rs` 该字段文档）。
+    pub input_schema: Option<Value>,
 }
 
 /// 插件声明的授权档位 → 智能体安全档位。
@@ -288,6 +295,7 @@ pub fn merge_plugin_command_specs(
                 name: command.name,
                 description: command.description,
                 safety: plugin_command_safety(command.required_permission.as_deref()),
+                input_schema: command.input_schema,
             })
         })
         .collect()
@@ -315,6 +323,72 @@ pub async fn collect_plugin_command_specs(app_handle: &AppHandle) -> Vec<PluginC
     merge_plugin_command_specs(catalog, &macro_names)
 }
 
+/// 单个参数在索引里的形状串。
+///
+/// `enum` 优先于 `type`：字面量集合比类型名更可执行（LLM 照着 enum 能一次传对，
+/// 照着 `string` 只能试）。`type` 是数组（JSON Schema 联合类型）时按 `a|b` 拼接。
+fn plugin_command_param_shape(schema: &Value) -> String {
+    if let Some(values) = schema.get("enum").and_then(Value::as_array) {
+        if !values.is_empty() {
+            return values
+                .iter()
+                .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "?".to_string()))
+                .collect::<Vec<_>>()
+                .join("|");
+        }
+    }
+    match schema.get("type") {
+        Some(Value::String(kind)) => kind.clone(),
+        Some(Value::Array(kinds)) => {
+            let joined = kinds.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("|");
+            if joined.is_empty() {
+                "any".to_string()
+            } else {
+                joined
+            }
+        },
+        _ => "any".to_string(),
+    }
+}
+
+/// 一条插件命令的参数面文案（任务 #171），拼进 [`render_plugin_command_index`] 的括号里。
+///
+/// 措辞刻意分三档，因为它们对 LLM 的处置动作不同：
+/// - 未声明（`None`）⇒「参数面未声明」：不约束形状，传什么都行；
+/// - 声明了但无 `properties` 或 `properties` 为空 ⇒「无参数」：应传 `{}`；
+/// - 有 `properties` ⇒ 逐个列出，必填项加 `*`（图例见 `[plugin]` 段下的说明行）。
+///
+/// 这里**不**重复执行链的强校验（宿主只在声明时校验「input 是 object + required 键存在」，
+/// 见 `PluginManager::check_command_input_shape`），只负责把声明面读得懂地呈现。
+fn render_plugin_command_params(input_schema: Option<&Value>) -> String {
+    let Some(schema) = input_schema else {
+        return String::from("参数面未声明");
+    };
+    let required: HashSet<&str> = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return String::from("无参数");
+    };
+    if properties.is_empty() {
+        return String::from("无参数");
+    }
+    let items: Vec<String> = properties
+        .iter()
+        .map(|(name, prop)| {
+            let mark = if required.contains(name.as_str()) {
+                "*"
+            } else {
+                ""
+            };
+            format!("{name}{mark}: {}", plugin_command_param_shape(prop))
+        })
+        .collect();
+    format!("参数 {}", items.join("、"))
+}
+
 /// 插件命令的索引片段（拼进 `<tauri-command-index>`）。
 ///
 /// 公共纯函数 + 异步包装两层：索引文案的顺序/图标是可单测的纯行为，
@@ -324,6 +398,9 @@ pub fn render_plugin_command_index(specs: &[PluginCommandSpec]) -> String {
         return String::new();
     }
     let mut index = String::from("\n[plugin]\n");
+    index.push_str(
+        "（参数面中 `*` 为必填；\"参数面未声明\" 表示插件未写 inputSchema，args 不约束形状）\n",
+    );
     for spec in specs {
         let safety_icon = match spec.safety {
             CommandSafety::Safe => "✓",
@@ -331,8 +408,12 @@ pub fn render_plugin_command_index(specs: &[PluginCommandSpec]) -> String {
             CommandSafety::Dangerous => "✗",
         };
         index.push_str(&format!(
-            "- {} {}: {}（插件 {}）\n",
-            safety_icon, spec.name, spec.description, spec.plugin_id
+            "- {} {}: {}（插件 {}；{}）\n",
+            safety_icon,
+            spec.name,
+            spec.description,
+            spec.plugin_id,
+            render_plugin_command_params(spec.input_schema.as_ref())
         ));
     }
     index
@@ -349,6 +430,11 @@ pub async fn build_plugin_command_index(app_handle: &AppHandle) -> String {
 /// 走与 `plugin_execute_command` 相同的 `spawn_blocking` + `blocking_read` 形态：
 /// `execute_plugin_command` 内含帧往返（最长 `DEFAULT_COMMAND_TIMEOUT_MS`），
 /// 直接在异步上下文里调会阻塞 runtime 工作线程。
+///
+/// **错误面（任务 #170）**：失败串与前端路径 `commands/plugin.rs::plugin_execute_command`
+/// **逐字同一份映射**（`plugin_command_error_response`）—— 产出结构化
+/// `ErrorResponse`（`code` + `category` + `detail`），不再是 `插件命令执行失败：{…}`
+/// 这种无码无分类的裸中文。复制一份映射逻辑属于禁区 12，所以这里提可见性而不是另写。
 async fn execute_plugin_agent_command(
     app_handle: &AppHandle,
     plugin_id: &str,
@@ -360,13 +446,25 @@ async fn execute_plugin_agent_command(
     let command = command.to_string();
     let args = args.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        manager
-            .blocking_read()
-            .execute_plugin_command(&plugin_id, &command, &args)
-            .map_err(|error| format!("插件命令执行失败：{error}"))
+        manager.blocking_read().execute_plugin_command(&plugin_id, &command, &args).map_err(
+            |error| String::from(crate::commands::plugin::plugin_command_error_response(&error)),
+        )
     })
     .await
-    .map_err(|error| format!("插件命令执行任务失败：{error}"))?
+    .map_err(|error| {
+        // 任务自身失败（worker 线程 panic / 被取消）不是 `PluginError`，没有变体可映射，
+        // 但同样不得回退成裸中文：给 `COMMON_INTERNAL` + `Unrecoverable`。
+        // ⚠ 这里与前端路径**刻意不一致**：`commands/plugin.rs::plugin_execute_command` 的
+        // 同一臂至今是裸串 `format!("plugin execute_command task panicked: {e}")`（非用户
+        // 可见文案，且本批只被授权收口智能体侧两吞点）。该处残留已进「未做」清单。
+        String::from(
+            crate::commands::error::ErrorResponse::new(
+                crate::commands::error_code::common::INTERNAL,
+            )
+            .with_category(crate::commands::error::ErrorCategory::Unrecoverable)
+            .with_detail(format!("插件命令执行任务失败：{error}")),
+        )
+    })?
 }
 
 // ── Command Cache (Phase 3) ────────────────────────────────────────────
@@ -622,6 +720,30 @@ pub fn build_tool_defs() -> Vec<TauriCommandToolDef> {
             }),
             is_read_only: false,
         },
+        // ── 辅助工具：列出可用命令 ──
+        //
+        // 本批前它只是 `dispatch_command` 里的一条臂，**永远进不来**：`dispatch_command` 的唯一
+        // 入口是 `build_command_handlers` 按 `build_tool_defs()` 的名字逐个建 handler，而这张表里
+        // 没有这个名字；`execute_tauri_command` 内层走 `dispatch_proxy_command`，不回灌
+        // `dispatch_command`。同时 `:1162` 与 `invoke_command_by_path` 的报错文案都在叫 LLM
+        // 「使用 list_available_commands 查看可用命令」—— 叫它去调一个不存在的工具。
+        // 处置选择：**提进工具表**而不是删臂 —— 臂体（含宿主 + 插件命令合并、domain 过滤）
+        // 本来就是对的、且已带 `"source"`/`"pluginId"` 字段；删臂要顺手改两处对 LLM 说假话的
+        // 文案，提表只加一条定义就让两处文案变成真话。
+        TauriCommandToolDef {
+            name: "list_available_commands",
+            description: "列出当前可调用的后端命令（宿主命令 + 已启用插件贡献的命名命令），含所属域与安全级别。可选 domain 参数按域过滤；插件命令不属于任何宿主域，带过滤时不返回",
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "description": "功能域名过滤，如 general / devops / data_analysis；省略则返回全部命令（含插件命令）"
+                    }
+                }
+            }),
+            is_read_only: true,
+        },
         // ── 设置（只读） ──
         TauriCommandToolDef {
             name: "tauri_get_settings",
@@ -823,7 +945,13 @@ fn execute_command(
             runtime.block_on(async { dispatch_command(&name, input, &db, &app).await })
         },
     }
-    .map_err(|_| axagent_tools::ToolError::execution_failed(command_name))
+    // 任务 #170：原写法 `.map_err(|_| ToolError::execution_failed(command_name))` 把
+    // `dispatch_command` 的结构化错误串整团丢掉、只留命令名 —— 而 `ToolError` 喂给 LLM 的
+    // 通道是 `Display`（`[kind] message`，见 harness `error.rs`），`message` 正是被换成命令名
+    // 的那一位。于是即使上游产出 `COMMON_TIMEOUT` 这类码，LLM 也只看得到
+    // `[executionFailed] execute_tauri_command`。改用 `_for`：原始错误串进 message（内含
+    // code/category/detail 三元组），error_code 同时非空。
+    .map_err(|error| axagent_tools::ToolError::execution_failed_for(command_name, error))
 }
 
 /// 命令分发 — 根据命令名调用对应的 DAO 操作
@@ -1078,6 +1206,13 @@ async fn dispatch_command(
             let permission_mode = input["permission_mode"].as_str().unwrap_or("default");
 
             // 检查是否在给定权限模式下允许执行
+            //
+            // ⚠ **Dangerous 只有这一条出口**，且这不是巧合而是可判定的（本文件
+            // `is_allowed` / `is_blocked` 的实现）：`is_blocked()` 仅对 `Dangerous` 为真，
+            // 而 `Dangerous::is_allowed(..)` 恒 `false` ⇒ 任何 `is_blocked()` 为真的命令都必然
+            // 满足 `!is_allowed(permission_mode)` ⇒ 本臂恒先吞。
+            // 此处曾有第二条 `else if safety.is_blocked()`（文案「需要显式授权才能执行」），
+            // **无条件不可达**，已删除；不要再加回同形态的分支。
             if !safety.is_allowed(permission_mode) && safety.is_blocked() {
                 warn!(
                     "Command blocked by permission mode: {} (mode={}, severity={})",
@@ -1089,10 +1224,6 @@ async fn dispatch_command(
                     "命令 '{}' 是危险操作，在当前权限模式 '{}' 下不允许执行。",
                     command, permission_mode
                 ))
-            } else if safety.is_blocked() {
-                // 危险命令，拒绝执行
-                warn!("Dangerous command blocked: {} (severity={})", command, safety.severity());
-                Err(format!("命令 '{}' 是危险操作，需要显式授权才能执行。", command))
             } else if safety.requires_confirmation() {
                 // 写入命令，返回需要确认的提示
                 debug!(
@@ -2985,12 +3116,14 @@ mod tests {
         plugin_id: &str,
         name: &str,
         required_permission: Option<&str>,
+        input_schema: Option<Value>,
     ) -> axagent_plugins::PluginAgentCommand {
         axagent_plugins::PluginAgentCommand {
             plugin_id: plugin_id.to_string(),
             name: name.to_string(),
             description: format!("{name} 的描述"),
             required_permission: required_permission.map(str::to_string),
+            input_schema,
         }
     }
 
@@ -3020,8 +3153,8 @@ mod tests {
     #[test]
     fn merge_plugin_command_specs_keeps_host_implementation_on_name_clash() {
         let catalog = vec![
-            plugin_agent_command("demo", "greet", None),
-            plugin_agent_command("demo", "host_owned", Some("workspace-write")),
+            plugin_agent_command("demo", "greet", None, None),
+            plugin_agent_command("demo", "host_owned", Some("workspace-write"), None),
         ];
         let macro_names: HashSet<&str> = ["host_owned"].into_iter().collect();
 
@@ -3031,6 +3164,29 @@ mod tests {
         assert_eq!(specs[0].name, "greet");
         assert_eq!(specs[0].plugin_id, "demo");
         assert_eq!(specs[0].safety, CommandSafety::Safe);
+    }
+
+    /// #171 第二跳：`inputSchema` 必须跟着穿过合并口（宿主重名剔除不影响它）。
+    #[test]
+    fn merge_plugin_command_specs_carries_input_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": { "symbol": { "type": "string" } },
+            "required": [ "symbol" ],
+        });
+        let catalog = vec![
+            plugin_agent_command("demo", "with_schema", None, Some(schema.clone())),
+            plugin_agent_command("demo", "without_schema", None, None),
+        ];
+        let macro_names: HashSet<&str> = HashSet::new();
+
+        let specs = merge_plugin_command_specs(catalog, &macro_names);
+        assert_eq!(specs.len(), 2);
+
+        let declared = specs.iter().find(|s| s.name == "with_schema").expect("投影保留");
+        assert_eq!(declared.input_schema.as_ref(), Some(&schema), "参数面不得被合并口丢弃");
+        let undeclared = specs.iter().find(|s| s.name == "without_schema").expect("投影保留");
+        assert_eq!(undeclared.input_schema, None, "未声明必须保持 None（不落空 object）");
     }
 
     /// 无插件命令时索引片段必须是空串（否则 `<tauri-command-index>` 里会多一个空 `[plugin]` 段）。
@@ -3048,26 +3204,121 @@ mod tests {
                 name: "safe_cmd".into(),
                 description: "只读查询".into(),
                 safety: CommandSafety::Safe,
+                input_schema: None,
             },
             PluginCommandSpec {
                 plugin_id: "p-b".into(),
                 name: "write_cmd".into(),
                 description: "写入".into(),
                 safety: CommandSafety::Caution,
+                input_schema: None,
             },
             PluginCommandSpec {
                 plugin_id: "p-c".into(),
                 name: "danger_cmd".into(),
                 description: "危险".into(),
                 safety: CommandSafety::Dangerous,
+                input_schema: None,
             },
         ];
 
         let index = render_plugin_command_index(&specs);
 
         assert!(index.starts_with("\n[plugin]\n"), "实际 {index}");
-        assert!(index.contains("- ✓ safe_cmd: 只读查询（插件 p-a）"), "实际 {index}");
-        assert!(index.contains("- ⚠ write_cmd: 写入（插件 p-b）"), "实际 {index}");
-        assert!(index.contains("- ✗ danger_cmd: 危险（插件 p-c）"), "实际 {index}");
+        assert!(index.contains("- ✓ safe_cmd: 只读查询（插件 p-a；参数面未声明）"), "实际 {index}");
+        assert!(index.contains("- ⚠ write_cmd: 写入（插件 p-b；参数面未声明）"), "实际 {index}");
+        assert!(index.contains("- ✗ danger_cmd: 危险（插件 p-c；参数面未声明）"), "实际 {index}");
+    }
+
+    /// 取索引里唯一那条命令行（排除 `[plugin]` 段头与图例行）。
+    fn entry(index: &str) -> &str {
+        index.lines().find(|l| l.starts_with("- ")).expect("索引里应有一条命令行")
+    }
+
+    /// #171 主症状锁：声明了 `inputSchema` 的命令，索引必须把**参数面**写出来，
+    /// 且必填标记 / enum 字面量 / 三档措辞都成立。此前第一跳就把 schema 丢了，
+    /// LLM 看得到命令名却不知道该传什么。
+    #[test]
+    fn render_plugin_command_index_exposes_declared_params() {
+        let line = |name: &str, schema: Option<Value>| {
+            render_plugin_command_index(&[PluginCommandSpec {
+                plugin_id: "p".into(),
+                name: name.into(),
+                description: "d".into(),
+                safety: CommandSafety::Safe,
+                input_schema: schema,
+            }])
+        };
+
+        // ① 有 properties + required：必填加 `*`，未必填不加；类型名照 schema。
+        // 逐项断言而不断言整串顺序 —— `serde_json` 未开 `preserve_order`，`Map` 实为
+        // BTreeMap（字典序），但那是实现细节，不该被测试钉死。
+        let index = line(
+            "quote",
+            Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "symbol": { "type": "string" },
+                    "days": { "type": "integer" },
+                    "freq": { "enum": ["1d", "1w"] },
+                },
+                "required": [ "symbol", "freq" ],
+            })),
+        );
+        assert!(index.contains("symbol*: string"), "必填标记缺失，实际 {index}");
+        assert!(index.contains("days: integer"), "实际 {index}");
+        assert!(index.contains("freq*: \"1d\"|\"1w\""), "enum 应展开成字面量集合，实际 {index}");
+        assert!(index.contains("- ✓ quote: d（插件 p；参数 "), "实际 {index}");
+
+        // ② 显式声明空 properties ⇒ 与「未声明」措辞不同（前者该传 {}，后者不约束形状）。
+        // ⚠ 这两档必须**只看命令行**：`[plugin]` 段下的图例行本身就写着「参数面未声明」，
+        // 对整串做 `!contains("参数面未声明")` 必然假（副本自证时实测踩过）。
+        let empty = line("noop", Some(serde_json::json!({ "type": "object", "properties": {} })));
+        assert!(entry(&empty).contains("无参数"), "实际 {empty}");
+        assert!(!entry(&empty).contains("参数面未声明"), "实际 {empty}");
+        let undeclared = line("legacy", None);
+        assert!(entry(&undeclared).contains("参数面未声明"), "实际 {undeclared}");
+
+        // ③ 只声明 required 却没有 properties：不猜形状，落到「无参数」而不是崩。
+        let odd = line("odd", Some(serde_json::json!({ "required": ["x"] })));
+        assert!(entry(&odd).contains("无参数"), "实际 {odd}");
+
+        // ④ `*` 的含义必须就地自解释，否则必填标记是暗号。
+        assert!(undeclared.contains("`*` 为必填"), "图例行缺失：{undeclared}");
+    }
+
+    /// 死臂回归锁：`dispatch_command` 只从 `build_tool_defs()` 的名字进来
+    /// （`build_command_handlers` → `create_handler` → `execute_command`），
+    /// 故**任何**匹配臂的名字都必须是这张表的成员，否则它就是一条永远进不去的死码。
+    /// `list_available_commands` 曾正是这种臂，同时两处报错文案还叫 LLM 去调它。
+    #[test]
+    fn dispatchable_command_names_are_all_exposed_as_tools() {
+        let tool_names: HashSet<&str> = build_tool_defs().iter().map(|def| def.name).collect();
+        for exposed in [
+            "execute_tauri_command",
+            "list_available_commands",
+            "tauri_get_settings",
+            "tauri_save_settings",
+            "tauri_list_conversations",
+            "tauri_get_conversation",
+            "tauri_list_knowledge_bases",
+            "tauri_list_memories",
+            "tauri_render_ui",
+            "tauri_update_ui",
+            "tauri_remove_ui",
+        ] {
+            assert!(
+                tool_names.contains(exposed),
+                "`{exposed}` 必须是 LLM 可见工具，否则其分发臂不可达"
+            );
+        }
+        // 名字唯一：重复注册会互相覆盖 handler。
+        let defs = build_tool_defs();
+        assert_eq!(
+            defs.len(),
+            tool_names.len(),
+            "工具名不得重复，实际 {:?}",
+            defs.iter().map(|d| d.name).collect::<Vec<_>>()
+        );
     }
 }

@@ -13,7 +13,7 @@
 import { create } from "zustand";
 
 import { invoke } from "@/lib/invoke";
-import type { RegisterRhaiRequest, StrategyMeta } from "@/types";
+import type { RegisterRhaiRequest, StrategyMeta } from "@/types/quant";
 
 interface StrategyState {
   strategies: StrategyMeta[];

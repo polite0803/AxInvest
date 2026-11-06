@@ -9,7 +9,7 @@ import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { EquityPoint } from "@/types";
+import type { EquityPoint } from "@/types/quant";
 
 interface EquityCurveChartProps {
   curve: EquityPoint[];

@@ -734,9 +734,8 @@ interface StockAnalysisState {
   pushTimelineNode: (node: TimelineNode) => void;
   updateTimelineNode: (id: string, patch: Partial<TimelineNode>) => void;
   clearTimeline: () => void;
-  // Phase 8: Right panel highlight (0.4s 闪烁)
-  highlightedPanel: string | null;
-  setHighlightedPanel: (key: string | null) => void;
+  // Phase 8: Right panel highlight (0.4s 闪烁) —— 属宿主中性状态，已迁至
+  // stores/shared/uiStore 的 highlightedPanel / setHighlightedPanel（useRightPanel 直接读写它）
 
   // 荐股 ↔ 分析师交叉验证：每只股票在最近一次工作流完成时
   // 缓存的分析师共识，用于 RecommendationPanel 中提示"推荐与共识是否一致"。
@@ -966,7 +965,6 @@ const initialState = {
   sidebarCollapsed: {},
   watchlistVersion: 0,
   timeline: [],
-  highlightedPanel: null,
   stockCodeConsensus: {},
   evidenceReport: {},
   asOfDate: null,
@@ -2205,10 +2203,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   clearTimeline: () => {
     set({ timeline: [] });
-  },
-
-  setHighlightedPanel: (key) => {
-    set({ highlightedPanel: key });
   },
 
   setStockCodeConsensus: (stockCode, consensus) => {

@@ -13,7 +13,7 @@
 
 import { investPath } from "@/lib/investRoutes";
 import { useStrategyStore } from "@/stores";
-import type { StrategyMeta, StrategyType } from "@/types";
+import type { StrategyMeta, StrategyType } from "@/types/quant";
 import { Button, Empty, Spin, Tag, theme, Tooltip, Typography } from "antd";
 import { ChevronRight, RefreshCw, Target } from "lucide-react";
 import { useEffect, useState } from "react";

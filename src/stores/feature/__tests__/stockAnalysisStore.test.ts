@@ -48,7 +48,6 @@ describe("stockAnalysisStore - feature coverage", () => {
       llmStatus: "unknown",
       _unlisten: null,
       timeline: [],
-      highlightedPanel: null,
     });
 
     listenMock.mockResolvedValue(unlistenMock);

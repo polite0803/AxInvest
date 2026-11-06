@@ -9,7 +9,7 @@ import { Card, Input, Select, Space, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { QuantBacktestTrade, TradeSide } from "@/types";
+import type { QuantBacktestTrade, TradeSide } from "@/types/quant";
 import type { ColumnsType } from "antd/es/table";
 
 interface TradesTableProps {

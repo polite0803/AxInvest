@@ -5,8 +5,8 @@ import { Form, Input, InputNumber } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { StrategyMeta } from "@/types";
-import { BUILTIN_STRATEGY_IDS, DEFAULT_STRATEGY_PARAMS } from "@/types";
+import type { StrategyMeta } from "@/types/quant";
+import { BUILTIN_STRATEGY_IDS, DEFAULT_STRATEGY_PARAMS } from "@/types/quant";
 
 interface StrategyFormProps {
   strategy: StrategyMeta;

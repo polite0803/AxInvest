@@ -3,7 +3,7 @@
 // 回撤由权益曲线在「前端」本地推导：Rust 侧 EquityPoint 不含 drawdown 字段，
 // 图表层用 running peak 推导每个时间点的回撤百分比。
 
-import type { EquityPoint } from "@/types";
+import type { EquityPoint } from "@/types/quant";
 
 /**
  * 由权益曲线推导每个时间点的回撤百分比（%）。

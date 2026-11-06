@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useStrategyStore } from "@/stores/feature/quant";
-import type { StrategyMeta } from "@/types";
+import type { StrategyMeta } from "@/types/quant";
 
 export function StrategyListTab() {
   const { t } = useTranslation();

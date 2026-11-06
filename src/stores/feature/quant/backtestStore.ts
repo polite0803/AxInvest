@@ -20,7 +20,7 @@ import type {
   BacktestRunResponse,
   MetricsCompareResponse,
   QuantRun,
-} from "@/types";
+} from "@/types/quant";
 
 interface BacktestState {
   // 表单（受控）

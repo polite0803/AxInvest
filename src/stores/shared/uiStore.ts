@@ -58,6 +58,13 @@ interface UIState {
   chartRawAnalysis: string;
   setChartResult: (data: ChartData | null, rawAnalysis: string) => void;
 
+  /**
+   * 右侧面板 0.4s 闪烁高亮的目标 panel key（null = 无高亮）。
+   * 由 `useRightPanel` 写入、面板组件读取 —— 宿主中性状态，不放业务域 store。
+   */
+  highlightedPanel: string | null;
+  setHighlightedPanel: (key: string | null) => void;
+
   researchSources: ResearchSourceItem[];
   setResearchSources: (sources: ResearchSourceItem[]) => void;
 
@@ -122,6 +129,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   chartData: null,
   chartRawAnalysis: "",
   setChartResult: (chartData, chartRawAnalysis) => set({ chartData, chartRawAnalysis }),
+
+  highlightedPanel: null,
+  setHighlightedPanel: (key) => set({ highlightedPanel: key }),
 
   researchSources: [],
   setResearchSources: (researchSources) => set({ researchSources }),

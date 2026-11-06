@@ -1,7 +1,7 @@
 // drawdown.test.ts — 回撤计算单测（P-2：前端 Vitest）
 import { describe, expect, it } from "vitest";
 
-import type { EquityPoint } from "@/types";
+import type { EquityPoint } from "@/types/quant";
 import { computeDrawdownPercent } from "./drawdown";
 
 function eq(date: string, equity: number): EquityPoint {

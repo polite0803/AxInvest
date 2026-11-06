@@ -21,7 +21,7 @@ import {
   readDecisionProvenance,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import { useSettingsStore, useStockAnalysisStore } from "@/stores";
+import { useSettingsStore, useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { DataQualityReport, HorizonPriceGroup } from "@/types/stock-analysis";
 import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
@@ -179,7 +179,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     };
   }, [llmDecisionJson]);
   // timeline-jump 高亮：被 evidence 指向时短暂加 ring 样式
-  const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
+  const highlightedPanel = useUIStore((s) => s.highlightedPanel);
   // 时间旅行: 当前决策所基于的 as-of 锚点 (live 时为 null)
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const [adding, setAdding] = useState(false);

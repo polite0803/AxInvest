@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useStrategyStore } from "@/stores/feature/quant";
-import { DEFAULT_RHAI_TEMPLATE } from "@/types";
+import { DEFAULT_RHAI_TEMPLATE } from "@/types/quant";
 
 const { Text, Paragraph } = Typography;
 

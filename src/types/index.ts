@@ -2444,11 +2444,10 @@ export type {
 } from "./skillLearning";
 
 // === AxInvest 投资域（stock/quant/pipeline） ===
-export * from "./quant";
-// BacktestResult 与 stock-analysis.ts 同名但语义不同（quant=完整量化回测 vs 单股决策记录）；
-// barrel 权威=quant 版，stock-analysis 版消费方走深路径 "@/types/stock-analysis"
+// quant 已从 barrel 拆除（B8-5 系列，38 个导出），12 条消费方 import 一律经 "@/types/quant" 直取
+// BacktestResult 与 stock-analysis.ts 同名但语义不同（quant=完整量化回测 vs 单股决策记录）：
+// barrel 不再仲裁权威，quant 版走 "@/types/quant"，stock-analysis 版走 "@/types/stock-analysis"
 // stock-analysis 已从 barrel 拆除（B8-5 第一批），消费方一律经 "@/types/stock-analysis" 直取
 export * from "./backgroundTask";
 // pipeline 已从 barrel 拆除（B8-5 第二批），5 个消费方一律经 "@/types/pipeline" 直取
 // （PipelineResult / PipelineAnalysisSummary / PipelineSummary / PipelineRun / PipelineStepEvent）
-export type { BacktestResult } from "./quant";

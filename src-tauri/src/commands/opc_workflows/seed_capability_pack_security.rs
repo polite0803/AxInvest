@@ -10,7 +10,7 @@ use sea_orm::DatabaseConnection;
 use super::seed_domain_helpers::*;
 
 const TEMPLATE_ID: &str = "security_harness_workflow";
-const TEMPLATE_VERSION: i32 = 4;
+const TEMPLATE_VERSION: i32 = 5;
 
 pub async fn seed_capability_pack_security_workflow_template(
     db: &DatabaseConnection,
@@ -56,7 +56,7 @@ pub async fn seed_capability_pack_security_workflow_template(
             "step3_security",
             "应急响应",
             "你是应急响应专家。执行「应急响应」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
-            vec![td("OpcSendNotification"), td("WebSearch")],
+            vec![td("WebSearch")],
             None,
             "step3_security",
             vec![("input", "step2_security")],

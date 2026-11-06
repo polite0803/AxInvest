@@ -10,7 +10,7 @@ use sea_orm::DatabaseConnection;
 use super::seed_domain_helpers::*;
 
 const TEMPLATE_ID: &str = "accounting_harness_workflow";
-const TEMPLATE_VERSION: i32 = 5;
+const TEMPLATE_VERSION: i32 = 6;
 
 pub async fn seed_capability_pack_accounting_workflow_template(
     db: &DatabaseConnection,
@@ -56,7 +56,7 @@ pub async fn seed_capability_pack_accounting_workflow_template(
             "step3_accounting",
             "通知客户",
             "你是通知客户专家。执行「通知客户」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
-            vec![td("OpcListCustomers"), td("OpcSendNotification")],
+            vec![td("OpcListCustomers")],
             Some("opc-accounting-financial-approver"),
             "step3_accounting",
             vec![("input", "step2_accounting")],

@@ -13,7 +13,7 @@ use sea_orm::DatabaseConnection;
 
 const PROFILE: &str = "opc-cto-cto-ai-engineer";
 /// gamedev 领域模板版本（v4 丰富拓扑）
-const GD_TEMPLATE_VERSION: i32 = 4;
+const GD_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化游戏开发领域的全部工作流
 pub(crate) async fn seed_domain_gamedev_workflows(
@@ -310,7 +310,7 @@ pub(crate) async fn seed_domain_gamedev_workflows(
                     "修复排期",
                     "为严重缺陷制定修复排期：优先级、责任人、验证标准。\
                      输出 JSON：{\"fix_plan\":[{\"defect\":\"\", \"priority\":\"P0|P1\", \"owner\":\"\", \"due\":\"\", \"verify\":\"\"}]}",
-                    vec![td_desc("OpcSendNotification", "通知开发团队严重缺陷")],
+                    vec![],
                     Some(PROFILE),
                     "a-gd-qa-fix",
                     vec![("functional", "a-gd-qa-functional")],

@@ -15,7 +15,7 @@ use sea_orm::DatabaseConnection;
 
 const PROFILE: &str = "opc-coo-coo-operations-manager";
 /// support 领域模板版本（v4 丰富拓扑）
-const SUP_TEMPLATE_VERSION: i32 = 4;
+const SUP_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化客户支持领域的全部工作流
 pub(crate) async fn seed_domain_support_workflows(
@@ -271,7 +271,7 @@ pub(crate) async fn seed_domain_support_workflows(
                     "紧急处理",
                     "紧急工单优先处理：快速定位、临时规避、升级上报、全程跟进。\
                      输出 JSON：{\"solution\":\"\", }",
-                    vec![td_desc("OpcSendNotification", "紧急通知值班工程师")],
+                    vec![],
                     Some(PROFILE),
                     "a-ticket-urgent-solve",
                     vec![("ticket", "a-ticket-categorize")],

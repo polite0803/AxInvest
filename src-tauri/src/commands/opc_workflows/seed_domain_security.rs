@@ -14,7 +14,7 @@ use sea_orm::DatabaseConnection;
 
 const PROFILE: &str = "opc-cto-cto-ai-engineer";
 /// security 领域模板版本（v4 丰富拓扑）
-const SEC_TEMPLATE_VERSION: i32 = 4;
+const SEC_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化信息安全领域的全部工作流
 pub(crate) async fn seed_domain_security_workflows(
@@ -79,7 +79,7 @@ pub(crate) async fn seed_domain_security_workflows(
                     "整改计划",
                     "为不合规项制定整改计划：措施、责任人、期限、验证方式。\
                      输出 JSON：{\"remediation\":[{\"item\":\"\", \"action\":\"\", \"owner\":\"\", \"due\":\"\", \"verify\":\"\"}]}",
-                    vec![td_desc("OpcSendNotification", "通知合规整改责任人")],
+                    vec![],
                     Some(PROFILE),
                     "a-comp-remediate",
                     vec![("audit", "a-comp-audit")],
@@ -178,7 +178,7 @@ pub(crate) async fn seed_domain_security_workflows(
                     "紧急响应",
                     "启动紧急响应：隔离受感染系统、遏制扩散、通知管理层、应急处置。\
                      输出 JSON：{\"containment\":[], \"notifications\":[], \"actions\":[{\"step\":\"\", \"status\":\"done|pending\", \"owner\":\"\"}]}",
-                    vec![td_desc("OpcSendNotification", "紧急通知管理层与安全团队")],
+                    vec![],
                     Some(PROFILE),
                     "a-incident-emergency",
                     vec![("detect", "a-incident-detect")],
@@ -304,7 +304,7 @@ pub(crate) async fn seed_domain_security_workflows(
                     "授权补充",
                     "测试未获授权，列出所需授权材料与获取流程，暂停测试。\
                      输出 JSON：{\"required_authorizations\":[], }",
-                    vec![td_desc("OpcSendNotification", "通知授权审批人")],
+                    vec![],
                     Some(PROFILE),
                     "a-pentest-authorize",
                     vec![("scope", "a-pentest-scope")],
@@ -408,7 +408,7 @@ pub(crate) async fn seed_domain_security_workflows(
                     "行动",
                     "针对高危威胁制定处置行动：加固措施、检测规则、应急预案。\
                      输出 JSON：{\"actions\":[{\"threat\":\"\", \"action\":\"\", }",
-                    vec![td_desc("OpcSendNotification", "通知安全运营团队高危威胁")],
+                    vec![],
                     Some(PROFILE),
                     "a-threat-act",
                     vec![("analyze", "a-threat-analyze")],

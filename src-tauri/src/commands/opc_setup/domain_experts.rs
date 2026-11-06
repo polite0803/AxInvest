@@ -324,7 +324,7 @@ pub const MARKETING_EXPERTS: &[(&str, &str, &str)] = &[
 ];
 
 pub const MARKETING_PROFILE_TOOLS: &[(&str, &[&str])] = &[
-    ("marketing-community-manager", &["WebSearch", "FileRead", "FileWrite", "OpcSendNotification"]),
+    ("marketing-community-manager", &["WebSearch", "FileRead", "FileWrite"]),
     ("marketing-product-marketer", &["WebSearch", "FileRead", "FileWrite"]),
     ("marketing-brand-strategist", &["WebSearch", "FileRead", "FileWrite", "OpcSearchWiki"]),
     ("marketing-influencer-manager", &["WebSearch", "FileRead", "FileWrite", "OpcSearchWiki"]),
@@ -481,7 +481,7 @@ pub const SECURITY_EXPERTS: &[(&str, &str, &str)] = &[
 ];
 
 pub const SECURITY_PROFILE_TOOLS: &[(&str, &[&str])] = &[
-    ("security-patch-manager", &["Bash", "FileRead", "WebSearch", "OpcSendNotification"]),
+    ("security-patch-manager", &["Bash", "FileRead", "WebSearch"]),
     ("security-incident-responder", &["Bash", "FileRead", "Grep", "WebSearch"]),
     ("security-compliance-auditor", &["FileRead", "WebSearch", "OpcSearchWiki"]),
     ("security-risk-assessor", &["Bash", "FileRead", "Grep", "WebSearch"]),
@@ -585,7 +585,7 @@ pub const SPECIALIZED_EXPERTS: &[(&str, &str, &str)] = &[
 pub const SPECIALIZED_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("specialized-ethics-reviewer", &["WebSearch", "FileRead", "FileWrite", "OpcSearchWiki"]),
     ("specialized-research-analyst", &["WebSearch", "FileRead", "FileWrite", "OpcSearchWiki"]),
-    ("specialized-change-manager", &["FileRead", "FileWrite", "WebSearch", "OpcSendNotification"]),
+    ("specialized-change-manager", &["FileRead", "FileWrite", "WebSearch"]),
     ("specialized-training-specialist", &["FileRead", "FileWrite", "WebSearch"]),
     ("specialized-legal-advisor", &["WebSearch", "FileRead", "OpcSearchWiki"]),
     ("specialized-data-scientist", &["Bash", "FileRead", "FileWrite", "WebSearch"]),

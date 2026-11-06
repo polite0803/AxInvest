@@ -40,7 +40,7 @@ const AI_RESEARCH_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("ai-research-director", &["OpcListProjects", "OpcCreateProject", "OpcSearchWiki"]),
     ("ai-literature-analyst", &["WebSearch", "FileRead", "OpcSearchWiki"]),
     ("ai-benchmark-analyst", &["Bash", "FileRead", "FileWrite"]),
-    ("ai-report-analyst", &["FileWrite", "OpcListKpis", "OpcRecordKpi", "OpcSendNotification"]),
+    ("ai-report-analyst", &["FileWrite", "OpcListKpis", "OpcRecordKpi"]),
 ];
 
 // ── 通用种子化函数 ──

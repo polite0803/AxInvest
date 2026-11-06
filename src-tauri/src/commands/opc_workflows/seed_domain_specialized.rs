@@ -24,7 +24,7 @@ const CEO: &str = "opc-ceo-ceo-business-strategist";
 const CFO: &str = "opc-cfo-cfo-financial-analyst";
 const COO: &str = "opc-coo-coo-operations-manager";
 /// specialized 领域模板版本（v4 丰富拓扑）
-const SPC_TEMPLATE_VERSION: i32 = 4;
+const SPC_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化专业服务领域的全部工作流
 pub(crate) async fn seed_domain_specialized_workflows(
@@ -104,7 +104,7 @@ pub(crate) async fn seed_domain_specialized_workflows(
                     "变革执行",
                     "监督变革执行，收集反馈并调整计划。\
                      输出 JSON：{\"progress\":0, \"feedback\":[], \"adjustments\":[], \"blockers\":[]}",
-                    vec![td_desc("OpcSendNotification", "通知变革相关方")],
+                    vec![],
                     Some(CEO),
                     "a-change-exec",
                     vec![("plan", "a-change-plan"), ("light", "a-change-light")],
@@ -175,7 +175,7 @@ pub(crate) async fn seed_domain_specialized_workflows(
                     "紧急整改",
                     "优先整改高风险差距：立即行动、责任到人、限期完成。\
                      输出 JSON：{\"remediation\":[{\"gap\":\"\", \"action\":\"\", \"owner\":\"\", \"deadline\":\"\"}], \"risk_after\":\"low\"}",
-                    vec![td_desc("OpcSendNotification", "通知隐私整改责任人")],
+                    vec![],
                     Some(CFO),
                     "a-privacy-fix",
                     vec![("audit", "a-privacy-audit")],
@@ -610,7 +610,7 @@ pub(crate) async fn seed_domain_specialized_workflows(
                     "风险升级",
                     "发现重大合同风险，升级至法务负责人：风险条款、影响、谈判建议。\
                      输出 JSON：{\"escalation\":[], }",
-                    vec![td_desc("OpcSendNotification", "通知法务负责人重大风险")],
+                    vec![],
                     Some(CFO),
                     "a-legal-escalate",
                     vec![("review", "a-legal-review")],

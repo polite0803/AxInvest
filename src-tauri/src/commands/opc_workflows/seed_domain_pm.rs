@@ -13,7 +13,7 @@ use sea_orm::DatabaseConnection;
 
 const PROFILE: &str = "opc-coo-coo-operations-manager";
 /// pm 领域模板版本（v4 丰富拓扑）
-const PM_TEMPLATE_VERSION: i32 = 4;
+const PM_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化项目管理领域的全部工作流
 pub(crate) async fn seed_domain_pm_workflows(db: &DatabaseConnection) -> Result<usize, String> {
@@ -76,7 +76,7 @@ pub(crate) async fn seed_domain_pm_workflows(db: &DatabaseConnection) -> Result<
                     "应对",
                     "为高风险项制定应对策略：规避、转移、缓解、接受，含行动项与责任人。\
                      输出 JSON：{\"responses\":[{\"risk\":\"\", \"strategy\":\"\", \"actions\":[], \"owner\":\"\", \"due\":\"\"}]}",
-                    vec![td_desc("OpcSendNotification", "通知高风险项相关方")],
+                    vec![],
                     Some(PROFILE),
                     "a-risk-respond",
                     vec![("assess", "a-risk-assess")],
@@ -289,7 +289,7 @@ pub(crate) async fn seed_domain_pm_workflows(db: &DatabaseConnection) -> Result<
                     "阻塞处理",
                     "为阻塞项提出处理建议：升级路径、资源调配、范围调整。\
                      输出 JSON：{\"blocker_actions\":[{\"blocker\":\"\", \"action\":\"\", \"escalate\":false, \"owner\":\"\"}]}",
-                    vec![td_desc("OpcSendNotification", "通知阻塞项相关方")],
+                    vec![],
                     Some(PROFILE),
                     "a-status-resolve",
                     vec![("analyze", "a-status-analyze")],

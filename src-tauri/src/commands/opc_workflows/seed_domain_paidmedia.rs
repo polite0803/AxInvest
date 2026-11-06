@@ -12,7 +12,7 @@ use sea_orm::DatabaseConnection;
 
 const PROFILE: &str = "opc-cmo-cmo-content-strategist";
 /// paidmedia 领域模板版本（v4 丰富拓扑）
-const PM_TEMPLATE_VERSION: i32 = 4;
+const PM_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化付费媒体领域的全部工作流
 pub(crate) async fn seed_domain_paidmedia_workflows(
@@ -181,7 +181,7 @@ pub(crate) async fn seed_domain_paidmedia_workflows(
                     "优化建议",
                     "ROI 未达标，诊断低效环节并给出优化建议：渠道调整、出价策略、素材优化、受众收窄。\
                      输出 JSON：{\"diagnosis\":\"\", \"recommendations\":[{\"action\":\"\", \"channel\":\"\", \"expected_improvement\":0}], \"priority\":\"\"}",
-                    vec![td_desc("OpcSendNotification", "通知投放团队 ROI 预警")],
+                    vec![],
                     Some(PROFILE),
                     "a-roi-fix",
                     vec![("metrics", "a-roi-calc")],

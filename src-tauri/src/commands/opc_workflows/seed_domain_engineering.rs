@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use super::seed_domain_helpers::*;
 
 /// engineering 领域模板版本（v4 丰富拓扑；wf-eng-refactor/refactor-lite 保持各自版本）
-const ENG_TEMPLATE_VERSION: i32 = 4;
+const ENG_TEMPLATE_VERSION: i32 = 5;
 
 /// 种子化工与开发领域的全部工作流
 pub(crate) async fn seed_domain_engineering_workflows(
@@ -376,7 +376,7 @@ pub(crate) async fn seed_domain_engineering_workflows(
                     "阻塞报告",
                     "存在严重问题，生成阻塞报告：阻塞项、修复要求、复核流程。\
                      输出 JSON：{\"blockers\":[], \"fix_required\":[], \"review_again\":true}",
-                    vec![td_desc("OpcSendNotification", "通知开发者阻塞问题")],
+                    vec![],
                     Some("opc-cto-cto-ai-engineer"),
                     "a-block",
                     vec![("review", "a-review")],
@@ -1038,7 +1038,7 @@ pub(crate) async fn seed_domain_engineering_workflows(
                     "紧急修复",
                     "紧急修复高危漏洞：立即整改、复测验证、上线加固。\
                      输出 JSON：{\"fixes\":[{\"vuln\":\"\", \"patch\":\"\", \"verified\":true}], \"advisory\":\"\"}",
-                    vec![td_desc("FileWrite", "写入修复代码"), td_desc("OpcSendNotification", "通知安全负责人")],
+                    vec![td_desc("FileWrite", "写入修复代码")],
                     Some("opc-cto-cto-ai-engineer"),
                     "a-fix",
                     vec![("scan", "a-scan")],
@@ -1153,7 +1153,7 @@ pub(crate) async fn seed_domain_engineering_workflows(
                     "优先偿还",
                     "制定 P0 债务偿还计划：立即行动、验证标准。\
                      输出 JSON：{\"repay_plan\":[{\"debt\":\"\", \"action\":\"\", \"owner\":\"\", \"due\":\"\"}]}",
-                    vec![td_desc("OpcSendNotification", "通知技术债责任人")],
+                    vec![],
                     Some("opc-cto-cto-ai-engineer"),
                     "a-debt-repay",
                     vec![("ranked", "a-debt-prioritize")],

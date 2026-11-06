@@ -45,7 +45,7 @@ pub const ACCOUNTING_EXPERTS: &[(&str, &str, &str)] = &[
 pub const ACCOUNTING_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("accounting-financial-clerk", &["OpcCreateInvoice", "OpcListCustomers", "OpcListInvoices"]),
     ("accounting-financial-approver", &["OpcListInvoices", "OpcGetFinancialReport"]),
-    ("accounting-financial-assistant", &["OpcSendNotification", "OpcListInvoices"]),
+    ("accounting-financial-assistant", &["OpcListInvoices"]),
     ("accounting-financial-analyst", &["OpcGetFinancialReport", "OpcRecordKpi", "OpcListKpis"]),
 ];
 
@@ -93,7 +93,7 @@ pub const FINANCE_INVEST_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("finance-market-analyst", &["OpcGetDashboard", "OpcListKpis", "OpcListCustomers"]),
     ("finance-industry-researcher", &["OpcSearchWiki", "OpcListProjects"]),
     ("finance-asset-allocator", &["OpcGetFinancialReport", "OpcGetDashboard"]),
-    ("finance-trade-executor", &["OpcSendNotification", "OpcGetDashboard"]),
+    ("finance-trade-executor", &["OpcGetDashboard"]),
     ("finance-portfolio-reviewer", &["OpcGetFinancialReport", "OpcRecordKpi"]),
 ];
 
@@ -333,7 +333,7 @@ pub const PROJECT_MANAGEMENT_EXPERTS: &[(&str, &str, &str)] = &[
 pub const PROJECT_MANAGEMENT_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("project-planning-expert", &["OpcCreateProject", "OpcAddMilestone", "OpcListProjects"]),
     ("project-monitoring-analyst", &["OpcListProjects", "OpcGetDashboard"]),
-    ("project-delivery-manager", &["OpcListProjects", "OpcSendNotification"]),
+    ("project-delivery-manager", &["OpcListProjects"]),
 ];
 
 // ── 销售增长 ──
@@ -396,7 +396,7 @@ pub const SECURITY_EXPERTS: &[(&str, &str, &str)] = &[
 
 pub const SECURITY_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("security-compliance-auditor", &["OpcSearchWiki", "FileRead"]),
-    ("security-incident-responder", &["OpcSendNotification", "OpcGetDashboard"]),
+    ("security-incident-responder", &["OpcGetDashboard"]),
     ("security-risk-assessor", &["OpcSearchWiki", "OpcGetDashboard"]),
 ];
 

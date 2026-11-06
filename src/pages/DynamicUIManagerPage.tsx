@@ -549,7 +549,13 @@ export function DynamicUIManagerPage() {
                           {item.isBuiltin
                             ? <Tag color="purple">{t("dynamicUIManager.builtin")}</Tag>
                             : null}
-                          {/* 来源元数据（与 isBuiltin 的守卫职责分离）：只标非 user 的产出方 */}
+                          {
+                            /* 「AI 生成」只标历史数据：`43803e5ac` 起创建面硬写 origin="user"、
+                              前端传 origin 的入参也在 `975652a17` 摘除 ⇒ ai 档不再产生，
+                              本分支消费的是那之前落库的存量行（详见 types/dynamicUI.ts 的
+                              TRUSTED_SCHEMA_ORIGINS 注释）。新建面要区分 AI 生成须新增展示字段，
+                              不得回写 origin —— 该字段已被归属闸门独占为安全锚点。 */
+                          }
                           {item.origin === "ai"
                             ? <Tag color="cyan">{t("dynamicUIManager.originAi")}</Tag>
                             : null}

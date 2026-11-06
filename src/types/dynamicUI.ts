@@ -244,8 +244,11 @@ export const COMPONENT_REQUIRED_PROPS: Readonly<
 /**
  * Schema 来源维度（后端 `dynamic_ui_schemas.origin`）。
  *
- * 与 `isBuiltin`（二值、用于删除/修改守卫）职责分离：本字段是**纯展示元数据**，
- * 用来区分「AI 生成」与「插件注入」这类信任级别不同的来源，不做权限分支。
+ * ⚠ 本字段在提交 `43803e5ac` 后**已变为安全锚点**：它回答「这行是谁注册的、可不可信」，
+ * 由下面的 `TRUSTED_SCHEMA_ORIGINS` 与后端同名常量做 fail-closed 归属判定。
+ * 与 `isBuiltin`（二值、删除 / 修改守卫）仍职责分离，但它**不再是「纯展示元数据」**，
+ * 也不该再被当作展示字段用 —— 「内容是不是 AI 生成的」这类展示语义请另建展示字段，
+ * 复用 `origin` 承载等于让一个字段同时管授权判定与 UI 呈现，是下一次权限绕过的成因。
  */
 export type DynamicUISchemaOrigin = "builtin" | "user" | "ai" | "plugin";
 
@@ -262,6 +265,16 @@ export type DynamicUISchemaOrigin = "builtin" | "user" | "ai" | "plugin";
  * - `src/lib/dynamicUI/schemaActionPermissions.ts` ⇒ 决定是否注入受限动作权限面；
  * - `src/lib/browserMock.ts` ⇒ dev mock 的 update / delete 归属闸门，必须与真机同判据，
  *   否则 `npm run dev` 下能改删真机拒掉的行，这类缺陷在开发期完全看不见。
+ *
+ * `"ai"` 留在白名单里**不是给新代码的出口**，只为存量行兜底：`43803e5ac` 起创建面把
+ * `origin` 硬写成 `"user"`（前端唯一传 `"ai"` 的入参 `origin: generatedByAI ? "ai"` 已在
+ * `975652a17` 摘除），此后**没有任何写面**能产出 `"ai"` 档 —— 全仓写入点只剩
+ * `create_dynamic_ui_schema`（`"user"`）与插件安装通道（`"plugin"`）。而 `43803e5ac` 之前
+ * 后端采信客户端自报的 `origin`，真实库里确有 `"ai"` 的历史行。把 `"ai"` 从白名单摘掉，
+ * 那些行会被八个归属闸门入口一律拒绝（`load_schema_for_command` 7 处 + `unpin` 内联判定），
+ * 又因 `origin != "plugin"` 不归插件撤销通道管，
+ * 变成用户既改不动也删不掉的孤儿 ⇒ 保留它挡不住任何新攻击面（新代码造不出该字面量），
+ * 放过的只有历史数据。**要恢复「AI 生成」的展示能力请新增展示字段，不要回写 `origin`。**
  */
 export const TRUSTED_SCHEMA_ORIGINS: ReadonlySet<string> = new Set(["builtin", "user", "ai"]);
 

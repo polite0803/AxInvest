@@ -5592,3 +5592,159 @@ PLAN 里那 15 行原本是**当时那一批的实证记录**（含「改前 →
    联合态门禁没验证过，这是本轮七个提交共同的未覆盖项。
 5. 组件中立性棘轮的 4 条已修复 + 3 条腐烂条目未收紧（#177，`--update-baseline` 只能串行窗口做）。
 6. `#32`（OPC 独立仓）照旧被 `#36` 挡着。
+
+## 118. 组件中立性门禁批 A：owner 比较的 camel↔kebab 归一（#168，2026-11-06）
+
+提交 `7594e32d1`，**一个文件** `scripts/check-component-neutrality.mjs`（`git diff --numstat` = +157 / −8，
+281 → 430 行）。批 A / 批 B 的分界沿用立项时的裁定：**批 A = 判据变更**（本批），
+**批 B = 收紧棘轮 212 → 186**（#177，仍待无写手窗口）。
+
+### 118.1 改的是什么
+
+旧判据把「组件一级目录名」与「`src/stores/feature/<X>Store` 剥掉 `Store` 后的 `<X>`」**逐字全等**比较，
+而这两套名字天生是两种命名形：目录 kebab（`stock-analysis`）、store camel（`stockAnalysisStore`）
+⇒ 同一个 owner 的两种写法判成跨域。本批只加一层**比较口径**：
+
+- `normOwner(name) = name.toLowerCase().replace(/[-_]/g, "")`（`:127`）；
+- 三支比较**同批**归一：owner 支、targetOwner 支、NEUTRAL 支（`:149-150` + `isNeutralOwner` `:130-132`）
+  —— NEUTRAL 不归一会和 owner 支分裂成两套口径，故 `n3d` 专门钉它；
+- **不作用于棘轮键**：键仍是 `file + " → " + import 字面量原文`，条目里 `target` / `targetOwner` 存原形
+  （`k1` / `k2` 两条断言锁住）。若把归一并进键，212 条基线**全部失配** ⇒ 那是洗白而不是修判据。
+
+### 118.2 零假阴是量出来的，不是推的
+
+并集 = 41 个组件一级目录名 ∪ 78 个 `stores/feature` 名（剥后缀后参与；其中 73 个真带 `Store`、
+5 个不带）= 去重 100 个名字 ⇒ 归一后 97 键，同键组（成员 >1）**仅 3 组**，且每组都「目录形与 store 形
+同时命中」= 同一模块的两种写法（`llm-wiki`/`llmWiki`、`multi-agent`/`multiAgent`、
+`stock-analysis`/`stockAnalysis`）⇒ 不存在「两个真不同 owner 被归一成同名」的组。
+另有一条未合并组做负控：`gatewayLinkStore`（剥后缀 = `gatewayLink`）与 `link` / `gateway` 两个目录
+归一后仍不相等（`n4`）。
+
+### 118.3 取证
+
+判定档实跑（当前树）：`扫描 927 文件 · 原始跨域引用 202 · 白名单豁免后 199` + `PASS（基线 212，本轮已修复 26）`，
+`GATE_EXIT=0`；`--selftest` 全绿（原 12 条 + 本批 15 条）。
+
+**两个变异体对照**（临时副本 `scripts/.tmp-*.mjs`，跑完即删，未入库 —— 入库的锁是 selftest 断言本身）：
+
+| 变异体 | 改法 | selftest | 判定档读数 |
+|---|---|---|---|
+| A 归一退回全等 | `normOwner` 改回 `return name` | **6 条 FAIL**（norm 形态 2 + 同 owner 正控 4），退红 | — |
+| C NEUTRAL 不归一 | `isNeutralOwner` 改回 `NEUTRAL_PREFIXES.includes` | **1 条 FAIL**（`③d`） | 逐字不变：202 / 199 / PASS |
+
+C 那一行是本轮最有价值的一条证据：它证明 **NEUTRAL 支的归一是纯防御性改动**，今天的真实数据上
+一分钱账面都没动 ⇒ 22 条消失必须全部来自 store 支。这一点由**键集差集**独立复算证实（把 HEAD 版与
+本版各插一行 dump 出 `effective` 键集再比对）：
+
+| 口径（都跑同一棵当前树） | 实例 | 唯一键 | 基线外新增 | 账面已修复 |
+|---|---|---|---|---|
+| HEAD 判据（全等） | 222 | 208 | 0 | 4 |
+| 本批判据（归一） | 199 | 186 | 0 | 26 |
+| 差 | −23 | −22 | **0** | +22 |
+
+消失的 22 条键**逐条**判定：全部 `kind = store` 且 `norm(目录名) == norm(剥 Store 后缀名)`
+（comp 支 0 条、非归一条目 0 条）；新增 0 条。算术自洽：199 实例 − 186 唯一键 = 13 条重复实例
+（旧口径 14 条，差的那 1 条正是 `stock-analysis → stockAnalysisStore` 里被归一消掉的重复实例，
+23 = 22 键 + 1 重复）。
+
+⚠ **那 4 条「已修复」不是本批的**：旧判据在当前树上就已经少 4 条（文档记的 HEAD 时点值是「修复 1」），
+差出来的 3 条来自并行批未提交的改动 —— 这就是记忆里「`--update-baseline` 并行期会把别人未提交的减少
+钉进棘轮」的实例。**批 B 钉账前必须先逐条归属这 4 条**，否则会把别人的减少记成归一的战果。
+
+锚点复核：文件 1–92 行一字未动 ⇒ `docs/plans/PLAN-shared-primitives-neutrality.md:147` 引用的
+`check-component-neutrality.mjs:53`（`NEUTRAL_PREFIXES` 那行）与本文件 `:82-85` 引用的
+`adjudicateImport` 两条正则（PLAN:5354）仍在原位、仍逐字可指。
+`component-neutrality-baseline.json` 与 `component-neutrality-allowlist.json` 相对 HEAD **零 diff**。
+
+### 118.4 未做
+
+1. **批 B（212 → 186）没跑**：`--update-baseline` 一个字节都没写。归一后基线里仍躺着 186 条**真**跨域，
+   外加 3 条腐烂条目（键指向的文件/target 已不存在）—— 都得等无写手窗口。
+2. `findViolations:143` 的 `const selfOwner = owner ?? ownerOf(resolved)` 是 **fail-open** 既存缺陷：
+   调用方传进 `owner` 就无条件采信，传错即少判。动它同样是判据变更（要配负控），本批刻意不碰。
+3. `#190` 不在范围：归一只消 camel/kebab 的**假**阳性，不消拆 stores barrel 后那 243 条真跨域，
+   也不解决「棘轮没有合法收紧通道」。
+4. 旧读数的三处文档记录**未回写**（`PLAN-shared-primitives-neutrality.md:147`、
+   `docs/plans/PLAN-shell-plus-plugins.md:4485` 的 K6、`docs/plans/PLAN-shell-plus-plugins.md:4557` 的 V16）
+   —— 那是各批次当时的实跑快照，改成新值等于篡改取证；差异（228/225/修复 1 →
+   旧判据 225/222/修复 4）已由本节的归属表说明。
+5. 行尾门禁仍红在他人正在编辑的 `docs/reference/skill-manifest-v2-example.json`（纯 CRLF 139 行），
+   与本批无关；本批文件实测 `CR_count=0` 后才用 `SKIP_SIMPLE_GIT_HOOKS=1` 提交。
+
+## 119. dev mock 补齐 dynamic_ui 闸门 + `schemaJson` 落库缺陷（#188，2026-11-06）
+
+提交 `7650ba903`：`src/lib/browserMock.ts`（+116 / −20）与 `src/lib/__tests__/browserMock.dynamicUI.test.ts`
+（+480 / −4），合计 **+596 / −24**。
+
+### 119.1 闸门面：上一批只补了三分之一
+
+`975652a17` 只给 create / update / delete 三条接了归属闸；**存 / 读 / 删表单、钉入、回滚五条改前一行闸门都没有**
+⇒ dev 模式下插件来源的行可被读写表单、可被钉进导航、可被回滚。本批六条全过同一个
+`mockLoadSchemaForCommand`（`:1808`）+ 同一份 `TRUSTED_SCHEMA_ORIGINS`（`src/types/dynamicUI.ts`），**没有第二套白名单**。
+
+`restore_dynamic_ui_schema_version` 按后端严格四步同序（`:624` 闸门 → `:626` 内置守卫 → `:630` 版本查找
+→ `:637` 跨 Schema 校验），并把改前混成一条 `Version not found` 的两种情形换成与后端**逐字同文案**的两条串。
+`unpin` 是唯一例外：判据是「宿主存在**且** `origin` 非可信 ⇒ 拒；宿主不存在 ⇒ 放行」，
+照后端 `dynamic_ui.rs:1130-1132` 的**注释原文**实现（理由 = `delete` 不级联 pins，否则悬空钉入永清不掉），
+执行者复核确认这条例外确实是「放行」而非「收紧」，未跟着转述走。
+
+### 119.2 `schemaJson` 从未落库（真缺陷，且是闸门的前提）
+
+`handleCommand`（调用点 `:2045`）对入参做**递归** snake_case（函数 `convertToSnakeCase` `:1195`）
+⇒ 只有「嵌套 `req` 且字段名含大写」的读法恒 `undefined`：`req.schemaJson` / `req.schemaId` /
+`req.formDataJson` / `req.instanceKey` / `req.changeLog` 全是空读，顶层参数各 handler 早就按 snake 形读，
+所以没一起烂掉（这是对派单前提的一处**纠口径**：影响面不是「顶层也受影响」）。
+
+改法用仓内既有先例（`browserMock.ts:2765` 的 `a ?? b` 双键形）收敛成 `readMockReqField`（`:1839`，
+camel 优先、回落 `camelToSnake`），落点 create `:5383` / update `:5444`+`:5463` / save `:5502`+`:5510`+`:5514`。
+**不动递归转换本身**（那是全 mock 面几十个命令共同的入参形状）。
+
+⚠ 派单没预见的耦合：form_data 三条的宿主键 `req.schemaId` 改前也恒 `undefined` ⇒ 若只加闸门不做键形兼容，
+闸门会把**每一次**保存判成「宿主不存在」（假收紧）。所以 119.2 是 119.1 在 form_data 上的前提，同批做。
+
+### 119.3 取证（leader 独立复跑，不复用执行者的日志）
+
+| 项 | 结果 |
+|---|---|
+| 目标测试文件 | `44 passed / 0 failed`，`VITEST=0`（HEAD 13 例 → 现 44 例，**+31**） |
+| 同目录 4 个既存 browserMock 测试（回归面） | `19 passed`，4 files，`VITEST=0` |
+| `npm run typecheck` | `EXIT=0`，`tsc 发现 src 源文件 **1477** 个`（改前基线同值） |
+| 4 道静态门（jsx-text-i18n / i18n-orphan-diff / component-neutrality / i18n-exemption-budget） | 全 `EXIT=0`，未跑 `--update-baseline` |
+| `npx dprint check <2 文件>` | `EXIT=0`（执行者首次 20 → 定点 fmt 后 0，leader 复跑仍 0） |
+| 行尾 | 两文件 `CR=0`（perl 计数字节级，不用 `grep -c $'\r'`） |
+| 执行者自证的 esbuild 探针 | 25 例（REPRO 3 + GATE 22）：改前 **18 FAIL** / 改后 **0 FAIL** —— 探针件在 `.tmp/`，leader 未复跑，行为级结论由上面 44 例 vitest 独立覆盖 |
+
+⚠ 取数陷阱复现两次并已在记忆里：直接 `npx vitest run <文件>` 会把根路径截断成 `Z: Folders/...`
+并报「No test files found, exiting with code 1」—— **这是探针失败，不是零命中**；必须走
+`npm run test:run -- <文件>`（`scripts/vitest-run.mjs`）。执行者另记录 3 次 worker 60 s 启动超时
+发生在并发 tsc + cargo 的窗口，且用同目录无关既存文件复现 ⇒ 判环境；tsc 退出后连续三次通过。
+
+### 119.4 登记而非本批修
+
+1. 新任务 **#191**：`schemaActionPermissions.ts:76-81` 给插件来源放行 `save/get/delete_*_form_data`，
+   而后端与现在的 mock 按 origin 白名单**一律拒插件行** ⇒ 前端权限表给了后端不兑现的承诺。
+   两条出路（前端收窄 / 后端按 `owner_id` 真放行，后者与 §113.5-1 同批）必须选一条，不许两边各让一步。
+2. 新任务 **#192**：dev mock 与后端的 7 条 dynamic_ui 语义差（版本推进条件、`semver_gt` 冲突校验、
+   restore 回滚前存档、delete 不级联 form_data、pin 的 group 内 position、默认 `instanceKey` 字面量、
+   `revoke_schemas_owned_by` 无 dev 镜像）—— 逐条要么对齐要么在注释里写明「刻意分歧 + 理由」，不许留成语义差。
+3. 执行者未普查 dynamic_ui 之外其它 handler 的嵌套 `req` camelCase 读点（全文件现在只剩 4 处
+   `req.[a-z]*[A-Z]`，1 处是 `:2765` 先例、其余是注释文本）⇒ **其它命令域可能仍有同类恒 `undefined`，未验证**。
+
+## 120. 本轮排期与第五道门读数（2026-11-06，含故意不重锚的两条）
+
+第五道门判定档在 `7650ba903` 这棵树（PLAN 已含 §118 / §119）上跑了一次，`SELFTEST` 17/17 类 check 无空洞，
+但 **`GATE5=1`：2 条硬失败**，且两条都是**在途写手**造成的锚点漂移，不是读数漂移：
+
+| 锚点 | 登记 token | 盘上实测 | 归因 |
+|---|---|---|---|
+| `dojo.extension`（组 H · planLine 304） | `pub fn execute_plugin_command` @ `manager.rs:875` | 第 875 行是一行 `///` 文档注释 | `axagent-plugins/crates/plugins/src/manager.rs` 与 `types.rs` 正在被智能体侧那一批改（未提交） |
+| `command.handler`（组 K · planLine 315） | `pub trait CommandHandler` @ `command_bridge.rs:1292` | 第 1292 行是 `\|spec\| {` | 同一批正在改 `src-tauri/src/commands/agent/command_bridge.rs` |
+
+⇒ **刻意不跑 `--repin-code --apply`**：锚点在别人未提交的中间态上重锚，等那批落地又得再锚一次，
+而且会把「中间态行号」钉成登记表基线。处理办法与 §117.5 相同：那批交回后一次性重锚 + 对账，
+同时把 `frontendFileCaliber`（现值仍 84 815）与 §117.6-5 的棘轮收紧一起收掉。
+
+⚠ 一个反直觉的好消息：`7650ba903` 那批 +596 行前端代码**没有**动 `frontendFileCaliber` —— 第五道门对本次
+判定档只报上面两条硬失败 ⇒ `src/lib/browserMock.ts` 与 `src/lib/__tests__/browserMock.dynamicUI.test.ts`
+都不命中 `feRe`（`/stock|quote|kline|technical|portfolio|trading|advis|invest|quant|market/i`），
+口径读数不变。这与 §117.5 里「只有 `seed-stock-schemas.ts` 命中」是同一判据的两次独立验证。

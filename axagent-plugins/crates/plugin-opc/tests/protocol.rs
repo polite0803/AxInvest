@@ -501,3 +501,264 @@ fn command_frame_publishes_a_blog_post_via_host_seam() {
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
 }
+
+/// `opc_delete_blog_post` 的帧级实证（#180-①：删除写 op）。
+///
+/// 锁五件只有真管道能钉住的跨层口径：
+/// 1. 出站帧的 seam / op 逐字 = `opc.store` / `delete_blog_post`（写错会落
+///    `SEAM_CALL_UNSUPPORTED`，而前端只看得见「删除失败」）；
+/// 2. 出站 `args` **只有 `id` 一个键**、值与命令入参逐字相同（不套 `request`、不带其它字段）；
+/// 3. **三态全部走 payload**：`"removed"` / `"not_found"` / `"protected"` 都是
+///    `ResponseKind::Success`，值原样成为命令出参（不包装、不改写）——「本来没有」与
+///    「不许删」都是业务读数，借错误码表达就等于让前端把三件事读成一件；
+/// 4. 宿主侧真失败 ⇒ 原样透传错误码；
+/// 5. 缺 `id` ⇒ 命令层就拒，**不发接缝帧**。
+#[test]
+fn command_frame_deletes_a_blog_post_via_host_seam() {
+    let mut worker = Worker::spawn();
+
+    // ① + ② + ③（`removed`）。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_delete_blog_post",
+            serde_json::json!({ "id": "post-7" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-delete"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM, "写面同样经 call_seam 出站");
+    assert_eq!(call.args["seam"], "opc.store");
+    assert_eq!(call.args["op"], "delete_blog_post", "op 名必须逐字");
+    let args = call.args["args"].as_object().expect("出站 args 应是对象");
+    assert_eq!(
+        args.keys().cloned().collect::<Vec<String>>(),
+        vec!["id".to_string()],
+        "删除入参只有 id 一个键：{args:?}"
+    );
+    assert_eq!(args["id"], "post-7", "id 必须逐字透传，插件侧不做任何加工");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!("removed"))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "命中应回成功：{response:?}");
+    assert_eq!(response.request_id.as_deref(), Some("req-delete"));
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    assert_eq!(reply["value"], serde_json::json!("removed"), "三态串逐字透出，不建包装对象");
+
+    // ③ 另外两态：仍然 Success，值逐字 —— **不许**借错误码。
+    for (id, want) in [("gone", "not_found"), ("keep-me", "protected")] {
+        worker.send(
+            &CommandFrame::new(
+                PLUGIN_ID,
+                "opc_delete_blog_post",
+                serde_json::json!({ "id": id }),
+                5_000,
+            )
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id(format!("req-{want}")),
+        );
+        let call = worker.recv_request();
+        assert_eq!(call.args["op"], "delete_blog_post");
+        assert_eq!(call.args["args"]["id"], id, "id 必须逐字");
+        worker.send_response(
+            &FrameResponse::success(serde_json::json!(want))
+                .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+        );
+        let response = worker.recv_response();
+        assert_eq!(
+            response.kind,
+            ResponseKind::Success,
+            "`{want}` 是正常结果，落成错误就等于让前端把三件事读成一件：{response:?}"
+        );
+        assert_eq!(response.code, None, "成功帧不该带错误码：{response:?}");
+        assert_eq!(response.value.expect("命令回执必须带 value")["value"], serde_json::json!(want));
+    }
+
+    // ④ 真失败：错误码原样透传。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_delete_blog_post",
+            serde_json::json!({ "id": "post-9" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-delete-fault"),
+    );
+    let call = worker.recv_request();
+    worker.send_response(
+        &FrameResponse::error("TEST_SEAM_DELETE_FAILED", "宿主删库失败")
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Error, "接缝真失败必须让命令失败");
+    assert_eq!(response.code.as_deref(), Some("TEST_SEAM_DELETE_FAILED"));
+    assert_eq!(response.request_id.as_deref(), Some("req-delete-fault"));
+
+    // ⑤ 缺 `id`：命令层就拒，**不发接缝帧**（下一条从 stdout 读到的必须是错误回执）。
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "opc_delete_blog_post", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id("req-delete-no-id"),
+    );
+    let response = worker.recv_response();
+    assert_eq!(
+        response.code.as_deref(),
+        Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+        "缺 id 属命令层参数错误，不该换来一次注定失败的帧：{response:?}"
+    );
+    assert_eq!(response.request_id.as_deref(), Some("req-delete-no-id"));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+/// `opc_create_blog_post` 的帧级实证（#180-②：创建写 op，首个带**正文**的入参）。
+///
+/// 锁五件只有真管道能钉住的跨层口径：
+/// 1. 出站帧的 seam / op 逐字 = `opc.store` / `create_blog_post`；
+/// 2. 命令入参是**平铺**的五个字段，出站 `args` 是**嵌一层**的 `{ "request": {五个字段} }`
+///    —— 多余键不转发，五个字段逐字（含正文，字节闸在宿主侧）；
+/// 3. 出参 = 接缝的列裁剪视图**逐字**（10 个 camelCase 键、无 `content`），
+///    且带 `id`（调用方后续发布 / 删除的句柄）；
+/// 4. 形状不符（缺字段 / tags 非字符串数组）⇒ 命令层拒，**不发帧**；
+/// 5. 宿主侧真失败（含正文超字节预算 ⇒ `SEAM_CALL_INVALID_ARGS`）⇒ 原样透传错误码。
+#[test]
+fn command_frame_creates_a_blog_post_via_host_seam() {
+    let mut worker = Worker::spawn();
+
+    // ① + ② + ③
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_create_blog_post",
+            serde_json::json!({
+                "title": "第一篇",
+                "slug": "first-post",
+                "excerpt": "摘要",
+                "content": "正文若干字",
+                "tags": ["opc", "blog"],
+                // 多余键：形状闸只转发那五个（接缝 args 的形状是契约）。
+                "extra": true,
+            }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-create"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM, "写面同样经 call_seam 出站");
+    assert_eq!(call.args["seam"], "opc.store");
+    assert_eq!(call.args["op"], "create_blog_post", "op 名必须逐字");
+    let args = call.args["args"].as_object().expect("出站 args 应是对象");
+    assert_eq!(
+        args.keys().cloned().collect::<Vec<String>>(),
+        vec!["request".to_string()],
+        "DTO 入参必须嵌一层 `request`（先例 knowledge.vector）：{args:?}"
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut request_keys: Vec<String> = request.keys().cloned().collect();
+    request_keys.sort();
+    assert_eq!(
+        request_keys,
+        ["content", "excerpt", "slug", "tags", "title"],
+        "只转发 DTO 的五个字段（多余键不得过线）：{request:?}"
+    );
+    assert_eq!(request["title"], "第一篇");
+    assert_eq!(request["slug"], "first-post");
+    assert_eq!(request["excerpt"], "摘要");
+    assert_eq!(request["content"], "正文若干字", "正文必须逐字过线（字节闸在宿主）");
+    assert_eq!(request["tags"], serde_json::json!(["opc", "blog"]));
+
+    // 宿主回的视图原样成为命令出参（10 个 camelCase 键，无正文）。
+    let view = seam_row("post-new", 0);
+    worker.send_response(
+        &FrameResponse::success(view.clone())
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "创建应回成功：{response:?}");
+    assert_eq!(response.request_id.as_deref(), Some("req-create"));
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    assert_eq!(reply["value"], view, "出参必须逐字透传接缝视图，不建包装对象");
+    let mut keys: Vec<String> =
+        reply["value"].as_object().expect("视图应是对象").keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "createdAt",
+            "excerpt",
+            "id",
+            "published",
+            "publishedAt",
+            "slug",
+            "tags",
+            "title",
+            "updatedAt",
+            "viewCount",
+        ]
+    );
+    assert!(reply["value"].get("content").is_none(), "正文不过线");
+    assert_eq!(reply["value"]["id"], "post-new", "创建必须回后端给的 id");
+
+    // ④ 形状不符：不发帧，直接落命令层参数错误。
+    for bad in [
+        serde_json::json!({ "title": "t", "slug": "s", "excerpt": "e", "content": "c" }),
+        serde_json::json!({ "title": "t", "slug": "s", "excerpt": "e", "content": "c",
+                            "tags": "opc" }),
+    ] {
+        worker.send(
+            &CommandFrame::new(PLUGIN_ID, "opc_create_blog_post", bad, 5_000)
+                .to_frame_request()
+                .expect("命令帧应能编成请求"),
+        );
+        let response = worker.recv_response();
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+            "形状不符必须在命令层拒（不发帧）：{response:?}"
+        );
+    }
+
+    // ⑤ 宿主的 Validation（正文超预算）⇒ `SEAM_CALL_INVALID_ARGS` 原样透传。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_create_blog_post",
+            serde_json::json!({ "title": "t", "slug": "s", "excerpt": "e", "content": "c",
+                                "tags": [] }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-create-over-budget"),
+    );
+    let call = worker.recv_request();
+    worker.send_response(
+        &FrameResponse::error(error_codes::SEAM_CALL_INVALID_ARGS, "content 越出契约上限")
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Error);
+    assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+    assert_eq!(response.request_id.as_deref(), Some("req-create-over-budget"));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}

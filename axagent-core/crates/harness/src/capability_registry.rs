@@ -235,10 +235,12 @@ impl ServiceDefinition {
 
     /// 预置 opc-store 接缝（OPC 站点内容数据面，宿主独占实现）。
     ///
-    /// 宿主把 `opc_blog_posts` 的列表读面经本接缝以列裁剪视图暴露给插件
-    /// （`list_blog_posts`；正文列 `content` 连 SELECT 都没有，裁剪判据见 `opc_store`
-    /// 模块头），并开放**写 op** `publish_blog_post`（只 `Set` published / published_at /
-    /// updated_at 三列；缺行回 `PublishBlogPostOutcome::NotFound` 这个正常值，不是错误码）。
+    /// 宿主把 `opc_blog_posts` 的读面以列裁剪视图暴露给插件（`list_blog_posts`；正文列
+    /// `content` 连 SELECT 都没有，裁剪判据见 `opc_store` 模块头），并开放**三个写 op**：
+    /// `publish_blog_post`（只 `Set` published / published_at / updated_at 三列；缺行回
+    /// `PublishBlogPostOutcome::NotFound`）、`delete_blog_post`（三态
+    /// `RemoveBlogPostOutcome`）、`create_blog_post`（正文按 `OPC_BLOG_POST_CONTENT_MAX_BYTES`
+    /// 设字节闸）—— 三者都是正常值走 payload、错误码留给真故障。
     /// 命名取 `.store` 族（同 `jobs.store` / `trajectory.store`）：OPC 的站点数据面
     /// （博客 / 落地页 / 联系提交 / 排期）后续都挂本接缝的**不同 op**，不再一表一条接缝。
     /// ⚠ 权限闸**只加写 op**（`write`，判在 `worker.rs` 的 `required_permission_for`）；
@@ -249,7 +251,8 @@ impl ServiceDefinition {
             "1.0",
             "axagent_harness::OpcStoreProvider",
             "OPC 站点内容：list_blog_posts（列裁剪行视图 + limit 之前的匹配总数，不含正文）\
-             / publish_blog_post（写三列，要 write 权限）",
+             / publish_blog_post（写三列）/ delete_blog_post（三态 removed/not_found/protected）\
+             / create_blog_post（正文按字节设闸）—— 三个写 op 都要 write 权限",
         )
     }
 
@@ -1212,13 +1215,14 @@ impl CapabilityRegistry {
         self.provider_as::<dyn crate::AnalysisRecordProvider>("analysis.record")
     }
 
-    // ── opc.store 接缝（OPC 站点内容只读提供者，单实例；唯一 op 是读面 `list_blog_posts`） ──
+    // ── opc.store 接缝（OPC 站点内容提供者，单实例；读 `list_blog_posts` + 三个写 op） ──
 
     /// 注册一个 OPC 站点内容提供者（`opc.store` 接缝）。
     ///
-    /// 宿主把 `opc_blog_posts` 的列表读面经本接缝暴露；列裁剪与 `tags_json` 解码的映射点
+    /// 宿主把 `opc_blog_posts` 的数据面经本接缝暴露；列裁剪与 `tags_json` 解码的映射点
     /// 必须**唯一**（在宿主 provider 内），否则「哪些列不过线」会在多处各写一遍并各自漂移。
-    /// 外部实现注册同一接缝即可整体替换。首批无写 op ⇒ 不设权限闸。
+    /// 外部实现注册同一接缝即可整体替换。写 op（publish / delete / create）的 `write` 权限闸
+    /// 判在 `worker.rs` 的 `required_permission_for`，本 trait 不重复校验。
     pub fn register_opc_store(
         &self,
         provider: Arc<dyn crate::OpcStoreProvider>,

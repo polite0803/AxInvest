@@ -3,8 +3,8 @@
 //! OPC 站点内容接缝（`opc.store`）— DTO + Trait。
 //!
 //! 宿主把 `opc_blog_posts` 的数据面经本接缝暴露给插件：读面 `list_blog_posts`（分页 + 列裁剪）、
-//! 写面 `publish_blog_post`（只 `Set` 三列，不碰 `content`）。**缺行不是错误**：命中不到 id 回
-//! [`PublishBlogPostOutcome::NotFound`]（走 payload、不占错误码）。闸只加写 op（`write`），读 op 不加。
+//! 写面 `publish_blog_post`（只 `Set` 三列）/ `delete_blog_post`（三态）/ `create_blog_post`
+//! （正文按字节设闸）。**缺行不是错误**：回 `NotFound`（走 payload、不占错误码）。闸只加写 op，读 op 不加。
 //!
 //! ## 为什么需要它
 //!
@@ -177,6 +177,44 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::publish_blog_post 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 删除博客文章（`delete_blog_post` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 三态出参见 [`RemoveBlogPostOutcome`]（与 `jobs.store` 的 `remove` 同族）：
+    /// - `id` 空 / 全空白 ⇒ `Err(Validation)`（provider 侧闸，在 IO **之前**）；
+    /// - 受保护 id ⇒ `Ok(Protected)` 且**一条 DELETE 都不发**（先判保护、再删）；
+    /// - 行不存在 ⇒ `Ok(NotFound)` —— **不是错误**：宿主 service 按 `rows_affected == 0` 判，
+    ///   不许回「删成功」；
+    /// - 命中 ⇒ `Ok(Removed)`。
+    ///
+    /// ⚠ 「删不存在的行也回成功」是本仓踩过的形态（裸 `Entity::delete_by_id().exec()` 不检
+    /// `rows_affected`）：那会让前端把一次空操作读成真删除。本 op 只接受**可判别**结果。
+    async fn delete_blog_post(&self, _id: String) -> Result<RemoveBlogPostOutcome> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_blog_post 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新建博客文章（`create_blog_post` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参是既有领域 DTO [`CreateBlogPostInput`]（本批从
+    /// `axagent-quant/crates/company-runtime/src/opc/site.rs` 上收：它要跨进程过帧，
+    /// 而插件进程链接不到实现层 crate ⇒ 权威定义必须在契约层，实现层保留 `pub use` 垫片）。
+    ///
+    /// - `input.content` 按 **UTF-8 字节**计：超 [`OPC_BLOG_POST_CONTENT_MAX_BYTES`] ⇒
+    ///   `Err(Validation)`，**不截断**（截断等于让调用方以为整篇都进库了）；
+    /// - `input.slug` 空 / 全空白 ⇒ `Err(Validation)`（它是对外路由键，表上 `unique`）；
+    ///   `title` / `excerpt` / `content` 的空串**不拒**（先落草稿、后补正文是合法流程）；
+    /// - 落库走宿主既有 `SiteService::create_blog_post`（**不是**本 trait 里重写一遍 SQL），
+    ///   回创建后的[`BlogPostView`]（列裁剪同读面：`content` 不过线，调用方要正文走详情面）。
+    ///
+    /// 为什么出参是视图而不是裸 id：前端拿到 id 与拿到整行是同一批字段（#180 ④ 的教训 ——
+    /// 让前端自己 `randomUUID()` 造 id 会落下悬空引用），而视图已经是接缝唯一的线格式。
+    async fn create_blog_post(&self, _input: CreateBlogPostInput) -> Result<BlogPostView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_blog_post 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -199,6 +237,66 @@ pub enum PublishBlogPostOutcome {
     Published,
     /// `id` 不在表里：**未发起任何 UPDATE**，行数据原样。
     NotFound,
+}
+
+/// `delete_blog_post` 的结果：区分「已删除」「不存在」「受保护未删除」。
+///
+/// 三态与 [`crate::jobs_store::RemoveJobOutcome`] **同族同口径**（那边叫 `RemoveJobOutcome`
+/// —— 命名规则是「表/资源名 + `Remove…Outcome`」，故本接缝落 `RemoveBlogPostOutcome`；
+/// 序列化形态逐字对齐：`#[serde(rename_all = "snake_case")]` ⇒ `"removed"` / `"not_found"` /
+/// `"protected"`，插件侧逐字透传，不做任何包装）。
+///
+/// 为什么 `NotFound` / `Protected` 都走 payload 而不是错误码：它们对调用方都是**业务读数**
+/// （「这篇本来就不在」「这篇不许删」），与「库连不上 / 未实现」不是同一档。升成错误码会让
+/// 插件把三种事读成一件（判据同 [`PublishBlogPostOutcome`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoveBlogPostOutcome {
+    /// 命中并已删除（`rows_affected == 1`）。
+    Removed,
+    /// `id` 不在表里：**未发起任何 DELETE**。
+    NotFound,
+    /// 受保护 id（内置站点内容）：**未删除**，行数据原样。
+    Protected,
+}
+
+/// `create_blog_post` 可提交的正文上限（**字节**，UTF-8 计）。
+///
+/// 与 [`crate::knowledge_vector::KNOWLEDGE_CONTENT_MAX_BYTES`] **同值同口径**（64 KiB）：
+/// 那条是「一次 embedding 调用的成本防线」，这条是「一次写库 + 一次回读的帧体积防线」，
+/// 判据都是**字节**而不是字符 —— 中文正文的字符数只有字节数的三分之一，按字符判会放行
+/// 三倍于预算的正文。
+///
+/// 为什么**不**复用 `MAX_FRAME_LEN`（64 MiB）：那是**帧层**上限（长度前缀能装下多少），
+/// 不是 op 预算 —— 拿它当预算等于「一帧塞 64 MiB 正文」，宿主侧写库与回读都会被拖住，
+/// 而调用方从帧层永远收不到「这篇太大」的明确拒绝（只能撞到一个巨大的超时）。
+///
+/// 超限 ⇒ provider 回 `Err(Validation)`（分派层落 `SEAM_CALL_INVALID_ARGS`），**不截断**。
+pub const OPC_BLOG_POST_CONTENT_MAX_BYTES: usize = 64 * 1024;
+
+/// `create_blog_post` 的入参（`opc.store` 写面唯一携带大字段的 DTO）。
+///
+/// 权威定义在本模块（**不是**实现层）：它要跨进程过帧，而插件进程按依赖规则链接不到
+/// `company-runtime` 的实现层。实现层
+/// （`axagent-quant/crates/company-runtime/src/opc/site.rs`）保留 `pub use` 垫片，
+/// 既有 `SiteService::create_blog_post` 的签名与所有调用方**零改动**（禁区 12 单源）。
+///
+/// 字段与 `opc_blog_posts` 的落库列一一对应：
+/// - `slug`：对外路由键，表上 `unique` ⇒ 空 / 全空白由 provider 拒收（重复由 DB 唯一约束拒）；
+/// - `content`：正文，**唯一**按字节设闸的字段（见 [`OPC_BLOG_POST_CONTENT_MAX_BYTES`]）；
+/// - `tags`：落库是 `tags_json`，编码在实现层做一次（不在接缝上给调用方第二个形态）。
+///
+/// ⚠ `rename_all = "camelCase"` 是禁区 13 的硬要求。本 DTO 的五个字段名恰好都是单词
+/// （`title` / `slug` / `excerpt` / `content` / `tags`）⇒ 注解**不改**线格式，上收前后
+/// 前端 `invoke("opc_create_blog_post", { input })` 的载荷逐字兼容。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBlogPostInput {
+    pub title: String,
+    pub slug: String,
+    pub excerpt: String,
+    pub content: String,
+    pub tags: Vec<String>,
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────
@@ -442,5 +540,117 @@ mod tests {
         assert_eq!(outcome, copied);
         assert_ne!(outcome, PublishBlogPostOutcome::NotFound);
         assert_ne!(PublishBlogPostOutcome::Published, PublishBlogPostOutcome::NotFound);
+    }
+
+    // ── 本批新增：`delete_blog_post` / `create_blog_post` 的形态锁 ─────────────
+
+    /// 默认体：与 publish 同款 `Err(Provider)`，且文案必须点明 trait + 方法。
+    ///
+    /// 落点分层判据同 publish：这是**契约缺省**，不是入参非法 ⇒ 分派层落
+    /// `PLUGIN_CALL_FAILED`，不许升成参数错误，也不许被伪装成 `"not_found"`。
+    #[test]
+    fn delete_and_create_default_methods_are_unimplemented() {
+        let provider = BareStore;
+        let err = futures::executor::block_on(provider.delete_blog_post("post-1".to_string()))
+            .expect_err("默认实现必须是错误");
+        match err {
+            AxAgentError::Provider(message) => {
+                assert!(
+                    message.contains("OpcStoreProvider::delete_blog_post"),
+                    "文案须点明 trait 与方法：{message}"
+                );
+            },
+            other => panic!("默认实现应返回 AxAgentError::Provider，实际 {other:?}"),
+        }
+
+        let err = futures::executor::block_on(provider.create_blog_post(sample_input()))
+            .expect_err("默认实现必须是错误");
+        match err {
+            AxAgentError::Provider(message) => {
+                assert!(
+                    message.contains("OpcStoreProvider::create_blog_post"),
+                    "文案须点明 trait 与方法：{message}"
+                );
+            },
+            other => panic!("默认实现应返回 AxAgentError::Provider，实际 {other:?}"),
+        }
+    }
+
+    fn sample_input() -> CreateBlogPostInput {
+        CreateBlogPostInput {
+            title: "OPC 的第一篇博客".into(),
+            slug: "opc-first-post".into(),
+            excerpt: "摘要若干字".into(),
+            content: "正文".into(),
+            tags: vec!["opc".into(), "blog".into()],
+        }
+    }
+
+    /// 线格式逐字钉住：三个 snake_case 串（与 `jobs.store` 的 `remove` 同一套取值）。
+    ///
+    /// 取值漂移会让插件侧「删掉了 / 本来没有 / 不许删」的判别静默失效（禁区 13：接缝出参
+    /// 就这一套名）。兄弟枚举的取值（`"published"` / `"removed"` 混用）一律不许被接受。
+    #[test]
+    fn remove_outcome_wire_format_is_three_snake_case_strings() {
+        assert_eq!(
+            serde_json::to_value(RemoveBlogPostOutcome::Removed).expect("可序列化"),
+            json!("removed")
+        );
+        assert_eq!(
+            serde_json::to_value(RemoveBlogPostOutcome::NotFound).expect("可序列化"),
+            json!("not_found")
+        );
+        assert_eq!(
+            serde_json::to_value(RemoveBlogPostOutcome::Protected).expect("可序列化"),
+            json!("protected")
+        );
+        for (raw, want) in [
+            (r#""removed""#, RemoveBlogPostOutcome::Removed),
+            (r#""not_found""#, RemoveBlogPostOutcome::NotFound),
+            (r#""protected""#, RemoveBlogPostOutcome::Protected),
+        ] {
+            let parsed: RemoveBlogPostOutcome =
+                serde_json::from_str(raw).expect("线格式应能解回枚举");
+            assert_eq!(parsed, want, "解回值应逐字对应：{raw}");
+        }
+        for bad in
+            [r#""Removed""#, r#""notFound""#, r#"{"state":"removed"}"#, r#""published""#, "null"]
+        {
+            assert!(
+                serde_json::from_str::<RemoveBlogPostOutcome>(bad).is_err(),
+                "非法线格式必须报错：{bad}"
+            );
+        }
+        // 三态两两可判别（分派层与 provider 都要「取一次、比一次」）。
+        assert_ne!(RemoveBlogPostOutcome::Removed, RemoveBlogPostOutcome::NotFound);
+        assert_ne!(RemoveBlogPostOutcome::Removed, RemoveBlogPostOutcome::Protected);
+        assert_ne!(RemoveBlogPostOutcome::NotFound, RemoveBlogPostOutcome::Protected);
+    }
+
+    /// 入参 DTO 的线格式：五个 camelCase 键（本 DTO 五个字段名都是单词，camelCase 与
+    /// snake_case 同形 ⇒ **上收不改载荷**），且没有 `content` 之外的派生键。
+    #[test]
+    fn create_input_key_set_is_exactly_five_words() {
+        let val = serde_json::to_value(sample_input()).expect("序列化应成功");
+        expect_keys(&val, &["title", "slug", "excerpt", "content", "tags"]);
+        let back: CreateBlogPostInput = serde_json::from_value(val).expect("往返应成立");
+        assert_eq!(back.tags, vec!["opc".to_string(), "blog".to_string()]);
+        assert_eq!(back.content, "正文");
+    }
+
+    /// 字节预算住在契约层：值就是 64 KiB，按 **UTF-8 字节** 而不是字符计。
+    ///
+    /// 本用例只钉常量与「中文字符数 ≪ 字节数」这条量纲事实 —— 真正的边界判定
+    /// （`±1` 字节）在宿主 provider 侧（`init/opc_store_service.rs` 的
+    /// `check_content_budget`），那里才拿得到 `Err(Validation)`。
+    #[test]
+    fn content_budget_is_64_kib_and_measured_in_bytes() {
+        assert_eq!(OPC_BLOG_POST_CONTENT_MAX_BYTES, 64 * 1024);
+        // 一个中文字 = 3 字节（UTF-8）⇒ 字符数与字节数**不是**同一个数。
+        let cjk = "文";
+        assert_eq!(cjk.len(), 3, "中文字符按 3 字节计");
+        assert_eq!(cjk.chars().count(), 1);
+        // 预算下界必须是正数：0 会把所有正文都拒掉，等于把写面悄悄关死。
+        // ⚠ 这一条由常量本身保证，不写成 `assert!(CONST > 0)`（会撞 clippy::assertions_on_constants）。
     }
 }

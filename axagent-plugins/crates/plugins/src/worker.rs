@@ -454,10 +454,12 @@ struct HostPeer {
 /// 全是读面（PLAN §56.1-Q4 裁定 `append` 不给 —— 写入口会污染进化门槛读的分母）⇒ 一律落
 /// 下面的 `_ => None`。将来若开写 op，必须**同批**在这里补登记，不许靠分派分支自查权限。
 ///
-/// 本批登记 **`opc.store` 的唯一写 op**（`publish_blog_post`）：它把一行博客置为已发布
-/// （落库只 `Set` published / published_at / updated_at 三列），改的是站点对外可见的内容 ⇒
-/// 要 `write`。同接缝的 `list_blog_posts` **必须仍是 `None`** —— 读缝加闸会把只读插件
-/// （`opc_list_blog_posts` 那条命令）无端拒掉，反向锁与正锁都在 `opc_store_*` 那两条用例里。
+/// 本批登记 **`opc.store` 的三个写 op**（`publish_blog_post` / `delete_blog_post` /
+/// `create_blog_post`）：发布把一行博客置为已发布（落库只 `Set` published / published_at /
+/// updated_at 三列）、删除是不可逆的数据面动作（受保护 id 走三态 `Protected` 兜底）、创建把
+/// 调用方给的正文写进库（正文按契约的字节上限设闸）—— 三者都改站点对外可见的内容 ⇒ 要
+/// `write`。同接缝的 `list_blog_posts` **必须仍是 `None`** —— 读缝加闸会把只读插件
+/// （`opc_list_blog_posts` 那条命令）无端拒掉，反向锁与正锁都在 `opc_store_*` 那几条用例里。
 ///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
@@ -471,7 +473,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ) => Some(PluginPermission::Write),
         ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
         ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
-        ("opc.store", "publish_blog_post") => Some(PluginPermission::Write),
+        // `opc.store` 的三个写 op 一律要 `write`：发布改「对外可见的内容」，删除是**不可逆**
+        // 的数据面动作（受保护 id 另有三态 `Protected` 兜底），创建会把调用方给的正文写进库。
+        // 读 op `list_blog_posts` **必须仍是 `None`**（给读缝加闸会把只读插件无端拒掉）。
+        ("opc.store", "publish_blog_post" | "delete_blog_post" | "create_blog_post") => {
+            Some(PluginPermission::Write)
+        },
         _ => None,
     }
 }
@@ -2617,10 +2624,10 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
-            // ── opc.store 接缝：宿主把 `opc_blog_posts` 的列表读面 + 发布写面暴露给插件 ──
+            // ── opc.store 接缝：宿主把 `opc_blog_posts` 的列表读面 + 三个写面暴露给插件 ──
             // 方向与 analysis.record 同类（宿主 → 插件，见上方先例注释）：只走入站分派，
             // **不进** `SUPPORTED_REMOTE_SEAMS`（那是「插件提供给宿主」的清单）。
-            // 权限闸**只加写 op**：`("opc.store","publish_blog_post") => Write`，读 op 仍 `None`
+            // 权限闸**只加写 op**：`("opc.store", publish/delete/create) => Write`，读 op 仍 `None`
             // （给读缝加闸会让只读插件被无端拒掉 —— 两侧都有用例钉住）。
             // 列裁剪（`content` 连 SELECT 都没有）、`tags_json` 解码、`limit` 区间闸
             // （`OPC_BLOG_POST_LIST_LIMIT_RANGE`）与 `id` 非空闸全在契约层 + 宿主 provider / dao 侧，
@@ -2669,6 +2676,53 @@ impl HostPeer {
                 };
                 match result {
                     Ok(outcome) => to_value("PublishBlogPostOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // `opc.store` 的删除写 op：入参同样只有 `id`，出参是**三态**枚举
+            // （`RemoveBlogPostOutcome`：`"removed"` / `"not_found"` / `"protected"`）。
+            //
+            // 三档里只有「真故障」走错误码：`NotFound`（本来就没有这篇）与 `Protected`
+            // （受保护 id，未删除）都是**业务读数**，逐字透出，分派层不加包装、不换取值
+            // （禁区 13 那条判据同样管枚举；判据与 `jobs.store` 的 `remove` 完全同族）。
+            "opc.store" if op == "delete_blog_post" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_blog_post(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("RemoveBlogPostOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // `opc.store` 的创建写 op：入参是**嵌一层**的 `{ "request": {title, slug, excerpt,
+            // content, tags} }`（先例 `knowledge.vector` 的 `request` 形态 —— 这是一个 DTO 而非
+            // 散标量；平铺时会因缺 `request` 键落 `SEAM_CALL_INVALID_ARGS`，不做兼容翻译）。
+            //
+            // 正文的**字节预算**与 `slug` 非空都在 provider 侧判（数字与语义都不在这一层），
+            // 越限 ⇒ `AxAgentError::Validation` ⇒ `seam_provider_error` 落
+            // `SEAM_CALL_INVALID_ARGS`（与分派层自己的参数错误**同码**，插件侧只认一个码）。
+            "opc.store" if op == "create_blog_post" => {
+                let input: axagent_harness::CreateBlogPostInput =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_blog_post(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 出参是列裁剪视图（与列表行同一套 10 个 camelCase 键，正文不过线）。
+                    Ok(view) => to_value("BlogPostView", &view),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -10786,12 +10840,20 @@ mod tests {
     /// 只记录 `(limit, offset)` 的 `opc.store` 提供者：取证分派层两个**可选标量**的翻译，
     /// 与出参是契约的具名对象（`posts` + `total`）。
     ///
-    /// 写面同样在这份替身上取证：记 `publish_calls`（id 逐字），并让它回**可配置的两态**
-    /// —— 「命中 / 缺行」在分派层必须走同一条 payload 通道，只有真故障才走错误码。
+    /// 写面同样在这份替身上取证：记 `publish_calls` / `delete_calls` / `create_calls`
+    /// （入参逐字），并让结果**可配置** —— 「命中 / 缺行 / 受保护」在分派层必须走同一条
+    /// payload 通道，只有真故障才走错误码。
     struct FixedOpcStore {
         calls: Mutex<Vec<(Option<usize>, Option<usize>)>>,
         publish_calls: Mutex<Vec<String>>,
         publish_outcome: axagent_harness::PublishBlogPostOutcome,
+        /// 删除写面：记 id 逐字，三态可配置（默认 `Removed`）。
+        delete_calls: Mutex<Vec<String>>,
+        delete_outcome: axagent_harness::RemoveBlogPostOutcome,
+        /// 创建写面：记整份 DTO（逐字进门），并可用 `create_rejects` 让 provider 回
+        /// `Err(Validation)` —— 正文超预算在宿主侧就是这条链路（`SEAM_CALL_INVALID_ARGS`）。
+        create_calls: Mutex<Vec<axagent_harness::CreateBlogPostInput>>,
+        create_rejects: Option<String>,
     }
 
     impl FixedOpcStore {
@@ -10800,16 +10862,33 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 publish_calls: Mutex::new(Vec::new()),
                 publish_outcome: axagent_harness::PublishBlogPostOutcome::Published,
+                delete_calls: Mutex::new(Vec::new()),
+                delete_outcome: axagent_harness::RemoveBlogPostOutcome::Removed,
+                create_calls: Mutex::new(Vec::new()),
+                create_rejects: None,
             }
         }
 
         /// 让写面回 `NotFound` 的夹具形态（缺行是**正常结果**，用例要靠它区分 payload 与错误码）。
         fn missing() -> Self {
             Self {
-                calls: Mutex::new(Vec::new()),
-                publish_calls: Mutex::new(Vec::new()),
                 publish_outcome: axagent_harness::PublishBlogPostOutcome::NotFound,
+                delete_outcome: axagent_harness::RemoveBlogPostOutcome::NotFound,
+                ..Self::new()
             }
+        }
+
+        /// 让删除写面回 `Protected`（受保护 id：**未删除**，也是正常结果）。
+        fn protected() -> Self {
+            Self {
+                delete_outcome: axagent_harness::RemoveBlogPostOutcome::Protected,
+                ..Self::new()
+            }
+        }
+
+        /// 让创建写面回 `Err(Validation)`（正文超预算 / 空 slug 在宿主侧就是这一档）。
+        fn rejecting_create(message: &str) -> Self {
+            Self { create_rejects: Some(message.to_string()), ..Self::new() }
         }
     }
 
@@ -10830,6 +10909,36 @@ mod tests {
         ) -> axagent_harness::core_error::Result<axagent_harness::PublishBlogPostOutcome> {
             self.publish_calls.lock().push(id);
             Ok(self.publish_outcome)
+        }
+
+        async fn delete_blog_post(
+            &self,
+            id: String,
+        ) -> axagent_harness::core_error::Result<axagent_harness::RemoveBlogPostOutcome> {
+            self.delete_calls.lock().push(id);
+            Ok(self.delete_outcome)
+        }
+
+        async fn create_blog_post(
+            &self,
+            input: axagent_harness::CreateBlogPostInput,
+        ) -> axagent_harness::core_error::Result<axagent_harness::BlogPostView> {
+            self.create_calls.lock().push(input.clone());
+            if let Some(message) = &self.create_rejects {
+                return Err(axagent_harness::core_error::AxAgentError::Validation(message.clone()));
+            }
+            Ok(axagent_harness::BlogPostView {
+                id: "post-new".into(),
+                title: input.title,
+                slug: input.slug,
+                excerpt: input.excerpt,
+                tags: input.tags,
+                published: false,
+                published_at: None,
+                view_count: 0,
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+            })
         }
     }
 
@@ -10953,27 +11062,31 @@ mod tests {
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
     }
 
-    /// `opc.store` 的权限表**逐条枚举锁**（本批新登记的那一格 + 两侧的反向锁）：
-    /// 写 op `publish_blog_post` ⇒ `Write`；读 op `list_blog_posts` ⇒ **必须仍是 `None`**；
-    /// 表外 op 与近似接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
+    /// `opc.store` 的权限表**逐条枚举锁**（三个写 op + 两侧的反向锁）：
+    /// `publish_blog_post` / `delete_blog_post` / `create_blog_post` ⇒ `Write`；读 op
+    /// `list_blog_posts` ⇒ **必须仍是 `None`**；表外 op 与近似接缝名 ⇒ `None`
+    /// （不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
     /// 这条承诺唯一的机械防线就是本用例 —— 多登记一条会把只读插件（今天
     /// `opc_list_blog_posts` 那条命名命令）无端拒成 `PLUGIN_PERMISSION_DENIED`。
     #[test]
-    fn opc_store_permission_table_has_exactly_one_write_gate() {
-        assert_eq!(
-            required_permission_for("opc.store", "publish_blog_post"),
-            Some(PluginPermission::Write),
-            "本批登记的唯一写 op 必须要求 write"
-        );
+    fn opc_store_permission_table_gates_exactly_the_three_write_ops() {
+        for write_op in ["publish_blog_post", "delete_blog_post", "create_blog_post"] {
+            assert_eq!(
+                required_permission_for("opc.store", write_op),
+                Some(PluginPermission::Write),
+                "写 op `{write_op}` 必须要求 write"
+            );
+        }
         assert_eq!(
             required_permission_for("opc.store", "list_blog_posts"),
             None,
             "读缝一条都不许加闸：加了一条 = 只读插件被拒"
         );
-        // 未登记的 op 名（含将来的 `delete_blog_post`）一律落 `_ => None`，不许被通配接住。
-        for unregistered in ["publish", "blog_publish", "delete_blog_post", ""] {
+        // 未登记的 op 名（含将来才有的 op）一律落 `_ => None`，不许被通配接住。
+        for unregistered in ["publish", "blog_publish", "delete", "create", "remove_blog_post", ""]
+        {
             assert_eq!(
                 required_permission_for("opc.store", unregistered),
                 None,
@@ -10981,8 +11094,10 @@ mod tests {
             );
         }
         // 接缝名逐字：`opc` 少一段、`opc.stores` 多一个字符都不算命中。
-        assert_eq!(required_permission_for("opc", "publish_blog_post"), None);
-        assert_eq!(required_permission_for("opc.stores", "publish_blog_post"), None);
+        for write_op in ["publish_blog_post", "delete_blog_post", "create_blog_post"] {
+            assert_eq!(required_permission_for("opc", write_op), None);
+            assert_eq!(required_permission_for("opc.stores", write_op), None);
+        }
     }
 
     /// 写 op 的四条跨层口径（一条用例串起来，因为它们互为反例）：
@@ -11107,6 +11222,270 @@ mod tests {
             });
         assert_eq!(response.kind, ResponseKind::Error);
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
+    }
+
+    /// `opc.store` 的**删除**写 op（#180-①）四条跨层口径：
+    /// ① 无 `write` ⇒ `PLUGIN_PERMISSION_DENIED` 且**零触达** provider（闸在取 provider 之前）；
+    /// ② 有 `write` ⇒ `id` 逐字进门，出参是契约枚举的 snake_case 串 `"removed"`；
+    /// ③ 有 `write` 但缺 `id` ⇒ `SEAM_CALL_INVALID_ARGS`，零触达（权限过了不等于参数能缺）；
+    /// ④ `"not_found"` / `"protected"` 都是 `ResponseKind::Success` + payload，
+    ///    **不占错误码** —— 「本来就没有这篇」与「这篇不许删」是两种业务读数。
+    #[test]
+    fn opc_store_delete_gate_denies_before_provider_and_returns_three_state_payload() {
+        // ① 无 write：被拒，替身一条都没收到。
+        let denied_store = Arc::new(FixedOpcStore::new());
+        let captured_denied = Arc::clone(&denied_store);
+        let (denied_peer, _denied_runtime) =
+            opc_store_peer_with_permissions(denied_store, Vec::new());
+        let denied =
+            with_watchdog(Duration::from_secs(2), "opc.store delete 无权限", move || {
+                denied_peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "delete_blog_post",
+                        "args": { "id": "post-1" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限的删除必须被拒，实际 {denied:?}"
+        );
+        assert!(
+            captured_denied.delete_calls.lock().is_empty(),
+            "被拒的写 op 不得触达 provider（闸在取 provider 之前）"
+        );
+
+        // ② + ③ 有 write：id 逐字进门、出参 `"removed"`；缺 id 落参数错误且不再触达。
+        let store = Arc::new(FixedOpcStore::new());
+        let captured = Arc::clone(&store);
+        let (peer, _runtime) =
+            opc_store_peer_with_permissions(store, vec![PluginPermission::Write]);
+        let (removed, missing_id) =
+            with_watchdog(Duration::from_secs(2), "opc.store delete 有权限", move || {
+                let removed = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "delete_blog_post",
+                        "args": { "id": "post-1" },
+                    }),
+                    &[],
+                );
+                let missing_id = peer.handle_call_seam(
+                    &json!({ "seam": "opc.store", "op": "delete_blog_post", "args": {} }),
+                    &[],
+                );
+                (removed, missing_id)
+            });
+        assert_eq!(removed.kind, ResponseKind::Success, "有 write 的删除应成功：{removed:?}");
+        assert_eq!(
+            removed.value,
+            Some(json!("removed")),
+            "出参是契约枚举的 snake_case 串，不建包装对象"
+        );
+        assert_eq!(captured.delete_calls.lock().clone(), vec!["post-1".to_string()]);
+        assert_eq!(
+            missing_id.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `id` 必须是参数错误：{missing_id:?}"
+        );
+        assert_eq!(
+            captured.delete_calls.lock().len(),
+            1,
+            "缺参那次不得触达 provider（两次调用只进门一次）"
+        );
+
+        // ④ NotFound / Protected：都走 Success+payload，且取值逐字。
+        for (store, want) in
+            [(FixedOpcStore::missing(), "not_found"), (FixedOpcStore::protected(), "protected")]
+        {
+            let (absent_peer, _absent_runtime) =
+                opc_store_peer_with_permissions(Arc::new(store), vec![PluginPermission::Write]);
+            let response =
+                with_watchdog(Duration::from_secs(2), "opc.store delete 三态", move || {
+                    absent_peer.handle_call_seam(
+                        &json!({
+                            "seam": "opc.store",
+                            "op": "delete_blog_post",
+                            "args": { "id": "post-absent" },
+                        }),
+                        &[],
+                    )
+                });
+            assert_eq!(
+                response.kind,
+                ResponseKind::Success,
+                "`{want}` 是正常结果，不许落成错误帧：{response:?}"
+            );
+            assert_eq!(response.code, None, "成功帧不该带错误码：{response:?}");
+            assert_eq!(response.value, Some(json!(want)), "三态取值必须逐字透出");
+        }
+    }
+
+    /// `opc.store` 的**创建**写 op（#180-②）四条跨层口径：
+    /// ① 无 `write` ⇒ 被拒且零触达；② 有 `write` ⇒ 入参**嵌一层 `request`**、五个字段逐字
+    /// 进门，出参是列裁剪视图（10 个 camelCase 键，无 `content`）；③ 平铺（缺 `request` 键）
+    /// ⇒ `SEAM_CALL_INVALID_ARGS` 且零触达；④ provider 回 `Validation`（正文超预算 / 空 slug）
+    /// ⇒ `SEAM_CALL_INVALID_ARGS`（与分派层自己的参数错误同码，插件侧只认一个码）。
+    #[test]
+    fn opc_store_create_requires_write_and_forwards_nested_request() {
+        // ① 无 write：被拒 + 零触达。
+        let denied_store = Arc::new(FixedOpcStore::new());
+        let captured_denied = Arc::clone(&denied_store);
+        let (denied_peer, _denied_runtime) =
+            opc_store_peer_with_permissions(denied_store, Vec::new());
+        let denied =
+            with_watchdog(Duration::from_secs(2), "opc.store create 无权限", move || {
+                denied_peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "create_blog_post",
+                        "args": { "request": { "title": "标题", "slug": "s", "excerpt": "摘要",
+                                               "content": "正文", "tags": [] } },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限的创建必须被拒，实际 {denied:?}"
+        );
+        assert!(
+            captured_denied.create_calls.lock().is_empty(),
+            "被拒的写 op 不得触达 provider（闸在取 provider 之前）"
+        );
+
+        // ② 有 write：DTO 逐字进门；出参是视图。③ 平铺形态必须被拒且零触达。
+        let store = Arc::new(FixedOpcStore::new());
+        let captured = Arc::clone(&store);
+        let (peer, _runtime) =
+            opc_store_peer_with_permissions(store, vec![PluginPermission::Write]);
+        let (ok, flat) =
+            with_watchdog(Duration::from_secs(2), "opc.store create 有权限", move || {
+                let ok = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "create_blog_post",
+                        "args": { "request": {
+                            "title": "第一篇", "slug": "first-post", "excerpt": "摘要",
+                            "content": "正文", "tags": ["opc", "blog"],
+                        } },
+                    }),
+                    &[],
+                );
+                // 平铺形态（把 DTO 的字段直接摊在 args 上）：缺 `request` 键 ⇒ 参数错误。
+                let flat = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "create_blog_post",
+                        "args": { "title": "第一篇", "slug": "first-post", "excerpt": "摘要",
+                                  "content": "正文", "tags": [] },
+                    }),
+                    &[],
+                );
+                (ok, flat)
+            });
+
+        assert_eq!(ok.kind, ResponseKind::Success, "有 write 的创建应成功：{ok:?}");
+        let view = ok.value.expect("成功帧必须带 value");
+        let mut keys: Vec<String> =
+            view.as_object().expect("出参应是行对象").keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "createdAt",
+                "excerpt",
+                "id",
+                "published",
+                "publishedAt",
+                "slug",
+                "tags",
+                "title",
+                "updatedAt",
+                "viewCount",
+            ],
+            "出参是接缝的列裁剪视图（10 个 camelCase 键）：{view}"
+        );
+        assert_eq!(view["slug"], json!("first-post"), "视图逐字来自 provider");
+        assert_eq!(view["id"], json!("post-new"), "创建必须回后端给的 id");
+        assert!(view.get("content").is_none(), "正文不过线");
+
+        let recorded = captured.create_calls.lock().clone();
+        assert_eq!(recorded.len(), 1, "平铺那次不得触达 provider（缺 request 键）");
+        assert_eq!(recorded[0].title, "第一篇");
+        assert_eq!(recorded[0].slug, "first-post");
+        assert_eq!(recorded[0].excerpt, "摘要");
+        assert_eq!(recorded[0].content, "正文", "正文必须逐字进门（字节闸在 provider 侧）");
+        assert_eq!(recorded[0].tags, vec!["opc".to_string(), "blog".to_string()]);
+
+        assert_eq!(
+            flat.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "平铺形态必须被拒（嵌一层 `request` 是唯一受理形态）：{flat:?}"
+        );
+
+        // ④ provider 回 Validation ⇒ 与分派层参数错误同码。
+        let (reject_peer, _reject_runtime) = opc_store_peer_with_permissions(
+            Arc::new(FixedOpcStore::rejecting_create("content 越出契约上限")),
+            vec![PluginPermission::Write],
+        );
+        let rejected =
+            with_watchdog(Duration::from_secs(2), "opc.store create 超预算", move || {
+                reject_peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "create_blog_post",
+                        "args": { "request": { "title": "t", "slug": "s", "excerpt": "e",
+                                               "content": "c", "tags": [] } },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            rejected.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "宿主拒收入参（正文超预算）必须落 SEAM_CALL_INVALID_ARGS：{rejected:?}"
+        );
+        assert!(
+            rejected.message.as_deref().is_some_and(|m| m.contains("契约上限")),
+            "错误文案应原样透出 provider 的说明：{rejected:?}"
+        );
+    }
+
+    /// 两个新写 op 在**未实现** provider 上必须落 `PLUGIN_CALL_FAILED`（与 publish 同一条链路）：
+    /// 「宿主没接这条 op」不许被升成参数错误，也不许被伪装成 `not_found` / 空视图。
+    #[test]
+    fn opc_store_unimplemented_delete_and_create_map_to_call_failed() {
+        for (op, args) in [
+            ("delete_blog_post", json!({ "id": "post-1" })),
+            (
+                "create_blog_post",
+                json!({ "request": { "title": "t", "slug": "s", "excerpt": "e", "content": "c",
+                                     "tags": [] } }),
+            ),
+        ] {
+            let (peer, _runtime) = opc_store_peer_with_permissions(
+                Arc::new(BareOpcStore),
+                vec![PluginPermission::Write],
+            );
+            let response =
+                with_watchdog(Duration::from_secs(2), "opc.store 新写 op 未实现", move || {
+                    peer.handle_call_seam(
+                        &json!({ "seam": "opc.store", "op": op, "args": args }),
+                        &[],
+                    )
+                });
+            assert_eq!(response.kind, ResponseKind::Error, "未实现必须失败：{op}");
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_CALL_FAILED),
+                "未实现必须是 PLUGIN_CALL_FAILED（op={op}）：{response:?}"
+            );
+        }
     }
 
     /// ③ + ④（写 op）：无 `write` 权限 ⇒ `PLUGIN_PERMISSION_DENIED` 且**零触达**；

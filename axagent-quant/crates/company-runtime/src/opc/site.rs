@@ -141,14 +141,15 @@ pub struct BlogPost {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateBlogPostInput {
-    pub title: String,
-    pub slug: String,
-    pub excerpt: String,
-    pub content: String,
-    pub tags: Vec<String>,
-}
+/// 创建博客的入参 —— **权威定义已上收契约层**（`axagent_harness::CreateBlogPostInput`）。
+///
+/// 为什么上收：`opc.store` 的 `create_blog_post` op 要把它跨进程过帧，而插件进程按依赖
+/// 规则链接不到实现层 crate ⇒ 契约层必须是唯一来源（禁区 12：不许留第二份同义定义）。
+/// 这里只做 `pub use` 垫片：`SiteService::create_blog_post` 的签名、
+/// `src-tauri/src/commands/opc.rs` 的导入路径（`axagent_company_runtime::opc::CreateBlogPostInput`）
+/// 与前端 `invoke("opc_create_blog_post", { input })` 的载荷**全部零改动**
+/// （五个字段名都是单词 ⇒ camelCase 注解不改线格式）。
+pub use axagent_harness::CreateBlogPostInput;
 
 /// 联系表单提交
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +282,31 @@ fn blog_entity_to_dto(e: opc_blog_posts::Model) -> BlogPost {
         view_count: e.view_count as u32,
         created_at: e.created_at,
         updated_at: e.updated_at,
+    }
+}
+
+// ── 接缝视图转换（`opc.store::create_blog_post` 的出参）──────────────────────
+//
+// 为什么这条转换住在实现层：`create_blog_post` 落库后交回的是领域 DTO [`BlogPost`]
+// （**带** `content`），而接缝线格式是列裁剪后的 `axagent_harness::BlogPostView`
+// （正文不过线，判据见 `harness/src/opc_store.rs` 模块头）。转换点只此一处 ⇒
+// 接缝上不会长出第二份字段名单（禁区 12）。
+impl From<BlogPost> for axagent_harness::BlogPostView {
+    fn from(post: BlogPost) -> Self {
+        Self {
+            id: post.id,
+            title: post.title,
+            slug: post.slug,
+            excerpt: post.excerpt,
+            tags: post.tags,
+            published: post.published,
+            published_at: post.published_at,
+            // 领域 DTO 是 `u32`（旧 DTO 遗留），接缝视图是 `i64`（对齐实体列宽）；
+            // u32 → i64 无损，这里是两者之间**唯一**的换算点。
+            view_count: i64::from(post.view_count),
+            created_at: post.created_at,
+            updated_at: post.updated_at,
+        }
     }
 }
 
@@ -757,5 +783,51 @@ mod delete_tests {
             matches!(svc.get_blog_post(&post.id).await, Err(OpcError::NotFound(_))),
             "删后必须取不到"
         );
+    }
+
+    /// `opc.store::create_blog_post` 的出参转换：领域 DTO → 列裁剪视图（真库建行再转）。
+    ///
+    /// 钉两件：#180-①② 的接缝写面不许把正文带出帧（唯一的大字段），以及键集合逐字 =
+    /// 接缝的 10 个 camelCase 键（前端 `SitesTab` 的列表列按 `dataIndex` 取值，
+    /// 键名漂一个字母不会报错、只会让那一列静默变空）。
+    #[tokio::test]
+    async fn create_dto_maps_to_the_column_pruned_seam_view() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功");
+        let svc = DefaultSiteService::new(handle.conn.clone());
+        let post = svc
+            .create_blog_post(CreateBlogPostInput {
+                title: "接缝视图".into(),
+                slug: "post-view-map-test".into(),
+                excerpt: "摘要".into(),
+                content: "正文只落库、不过线".into(),
+                tags: vec!["opc".into()],
+            })
+            .await
+            .expect("创建博客文章应成功");
+
+        let view: axagent_harness::BlogPostView = post.into();
+        let val = serde_json::to_value(&view).expect("视图应可序列化");
+
+        let mut keys: Vec<String> = val.as_object().expect("应为对象").keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "createdAt",
+                "excerpt",
+                "id",
+                "published",
+                "publishedAt",
+                "slug",
+                "tags",
+                "title",
+                "updatedAt",
+                "viewCount",
+            ]
+        );
+        assert!(val.get("content").is_none(), "正文列不得过线（列裁剪点唯一）");
+        assert_eq!(val["tags"], serde_json::json!(["opc"]));
+        assert_eq!(val["published"], serde_json::json!(false), "新建恒为草稿");
+        assert_eq!(val["publishedAt"], serde_json::json!(null), "草稿不写发布时刻");
     }
 }

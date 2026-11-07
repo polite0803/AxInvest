@@ -31,6 +31,7 @@ import {
   listNarrativeStructures as apiListNarrative,
 } from "@/lib/narrativeStructure";
 import { autoLayout } from "@/lib/workflowLayout";
+import type { LlmDiagnoseV2 } from "@/types";
 import type { ChapterMeta, NarrativeStructure, StructureAdjustmentSuggestion } from "@/types/narrative";
 
 export interface ExpandedSubWorkflowData {
@@ -682,27 +683,8 @@ function resolveMergeConflicts(
   return { nodes, edges, renamedVars };
 }
 
-/**
- * V2 协议 LLM diagnose 报告原始 schema(后端 `llm_diagnose_workflow` 返回):
- * 4 档 severity + 顶层 fixes[] + autoApply 标志
- *
- * 导出供 WorkflowExecutor 等跨上下文场景复用(禁止重复定义)。
- */
-export interface LlmDiagnoseV2 {
-  summary: string;
-  issues: Array<{
-    severity: string;
-    category: string;
-    nodeId: string | null;
-    title: string;
-    detail: string;
-    suggestion: string;
-    fix?: DiagnosticFix;
-  }>;
-  suggestions: string[];
-  fixes?: DiagnosticFix[];
-  autoApply?: boolean;
-}
+// LlmDiagnoseV2 的权威定义已下沉到 `src/types/workflow.ts`（组件中立性 A 档）：
+// WorkflowExecutor 跨域消费该类型，不该反向依赖 workflowEditor store。本 store 内部经顶部 import 使用。
 
 /**
  * 把 LLM 返回的 severity 字符串映射到前端 `DiagnosticSeverity` 3 档。

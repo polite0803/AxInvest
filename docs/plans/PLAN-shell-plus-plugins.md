@@ -7050,3 +7050,83 @@ provider 侧 `check_content_budget`，`MAX_FRAME_LEN` 64 MiB 不算 op 预算）
 | H194 | #194 首批 7 键（139→132） | `src/components/{wiki,skill,workflow}/**`、两个 page |
 | I194b2（新） | #194 第二批 settings 族（6 键，132→126） | `src/components/settings/**`、`src/pages/{SettingsPage,KnowledgeHubPage}.tsx` |
 | J216spec（新，只读） | #216 三件前置的规格与决策表 | 只写 `.tmp/laneJ216-spec.md` |
+
+## 130. #216 规格裁定（2026-11-07，只读 lane 交回 `.tmp/laneJ216-spec.md` 后由 leader 拍板）
+
+### 130.1 它推翻我的三条前提（均按盘上采纳）
+
+1. **「B8-1 卡片注册表本体已存在、只是键太窄」不成立**：盘上只有两块互不相干的半机制 ——
+   `PluginSchemaCardSlot`（聊天插槽，键 = `meta.pluginCards[].schemaId` 自由字符串）与
+   `adapters/registry.ts`（run 源注册表，键 = `SourceId`）。**没有任何以「消息类型」为键的键空间**，
+   `Message` 只有 `role/status/meta`，全仓无类型判别式 —— 与 §128.20 记的「本体未建」一致。
+2. **`dashboard_panels` 不止 DashboardPage 一个消费方**：`PluginPanelHost.tsx` 与
+   `DashboardPluginsSettings.tsx` 也吃（§128.20 只点了一个）。
+3. **审批动作的时态写错**：今天它是抽屉直调 store（`EvolutionApprovalDrawer` → `stockAnalysisStore`），
+   **不过 `ActionRouter`**；只有把它改写成 schema 动作之后才会撞上 `schemaActionPermissions` 的
+   fail-closed。「已经被白名单禁止」是未来态，不是现状。
+
+### 130.2 两条决定形状的新事实
+
+- `PluginSummaryDto` **不带 `permissions`** ⇒ 前端判不出「该插件有没有 `write`」⇒ 任何插件声明的
+  写动作，**权限判定必须放后端**，前端只负责渲染后端投影出来的可执行动作集合。
+- schema 动作的 `args` **没有行级模板插值** ⇒ 表格行上的「接受」按钮绑不了该行 `historyId`
+  ⇒ 行级动作只能由**宿主渲染按钮**（这也正好把「按 historyId 自由寻址」关在宿主里）。
+- `plugin-stock` worker 不处理 `ui.action`（落 unknown-op）；`bundled/` 是 `.gitignore` 产物，
+  改清单必须改 `build-plugin-bundle.mjs`（不许手改产物）。
+
+### 130.3 leader 裁定（四条，实施批按此执行）
+
+| 议题 | 裁定 | 理由 |
+|---|---|---|
+| ③ 审批动作走 B 还是 A | **先 B**：后端按 `write` 权限投影 actions + 宿主常量表 `TASK_CARD_HOST_ACTIONS` + 行集校验；A（新建 `evolution.plan` 写接缝）登记为终局项 | B 能当场解锁 #178④；A 是新建接缝 + worker 身份，属大改，与 #35/#36 的插件迁移同批更划算 |
+| `slot` 词汇表 | 首版只登记两个 surface：`chat`（既有聊天插槽）与 `task_card`（本次 `task_cards[]`）；`overview` **不预先开**，等 #178④ 真需要时逐字登记（NEUTRAL 同族纪律：登记面不许被命名形态自动扩） | 少一个未消费的 surface 就少一份要维护的判据 |
+| `write` 是否卡片动作唯一闸 | **是**，但只对 `mutating: true` 的动作生效；只读动作（打开/导航）不要求 `write` | 与 `required_permission_for` 的「写 op 才加闸」同族 |
+| 撞键与 `order` | 宿主优先（同 `collect_plugin_command_specs` 口径）；同一插件内重复键 ⇒ **整个声明拒收**（fail-closed）；跨插件重复 ⇒ 先到先得 + `warn!` | 声明面坏了不该静默挑一个 |
+
+### 130.4 实施批序（互斥文件面）
+
+1. **① 注册表 + ② `task_cards[]` 声明链**（同一批，因为 ② 的投影要落进 ① 的注册表）：
+   Rust 四段照抄 `task_sources[]`（`types.rs` 的 manifest 字段 + `manager.rs` 的 retain/校验 +
+   `commands/plugin.rs` 的 DTO 投影），**必带 `#[serde(alias = "taskCards", rename = "taskCards")]`**
+   （`RawPluginManifest` 无 `rename_all`，漏了就静默丢字段）；前端补 DTO 类型 + 注册表 + 归属性校验。
+2. **③-B 审批动作宿主化**：后端按 `write` 投影动作集合 + 宿主常量表 + 行集校验；前端 `OverviewTab`
+   改读投影（这一步才解锁 #178④ 的三条 import 摘除）。
+3. **③-A（终局）**：新建 `evolution.plan` 写接缝 + worker 身份，登记为后续批次，白名单一个字不动。
+
+**判据不足七条**（`{count}` 契约 / 双数互斥 / 复核失败退化 / 订阅事件 / 能力登记表读数 / 行集校验落点 /
+ui.json 能否表达行级动作）由 ③-B 实施批在落码时按盘上定，**不许按推测补**；定不了的列进报告「需 leader 决定」。
+
+## 131. #194 前两批收口 + #208 关闭（2026-11-07）
+
+### 131.1 交付（两笔提交，均已过门禁复跑）
+
+| 提交 | 批次 | 消键 | 内容 |
+|---|---|---|---|
+| `bbe2fad6b` | 首批 7 键 | 139 → 132 | wiki 页级 props（`IngestPanel` / `LintReport`，宿主页 `IngestPage` / `WikiEditorPage`）；删 4 个零调用点死件（`SkillEvolutionViewer` / `SkillABTestResults` / `SkillVersionTimeline` / `WorkflowPromptTemplateSelector`）；11 语言同步删 **34 组**孤儿 key |
+| `4117046f4` | 第二批 5 键 | 账面仍 132（待收紧） | `EngineDetailPanel` / `EvolutionSettings` → `components/evolution/`；`PromptImportModal` / `PromptTemplatesSettings` → `components/prompt-template/`（`SettingsGroup` 外壳上移到 `SettingsPage`）；`AgentProfileManager` 走 props 下传；`scripts/.i18n-allowlist.json` 清 3 条死文件条目 421 → 418 |
+
+leader 复跑读数：中立性 `PASS`（原始 125 / 豁免后 122 / 基线 132 / 本轮修复 17）、`tsc` 0（1476 文件）、
+key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0）、豁免预算 0（死文件 0）、`doc-refs` 0、dprint 0。
+**基线 132 里仍留 12 条松弛**（别人已修未收紧），收紧转 #217 的安静窗口。
+
+### 131.2 执行者纠正我的四件事（全部按盘上采纳）
+
+1. **纯方法 props 化不一定消键**：`LintReport` 同一 import 行还带类型 `LintResult`，只搬两个方法消不掉 ⇒ 类型同批改走 `@/types`。
+2. **删组件会连带孤儿 i18n key**，而且范围远大于「`components_skill_*` 三块」：实测 26 个（`skill.abTest.*` 11 + `skill.evolution.*` 14 + `skillTimeline.promptDiff` 1）；那三个顶层对象**在 HEAD 就已是孤儿**。
+3. **「留旧路径 shim」在 owner 目录搬迁里是错的**：shim 本身就是 `settings → evolution/prompt-template` 的 import，会当场再造 3 条违规；且这 4 个文件在 `docs/**` 零引用（doc-refs PASS 可证）⇒ 直接删。
+4. **`SourceManager` 是 4 键 / 5 实例 / 3 个 owner**（漏计 `@/components/memory/MemoryGraphView`），任何单目录搬迁都会转嫁键 ⇒ 另立 **#219**（唯一可行解是把 Tab 组合上移到 `KnowledgeHubPage` 注入）。
+
+### 131.3 新记录的假绿形态（本机）
+
+- `check-i18n-orphan-diff.mjs` 在 **UNC 工作目录**下会打印「取不到 git ⇒ 跳过 ≠ 通过」并 **EXIT=0**。必须在 `D:/OneManager/AxInvest` 跑才算判定。
+- 全量 `check-tsc.mjs` 的红可能来自**别路未跟踪的中间态文件**（本次是 `components/prompt-template/PromptTemplatesSettings.tsx` 写了一半）⇒ 先归因再处理，不要改别人的文件。
+
+### 131.4 另立两项
+
+- **#218**：`evolutionStore.getSkillEvolutionHistory` / `getABTestResults` 完全忽略入参、恒返回写死的进化史与 A/B 结果（伪造的 promptDiff 与指标）—— #194 批 3 保持语义中立不改它，缺陷单独立项。
+- **#219**：`SourceManager` 三 owner 中枢（见 131.2-4）。
+
+### 131.5 #208 关闭
+
+两条定点测试齐了：`commands::opc_setup` 5 passed / EXIT=0；`commands::opc_workflows` **16 passed** / EXIT=0。
+配合 `e9f4404d0` 的配置/专家 prompt 去声明，全仓已无 `OpcSendNotification` 活声明。

@@ -950,6 +950,7 @@ macro_rules! register_all_commands {
             commands::plugin::plugin_install,
             commands::plugin::plugin_list,
             commands::plugin::plugin_list_pages,
+            commands::plugin::plugin_list_task_cards,
             commands::plugin::plugin_list_task_sources,
             commands::plugin::plugin_read_panel_asset,
             commands::plugin::plugin_resolve_page_asset,
@@ -1392,6 +1393,7 @@ macro_rules! register_all_commands {
             commands::sub_agent::sub_agent_get_children,
             commands::sub_agent::sub_agent_get_messages,
             commands::sub_agent::sub_agent_list,
+            commands::task_card_host_actions::task_card_host_cards,
             #[cfg(not(mobile))]
             commands::terminal::git_get_branch,
             #[cfg(not(mobile))]

@@ -5475,6 +5475,56 @@ async function executeCommand<T>(
       // 任务中心照常显示宿主源，不因为离线路径报错。
       return [] as T;
 
+    case "plugin_list_task_cards":
+      // 同 plugin_list_task_sources：无安装根 ⇒ 空清单 =「没有插件卡片贡献」，
+      // 宿主卡片照常渲染，聊天侧插槽渲染出空。
+      // ⚠ 这里**不造假卡片**：卡片动作的 `write` 闸在后端装载期（`mutating: true` 要求清单
+      // permissions 含 `write`），前端注册表刻意不复制该判定（禁区 12，两套口径必然漂移）。
+      // 空清单是这条闸在浏览器模式下的 fail-closed 镜像 —— 没有投影就一张卡都不出。
+      return [] as T;
+
+    case "task_card_host_cards":
+      // 宿主卡是**宿主原生投影**（`task_card_host_actions.rs` 纯静态组装），不依赖插件安装根
+      // ⇒ 浏览器模式照常返回，审批卡（计数 + 行级动作）在 `npm run dev` 下端到端可走通。
+      // 行集命令 `list_pending_evolution_plans` 已有 mock 镜像（本文件审批三命令区）。
+      // ⚠ `title` / `actions[].title` 是宿主 i18n **key**（消费方 t() 渲染），与插件卡纯文本口径相反；
+      // `version` 与 `name`/`description`/`author` 不被注册表消费，静态字面量即可（不镜像 CARGO_PKG_VERSION）。
+      return [
+        {
+          id: "host",
+          name: "host",
+          version: "0.0.0",
+          description: "host-owned task cards",
+          author: null,
+          enabled: true,
+          taskCards: [
+            {
+              id: "evolution-approval",
+              title: "tasksCenter.health.pendingEvolution",
+              surface: "task_card",
+              summaryCommand: "list_pending_evolution_plans",
+              detailSchema: null,
+              tone: "gold",
+              order: 0,
+              actions: [
+                {
+                  id: "approve",
+                  title: "stockAnalysis.evolutionApproval.approve",
+                  command: "approve_evolution_plan",
+                  mutating: true,
+                },
+                {
+                  id: "reject",
+                  title: "stockAnalysis.evolutionApproval.reject",
+                  command: "reject_evolution_plan",
+                  mutating: true,
+                },
+              ],
+            },
+          ],
+        },
+      ] as T;
+
     // ── Agent Profiles (mock) ──────────────────────────────────────
     case "list_agent_profiles":
     case "list_agent_roles":

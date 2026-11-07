@@ -227,6 +227,55 @@ pub enum PluginManifestValidationError {
         source: String,
         key: String,
     },
+    /// 卡片声明的 `id` 形状非法（任务 #216 前置 ②）。
+    ///
+    /// 与 [`Self::InvalidTaskSourceId`] 同源判据：id 会进前端注册表键 `${pluginId}:${id}`，
+    /// 带 `:` / 空格 / 大写会让「同一张卡只有一种写法」这条不变量失效 ⇒ 装载期就拒。
+    InvalidTaskCardId {
+        card: String,
+        detail: String,
+    },
+    /// 卡片声明的 `surface` 缺失或不在词汇表（`chat` / `task_card`）内。
+    ///
+    /// 与 [`Self::InvalidPageLoading`] 同族：枚举型声明字段必须走清单校验错误，
+    /// 不许默认兜底到某个 surface（插在界面上错误的位置比不显示更难查）。
+    InvalidTaskCardSurface {
+        card: String,
+        surface: String,
+    },
+    /// 卡片的 `summaryCommand` 不在同一份清单的 `commands[]` 里。
+    TaskCardCommandUnknown {
+        card: String,
+        command: String,
+    },
+    /// 卡片的 `detailSchema` 不是**本插件 `ui.json`** 里声明的 key。
+    TaskCardSchemaKeyUnknown {
+        card: String,
+        key: String,
+    },
+    /// 卡片动作的 `id` 形状非法（同一张卡内动作 id 是宿主按钮的键）。
+    InvalidTaskCardActionId {
+        card: String,
+        action: String,
+        detail: String,
+    },
+    /// 卡片动作引用的 `command` 不在同一份清单的 `commands[]` 里。
+    ///
+    /// **不允许写成宿主命令名**：这条判据就是「插件只能调自己的命令」在声明面上的落点。
+    TaskCardActionCommandUnknown {
+        card: String,
+        action: String,
+        command: String,
+    },
+    /// 卡片动作声明了 `mutating: true`，但清单 `permissions[]` 没有 `write`。
+    ///
+    /// 权限判定**只在后端**做（`PluginSummaryDto` 不带 permissions，前端判不了），
+    /// 且必须在**装载期**拦：放它装上的话，界面上会出现一颗前端无法判权、后端也不知道
+    /// 该不该放行的按钮 —— 静默降级成「点了没反应」或「点了就写」，两种都不可接受。
+    TaskCardActionWritePermissionMissing {
+        card: String,
+        action: String,
+    },
 }
 
 impl Display for PluginManifestValidationError {
@@ -317,6 +366,34 @@ impl Display for PluginManifestValidationError {
                 f,
                 "plugin task source `{source}` references UI Schema key `{key}`, which is not declared in this plugin's {file}",
                 file = crate::ui_schema::UI_SCHEMA_FILE_NAME
+            ),
+            Self::InvalidTaskCardId { card, detail } => {
+                write!(f, "plugin task card `{card}` has an invalid id: {detail}")
+            },
+            Self::InvalidTaskCardSurface { card, surface } => write!(
+                f,
+                "plugin task card `{card}` declares surface `{surface}`, which must be one of {}",
+                PluginCardSurface::LABELS.join(", ")
+            ),
+            Self::TaskCardCommandUnknown { card, command } => write!(
+                f,
+                "plugin task card `{card}` references command `{command}`, which is not declared in this manifest's commands[]"
+            ),
+            Self::TaskCardSchemaKeyUnknown { card, key } => write!(
+                f,
+                "plugin task card `{card}` references UI Schema key `{key}`, which is not declared in this plugin's {file}",
+                file = crate::ui_schema::UI_SCHEMA_FILE_NAME
+            ),
+            Self::InvalidTaskCardActionId { card, action, detail } => {
+                write!(f, "plugin task card `{card}` action `{action}` has an invalid id: {detail}")
+            },
+            Self::TaskCardActionCommandUnknown { card, action, command } => write!(
+                f,
+                "plugin task card `{card}` action `{action}` references command `{command}`, which is not declared in this manifest's commands[]"
+            ),
+            Self::TaskCardActionWritePermissionMissing { card, action } => write!(
+                f,
+                "plugin task card `{card}` action `{action}` is declared mutating but the manifest's permissions[] does not include `write`"
             ),
         }
     }
@@ -750,6 +827,42 @@ impl PluginManager {
                 author: manifest.author,
                 enabled: summary.enabled,
                 task_sources: manifest.task_sources,
+            });
+        }
+        Ok(out)
+    }
+
+    /// 插件贡献的卡片清单 —— `manifest.taskCards[]` 的只读投影（任务 #216 前置 ②）。
+    ///
+    /// 与 [`Self::list_plugin_task_sources`] 同形、逐条对齐：每次调用实时扫描已安装插件清单、
+    /// 不缓存、不建第二份注册表（禁区 4），并带 `enabled` 位把启停过滤**留给消费侧**
+    /// （前端注册表只挂已启用插件的卡）。单插件清单读失败按跳过处理，不拖垮整张清单。
+    ///
+    /// 与任务源投影的**唯一**差异：本函数不额外过滤 `actions[]`。写权限闸在装载期做
+    /// （`build_manifest_task_cards` 的 `TaskCardActionWritePermissionMissing`），
+    /// 已装上的插件里不可能存在越权的 `mutating` 动作 ⇒ 投影期再判一遍只会长出第二套口径
+    /// （且两处判定一旦漂移，用户看到的是「装了却不显示」而不是「装不上」）。
+    pub fn list_plugin_task_cards(
+        &self,
+    ) -> Result<Vec<crate::types::PluginTaskCardsInfo>, PluginError> {
+        let mut out = Vec::new();
+        for summary in self.list_plugins()? {
+            let Some(root) = summary.metadata.root.as_deref() else { continue };
+            let Ok(manifest) = load_plugin_from_directory(root) else {
+                tracing::warn!(root = %root.display(), "插件卡片清单：插件 manifest 读取失败，跳过");
+                continue;
+            };
+            if manifest.task_cards.is_empty() {
+                continue;
+            }
+            out.push(crate::types::PluginTaskCardsInfo {
+                id: summary.metadata.id,
+                name: summary.metadata.name,
+                version: summary.metadata.version,
+                description: summary.metadata.description,
+                author: manifest.author,
+                enabled: summary.enabled,
+                task_cards: manifest.task_cards,
             });
         }
         Ok(out)
@@ -2310,6 +2423,7 @@ fn load_manifest_from_skill_md(
         // SKILL.md 派生的清单同样没有页面/任务源声明（二者只能来自 plugin.json）。
         pages: Vec::new(),
         task_sources: Vec::new(),
+        task_cards: Vec::new(),
         dependencies: Vec::new(),
         integrity: None,
         capabilities: Vec::new(),
@@ -2569,6 +2683,16 @@ fn build_plugin_manifest(
     let command_names: BTreeSet<&str> = commands.iter().map(|c| c.name.as_str()).collect();
     let task_sources =
         build_manifest_task_sources(raw.task_sources, &command_names, &ui_keys, &mut errors);
+    // 卡片声明的自洽性判据与任务源同源（命令 membership + ui.json membership），
+    // 额外多一条**写权限闸**：`mutating` 动作要求 `permissions[]` 含 `write`。
+    // 权限在这里判而不在前端：`PluginSummaryDto` 不带 permissions，前端无从判断。
+    let task_cards = build_manifest_task_cards(
+        raw.task_cards,
+        &command_names,
+        &ui_keys,
+        &permissions,
+        &mut errors,
+    );
 
     if !errors.is_empty() {
         return Err(PluginError::ManifestValidation(errors));
@@ -2618,6 +2742,7 @@ fn build_plugin_manifest(
         dashboard_panels: raw.dashboard_panels,
         pages,
         task_sources,
+        task_cards,
         dependencies: raw.dependencies,
         integrity: raw.integrity,
         capabilities: raw.capabilities,
@@ -3096,6 +3221,190 @@ fn build_manifest_task_sources(
             continue;
         }
         validated.push(PluginTaskSource { id, title: source.title, command, color, detail_schema });
+    }
+
+    validated
+}
+
+/// 校验并转写 `plugin.json` 的 `taskCards[]`（任务 #216 前置 ②）。
+///
+/// 逐条对齐 [`build_manifest_task_sources`]，差异点写在下面（交付报告也会逐点列）。
+///
+/// 1. `id` 形状 = [`is_declared_key_shape`]（小写字母数字与 `-`，首字符须是字母数字，≤64），
+///    **同一份清单内唯一**；重名 ⇒ **fail-closed**（leader 裁定 3）：报
+///    `DuplicateEntry{kind: "task card"}`，整份 `plugin.json` 校验失败、插件装不上。
+///    与 `task_sources` 的区别：源重名裁决在消费侧（宿主优先），卡片重名在装载期直接拒
+///    —— 卡片键是前端注册表的身份，静默丢一张卡等于让用户看到「少了一张卡」却查不到原因。
+/// 2. `title` 非空（纯文本，不走宿主 i18n）。
+/// 3. `surface` 必须精确命中 [`PluginCardSurface::LABELS`]；缺失 / 表外值一律报错，不兜底。
+/// 4. `summaryCommand` 必须是**同一份清单** `commands[]` 里已声明的命令（用已校验的 commands 取名，
+///    指一条本身非法的命令也算「不存在」）。
+/// 5. `detailSchema` 若声明，必须是**本插件 `ui.json`** 的 key（`ui_keys`）。
+/// 6. `actions[]` 的 `id` 形状同上 + **同卡内唯一**，`command` 也必须是本包命令
+///    （⇒ 宿主命令名在声明面上写不出来）。
+/// 7. `actions[].mutating = true` ⇒ 清单 `permissions[]` 必须含 `write`
+///    （[`PluginPermission::implies_write`]，`execute` / `subprocess_execution` 也算）。
+///    只读动作不要求 `write`（leader 裁定 2）。
+fn build_manifest_task_cards(
+    cards: Vec<RawPluginTaskCard>,
+    command_names: &BTreeSet<&str>,
+    ui_keys: &BTreeSet<String>,
+    permissions: &[PluginPermission],
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> Vec<PluginTaskCard> {
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut validated = Vec::new();
+    let write_allowed = permissions.iter().any(PluginPermission::implies_write);
+
+    for card in cards {
+        let id = card.id.trim().to_string();
+        if id.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "task card",
+                field: "id",
+                name: None,
+            });
+            continue;
+        }
+        if !is_declared_key_shape(&id) {
+            errors.push(PluginManifestValidationError::InvalidTaskCardId {
+                card: id.clone(),
+                detail: "只允许小写字母、数字与 `-`，且首字符须是字母或数字".to_string(),
+            });
+            continue;
+        }
+        // fail-closed：重名不「先到先得」，而是报错让整份清单装不上（leader 裁定 3）。
+        if !seen.insert(id.clone()) {
+            errors.push(PluginManifestValidationError::DuplicateEntry {
+                kind: "task card",
+                name: id,
+            });
+            continue;
+        }
+        if card.title.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "task card",
+                field: "title",
+                name: Some(id.clone()),
+            });
+            continue;
+        }
+        let surface_label = card.surface.as_deref().unwrap_or_default().trim().to_string();
+        let Some(surface) = PluginCardSurface::parse(&surface_label) else {
+            errors.push(PluginManifestValidationError::InvalidTaskCardSurface {
+                card: id,
+                surface: surface_label,
+            });
+            continue;
+        };
+        let summary_command = card.summary_command.trim().to_string();
+        if summary_command.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "task card",
+                field: "summaryCommand",
+                name: Some(id.clone()),
+            });
+            continue;
+        }
+        if !command_names.contains(summary_command.as_str()) {
+            errors.push(PluginManifestValidationError::TaskCardCommandUnknown {
+                card: id,
+                command: summary_command,
+            });
+            continue;
+        }
+        // 空白串按「未声明」处理（与 color / loading / detailSchema 同判）。
+        let detail_schema =
+            card.detail_schema.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+        if let Some(key) = &detail_schema
+            && !ui_keys.contains(key)
+        {
+            errors.push(PluginManifestValidationError::TaskCardSchemaKeyUnknown {
+                card: id.clone(),
+                key: key.clone(),
+            });
+            continue;
+        }
+        let tone = card.tone.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+
+        // 动作逐条校验。任一条非法 ⇒ 整张卡被丢弃（下面的 errors 非空即整份清单校验失败，
+        // 故「丢卡」只是不再往 validated 里塞，不会真的放行一份残缺声明）。
+        let mut actions = Vec::with_capacity(card.actions.len());
+        let mut seen_actions: BTreeSet<String> = BTreeSet::new();
+        let mut actions_ok = true;
+        for action in card.actions {
+            let action_id = action.id.trim().to_string();
+            let label = if action_id.is_empty() {
+                format!("{id}#{}", actions.len())
+            } else {
+                format!("{id}.{action_id}")
+            };
+            if action_id.is_empty() || !is_declared_key_shape(&action_id) {
+                errors.push(PluginManifestValidationError::InvalidTaskCardActionId {
+                    card: id.clone(),
+                    action: label,
+                    detail: "只允许小写字母、数字与 `-`，且首字符须是字母或数字".to_string(),
+                });
+                actions_ok = false;
+                continue;
+            }
+            if !seen_actions.insert(action_id.clone()) {
+                errors.push(PluginManifestValidationError::DuplicateEntry {
+                    kind: "task card action",
+                    name: label,
+                });
+                actions_ok = false;
+                continue;
+            }
+            if action.title.trim().is_empty() {
+                errors.push(PluginManifestValidationError::EmptyEntryField {
+                    kind: "task card action",
+                    field: "title",
+                    name: Some(label),
+                });
+                actions_ok = false;
+                continue;
+            }
+            let command = action.command.trim().to_string();
+            if command.is_empty() || !command_names.contains(command.as_str()) {
+                errors.push(PluginManifestValidationError::TaskCardActionCommandUnknown {
+                    card: id.clone(),
+                    action: label,
+                    command,
+                });
+                actions_ok = false;
+                continue;
+            }
+            // 写权限闸（leader 裁定 2）：只对 `mutating: true` 生效，只读动作一概不要求 write。
+            if action.mutating && !write_allowed {
+                errors.push(PluginManifestValidationError::TaskCardActionWritePermissionMissing {
+                    card: id.clone(),
+                    action: label,
+                });
+                actions_ok = false;
+                continue;
+            }
+            actions.push(PluginTaskCardAction {
+                id: action_id,
+                title: action.title,
+                command,
+                mutating: action.mutating,
+            });
+        }
+        if !actions_ok {
+            continue;
+        }
+
+        validated.push(PluginTaskCard {
+            id,
+            title: card.title,
+            surface,
+            summary_command,
+            detail_schema,
+            tone,
+            order: card.order,
+            actions,
+        });
     }
 
     validated
@@ -4066,6 +4375,7 @@ mod tests {
             dashboard_panels: Vec::new(),
             pages: Vec::new(),
             task_sources: Vec::new(),
+            task_cards: Vec::new(),
             dependencies: Vec::new(),
             integrity: None,
             capabilities: vec![PluginCapabilityDecl {
@@ -6100,5 +6410,351 @@ mod bundled_root_tests {
         let module_at = manager.find("mod test_support").expect("test_support 模块必须存在");
         let construct_at = manager.find(needle).expect("必须保留唯一构造点");
         assert!(construct_at > module_at, "唯一构造点必须在 `test_support` 模块内");
+    }
+
+    // ==== #216 前置 ②：`taskCards[]` 声明面（surface / 命令 membership / 写权限闸）====
+
+    fn task_card_action_entry(id: &str, command: &str, mutating: bool) -> RawPluginTaskCardAction {
+        RawPluginTaskCardAction {
+            id: id.to_string(),
+            title: "动作".to_string(),
+            command: command.to_string(),
+            mutating,
+        }
+    }
+
+    fn task_card_entry(id: &str, surface: Option<&str>, summary: &str) -> RawPluginTaskCard {
+        RawPluginTaskCard {
+            id: id.to_string(),
+            title: "卡片".to_string(),
+            surface: surface.map(str::to_string),
+            summary_command: summary.to_string(),
+            detail_schema: None,
+            tone: None,
+            order: 0,
+            actions: Vec::new(),
+        }
+    }
+
+    /// surface 词汇表是**封闭**的（leader 裁定 1：只开 `chat` / `task_card`）：
+    /// 表外值与缺失一律报错，**不兜底** —— 兜底会让卡片落在界面上错误的位置。
+    #[test]
+    fn task_card_surface_vocabulary_is_closed() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+        let read_only = [PluginPermission::Read];
+
+        // 两个合法值都通过，且原样落到枚举上（序列化字面量与清单写法逐字一致）。
+        for (label, expected) in
+            [("chat", PluginCardSurface::Chat), ("task_card", PluginCardSurface::TaskCard)]
+        {
+            let mut errors = Vec::new();
+            let validated = build_manifest_task_cards(
+                vec![task_card_entry("surface-ok", Some(label), "rows")],
+                &names,
+                &BTreeSet::new(),
+                &read_only,
+                &mut errors,
+            );
+            assert!(errors.is_empty(), "`{label}` 应通过，实际 {errors:?}");
+            assert_eq!(validated[0].surface, expected);
+        }
+        // 反向控：serde 序列化值必须与 parse 令牌一致（两处口径同源，防漂移）。
+        for surface in [PluginCardSurface::Chat, PluginCardSurface::TaskCard] {
+            assert_eq!(PluginCardSurface::parse(surface.as_str()), Some(surface));
+        }
+
+        for bad in [None, Some("overview"), Some(""), Some("Chat")] {
+            let mut errors = Vec::new();
+            let validated = build_manifest_task_cards(
+                vec![task_card_entry("surface-bad", bad, "rows")],
+                &names,
+                &BTreeSet::new(),
+                &read_only,
+                &mut errors,
+            );
+            assert!(validated.is_empty(), "`{bad:?}` 不应通过");
+            assert_eq!(errors.len(), 1, "实际 {errors:?}");
+            assert!(
+                matches!(errors[0], PluginManifestValidationError::InvalidTaskCardSurface { .. }),
+                "应报 InvalidTaskCardSurface，实际 {:?}",
+                errors[0]
+            );
+            let text = errors[0].to_string();
+            assert!(text.contains("surface-bad"), "文案要点出是哪张卡：{text}");
+            assert!(text.contains("chat") && text.contains("task_card"), "文案要列出词表：{text}");
+        }
+    }
+
+    /// 同插件重复卡 id ⇒ **fail-closed**（leader 裁定 3）：报错让整份清单装不上，
+    /// 不是「先到先得静默丢一张」——后者在界面上表现为「少了一张卡」且无处可查。
+    #[test]
+    fn task_card_duplicate_id_is_rejected_not_first_wins() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_task_cards(
+            vec![
+                task_card_entry("dup-card", Some("task_card"), "rows"),
+                task_card_entry("dup-card", Some("chat"), "rows"),
+                task_card_entry("Bad-Card", Some("task_card"), "rows"),
+            ],
+            &names,
+            &BTreeSet::new(),
+            &[PluginPermission::Read],
+            &mut errors,
+        );
+
+        // 第一份留下，第二份（重名）与大写 id 都被拒；errors 非空 ⇒ 调用方整份清单失败。
+        assert_eq!(validated.len(), 1, "实际 {validated:?}");
+        assert_eq!(validated[0].id, "dup-card");
+        assert_eq!(errors.len(), 2, "实际 {errors:?}");
+        assert!(
+            matches!(
+                errors[0],
+                PluginManifestValidationError::DuplicateEntry { kind: "task card", .. }
+            ),
+            "应报 DuplicateEntry(kind=task card)，实际 {:?}",
+            errors[0]
+        );
+        assert!(
+            matches!(errors[1], PluginManifestValidationError::InvalidTaskCardId { .. }),
+            "应报 InvalidTaskCardId，实际 {:?}",
+            errors[1]
+        );
+    }
+
+    /// 三项 membership：`summaryCommand` ∈ commands[]、`detailSchema` ∈ 本插件 ui.json key 集、
+    /// 动作 `command` ∈ commands[]（⇒ 宿主命令名在声明面上写不出来）。
+    #[test]
+    fn task_card_references_must_stay_inside_own_declarations() {
+        let names: BTreeSet<&str> = ["rows", "act"].into_iter().collect();
+        let ui_keys: BTreeSet<String> = ["order-form".to_string()].into_iter().collect();
+        let mut errors = Vec::new();
+
+        let ok = RawPluginTaskCard {
+            id: "ok-card".to_string(),
+            title: "合规卡".to_string(),
+            surface: Some("task_card".to_string()),
+            summary_command: "rows".to_string(),
+            detail_schema: Some("order-form".to_string()),
+            tone: Some("  ".to_string()),
+            order: 7,
+            actions: vec![task_card_action_entry("approve", "act", false)],
+        };
+        // 三处各错一条：summaryCommand 指错、detailSchema 不在 ui.json、动作指向宿主命令名。
+        let bad_summary =
+            task_card_entry("bad-summary", Some("task_card"), "approve_evolution_plan");
+        let mut bad_schema = task_card_entry("bad-schema", Some("task_card"), "rows");
+        bad_schema.detail_schema = Some("other-plugin-form".to_string());
+        let mut bad_action = task_card_entry("bad-action", Some("task_card"), "rows");
+        bad_action.actions =
+            vec![task_card_action_entry("approve", "approve_evolution_plan", false)];
+
+        let validated = build_manifest_task_cards(
+            vec![ok, bad_summary, bad_schema, bad_action],
+            &names,
+            &ui_keys,
+            &[PluginPermission::Read],
+            &mut errors,
+        );
+
+        assert_eq!(validated.len(), 1, "实际 {validated:?}");
+        assert_eq!(validated[0].tone, None, "空白 tone 按「未声明」处理");
+        assert_eq!(validated[0].order, 7);
+        assert_eq!(validated[0].actions.len(), 1);
+        assert!(!validated[0].actions[0].mutating);
+
+        assert_eq!(errors.len(), 3, "实际 {errors:?}");
+        assert!(
+            matches!(errors[0], PluginManifestValidationError::TaskCardCommandUnknown { .. }),
+            "实际 {:?}",
+            errors[0]
+        );
+        assert!(
+            matches!(errors[1], PluginManifestValidationError::TaskCardSchemaKeyUnknown { .. }),
+            "实际 {:?}",
+            errors[1]
+        );
+        assert!(
+            matches!(errors[2], PluginManifestValidationError::TaskCardActionCommandUnknown { .. }),
+            "实际 {:?}",
+            errors[2]
+        );
+        let text = errors[2].to_string();
+        assert!(text.contains("bad-action"), "文案要点出是哪张卡：{text}");
+        assert!(text.contains("approve_evolution_plan"), "文案要点出那条命令：{text}");
+    }
+
+    /// 写权限闸（leader 裁定 2）：**只对 `mutating: true` 生效**，只读动作不要求 `write`。
+    /// 判定必须在后端（`PluginSummaryDto` 不带 permissions），且必须在装载期拦。
+    #[test]
+    fn task_card_mutating_action_requires_write_permission() {
+        let names: BTreeSet<&str> = ["rows", "act"].into_iter().collect();
+        let card_with = |mutating: bool| {
+            let mut card = task_card_entry("gate-card", Some("task_card"), "rows");
+            card.actions = vec![task_card_action_entry("do-it", "act", mutating)];
+            card
+        };
+
+        // ① 只读动作 + 只读权限 ⇒ 通过（不许给只读动作加写门槛）。
+        let mut errors = Vec::new();
+        let validated = build_manifest_task_cards(
+            vec![card_with(false)],
+            &names,
+            &BTreeSet::new(),
+            &[PluginPermission::Read],
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "只读动作不应要求 write：{errors:?}");
+        assert_eq!(validated.len(), 1);
+
+        // ② mutating 动作 + 只读权限 ⇒ 拒，且文案点出卡与动作。
+        let mut errors = Vec::new();
+        let validated = build_manifest_task_cards(
+            vec![card_with(true)],
+            &names,
+            &BTreeSet::new(),
+            &[PluginPermission::Read],
+            &mut errors,
+        );
+        assert!(validated.is_empty(), "越权动作不得进投影");
+        assert!(
+            matches!(
+                errors[0],
+                PluginManifestValidationError::TaskCardActionWritePermissionMissing { .. }
+            ),
+            "实际 {:?}",
+            errors[0]
+        );
+        let text = errors[0].to_string();
+        assert!(
+            text.contains("gate-card") && text.contains("do-it"),
+            "文案要定位到卡与动作：{text}"
+        );
+        assert!(text.contains("write"), "文案要点出缺的是 write：{text}");
+
+        // ③ 三个「隐含写」的权限档位都必须放开闸（与 PluginPermission::implies_write 同源）。
+        for permission in [
+            PluginPermission::Write,
+            PluginPermission::FileSystemWrite,
+            PluginPermission::Execute,
+            PluginPermission::SubprocessExecution,
+        ] {
+            let mut errors = Vec::new();
+            let validated = build_manifest_task_cards(
+                vec![card_with(true)],
+                &names,
+                &BTreeSet::new(),
+                &[permission],
+                &mut errors,
+            );
+            assert!(errors.is_empty(), "{permission:?} 应蕴含 write：{errors:?}");
+            assert!(validated[0].actions[0].mutating);
+        }
+    }
+
+    /// 端到端：装一个声明了 `taskCards` 的插件 ⇒ 投影出该卡；禁用后仍投影但带 `enabled = false`。
+    ///
+    /// 这条同时是 **serde 别名陷阱的回归钉**：清单里写的是 camelCase `taskCards`，
+    /// `RawPluginManifest` 没有 `rename_all`，漏了 `rename` / `alias` 就会解出空表
+    /// （表现是「清单里有、界面上没有、且零报错」）。
+    #[test]
+    fn list_plugin_task_cards_projects_installed_declarations() {
+        let label = "task-card";
+        let source = temp_dir(&format!("{label}-source"));
+        let config_home = temp_dir(&format!("{label}-home"));
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        let manifest_path = source.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(manifest_path.parent().expect("manifest 有父目录"))
+            .expect("创建 manifest 目录");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+  "name": "task-card-demo",
+  "version": "1.0.0",
+  "description": "task card projection plugin",
+  "defaultEnabled": true,
+  "permissions": ["read", "write"],
+  "commands": [
+    { "name": "rows", "description": "rows", "command": "echo" },
+    { "name": "act", "description": "act", "command": "echo" }
+  ],
+  "taskCards": [{
+    "id": "demo-card",
+    "title": "Demo Card",
+    "surface": "task_card",
+    "summaryCommand": "rows",
+    "tone": "purple",
+    "order": 50,
+    "actions": [{ "id": "do-it", "title": "执行", "command": "act", "mutating": true }]
+  }]
+}"#,
+        )
+        .expect("写入 manifest");
+
+        // 隔离构造：本模块在 `mod tests` 之后，走全路径引用唯一的构造点（不新增第二份配置）。
+        let mut manager =
+            PluginManager::new(crate::manager::test_support::isolated_config(&config_home));
+        manager.install(source.to_str().expect("utf8 path")).expect("装带卡片的插件应通过校验");
+
+        let list = manager.list_plugin_task_cards().expect("卡片投影应成功");
+        assert_eq!(list.len(), 1, "实际 {list:?}");
+        assert!(list[0].enabled, "defaultEnabled = true ⇒ 投影应带启用位");
+        assert_eq!(list[0].task_cards.len(), 1);
+        let card = &list[0].task_cards[0];
+        assert_eq!(card.id, "demo-card");
+        assert_eq!(card.surface, PluginCardSurface::TaskCard);
+        assert_eq!(card.summary_command, "rows");
+        assert_eq!(card.tone.as_deref(), Some("purple"));
+        assert_eq!(card.order, 50);
+        assert_eq!(card.actions.len(), 1);
+        assert_eq!(card.actions[0].command, "act");
+        assert!(card.actions[0].mutating);
+
+        manager.disable(&list[0].id).expect("禁用插件");
+        let after = manager.list_plugin_task_cards().expect("禁用后仍可投影");
+        assert_eq!(after.len(), 1, "启停过滤归消费侧，投影面不隐藏条目");
+        assert!(!after[0].enabled, "禁用位必须透出，否则前端会把死卡挂上去");
+
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+    }
+
+    /// 反向：`taskCards[].summaryCommand` 指到未声明的命令 ⇒ **装载期**就拒，插件装不上。
+    #[test]
+    fn install_rejects_task_card_referencing_unknown_command() {
+        let label = "task-card-bad";
+        let source = temp_dir(&format!("{label}-source"));
+        let config_home = temp_dir(&format!("{label}-home"));
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        let manifest_path = source.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(manifest_path.parent().expect("manifest 有父目录"))
+            .expect("创建 manifest 目录");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+  "name": "task-card-bad-demo",
+  "version": "1.0.0",
+  "description": "task card bad reference plugin",
+  "defaultEnabled": true,
+  "permissions": ["read"],
+  "commands": [{ "name": "rows", "description": "rows", "command": "echo" }],
+  "taskCards": [{ "id": "ghost-card", "title": "Ghost", "surface": "chat", "summaryCommand": "not_declared" }]
+}"#,
+        )
+        .expect("写入 manifest");
+
+        let mut manager =
+            PluginManager::new(crate::manager::test_support::isolated_config(&config_home));
+        let text = manager
+            .install(source.to_str().expect("utf8 path"))
+            .expect_err("卡片引用未声明的命令必须被拒")
+            .to_string();
+        assert!(text.contains("ghost-card"), "文案要指出是哪张卡：{text}");
+        assert!(text.contains("not_declared"), "文案要指出那条命令：{text}");
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
     }
 }

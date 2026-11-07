@@ -341,6 +341,170 @@ pub struct PluginTaskSourcesInfo {
     pub task_sources: Vec<PluginTaskSource>,
 }
 
+/// 卡片可落的位置（surface 词汇表，任务 #216 前置 ②）。
+///
+/// 词表**只开两个**（2026-11-07 leader 裁定，不预留 `overview`）：
+/// - `chat`：既有消息侧插槽（`PluginSchemaCardSlot` 读的 `Message.meta.pluginCards[]`）；
+/// - `task_card`：任务中心卡片面（本轮新增，消费点由任务中心提供）。
+///
+/// 为什么不预留：新增一个 surface 必须同时在这里登记**并在宿主侧接一个消费点**，
+/// 预先留出词表等于让插件写出一个「装得上、界面上永远不出现」的声明 —— 静默失效比装不上更坏。
+///
+/// serde `rename_all = "snake_case"`：多词变体因此是 `task_card`（与 [`PluginPageLoading`]
+/// 的 `lowercase` 只够单词的重命名口径不同，同 [`PluginPermission`] 的 `file_system_read`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginCardSurface {
+    Chat,
+    TaskCard,
+}
+
+impl PluginCardSurface {
+    /// 清单词汇表（错误文案与 [`Self::parse`] 同源，勿在别处另写字面串）。
+    pub const LABELS: [&'static str; 2] = ["chat", "task_card"];
+
+    /// 本变体的清单字面量（与 serde `rename_all = "snake_case"` 的序列化值一致）。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::TaskCard => "task_card",
+        }
+    }
+
+    /// 解析 `plugin.json` 声明的 `surface` 值。
+    ///
+    /// 只接受精确小写（与 [`PluginPageLoading::parse`] 同口径，不做大小写宽容）；
+    /// 不在词汇表内返回 `None`，由 `build_manifest_task_cards` 报清单校验错误。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "chat" => Some(Self::Chat),
+            "task_card" => Some(Self::TaskCard),
+            _ => None,
+        }
+    }
+}
+
+/// 任务卡片上的一颗动作按钮（`plugin.json` 的 `taskCards[].actions[]`）。
+///
+/// `command` 只能是**同一份清单** `commands[]` 里的命名命令 —— 与
+/// [`PluginTaskSource::command`] 同一条判据：宿主命令名在声明面上写不出来，
+/// 于是「插件按名字寻址宿主能力」这条通道不存在（`PLAN-shell-plus-plugins.md` §93）。
+///
+/// `mutating` 是**权限档位判据**（2026-11-07 leader 裁定 2）：`true` ⇒ 该动作会改变宿主/用户数据，
+/// 清单 `permissions[]` 必须含 `write`（[`PluginPermission::implies_write`]），否则**装载期**
+/// 直接拒收（`TaskCardActionWritePermissionMissing`）。只读动作（打开 / 导航 / 取数）不要求 `write`
+/// —— 给只读动作加写权限门槛，只会把无写能力的插件整包拒掉。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTaskCardAction {
+    /// 动作标识：同一张卡内唯一（宿主按钮的 React key 与日志定位都用它）。
+    pub id: String,
+    /// 按钮文案（纯文本，不走宿主 i18n —— 与 [`PluginTaskCard::title`] 同口径）。
+    pub title: String,
+    /// 本包 `commands[]` 里已声明的命名命令名。
+    pub command: String,
+    /// 是否有写语义（见本结构体文档）。缺省 `false` = 只读动作。
+    #[serde(default)]
+    pub mutating: bool,
+}
+
+/// 插件贡献给宿主的一张**卡片**（`plugin.json` 的 `taskCards[]`，任务 #216 前置 ②）。
+///
+/// 与 [`PluginTaskSource`] / [`PluginPage`] 同族的既有约定：
+/// 1. **只声明数据面，不声明渲染**（§93 裁定）：卡片体是一张本插件 `ui.json` 的 schema，
+///    宿主用 `PluginSchemaCard` 画出来 ⇒ 主 origin 里不出现任何插件 React 代码。
+/// 2. **`title` 不做宿主 i18n** —— 卡片文案归插件产物自己负责（不占 11 语言 key）。
+/// 3. **只引用自己的声明**：`detailSchema` 是**本插件 `ui.json` 的 key**（不是行 id），
+///    拼 `plugin.{pluginId}.{key}` 归宿主（`crate::ui_schema::row_id`）⇒ 跨插件引用写不出来。
+///
+/// ⚠ 与宿主已占用卡片键重名时**宿主优先**：裁决在消费侧（前端注册表 `registerCardContributions`
+/// 幂等 + 先到先得），因为宿主卡片清单是前端常量，清单校验期看不到它。同一份清单内重名则相反
+/// —— **fail-closed**，整份声明立刻报清单校验错误（leader 裁定 3）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTaskCard {
+    /// 卡片标识（surface 内唯一）；与 `pluginId` 拼成宿主注册表键 `${pluginId}:${id}`。
+    pub id: String,
+    /// 显示标题（纯文本，不走宿主 i18n）。
+    pub title: String,
+    /// 落位（见 [`PluginCardSurface`]）。
+    pub surface: PluginCardSurface,
+    /// 计数 / 取数命令：必须是**同一份清单** `commands[]` 里已声明的命名命令。
+    pub summary_command: String,
+    /// 卡片体 schema：**本插件 `ui.json` 里的 key**；缺省 ⇒ 纯计数卡（无卡体，不可点开）。
+    ///
+    /// 与 [`PluginTaskSource::detail_schema`] 同口径：安装期做 membership 校验，
+    /// 运行期由 `plugin_list_task_cards` 再按库复核（`retain_owned_card_schemas`）。
+    #[serde(default)]
+    pub detail_schema: Option<String>,
+    /// 展示色（antd Tag 色板名，如 `gold`）；缺省 ⇒ 宿主用默认色。
+    #[serde(default)]
+    pub tone: Option<String>,
+    /// 宿主渲染顺序（升序）；缺省 `0`。
+    ///
+    /// ⚠ 本轮**不做区间校验**：报告 §3.2 建议夹在 `0..=1000` 需 leader 裁口径（见交付报告
+    /// 「需要 leader 决策」），未经裁定不新增拒收条件 —— 多一条判据会把已装插件变装不上。
+    #[serde(default)]
+    pub order: i32,
+    /// 卡片动作。空表 = 纯展示卡。
+    #[serde(default)]
+    pub actions: Vec<PluginTaskCardAction>,
+}
+
+/// `plugin.json` 中 `taskCards[]` 的**未校验**形态。
+///
+/// 与 [`RawPluginTaskSource`] 同理：`surface` 在载入期收成字符串，好让「缺失 / 非法值」
+/// 走**清单校验错误**（`InvalidTaskCardSurface`）而不是整份 `plugin.json` 反序列化失败 ——
+/// 后者只能报 serde 行列号，指不出是哪张卡、哪个键。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawPluginTaskCard {
+    pub id: String,
+    pub title: String,
+    /// `None` = 键缺失（未声明）；`Some("")` = 声明了空值。两者都按「非法」处理
+    /// （surface 决定这张卡落在哪，没有合理缺省）。
+    #[serde(default)]
+    pub surface: Option<String>,
+    pub summary_command: String,
+    #[serde(default)]
+    pub detail_schema: Option<String>,
+    #[serde(default)]
+    pub tone: Option<String>,
+    #[serde(default)]
+    pub order: i32,
+    #[serde(default)]
+    pub actions: Vec<RawPluginTaskCardAction>,
+}
+
+/// `plugin.json` 中 `taskCards[].actions[]` 的**未校验**形态。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawPluginTaskCardAction {
+    pub id: String,
+    pub title: String,
+    pub command: String,
+    #[serde(default)]
+    pub mutating: bool,
+}
+
+/// `plugin_list_task_cards` 的返回形状（任务 #216 前置 ②）：某插件贡献的卡片清单 + 启停位。
+///
+/// 真相源恒为 `PluginManifest.task_cards`，每次调用实时扫描；不缓存、不建第二份注册表
+/// （AGENTS.md 禁区 4）。前端注册表只做只读投影，启停过滤按 [`Self::enabled`] 由消费侧做，
+/// 与 [`PluginTaskSourcesInfo`] 同口径。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTaskCardsInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: Option<String>,
+    pub enabled: bool,
+    pub task_cards: Vec<PluginTaskCard>,
+}
+
 /// `plugin.json` 中 `pages[]` 的**未校验**形态。
 ///
 /// 照抄 [`RawPluginToolManifest`] 的先例：枚举字段在载入期收成字符串，好让
@@ -416,6 +580,12 @@ pub struct PluginManifest {
     /// 泛型适配器实例化，不得另建平行清单。
     #[serde(default)]
     pub task_sources: Vec<PluginTaskSource>,
+    /// 插件贡献的卡片（任务 #216 前置 ②）；缺省 = 该包不贡献卡片。
+    ///
+    /// 声明面的**唯一**权威：聊天侧插槽与任务中心卡片面都只做只读投影
+    /// （前端注册表 `pluginCardRegistry`），不得另建平行清单。
+    #[serde(default)]
+    pub task_cards: Vec<PluginTaskCard>,
     #[serde(default)]
     pub dependencies: Vec<PluginDependency>,
     #[serde(default)]
@@ -842,6 +1012,16 @@ pub(crate) struct RawPluginManifest {
     /// 表现为「清单里有、任务中心里没有」，且零报错（e2e 安装测试就是这么抓到的）。
     #[serde(default, alias = "taskSources")]
     pub task_sources: Vec<RawPluginTaskSource>,
+    /// 卡片声明的未校验形态；必须显式转写进 [`PluginManifest::task_cards`] ——
+    /// serde 默认忽略未知字段，漏了这一步清单里的 `taskCards` 会被静默丢弃。
+    ///
+    /// ⚠ 与 `task_sources` 同一个坑，而且更狠：`alias` 与 `rename` **必须同时写**
+    /// （leader 裁定 4）。本结构体没有 `rename_all` ⇒ 只写 `alias` 时字段在 Rust 侧仍叫
+    /// `task_cards`，`rename` 才是「清单里的键名」；漏掉它，`plugin.json` 写 `taskCards`
+    /// 解出空表 —— 表现为「清单里有、界面上没有、且零报错」。两个都写是刻意的冗余：
+    /// 读代码的人不必追问「到底哪个生效」。
+    #[serde(default, alias = "taskCards", rename = "taskCards")]
+    pub task_cards: Vec<RawPluginTaskCard>,
     #[serde(default)]
     pub dependencies: Vec<PluginDependency>,
     #[serde(default)]

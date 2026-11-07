@@ -607,6 +607,46 @@ pub async fn plugin_list_task_sources(
     Ok(infos)
 }
 
+/// 插件贡献的**卡片**清单 —— `manifest.taskCards[]` 的只读投影（任务 #216 前置 ②）。
+///
+/// 与 [`plugin_list_task_sources`] 逐条同形：真相源是 `PluginManifest.task_cards`，每次调用
+/// 实时扫描、**不缓存、不建第二份卡片注册表**（禁区 4）。`enabled` 位原样透出，
+/// 启停过滤与「与宿主卡片重名时宿主优先」的裁决都留给消费侧
+/// （前端注册表 `src/lib/dynamicUI/pluginCardRegistry.ts`）。
+///
+/// **写权限闸不在这里**：`actions[].mutating = true` 要求清单 `permissions[]` 含 `write`，
+/// 这条在**装载期**由 `build_manifest_task_cards` 拦（装不上），投影期再判一遍只会长出
+/// 第二套口径。⇒ 能走到本命令的声明里不存在越权动作，前端不需要也无法再判一次
+/// （`PluginSummaryDto` 根本不带 `permissions`）。
+#[agent_command(
+    domain = plugin,
+    safety = Safe,
+    call_mode = StateOnly,
+    description = "列出插件贡献的卡片"
+)]
+#[command]
+pub async fn plugin_list_task_cards(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_plugins::types::PluginTaskCardsInfo>, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    let mut infos = tauri::async_runtime::spawn_blocking(move || {
+        let manager = plugin_manager.blocking_read();
+        manager.list_plugin_task_cards().map_err(|e| {
+            String::from(ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })
+    })
+    .await
+    .map_err(|e| format!("plugin list task cards task panicked: {e}"))??;
+    // 运行期复核 `detailSchema` 的归属：安装期校验只证明「当时声明过」，库被换掉 / 行被剪掉 /
+    // ui.json 被删都会让那份 key 变成悬空引用。复核不过置 `None`（卡片退化为纯计数卡）。
+    crate::init::plugin_ui_schema::retain_owned_card_schemas(state.harness.db(), &mut infos)
+        .await?;
+    Ok(infos)
+}
+
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "更新指定插件")]
 #[command]
 pub async fn plugin_update(

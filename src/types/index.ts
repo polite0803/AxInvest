@@ -2183,6 +2183,76 @@ export interface PluginTaskSourceDto {
 }
 
 /**
+ * 卡片可落的位置（后端 `plugins::types::PluginCardSurface`，serde `rename_all = "snake_case"`）。
+ *
+ * 词汇表**只开两个**（2026-11-07 leader 裁定，不预留 `overview`）：
+ * - `chat`：聊天消息侧插槽（`PluginSchemaCardSlot` 读的 `Message.meta.pluginCards[]`）；
+ * - `task_card`：任务中心卡片面。
+ *
+ * 前端注册表（`src/lib/dynamicUI/pluginCardRegistry.ts`）的 `surface` 字段与它逐字同集；
+ * 新增取值必须同时在后端枚举、本类型与注册表三处登记并接一个消费点。
+ */
+export type PluginCardSurfaceDto = "chat" | "task_card";
+
+/**
+ * 卡片上的一颗动作按钮（后端 `plugins::types::PluginTaskCardAction`）。
+ *
+ * `command` 只能是**同一份清单** `commands[]` 里的命名命令 —— 宿主命令名在声明面上写不出来。
+ * `mutating` 是权限档位判据：`true` ⇒ 清单 `permissions[]` 必须含 `write`，**装载期**由后端拦
+ * （前端判不了：`PluginSummaryDto` 不带 `permissions`）。
+ */
+export interface PluginTaskCardActionDto {
+  id: string;
+  /** 按钮文案（纯文本，不走宿主 i18n）。 */
+  title: string;
+  /** 本包 `commands[].name`。 */
+  command: string;
+  /** 是否有写语义；缺省 `false` = 只读动作。 */
+  mutating?: boolean;
+}
+
+/**
+ * 插件贡献给宿主的一张卡片（后端 `plugins::types::PluginTaskCard`，任务 #216 前置 ②）。
+ *
+ * `title` / `actions[].title` 是**插件自带文案**，不占宿主 11 语言 key（与 `PluginPageDto.title` 同口径）。
+ * `detailSchema` 是**本插件 `ui.json` 的 key**（不是动态 UI 行 id）：拼 `plugin.{pluginId}.{key}`
+ * 归宿主（`src/lib/pluginUiSchema.ts` 的 `pluginSchemaRowId`），跨插件引用因此写不出来。
+ */
+export interface PluginTaskCardDto {
+  /** 卡片标识：与 `pluginId` 拼成注册表键 `${pluginId}:${id}`。 */
+  id: string;
+  title: string;
+  surface: PluginCardSurfaceDto;
+  /** 计数 / 取数命令（本包 `commands[].name`）。 */
+  summaryCommand: string;
+  /** 卡片体 schema key；缺省/null ⇒ 纯计数卡（无卡体，不可点开）。 */
+  detailSchema?: string | null;
+  /** antd Tag 色板名；缺省/null ⇒ 宿主用默认色。 */
+  tone?: string | null;
+  /** 渲染顺序（升序）；后端缺省 0。 */
+  order: number;
+  /** 卡片动作；空表 = 纯展示卡。 */
+  actions: PluginTaskCardActionDto[];
+}
+
+/**
+ * `plugin_list_task_cards` 的返回形状（后端 `plugins::types::PluginTaskCardsInfo`，任务 #216）。
+ *
+ * 与 [`PluginTaskSourcesInfoDto`] 同族：真相源是 `manifest.taskCards[]`，每次调用实时扫描，
+ * 前端只做只读投影（注册 contributions），**不得**另建第二份卡片清单（禁区 4）。
+ * `enabled = false` 的条目由消费侧过滤掉（投影面原样透出启停位）。
+ */
+export interface PluginTaskCardsInfoDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  enabled: boolean;
+  taskCards: PluginTaskCardDto[];
+}
+
+/**
  * 插件任务源返回的一行运行记录（后端 `axagent_plugin_proto::PluginTaskRunRow`）。
  *
  * ⚠ `state` 的词汇表与 `TasksCenterPage/model.ts` 的 `RunState` **同源**（七态、精确小写）：

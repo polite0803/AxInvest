@@ -1,27 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * **聊天消息侧的 schema 卡片插槽**（B8-1 实现半边；形态裁定见 `PLAN-shell-plus-plugins.md` §93）。
+ * **聊天消息侧的 schema 卡片插槽**（B8-1 实现半边；形态裁定见 `PLAN-shell-plus-plugins.md` §93；
+ * 键迁移见任务 #216 前置 ①）。
  *
  * 职责只有一个：把「一张消息能带哪些卡片」这件事收成一个**可校验的契约**，然后把每一张交给
- * `PluginSchemaCard` 渲染。不认插件、不取数据、不碰网络 —— 消息里有什么规格就画什么。
+ * `PluginSchemaCard` 渲染。不认插件、不取数据（除注册表投影那一次只读 IPC）——
+ * 消息里有什么规格就画什么。
  *
- * ── 契约落在哪个字段（为什么不新增 DTO） ────────────────────────────────────────
+ * ── 契约：键走**卡片贡献注册表**（2026-11-07 迁移） ───────────────────────────────
  *
- * 载体是 `Message.meta?: Record<string, unknown>`（`src/types/index.ts:228`，注释原文
- * "Additional metadata for extensibility"）—— 这就是本仓为「消息带附加结构化载荷」留的既有口子，
- * 消费端读它不需要给 `Message` 加字段，也就不需要动 `src/types/**`（B8-3 批在占该目录）。
- *
- * 键：`meta.pluginCards`，值是 `PluginSchemaCardSpec[]`：
+ * 载体仍是 `Message.meta?: Record<string, unknown>`（"Additional metadata for extensibility"），
+ * 键仍是 `meta.pluginCards`，值是条目数组。**卡片的身份改由注册表键表达**：
  *
  * ```json
- * { "pluginCards": [{ "schemaId": "release-note-card", "title": "发行说明",
- *                     "dataContext": { "rows": [{ "name": "…", "qty": 3 }] } }] }
+ * { "pluginCards": [{ "card": "stock:evolution-approvals", "dataContext": { "rows": [...] } }] }
  * ```
  *
- * ⚠ 生产者侧今天还没有人写这个键（插件产出入消息 meta 的通道不在本批：本批只做「宿主能渲染」
- * 这一件事）。所以在没有生产者之前，插槽在真实消息上是**渲染出空**（返回 `null`，不占位、不报错），
- * 不是「白色一块」—— 判据见下面的 `parsePluginSchemaCards`。
+ * - `card` = 卡片贡献注册表的宿主键 `${pluginId}:${id}`（`src/lib/dynamicUI/pluginCardRegistry.ts`
+ *   的 `cardKey`）。键只能由宿主拼，`schemaId` 也由宿主按 `plugin.{pluginId}.{key}` 拼
+ *   ⇒ 消息**写不出**指向别人 schema 的卡；未声明 / 未启用 / surface 不匹配 ⇒ 不渲染。
+ * - 旧键 `{ schemaId: "..." }` 仍然受理，但只在该 id **能被注册表反查到某条 `chat` 贡献**时
+ *   （`getContributionBySchemaId`）。裸 `schemaId` 一律丢弃：它没有归属，画的是「谁的 schema
+ *   都行」——扩键后这条若继续放行，等于把零风险变成默认路径。
+ *   ⚠ 迁移成本为零：本仓**零生产者**（插件产出入消息 meta 的通道还没建），
+ *   旧写法的唯一消费方是单测固定装置。
+ *
+ * 归属为什么可以在前端判：注册表里的条目全部来自后端投影（`plugin_list_task_cards`）——
+ * `pluginId` 是投影里的插件 id、`schemaId` 由宿主用 `pluginSchemaRowId` 拼，归属是**结构性**的，
+ * 不需要再回查 schema 记录的 `ownerId`（那条路要求改 `PluginSchemaCard`，本轮不动它）。
  *
  * ── 为什么不抛错 ────────────────────────────────────────────────────────────
  *
@@ -29,8 +36,16 @@
  * 不该让整条消息的渲染树炸掉：解析对每条独立校验，坏条目丢弃，其余照常渲染。
  */
 
+import {
+  ensureCardContributionsLoaded,
+  getContributionByKey,
+  getContributionBySchemaId,
+  type PluginCardContribution,
+  type PluginCardKey,
+  useCardRegistryVersion,
+} from "@/lib/dynamicUI/pluginCardRegistry";
 import type { DynamicAction } from "@/types";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { PluginSchemaCard, type PluginSchemaCardSpec } from "./PluginSchemaCard";
 
 /** `Message.meta` 里承载卡片规格的键。改名等于改契约，先找本文件的消费方。 */
@@ -41,17 +56,32 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 把 `Message.meta` 规范成卡片规格数组。
+ * 消息里的一条卡片条目（**未解析归属**，解析在 `resolveChatCards`）。
+ *
+ * 两条键至少有一条：`card`（新，注册表宿主键）或 `schemaId`（旧，卡体行 id）。
+ */
+export interface PluginSchemaCardEntry {
+  /** 新键：注册表宿主键 `${pluginId}:${id}`。 */
+  card?: PluginCardKey;
+  /** 旧键：动态 UI 行 id（`plugin.{pluginId}.{key}`）；仅当注册表能反查到才受理。 */
+  schemaId?: string;
+  dataContext?: Record<string, unknown>;
+  title?: string;
+}
+
+/**
+ * 把 `Message.meta` 规范成条目数组。
  *
  * 判据（逐条独立，坏条目只丢自己）：
  * - `meta` 不是对象 / 没有 `pluginCards` / 值不是数组 ⇒ `[]`（静默，等同「这条消息没有卡片」）；
- * - 条目不是对象、`schemaId` 不是非空字符串 ⇒ 丢弃；
+ * - `card` 是非空字符串且含 `:` ⇒ 取用；否则看 `schemaId` 是否非空字符串；
+ * - 两者都不成立 ⇒ 丢弃（**归属不明不画**，fail-closed）；
  * - `dataContext` 不是普通对象 ⇒ 置空（schema 里没有数据节点时本来也不需要它）；
  * - `title` 不是字符串 ⇒ 缺省（仅少一个标题，卡片照画）。
  */
 export function parsePluginSchemaCards(
   meta: Record<string, unknown> | null | undefined,
-): PluginSchemaCardSpec[] {
+): PluginSchemaCardEntry[] {
   if (!isPlainRecord(meta)) {
     return [];
   }
@@ -59,22 +89,68 @@ export function parsePluginSchemaCards(
   if (!Array.isArray(raw)) {
     return [];
   }
-  const specs: PluginSchemaCardSpec[] = [];
+  const entries: PluginSchemaCardEntry[] = [];
   for (const item of raw) {
     if (!isPlainRecord(item)) {
       continue;
     }
-    const schemaId = item.schemaId;
-    if (typeof schemaId !== "string" || schemaId.length === 0) {
+    const card = typeof item.card === "string" && item.card.includes(":")
+      ? (item.card as PluginCardKey)
+      : undefined;
+    const schemaId = typeof item.schemaId === "string" && item.schemaId.length > 0
+      ? item.schemaId
+      : undefined;
+    if (!card && !schemaId) {
       continue;
     }
-    specs.push({
+    entries.push({
+      card,
       schemaId,
       dataContext: isPlainRecord(item.dataContext) ? item.dataContext : undefined,
       title: typeof item.title === "string" && item.title.length > 0 ? item.title : undefined,
     });
   }
-  return specs;
+  return entries;
+}
+
+/** 已解析归属的聊天卡：卡片规格 + 贡献（贡献用于回流时带出 `pluginId`）。 */
+export interface ResolvedChatCard {
+  readonly contribution: PluginCardContribution;
+  readonly spec: PluginSchemaCardSpec;
+}
+
+/**
+ * 把条目解析成可渲染的卡片（归属由注册表证明），并**按注册表当前状态过滤**。
+ *
+ * 解析规则：
+ * - `card` 键 ⇒ 必须命中注册表且 `surface === "chat"`；否则丢弃（未声明 / 已禁用 / 落位不符）。
+ * - 旧键 `schemaId` ⇒ 必须能反查到 `surface === "chat"` 的贡献；否则丢弃（归属不明，fail-closed）。
+ * - 贡献没有卡体（`schemaId` 缺省）⇒ 丢弃：聊天侧一张没有卡体的卡只是空白块。
+ *
+ * `title` 优先取消息里给的（那张卡在这一条消息里的具体标题），缺省用声明的卡标题；
+ * `schemaId` 恒取**宿主拼的那份**（消息给的串只用于反查，不进渲染链）。
+ */
+export function resolveChatCards(entries: readonly PluginSchemaCardEntry[]): ResolvedChatCard[] {
+  const resolved: ResolvedChatCard[] = [];
+  for (const entry of entries) {
+    const contribution = entry.card
+      ? getContributionByKey(entry.card)
+      : entry.schemaId
+      ? getContributionBySchemaId(entry.schemaId)
+      : undefined;
+    if (!contribution || contribution.surface !== "chat" || !contribution.schemaId) {
+      continue;
+    }
+    resolved.push({
+      contribution,
+      spec: {
+        schemaId: contribution.schemaId,
+        dataContext: entry.dataContext,
+        title: entry.title ?? contribution.title,
+      },
+    });
+  }
+  return resolved;
 }
 
 export interface PluginSchemaCardSlotProps {
@@ -86,17 +162,35 @@ export interface PluginSchemaCardSlotProps {
 
 /**
  * 一条消息的卡片插槽。挂在 AI 消息内容之后（`ChatViewMessages.tsx` 的 ai-content-wrapper 之后）。
+ *
+ * 首次遇到带卡片的载荷时**幂等**拉一次卡片投影（`ensureCardContributionsLoaded`）；
+ * 读失败按「没有插件卡」处理（不报错、不白屏），与任务中心对插件源的口径一致。
  */
 export function PluginSchemaCardSlot({ meta, onAction }: PluginSchemaCardSlotProps) {
-  const cards = useMemo(() => parsePluginSchemaCards(meta), [meta]);
+  const entries = useMemo(() => parsePluginSchemaCards(meta), [meta]);
+  // 订阅注册表：投影异步到达后要重渲染，否则卡片永远停在「注册表里还没有」的空态。
+  const registryVersion = useCardRegistryVersion();
+  const cards = useMemo(
+    () => resolveChatCards(entries),
+    // registryVersion 是外置 store 的快照值：它变了说明注册表变了，必须重算。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entries, registryVersion],
+  );
+
+  useEffect(() => {
+    if (entries.length > 0) {
+      void ensureCardContributionsLoaded();
+    }
+  }, [entries.length]);
+
   if (cards.length === 0) {
     return null;
   }
   return (
     <>
-      {cards.map((spec, index) => (
+      {cards.map(({ contribution, spec }, index) => (
         <PluginSchemaCard
-          key={`${spec.schemaId}-${index}`}
+          key={`${contribution.key}-${index}`}
           spec={spec}
           onAction={onAction ? (action) => onAction(action, spec) : undefined}
         />

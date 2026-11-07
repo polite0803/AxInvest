@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * 聊天消息侧 schema 卡片插槽（B8-1 实现半边）的验收用例。
+ * 聊天消息侧 schema 卡片插槽（B8-1 实现半边 + 任务 #216 前置 ① 的键迁移）验收用例。
  *
- * 三条都打在**用户能看到的东西**上，不回头调用判据函数自证：
- * 1. 给 `(schemaId, dataContext)` ⇒ 画出标题与表格值（数据来自 `dataContext`，schema 来自库）；
+ * 四条都打在**用户能看到的东西**上，不回头调用判据函数自证：
+ * 1. 给注册表键 `card` + `dataContext` ⇒ 画出卡片标题、schema 标题与表格值（数据来自 dataContext，
+ *    卡体来自库）；`schemaId` 由宿主按 `plugin.{pluginId}.{key}` 拼，不由消息给；
  * 2. schema 取不到 ⇒ 明确的错误态（既有 11 语言译文），不崩、不白屏；
- * 3. 载荷不合契约 ⇒ 静默不渲染（一条坏消息不该炸掉整条渲染树），且宿主卡片文件里
- *    **没有任何股票 / 插件产物 import**（§93 安全边界的静态钉子）。
+ * 3. 载荷不合契约 / **归属不明**（未在清单里声明的卡、裸 schemaId）⇒ 静默不渲染（fail-closed）；
+ * 4. 宿主卡片文件不 import 任何股票 / 插件产物（§93 安全边界的静态钉子）。
  *
  * 固定装置刻意取**非股票语义**（发行说明卡）：验收点正是「宿主不 import 任何股票文件也能画出卡片」。
  */
@@ -32,8 +33,9 @@ vi.mock("@/lib/invoke", async (importOriginal) => {
 import { CardContainer } from "@/components/dynamicUI/containers/CardContainer";
 import { DataTable } from "@/components/dynamicUI/data/DataTable";
 import { componentRegistry } from "@/lib/dynamicUI/ComponentRegistry";
+import { __resetCardRegistryForTests, registerCardContributions } from "@/lib/dynamicUI/pluginCardRegistry";
 import { invoke } from "@/lib/invoke";
-import type { UISchema } from "@/types";
+import type { PluginTaskCardsInfoDto, UISchema } from "@/types";
 import { PluginSchemaCardSlot } from "../PluginSchemaCardSlot";
 
 const invokeMock = vi.mocked(invoke);
@@ -66,6 +68,29 @@ const RELEASE_NOTE_DATA = {
   ],
 };
 
+/** 清单声明（后端 `plugin_list_task_cards` 的投影形状，任务 #216 前置 ②）。 */
+const DECLARED_CARDS: PluginTaskCardsInfoDto[] = [{
+  id: "demo",
+  name: "Demo",
+  version: "1.0.0",
+  description: "demo plugin",
+  author: null,
+  enabled: true,
+  taskCards: [{
+    id: "release-note",
+    title: "发行说明",
+    surface: "chat",
+    summaryCommand: "rows",
+    detailSchema: "release-note-card",
+    tone: null,
+    order: 0,
+    actions: [],
+  }],
+}];
+
+/** 宿主拼出来的卡体行 id：`plugin.{pluginId}.{ui.json key}`。 */
+const RELEASE_NOTE_ROW_ID = "plugin.demo.release-note-card";
+
 function renderSlot(meta: Record<string, unknown> | null | undefined) {
   return render(
     <MemoryRouter>
@@ -92,25 +117,32 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  __resetCardRegistryForTests();
+  registerCardContributions(DECLARED_CARDS);
   invokeMock.mockReset();
+  // 投影与取 schema 走同一条 invoke：按命令名分流，避免两条命令互相喂错返回体。
+  invokeMock.mockImplementation(async (command: string) => {
+    if (command === "plugin_list_task_cards") {
+      return DECLARED_CARDS;
+    }
+    if (command === "get_dynamic_ui_schema") {
+      return { id: RELEASE_NOTE_ROW_ID, schemaJson: JSON.stringify(RELEASE_NOTE_SCHEMA) };
+    }
+    throw new Error(`unexpected command: ${command}`);
+  });
 });
 
 describe("PluginSchemaCardSlot —— 消息侧 schema 卡片", () => {
-  it("给 schemaId + 数据 ⇒ 画出卡片标题、schema 标题与表格值", async () => {
-    invokeMock.mockResolvedValue({
-      id: "release-note-card",
-      schemaJson: JSON.stringify(RELEASE_NOTE_SCHEMA),
-    });
-
+  it("给注册表键 + 数据 ⇒ 画出卡片标题、schema 标题与表格值", async () => {
     renderSlot({
       pluginCards: [{
-        schemaId: "release-note-card",
+        card: "demo:release-note",
         title: "本期变更",
         dataContext: RELEASE_NOTE_DATA,
       }],
     });
 
-    // 宿主 chrome（插件给的标题）与 schema 自己的 Card 标题
+    // 宿主 chrome（消息给的标题）与 schema 自己的 Card 标题
     expect(screen.getByText("本期变更")).toBeInTheDocument();
     expect(await screen.findByText("发行说明")).toBeInTheDocument();
     // dataContext.rows 经 Table 节点（id = rows）绑进表格
@@ -118,40 +150,75 @@ describe("PluginSchemaCardSlot —— 消息侧 schema 卡片", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("修复启动崩溃")).toBeInTheDocument();
 
-    // 取 schema 走的是既有命令，且只认 schemaId
-    expect(invokeMock).toHaveBeenCalledWith("get_dynamic_ui_schema", { id: "release-note-card" });
+    // 取 schema 用的是**宿主拼的行 id**（消息里没有写 id 的机会）
+    expect(invokeMock).toHaveBeenCalledWith("get_dynamic_ui_schema", { id: RELEASE_NOTE_ROW_ID });
+  });
+
+  it("旧键 schemaId 仍受理，但只在它能被注册表反查到归属时", async () => {
+    renderSlot({ pluginCards: [{ schemaId: RELEASE_NOTE_ROW_ID }] });
+
+    expect(await screen.findByText("发行说明")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("get_dynamic_ui_schema", { id: RELEASE_NOTE_ROW_ID });
   });
 
   it("schema 取不到 ⇒ 明确错误态（既有译文 + 原因），不崩、不白屏", async () => {
-    invokeMock.mockRejectedValue(new Error("DYNAMIC_UI_SCHEMA_NOT_FOUND: release-note-card"));
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "plugin_list_task_cards") {
+        return DECLARED_CARDS;
+      }
+      throw new Error(`DYNAMIC_UI_SCHEMA_NOT_FOUND: ${RELEASE_NOTE_ROW_ID}`);
+    });
 
-    renderSlot({ pluginCards: [{ schemaId: "release-note-card" }] });
+    renderSlot({ pluginCards: [{ card: "demo:release-note" }] });
 
     // 错误态落到既有 key（11 语言已有译文），原因原样带出便于定位
     expect(await screen.findByText("dynamicUI.schemaNotFound")).toBeInTheDocument();
-    expect(screen.getByText("DYNAMIC_UI_SCHEMA_NOT_FOUND: release-note-card")).toBeInTheDocument();
+    expect(screen.getByText(`DYNAMIC_UI_SCHEMA_NOT_FOUND: ${RELEASE_NOTE_ROW_ID}`))
+      .toBeInTheDocument();
     // 不白屏：卡片容器仍在（有可定位的宿主节点）
-    expect(document.querySelector('[data-plugin-schema-card="release-note-card"]')).not.toBeNull();
+    expect(
+      document.querySelector(`[data-plugin-schema-card="${RELEASE_NOTE_ROW_ID}"]`),
+    ).not.toBeNull();
   });
 
   it("schemaJson 坏掉同样落错误态，而不是抛到消息渲染树", async () => {
-    invokeMock.mockResolvedValue({ id: "release-note-card", schemaJson: "{not json" });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "plugin_list_task_cards") {
+        return DECLARED_CARDS;
+      }
+      // 注册表幂等加载还会投宿主投影；fallback 只服务 get_dynamic_ui_schema
+      if (command === "task_card_host_cards") {
+        return [];
+      }
+      return { id: RELEASE_NOTE_ROW_ID, schemaJson: "{not json" };
+    });
 
-    renderSlot({ pluginCards: [{ schemaId: "release-note-card" }] });
+    renderSlot({ pluginCards: [{ card: "demo:release-note" }] });
 
     expect(await screen.findByText("dynamicUI.schemaNotFound")).toBeInTheDocument();
   });
 
-  it("载荷不合契约 ⇒ 静默不渲染（不占位、不报错）", () => {
+  it("归属不明 / 载荷不合契约 ⇒ 静默不渲染（fail-closed）", () => {
+    // 未声明的卡键、裸 schemaId、空 / 非字符串、非对象条目：一条都不该画。
+    // （注册表投影由挂载幂等拉取，与消息内容无关；这里钉的是渲染面与 schema 取数都 fail-closed。）
+    const schemaCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "get_dynamic_ui_schema");
     const { container } = renderSlot({
-      pluginCards: [null, { schemaId: "" }, { schemaId: 42 }, "not-a-card"],
+      pluginCards: [
+        null,
+        { schemaId: "" },
+        { schemaId: 42 },
+        { schemaId: "release-note-card" },
+        { card: "ghost:never-declared" },
+        "not-a-card",
+      ],
     });
     expect(container).toBeEmptyDOMElement();
-    expect(invokeMock).not.toHaveBeenCalled();
+    expect(schemaCalls()).toEqual([]);
 
-    // meta 本身缺失 / 不是对象 / 键不是数组，三种退化都不渲染
+    // meta 本身缺失 / 不是对象 / 键不是数组，三种退化都不渲染，也不发生 schema 取数
     expect(renderSlot(undefined).container).toBeEmptyDOMElement();
     expect(renderSlot({ pluginCards: "nope" }).container).toBeEmptyDOMElement();
+    expect(schemaCalls()).toEqual([]);
   });
 
   it("宿主卡片文件不 import 任何股票 / 插件产物（§93：第三方代码不进主 origin）", () => {

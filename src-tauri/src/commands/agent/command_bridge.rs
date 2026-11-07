@@ -71,24 +71,127 @@ impl CommandSafety {
             CommandSafety::Dangerous => 2,
         }
     }
+}
 
-    /// 判断是否允许在给定权限模式下执行
-    pub fn is_allowed(&self, permission_mode: &str) -> bool {
-        match self {
-            CommandSafety::Safe => true,
-            CommandSafety::Caution => matches!(permission_mode, "full_access"),
-            CommandSafety::Dangerous => false, // Dangerous 命令始终需要显式授权
+// ── #181：派发层授权裁决 ───────────────────────────────────────────────
+//
+// 这里**刻意**没有 `is_allowed()` / `requires_confirmation()` 两个逐级判据。
+// 它们曾同时存在，且互相矛盾：`is_allowed(Caution, _)` 只认 `full_access`，而
+// `requires_confirmation(Caution)` 恒真 ⇒ 两条判据叠加，Caution 命令在任何档位都进不了
+// 执行臂（那条 `requires_confirmation` 分支返回的占位 JSON 全仓零消费方）。授权不是
+// 「几个布尔值的与」，而是一次裁决，所以只留 [`command_decision`] 一个出口。
+// 不要把逐级判据加回来。（注：[`CommandDecision::is_blocked`] 是裁决**结果**的便捷查询，
+// 供回归锁断言，不参与裁决，与上述逐级判据不同。）
+
+/// 会话授权档位 —— 与 `agent_sessions.permission_mode` 的存档值、前端
+/// `AgentBehaviorMode`（`src/types/agent.ts`）取同一集合。
+///
+/// 抽成枚举是为了把「已知档位」写成**封闭清单**：`command_decision` 只认这三个值，
+/// 其余一律 fail-closed。修复前这段映射散在 `mod.rs` 的
+/// `match permission_mode_str { ... _ => Prompt }` 里，未知值被静默当成默认档 ——
+/// 那是「猜」而不是「判」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPermissionMode {
+    /// 默认：写操作逐次确认
+    Default,
+    /// 接受编辑：工作区内写入放行
+    AcceptEdits,
+    /// 全权放行
+    FullAccess,
+}
+
+impl SessionPermissionMode {
+    /// 解析存档值；未知值返回 `None`，由调用点 fail-closed（**不得**兜底成 `Default`）。
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "default" => Some(Self::Default),
+            "accept_edits" => Some(Self::AcceptEdits),
+            "full_access" => Some(Self::FullAccess),
+            _ => None,
         }
     }
+}
 
-    /// 判断是否需要用户确认
-    pub fn requires_confirmation(&self) -> bool {
-        matches!(self, CommandSafety::Caution)
-    }
+/// 「会话授权档位读不到 / 不认识」的哨兵值。
+///
+/// 不复用 `"default"`：`default` 是**已知档位**，兜成它会把「查不到」伪装成
+/// 「用户选了默认档」，而这两件事在派发层必须可区分（一个该拒、一个该放）。
+pub const SESSION_MODE_UNKNOWN: &str = "__unknown__";
 
-    /// 判断是否被阻止执行
+/// 派发层对一次命令调用的授权裁决结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandDecision {
+    /// 放行：命令可以真正执行
+    Execute,
+    /// 拒绝：不执行，按结构化错误回给调用方
+    Block(BlockReason),
+}
+
+impl CommandDecision {
+    /// 是否拒绝（便捷判据，供回归锁表达「任何档位都拒」）。
+    ///
+    /// 生产路径直接 `match` [`CommandDecision::Block`]`(reason)` 取结构化缘由进错误码，
+    /// 不经过本 bool 方法；它只被 `#[cfg(test)]` 回归锁调用，故 lib target 下 dead_code。
+    #[allow(dead_code)]
     pub fn is_blocked(&self) -> bool {
-        matches!(self, CommandSafety::Dangerous)
+        matches!(self, Self::Block(_))
+    }
+}
+
+/// [`CommandDecision::Block`] 的机器可读缘由（进错误码 `params` 与日志字段）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockReason {
+    /// 命令安全级别为 `CommandSafety::Dangerous`
+    DangerousCommand,
+    /// 会话授权档位不认识（存档值损坏 / 新增档位未登记）⇒ fail-closed
+    UnknownSessionMode,
+}
+
+impl BlockReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::DangerousCommand => "dangerous_command",
+            Self::UnknownSessionMode => "unknown_session_mode",
+        }
+    }
+}
+
+/// #181：命令派发层的**唯一**授权裁决。
+///
+/// ## 为什么档位不取 LLM 入参
+/// 修复前这里读的是 `input["permission_mode"]`（LLM 的工具入参），而该工具的
+/// `input_schema`（见 [`build_tool_defs`]）只声明 `command` / `args` —— LLM 根本不知道
+/// 有这个键，全仓也没有任何写点 ⇒ 恒取默认值。**授权档位一旦由被授权方自己声明，
+/// 就不再是授权**。现在档位只来自会话存档（`agent_sessions.permission_mode`），
+/// 由 `dispatch_command` 按 `conversation_id` 读库后传进来。
+///
+/// ## 为什么 `Caution` 在这里放行
+/// 确认责任由**运行时门**承担，不由派发层承担：`execute_tauri_command` 不在
+/// `PermissionPolicy` 的 `tool_requirements` 里 ⇒ `required_mode_for` 落
+/// `DangerFullAccess`，于是非 `full_access` 档下 `Prompt` 弹窗、`WorkspaceWrite` 因升级
+/// 需求弹窗、无 prompter 时直接 Deny（`harness/runtime_types/permissions.rs` 的
+/// `authorize_with_context` / `prompt_or_deny`，调用点在
+/// `runtime-core/src/conversation.rs` 的 turn 循环）。派发层再做一次「需要确认」的判断，
+/// 只会得到一份无人消费的占位（修复前正是如此）。
+///
+/// ## 判据
+/// - `Safe` ⇒ 执行
+/// - `Caution` ⇒ 执行（确认已在运行时门完成）
+/// - `Dangerous` ⇒ 拒绝，**任何档位都不放行**（含 `full_access`，见
+///   `dangerous_command_is_blocked_in_every_session_mode`）
+/// - 档位不认识 ⇒ 拒绝（fail-closed）
+pub fn command_decision(safety: &CommandSafety, session_mode: &str) -> CommandDecision {
+    if SessionPermissionMode::parse(session_mode).is_none() {
+        warn!(
+            session_mode = session_mode,
+            safety = safety.as_str(),
+            "会话授权档位无法识别，按 fail-closed 拒绝命令"
+        );
+        return CommandDecision::Block(BlockReason::UnknownSessionMode);
+    }
+    match safety {
+        CommandSafety::Safe | CommandSafety::Caution => CommandDecision::Execute,
+        CommandSafety::Dangerous => CommandDecision::Block(BlockReason::DangerousCommand),
     }
 }
 
@@ -882,14 +985,19 @@ pub fn build_chat_tools() -> Vec<ChatTool> {
 /// 为每个工具创建 SkillToolHandler
 ///
 /// 在 handler 内部通过 block_in_place + block_on 调用异步 DAO 操作。
+///
+/// `conversation_id` 只用于一件事（#181）：`execute_tauri_command` 派发时按它读
+/// `agent_sessions.permission_mode`，作为授权档位的**唯一**来源。它必须来自调用方的
+/// 运行时上下文（`agent_query` 的会话 ID），**不得**可由 LLM 的 tool 入参提供。
 pub fn build_command_handlers(
     db: DatabaseConnection,
     app_handle: AppHandle,
+    conversation_id: &str,
 ) -> Vec<(String, SkillToolHandler)> {
     let mut handlers = Vec::new();
 
     for def in build_tool_defs() {
-        let handler = create_handler(def.name, db.clone(), app_handle.clone());
+        let handler = create_handler(def.name, db.clone(), app_handle.clone(), conversation_id);
         handlers.push((def.name.to_string(), handler));
     }
 
@@ -901,13 +1009,15 @@ fn create_handler(
     command_name: &str,
     db: DatabaseConnection,
     app_handle: AppHandle,
+    conversation_id: &str,
 ) -> SkillToolHandler {
     let name = command_name.to_string();
+    let conversation_id = conversation_id.to_string();
     Box::new(move |input: &str| {
         let input_value: Value =
             serde_json::from_str(input).unwrap_or_else(|_| serde_json::json!({}));
 
-        execute_command(&name, &input_value, &db, &app_handle)
+        execute_command(&name, &input_value, &db, &app_handle, &conversation_id)
     })
 }
 
@@ -921,10 +1031,12 @@ fn execute_command(
     input: &Value,
     db: &DatabaseConnection,
     app_handle: &AppHandle,
+    conversation_id: &str,
 ) -> Result<String, axagent_tools::ToolError> {
     let db = db.clone();
     let app = app_handle.clone();
     let name = command_name.to_string();
+    let conversation_id = conversation_id.to_string();
 
     // 安全地获取或创建 runtime 执行异步操作
     match tokio::runtime::Handle::try_current() {
@@ -933,7 +1045,9 @@ fn execute_command(
             // 避免在 runtime worker 上直接 block_on 触发
             // "Cannot block the current thread from within a runtime" panic
             tokio::task::block_in_place(move || {
-                handle.block_on(async { dispatch_command(&name, input, &db, &app).await })
+                handle.block_on(async {
+                    dispatch_command(&name, input, &db, &app, &conversation_id).await
+                })
             })
         },
         Err(_) => {
@@ -942,7 +1056,9 @@ fn execute_command(
                 .enable_all()
                 .build()
                 .map_err(|_| axagent_tools::ToolError::execution_failed(command_name))?;
-            runtime.block_on(async { dispatch_command(&name, input, &db, &app).await })
+            runtime.block_on(async {
+                dispatch_command(&name, input, &db, &app, &conversation_id).await
+            })
         },
     }
     // 任务 #170：原写法 `.map_err(|_| ToolError::execution_failed(command_name))` 把
@@ -955,12 +1071,16 @@ fn execute_command(
 }
 
 /// 命令分发 — 根据命令名调用对应的 DAO 操作
+///
+/// `conversation_id` 是 #181 的授权输入：`execute_tauri_command` 用它读会话存档的
+/// 授权档位。其余命令臂不消费它（它们不经 `execute_tauri_command` 这一层授权）。
 #[instrument(skip(db, app_handle), fields(command = %command_name))]
 async fn dispatch_command(
     command_name: &str,
     input: &Value,
     db: &DatabaseConnection,
     app_handle: &AppHandle,
+    conversation_id: &str,
 ) -> Result<String, String> {
     debug!("Executing Tauri command: {}", command_name);
 
@@ -1203,47 +1323,52 @@ async fn dispatch_command(
                     ));
                 },
             };
-            let permission_mode = input["permission_mode"].as_str().unwrap_or("default");
+            // #181：授权档位来自**会话存档**（按 conversation_id 读库），不来自 LLM 入参。
+            let session_mode = load_session_permission_mode(db, conversation_id).await;
 
-            // 检查是否在给定权限模式下允许执行
-            //
-            // ⚠ **Dangerous 只有这一条出口**，且这不是巧合而是可判定的（本文件
-            // `is_allowed` / `is_blocked` 的实现）：`is_blocked()` 仅对 `Dangerous` 为真，
-            // 而 `Dangerous::is_allowed(..)` 恒 `false` ⇒ 任何 `is_blocked()` 为真的命令都必然
-            // 满足 `!is_allowed(permission_mode)` ⇒ 本臂恒先吞。
-            // 此处曾有第二条 `else if safety.is_blocked()`（文案「需要显式授权才能执行」），
-            // **无条件不可达**，已删除；不要再加回同形态的分支。
-            if !safety.is_allowed(permission_mode) && safety.is_blocked() {
-                warn!(
-                    "Command blocked by permission mode: {} (mode={}, severity={})",
-                    command,
-                    permission_mode,
-                    safety.severity()
-                );
-                Err(format!(
-                    "命令 '{}' 是危险操作，在当前权限模式 '{}' 下不允许执行。",
-                    command, permission_mode
-                ))
-            } else if safety.requires_confirmation() {
-                // 写入命令，返回需要确认的提示
-                debug!(
-                    "Command requires confirmation: {} (severity={})",
-                    command,
-                    safety.severity()
-                );
-                Ok(serde_json::json!({
-                    "requires_confirmation": true,
-                    "command": command,
-                    "safety_level": safety.as_str(),
-                    "message": format!(
-                        "命令 '{}' 是写入操作，需要用户确认。安全级别: {}",
-                        command, safety.as_str()
-                    ),
-                    "args": args,
-                })
-                .to_string())
-            } else if macro_meta.is_none() {
-                // 只读插件命令：转发到 worker（归属由插件清单决定，不由 LLM 指定）。
+            // 一次裁决，只有「放行 / 拒绝」两态。此前这里是三级 if 链，且判据互相矛盾
+            // （Caution 要求 full_access 才算 allowed，却又恒进 requires_confirmation 臂），
+            // 详见 `command_decision` 的文档。
+            match command_decision(&safety, &session_mode) {
+                CommandDecision::Execute => {
+                    debug!(
+                        "Command authorized at dispatch layer: {} (safety={}, session_mode={})",
+                        command,
+                        safety.as_str(),
+                        session_mode
+                    );
+                },
+                CommandDecision::Block(reason) => {
+                    warn!(
+                        conversation_id = conversation_id,
+                        command = command,
+                        safety = safety.as_str(),
+                        session_mode = session_mode,
+                        reason = reason.as_str(),
+                        "Command blocked at dispatch layer"
+                    );
+                    // 结构化错误（码 + 分类 + params），不再回裸中文串。
+                    // 复用既有码 `SECURITY_TOOL_ACCESS_DENIED`（harness `error_codes::security`，
+                    // 11 语言 `error` 段均已登记）—— 语义正是「工具访问被拒绝」，
+                    // 不为单点新造码（AGENTS.md「后端错误码 i18n 规范」）。
+                    return Err(String::from(
+                        crate::commands::error::ErrorResponse::new(
+                            axagent_harness::error_codes::security::TOOL_ACCESS_DENIED,
+                        )
+                        .with_category(crate::commands::error::ErrorCategory::PermissionDenied)
+                        .with_detail(format!(
+                            "命令 '{command}' 在会话授权档位 '{session_mode}' 下被拒绝（{}）",
+                            reason.as_str()
+                        ))
+                        .with_param("command", command)
+                        .with_param("sessionMode", session_mode)
+                        .with_param("reason", reason.as_str()),
+                    ));
+                },
+            }
+
+            if macro_meta.is_none() {
+                // 插件命令：转发到 worker（归属由插件清单决定，不由 LLM 指定）。
                 let spec = plugin_spec.expect("命中分支已排除 None");
                 debug!(
                     "Executing plugin command: {} (plugin={}, severity={})",
@@ -1253,7 +1378,7 @@ async fn dispatch_command(
                 );
                 execute_plugin_agent_command(app_handle, &spec.plugin_id, &spec.name, &args).await
             } else {
-                // 只读命令，直接执行
+                // 宿主命令，直接执行
                 debug!("Executing safe command: {} (severity={})", command, safety.severity());
                 dispatch_proxy_command(command, &args, db, app_handle).await
             }
@@ -1314,6 +1439,42 @@ async fn dispatch_command(
         unknown => {
             warn!("Unknown Tauri command: {}", unknown);
             Err(format!("未知的 Tauri 命令: {}", unknown))
+        },
+    }
+}
+
+/// 会话授权档位的**唯一**读取口（#181）：按 `conversation_id` 取 `agent_sessions` 存档值。
+///
+/// 读不到时返回 [`SESSION_MODE_UNKNOWN`] 而不是 `"default"`：
+/// 「查不到」与「用户选了默认档」是两件事，混成一件就等于把未验证的会话
+/// 静默当成已授权的默认档。未知值由 [`command_decision`] fail-closed 拒掉。
+///
+/// 每调用一次多一条 `agent_sessions` 单行查询（走 `conversation_id` 过滤）。
+/// 换成「建 handler 时读一次并缓存」是不行的：用户可以在会话中途改档位
+/// （`agent_update_session`），而 handler 的生命周期跨整个 turn —— 缓存会让
+/// 「用户刚改成默认档」这一步在同一个 turn 内不生效。
+async fn load_session_permission_mode(db: &DatabaseConnection, conversation_id: &str) -> String {
+    match axagent_dao::repo::agent_session::get_agent_session_by_conversation_id(
+        db,
+        conversation_id,
+    )
+    .await
+    {
+        Ok(Some(session)) => session.permission_mode,
+        Ok(None) => {
+            warn!(
+                conversation_id = conversation_id,
+                "会话无 agent_sessions 存档，授权档位按未知处理（fail-closed）"
+            );
+            SESSION_MODE_UNKNOWN.to_string()
+        },
+        Err(error) => {
+            warn!(
+                conversation_id = conversation_id,
+                error = %error,
+                "读取会话授权档位失败，按未知处理（fail-closed）"
+            );
+            SESSION_MODE_UNKNOWN.to_string()
         },
     }
 }
@@ -3061,23 +3222,12 @@ mod tests {
         assert_eq!(CommandSafety::Caution.severity(), 1);
         assert_eq!(CommandSafety::Dangerous.severity(), 2);
 
-        // 测试 requires_confirmation
-        assert!(!CommandSafety::Safe.requires_confirmation());
-        assert!(CommandSafety::Caution.requires_confirmation());
-        assert!(!CommandSafety::Dangerous.requires_confirmation());
-
-        // 测试 is_blocked
-        assert!(!CommandSafety::Safe.is_blocked());
-        assert!(!CommandSafety::Caution.is_blocked());
-        assert!(CommandSafety::Dangerous.is_blocked());
-
-        // 测试 is_allowed
-        assert!(CommandSafety::Safe.is_allowed("default"));
-        assert!(CommandSafety::Safe.is_allowed("full_access"));
-        assert!(!CommandSafety::Dangerous.is_allowed("default"));
-        assert!(!CommandSafety::Dangerous.is_allowed("full_access"));
-        assert!(CommandSafety::Caution.is_allowed("full_access"));
-        assert!(!CommandSafety::Caution.is_allowed("default"));
+        // 授权判据不在本枚举（CommandSafety）上（#181）：`is_allowed` /
+        // `requires_confirmation` 两个逐级布尔方法已删除 —— 它们叠加起来互相矛盾
+        // （Caution 要求 full_access 才算 allowed，却又恒返回「需要确认」占位），把
+        // Caution 命令堵死。授权裁决统一走 `command_decision`，矩阵见
+        // `command_decision_matrix_is_exhaustive_and_fail_closed`。
+        // （`CommandDecision::is_blocked` 是裁决结果查询，供回归锁断言，不属逐级判据。）
     }
 
     /// 测试 resolve_command_domains 便捷函数
@@ -3320,5 +3470,155 @@ mod tests {
             "工具名不得重复，实际 {:?}",
             defs.iter().map(|d| d.name).collect::<Vec<_>>()
         );
+    }
+
+    // ==== #181：授权决策从 LLM 入参移到派发层 ====
+
+    /// 已知档位 × 三档安全级别的完整矩阵，以及未知档位的 fail-closed。
+    ///
+    /// 9 格逐格钉死，不做「只测几个代表值」的抽样：`Safe`/`Caution` 在任何已知档位
+    /// 都放行（确认责任在运行时门），`Dangerous` 在任何已知档位都拒。
+    #[test]
+    fn command_decision_matrix_is_exhaustive_and_fail_closed() {
+        let known = ["default", "accept_edits", "full_access"];
+
+        for mode in known {
+            assert_eq!(
+                command_decision(&CommandSafety::Safe, mode),
+                CommandDecision::Execute,
+                "Safe 命令在 {mode} 档应放行"
+            );
+            assert_eq!(
+                command_decision(&CommandSafety::Caution, mode),
+                CommandDecision::Execute,
+                "Caution 命令在 {mode} 档应放行（确认由运行时门承担）"
+            );
+            assert_eq!(
+                command_decision(&CommandSafety::Dangerous, mode),
+                CommandDecision::Block(BlockReason::DangerousCommand),
+                "Dangerous 命令在 {mode} 档应拒绝"
+            );
+        }
+
+        // 三档都必须被认出：若已知档位表被删空，上面的断言会以「全部 Block」失败，
+        // 这条是它的正向对照（避免「全 fail-closed」被误当作通过）。
+        for mode in known {
+            assert!(
+                SessionPermissionMode::parse(mode).is_some(),
+                "{mode} 必须是已知档位（否则整张矩阵退化成全拒绝）"
+            );
+        }
+
+        // 未知档位：三档安全级别**全部**拒绝（含 Safe —— fail-closed 不按级别开小口）。
+        // 一份是「存档损坏 / 新增档位没登记」的常见形态，一份是大小写/连字符混用，
+        // 还有 runtime 配置层的别名（dontAsk/plan）—— 它们不是 agent_sessions 的值域。
+        for garbage in
+            ["", " ", SESSION_MODE_UNKNOWN, "FULL_ACCESS", "full-access", "dontAsk", "plan"]
+        {
+            for safety in [CommandSafety::Safe, CommandSafety::Caution, CommandSafety::Dangerous] {
+                assert_eq!(
+                    command_decision(&safety, garbage),
+                    CommandDecision::Block(BlockReason::UnknownSessionMode),
+                    "未知档位 {garbage:?} 下 {:?} 必须 fail-closed",
+                    safety
+                );
+            }
+        }
+    }
+
+    /// 回归锁：A-min 让 `Caution` 在派发层放行，**不得**顺手把 `Dangerous` 一起放开。
+    ///
+    /// 任何档位（含 `full_access`，含读不到存档的未知档位）都必须拒。
+    #[test]
+    fn dangerous_command_is_blocked_in_every_session_mode() {
+        for mode in ["default", "accept_edits", "full_access", SESSION_MODE_UNKNOWN, "", "whatever"]
+        {
+            assert!(
+                command_decision(&CommandSafety::Dangerous, mode).is_blocked(),
+                "Dangerous 命令在 {mode:?} 档必须被拒（full_access 也不例外）"
+            );
+        }
+        // 已知档位上的拒绝缘由必须是「命令危险」而不是「档位不认识」——
+        // 否则上一条断言会被「未知档位」这条兜底路径满足，失去区分度。
+        for mode in ["default", "accept_edits", "full_access"] {
+            assert_eq!(
+                command_decision(&CommandSafety::Dangerous, mode),
+                CommandDecision::Block(BlockReason::DangerousCommand)
+            );
+        }
+    }
+
+    /// 反向锁（#181）：`execute_tauri_command` 的参数面不得再出现 `permission_mode`。
+    ///
+    /// 授权档位一旦能从 LLM 入参进来，就等于「被授权方自证授权」——那正是本次修复
+    /// 拆掉的形态。这里同时做正向对照（属性集合逐字固定），否则整张 `properties`
+    /// 被换掉时本测会静默通过。
+    #[test]
+    fn execute_tauri_command_schema_has_no_permission_mode_property() {
+        let def = build_tool_defs()
+            .into_iter()
+            .find(|def| def.name == "execute_tauri_command")
+            .expect("execute_tauri_command 必须在工具表中");
+
+        let properties = def.input_schema["properties"]
+            .as_object()
+            .expect("input_schema 必须是带 properties 的对象");
+        assert!(
+            !properties.contains_key("permission_mode"),
+            "不允许 LLM 声明授权档位，实际 properties={:?}",
+            properties.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            !def.input_schema.to_string().contains("permission_mode"),
+            "schema 全文不得出现 permission_mode，实际 {}",
+            def.input_schema
+        );
+
+        let mut keys: Vec<&str> = properties.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["args", "command"], "参数面只允许命令名与参数对象");
+    }
+
+    /// P2（#181）：`agent_get_session` 的响应必须把会话存档的授权档位带出去。
+    ///
+    /// 前端 `src/components/chat/InputArea.tsx` 读 `permissionMode` 初始化权限选择器；
+    /// 该字段此前不在 DTO 里 ⇒ 恒 `undefined` ⇒ 界面恒显示 `default`，
+    /// 于是「后端已是 full_access、界面还是 default」且用户一改就反向覆盖存档。
+    #[tokio::test]
+    async fn agent_get_session_response_carries_permission_mode() {
+        use crate::commands::agent::AgentGetSessionResponse;
+
+        let handle = axagent_dao::db::create_test_pool().await.expect("测试池应建成");
+        let conversation_id = "conv-181-p2";
+
+        // 先落一条 full_access 存档，再走「读存档 → 组装响应」这条真实链路。
+        axagent_dao::repo::agent_session::upsert_agent_session(
+            &handle.conn,
+            conversation_id,
+            None,
+            Some("full_access"),
+        )
+        .await
+        .expect("写入会话存档应成功");
+
+        let session = axagent_dao::repo::agent_session::get_agent_session_by_conversation_id(
+            &handle.conn,
+            conversation_id,
+        )
+        .await
+        .expect("读取会话存档应成功")
+        .expect("会话存档必须存在");
+
+        let json = serde_json::to_value(AgentGetSessionResponse::from_session(
+            conversation_id.to_string(),
+            &session,
+        ))
+        .expect("响应应可序列化");
+
+        assert_eq!(
+            json["permissionMode"], "full_access",
+            "存档档位必须原样出到前端读的 camelCase 键上，实际 {json}"
+        );
+        assert_eq!(json["conversationId"], conversation_id);
     }
 }

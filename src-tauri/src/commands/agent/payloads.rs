@@ -1,6 +1,7 @@
 //! Payload types for agent Tauri events and commands.
 //! Extracted from mod.rs to reduce file size.
 
+use axagent_harness::types::AgentSession;
 use axagent_harness::types::AttachmentInput;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -314,6 +315,32 @@ pub struct AgentGetSessionResponse {
     pub created_at: i64,
     #[serde(rename = "lastActiveAt")]
     pub last_active_at: i64,
+    /// 会话存档的授权档位（#181 P2）。
+    ///
+    /// 前端 `src/components/chat/InputArea.tsx` 读这个键来初始化权限选择器，
+    /// 此前该字段不在 DTO 里 ⇒ 恒 `undefined` ⇒ 界面永远显示 `default`，
+    /// 与后端存档（可能是 `full_access`）不一致。
+    #[serde(rename = "permissionMode")]
+    pub permission_mode: Option<String>,
+}
+
+impl AgentGetSessionResponse {
+    /// 由 `agent_sessions` 存档组装响应（#181 P2）。
+    ///
+    /// 抽成构造函数而非在 `mod.rs` 手写字面量：`agent_get_session` 有「命中存档」与
+    /// 「新建存档」两条分支，两处各写一份字面量时漏字段是自然结果（`permissionMode`
+    /// 就是这样漏掉的）。同时它让单测能不经 `AppState` 直接钉住
+    /// 「存档值 → 前端字段」这条投影。
+    pub fn from_session(conversation_id: String, session: &AgentSession) -> Self {
+        Self {
+            conversation_id,
+            name: None,
+            metadata: None,
+            created_at: session.created_at,
+            last_active_at: session.updated_at,
+            permission_mode: Some(session.permission_mode.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

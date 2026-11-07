@@ -1461,7 +1461,9 @@ pub async fn agent_query(
         let tauri_tool_count = tauri_tools.len();
         chat_tools.extend(tauri_tools);
 
-        let handlers = build_command_handlers(app_state.harness.db().clone(), app.clone());
+        // `conversation_id` 只作授权输入（#181：派发层按它读会话存档的授权档位）
+        let handlers =
+            build_command_handlers(app_state.harness.db().clone(), app.clone(), &conversation_id);
         let handler_count = handlers.len();
         for (tool_name, handler) in handlers {
             tool_registry.register_skill_tool(tool_name, handler);
@@ -3583,13 +3585,7 @@ pub async fn agent_get_session(
     })?;
 
     if let Some(session) = session {
-        Ok(AgentGetSessionResponse {
-            conversation_id: request.conversation_id,
-            name: None,
-            metadata: None,
-            created_at: session.created_at,
-            last_active_at: session.updated_at,
-        })
+        Ok(AgentGetSessionResponse::from_session(request.conversation_id, &session))
     } else {
         // Create a new session if none exists
         let new_session = axagent_dao::repo::agent_session::upsert_agent_session(
@@ -3606,16 +3602,7 @@ pub async fn agent_get_session(
             ))
         })?;
 
-        let created_at = new_session.created_at;
-        let last_active_at = new_session.updated_at;
-
-        Ok(AgentGetSessionResponse {
-            conversation_id: request.conversation_id,
-            name: None,
-            metadata: None,
-            created_at,
-            last_active_at,
-        })
+        Ok(AgentGetSessionResponse::from_session(request.conversation_id, &new_session))
     }
 }
 

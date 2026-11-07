@@ -567,9 +567,15 @@ impl SessionManager {
             session.session_mut().workspace_root = Some(std::path::PathBuf::from(cwd.as_str()));
         }
 
+        // 授权档位传 `None`（= 不覆盖存档值），#181 P1。
+        //
+        // 此前这里写死 `Some("default")`，而 dao 的 upsert 语义是
+        // 「`Some` ⇒ 覆盖，`None` ⇒ 保留」⇒ 每建一次运行时 Session（会话首次进入、
+        // 被 LRU 驱逐后重入）就把用户设的 `full_access` 打回 `default`。
+        // 派发层读到的授权档位因此恒为默认值 —— 那是 #181 决策的输入本身是坏的。
         let axagent_session = self
             .agent_session_repo
-            .upsert_agent_session(&conversation_id, cwd_to_use.as_deref(), Some("default"))
+            .upsert_agent_session(&conversation_id, cwd_to_use.as_deref(), None)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -2598,5 +2604,139 @@ mod tests {
         // 覆盖可被再次清除（用户把设置改回默认）
         sm.set_max_iterations_override(0);
         assert_eq!(sm.max_iterations_override(), None);
+    }
+
+    /// 记录 `upsert_agent_session` 入参、并按 dao 语义维护存档值的测试替身。
+    ///
+    /// dao 的语义（`axagent-infra/crates/dao/src/repo/agent_session.rs`）：
+    /// `Some(pm)` ⇒ 覆盖存档，`None` ⇒ 保留存档。这里逐字镜像它 ——
+    /// 替身若把 `None` 也当成「写 default」，就测不出 P1 那个覆盖缺陷。
+    struct RecordingAgentSessionRepo {
+        stored_permission_mode: parking_lot::Mutex<String>,
+        upsert_permission_modes: parking_lot::Mutex<Vec<Option<String>>>,
+    }
+
+    impl RecordingAgentSessionRepo {
+        fn new(stored_permission_mode: &str) -> Self {
+            Self {
+                stored_permission_mode: parking_lot::Mutex::new(stored_permission_mode.to_string()),
+                upsert_permission_modes: parking_lot::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn stored_permission_mode(&self) -> String {
+            self.stored_permission_mode.lock().clone()
+        }
+
+        /// 每次 upsert 收到的档位实参（按调用顺序）。
+        fn upsert_permission_modes(&self) -> Vec<Option<String>> {
+            self.upsert_permission_modes.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AgentSessionRepository for RecordingAgentSessionRepo {
+        async fn upsert_agent_session(
+            &self,
+            conversation_id: &str,
+            _cwd: Option<&str>,
+            permission_mode: Option<&str>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::types::AgentSession> {
+            self.upsert_permission_modes.lock().push(permission_mode.map(ToString::to_string));
+            // dao 语义：Some ⇒ 覆盖，None ⇒ 保留
+            let effective = match permission_mode {
+                Some(pm) => {
+                    *self.stored_permission_mode.lock() = pm.to_string();
+                    pm.to_string()
+                },
+                None => self.stored_permission_mode(),
+            };
+            Ok(axagent_harness::types::AgentSession {
+                id: "sess-p1".to_string(),
+                conversation_id: conversation_id.to_string(),
+                cwd: None,
+                workspace_locked: 0,
+                permission_mode: effective,
+                runtime_status: "idle".to_string(),
+                sdk_context_json: None,
+                sdk_context_backup_json: None,
+                total_tokens: 0,
+                total_cost_usd: 0.0,
+                created_at: 0,
+                updated_at: 0,
+            })
+        }
+
+        async fn update_agent_session_status(
+            &self,
+            _id: &str,
+            _runtime_status: &str,
+        ) -> axagent_harness::core_error::Result<()> {
+            Ok(())
+        }
+
+        async fn update_agent_session_after_query(
+            &self,
+            _id: &str,
+            _runtime_status: &str,
+            _sdk_context_json: Option<&str>,
+            _tokens_delta: i64,
+            _cost_delta: f64,
+        ) -> axagent_harness::core_error::Result<()> {
+            Ok(())
+        }
+
+        async fn clear_sdk_context_by_conversation_id(
+            &self,
+            _conversation_id: &str,
+        ) -> axagent_harness::core_error::Result<()> {
+            Ok(())
+        }
+
+        async fn get_by_id(
+            &self,
+            _id: &str,
+        ) -> axagent_harness::core_error::Result<Option<axagent_harness::types::AgentSession>>
+        {
+            Ok(None)
+        }
+
+        async fn get_by_conversation_id(
+            &self,
+            _conversation_id: &str,
+        ) -> axagent_harness::core_error::Result<Option<axagent_harness::types::AgentSession>>
+        {
+            Ok(None)
+        }
+
+        async fn list_all(
+            &self,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::types::AgentSession>>
+        {
+            Ok(Vec::new())
+        }
+    }
+
+    /// #181 P1：`create_session` 不得把会话存档的授权档位重置为 `default`。
+    ///
+    /// 修复前它传的是 `Some("default")`，dao 语义下即「覆盖」⇒ 会话每被 LRU 驱逐一次
+    /// （或每个新会话首轮）用户设的 `full_access` 就被打回 `default`；派发层的授权决策
+    /// 读到的因此恒是默认档。这条锁两件事：传参必须是 `None`，且存档值不得变化。
+    #[tokio::test]
+    async fn create_session_does_not_reset_stored_permission_mode() {
+        let repo = Arc::new(RecordingAgentSessionRepo::new("full_access"));
+        let sm = SessionManager::new_for_test(repo.clone());
+
+        sm.create_session("provider-1".to_string(), "conv-181-p1".to_string())
+            .await
+            .expect("建会话应成功");
+
+        let calls = repo.upsert_permission_modes();
+        assert_eq!(calls.len(), 1, "create_session 应恰好 upsert 一次，实际 {calls:?}");
+        assert_eq!(
+            calls[0], None,
+            "create_session 不得声明档位（Some 会覆盖用户存档，实际 {calls:?}）"
+        );
+        assert_eq!(repo.stored_permission_mode(), "full_access", "存档档位不得被建会话动作改写");
     }
 }

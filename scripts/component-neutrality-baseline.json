@@ -68,40 +68,16 @@
       "targetOwner": "agent"
     },
     {
-      "file": "src/components/chat/AssistantFooter.tsx",
-      "target": "../gateway/tokenFormat",
-      "kind": "component",
-      "targetOwner": "gateway"
-    },
-    {
       "file": "src/components/chat/AwarenessPanel.tsx",
       "target": "@/stores/feature/appConfigStore",
       "kind": "store",
       "targetOwner": "appConfig"
     },
     {
-      "file": "src/components/chat/BuddyMessage.tsx",
-      "target": "@/stores/feature/buddyStore",
-      "kind": "store",
-      "targetOwner": "buddy"
-    },
-    {
-      "file": "src/components/chat/BuddyWidget.tsx",
-      "target": "@/stores/feature/buddyStore",
-      "kind": "store",
-      "targetOwner": "buddy"
-    },
-    {
       "file": "src/components/chat/ChatMarkdownNodes.tsx",
       "target": "@/stores/feature/executionStore",
       "kind": "store",
       "targetOwner": "execution"
-    },
-    {
-      "file": "src/components/chat/ChatMarkdownNodes.tsx",
-      "target": "../gateway/tokenFormat",
-      "kind": "component",
-      "targetOwner": "gateway"
     },
     {
       "file": "src/components/chat/ChatSidebar.tsx",
@@ -111,39 +87,9 @@
     },
     {
       "file": "src/components/chat/ChatView.tsx",
-      "target": "@/stores/feature/topicGroupStore",
-      "kind": "store",
-      "targetOwner": "topicGroup"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
       "target": "../proactive/PrefetchIndicator",
       "kind": "component",
       "targetOwner": "proactive"
-    },
-    {
-      "file": "src/components/chat/ChatViewToolbar.tsx",
-      "target": "../gateway/tokenFormat",
-      "kind": "component",
-      "targetOwner": "gateway"
-    },
-    {
-      "file": "src/components/chat/CognitiveRoutePanel.tsx",
-      "target": "@/stores/feature/cognitiveRouteStore",
-      "kind": "store",
-      "targetOwner": "cognitiveRoute"
-    },
-    {
-      "file": "src/components/chat/ContextBar.tsx",
-      "target": "@/components/gateway/tokenFormat",
-      "kind": "component",
-      "targetOwner": "gateway"
-    },
-    {
-      "file": "src/components/chat/ContextClassificationBar.tsx",
-      "target": "@/components/gateway/tokenFormat",
-      "kind": "component",
-      "targetOwner": "gateway"
     },
     {
       "file": "src/components/chat/ConversationSettingsModal.tsx",
@@ -212,12 +158,6 @@
       "targetOwner": "skill"
     },
     {
-      "file": "src/components/chat/RightPanelContainer.tsx",
-      "target": "@/stores/feature/cacheStore",
-      "kind": "store",
-      "targetOwner": "cache"
-    },
-    {
       "file": "src/components/chat/SuggestionPanel.tsx",
       "target": "@/stores/feature/appConfigStore",
       "kind": "store",
@@ -234,12 +174,6 @@
       "target": "@/stores/feature/executionStore",
       "kind": "store",
       "targetOwner": "execution"
-    },
-    {
-      "file": "src/components/chat/TopicGroupDivider.tsx",
-      "target": "@/stores/feature/topicGroupStore",
-      "kind": "store",
-      "targetOwner": "topicGroup"
     },
     {
       "file": "src/components/chat/TrajectoryReplay.tsx",
@@ -290,36 +224,6 @@
       "targetOwner": "voice"
     },
     {
-      "file": "src/components/devtools/RLCheckpointManager.tsx",
-      "target": "@/stores/feature/rlTrainingStore",
-      "kind": "store",
-      "targetOwner": "rlTraining"
-    },
-    {
-      "file": "src/components/devtools/RLTrainingConfig.tsx",
-      "target": "@/components/settings/EngineConfigForm",
-      "kind": "component",
-      "targetOwner": "settings"
-    },
-    {
-      "file": "src/components/devtools/RLTrainingConfig.tsx",
-      "target": "@/stores/feature/rlTrainingStore",
-      "kind": "store",
-      "targetOwner": "rlTraining"
-    },
-    {
-      "file": "src/components/devtools/RLTrainingMonitor.tsx",
-      "target": "@/stores/feature/rlTrainingStore",
-      "kind": "store",
-      "targetOwner": "rlTraining"
-    },
-    {
-      "file": "src/components/devtools/RLTrainingPanel.tsx",
-      "target": "@/stores/feature/rlTrainingStore",
-      "kind": "store",
-      "targetOwner": "rlTraining"
-    },
-    {
       "file": "src/components/dynamicUI/DynamicUIRenderer.tsx",
       "target": "@/stores/feature/securityStore",
       "kind": "store",
@@ -350,12 +254,6 @@
       "targetOwner": "style"
     },
     {
-      "file": "src/components/layout/UserProfileModal.tsx",
-      "target": "@/stores/feature/userProfileStore",
-      "kind": "store",
-      "targetOwner": "userProfile"
-    },
-    {
       "file": "src/components/memory/MemoryGraphView.tsx",
       "target": "@/components/wiki/GraphView",
       "kind": "component",
@@ -374,148 +272,10 @@
       "targetOwner": "skill"
     },
     {
-      "file": "src/components/settings/AgentProfileManager.tsx",
-      "target": "@/stores/feature/agentStore",
-      "kind": "store",
-      "targetOwner": "agent"
-    },
-    {
-      "file": "src/components/settings/CodeRefactorConfigPanel.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/DataVendorsTab.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/DemandDiscoveryConfigPanel.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
       "file": "src/components/settings/DirectoryImportWizard.tsx",
       "target": "@/stores/feature/sourceStore",
       "kind": "store",
       "targetOwner": "source"
-    },
-    {
-      "file": "src/components/settings/EncryptionSettingsPanel.tsx",
-      "target": "@/stores/feature/deviceSyncStore",
-      "kind": "store",
-      "targetOwner": "deviceSync"
-    },
-    {
-      "file": "src/components/settings/EngineDetailPanel.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
-    },
-    {
-      "file": "src/components/settings/EvolutionSettings.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
-    },
-    {
-      "file": "src/components/settings/GeneralSettings.tsx",
-      "target": "@/stores/feature/voicePreferenceStore",
-      "kind": "store",
-      "targetOwner": "voicePreference"
-    },
-    {
-      "file": "src/components/settings/index.ts",
-      "target": "../chat/PluginMarketplace",
-      "kind": "component",
-      "targetOwner": "chat"
-    },
-    {
-      "file": "src/components/settings/LiteraryCreationConfigPanel.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/numberBounds.test.ts",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/numberBounds.ts",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/PromptImportModal.tsx",
-      "target": "@/stores/feature/promptTemplateStore",
-      "kind": "store",
-      "targetOwner": "promptTemplate"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "target": "@/stores/feature/promptTemplateStore",
-      "kind": "store",
-      "targetOwner": "promptTemplate"
-    },
-    {
-      "file": "src/components/settings/RealtimePushPanel.tsx",
-      "target": "@/stores/feature/deviceSyncStore",
-      "kind": "store",
-      "targetOwner": "deviceSync"
-    },
-    {
-      "file": "src/components/settings/SettingsPanel.tsx",
-      "target": "@/stores/feature/appConfigStore",
-      "kind": "store",
-      "targetOwner": "appConfig"
-    },
-    {
-      "file": "src/components/settings/SourceManager.tsx",
-      "target": "@/components/memory/MemoryGraphView",
-      "kind": "component",
-      "targetOwner": "memory"
-    },
-    {
-      "file": "src/components/settings/SourceManager.tsx",
-      "target": "@/stores/feature/llmWikiStore",
-      "kind": "store",
-      "targetOwner": "llmWiki"
-    },
-    {
-      "file": "src/components/settings/SourceManager.tsx",
-      "target": "@/stores/feature/memoryStore",
-      "kind": "store",
-      "targetOwner": "memory"
-    },
-    {
-      "file": "src/components/settings/SourceManager.tsx",
-      "target": "@/stores/feature/sourceStore",
-      "kind": "store",
-      "targetOwner": "source"
-    },
-    {
-      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/ThemeManager.tsx",
-      "target": "@/stores/feature/themeStore",
-      "kind": "store",
-      "targetOwner": "theme"
-    },
-    {
-      "file": "src/components/settings/ToolSemanticCheck.tsx",
-      "target": "@/components/workflow/types/workflow.types",
-      "kind": "component",
-      "targetOwner": "workflow"
     },
     {
       "file": "src/components/settings/UserProfileSettings.tsx",
@@ -530,58 +290,10 @@
       "targetOwner": "style"
     },
     {
-      "file": "src/components/settings/UserProfileSettings.tsx",
-      "target": "@/stores/feature/userProfileStore",
-      "kind": "store",
-      "targetOwner": "userProfile"
-    },
-    {
-      "file": "src/components/settings/VariableControls.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
       "file": "src/components/settings/WorkflowSettings.tsx",
       "target": "@/components/workflow/Templates",
       "kind": "component",
       "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/settings/WorkflowSettings.tsx",
-      "target": "@/components/workflow/types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/shared/ChartRenderer.tsx",
-      "target": "@/components/chat/ArtifactPreview/ChartPreview",
-      "kind": "component",
-      "targetOwner": "chat"
-    },
-    {
-      "file": "src/components/skill/SkillChatCommands.tsx",
-      "target": "@/stores/feature/skillExtensionStore",
-      "kind": "store",
-      "targetOwner": "skillExtension"
-    },
-    {
-      "file": "src/components/skill/SkillStatusBar.tsx",
-      "target": "@/stores/feature/skillExtensionStore",
-      "kind": "store",
-      "targetOwner": "skillExtension"
-    },
-    {
-      "file": "src/components/skill/SkillToolbar.tsx",
-      "target": "@/stores/feature/skillExtensionStore",
-      "kind": "store",
-      "targetOwner": "skillExtension"
-    },
-    {
-      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
-      "target": "@/stores/feature/stockWorkflowChatBridge",
-      "kind": "store",
-      "targetOwner": "stockWorkflowChatBridge"
     },
     {
       "file": "src/components/stock-analysis/BacktestPanel.tsx",
@@ -590,46 +302,16 @@
       "targetOwner": "time-travel"
     },
     {
-      "file": "src/components/stock-analysis/PaperPortfolioDashboard.tsx",
-      "target": "@/stores/feature/paperPortfolioStore",
-      "kind": "store",
-      "targetOwner": "paperPortfolio"
-    },
-    {
       "file": "src/components/stock-analysis/RecommendationPanel.tsx",
       "target": "@/components/time-travel/ReplayBadge",
       "kind": "component",
       "targetOwner": "time-travel"
     },
     {
-      "file": "src/components/stock-analysis/ReflectionPanel.tsx",
-      "target": "@/components/workflow/types/workflow.types",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
       "file": "src/components/stock-analysis/ScreenshotDiagnosisDashboard.tsx",
       "target": "@/stores/feature/providerStore",
       "kind": "store",
       "targetOwner": "provider"
-    },
-    {
-      "file": "src/components/stock-analysis/ScreenshotDiagnosisDashboard.tsx",
-      "target": "@/stores/feature/screenshotDiagnosisStore",
-      "kind": "store",
-      "targetOwner": "screenshotDiagnosis"
-    },
-    {
-      "file": "src/components/stock-analysis/SerenityCandidateCard.tsx",
-      "target": "@/stores/feature/serenityStore",
-      "kind": "store",
-      "targetOwner": "serenity"
-    },
-    {
-      "file": "src/components/stock-analysis/SerenityScreeningPanel.tsx",
-      "target": "@/stores/feature/serenityStore",
-      "kind": "store",
-      "targetOwner": "serenity"
     },
     {
       "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
@@ -650,40 +332,10 @@
       "targetOwner": "settings"
     },
     {
-      "file": "src/components/stock-analysis/WhatIfBacktest.tsx",
-      "target": "@/components/settings/StockAnalysisConfigPanel",
-      "kind": "component",
-      "targetOwner": "settings"
-    },
-    {
       "file": "src/components/stock-analysis/__tests__/ScreenerToWorkspace.integration.test.tsx",
       "target": "@/components/invest/InvestHub",
       "kind": "component",
       "targetOwner": "invest"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/SerenityCandidateCard.tier.test.tsx",
-      "target": "@/stores/feature/serenityStore",
-      "kind": "store",
-      "targetOwner": "serenity"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.asOfRunScope.test.tsx",
-      "target": "@/stores/feature/serenityStore",
-      "kind": "store",
-      "targetOwner": "serenity"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.historyGeneration.test.tsx",
-      "target": "@/stores/feature/serenityStore",
-      "kind": "store",
-      "targetOwner": "serenity"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.nodeFailure.test.tsx",
-      "target": "@/stores/feature/serenityStore",
-      "kind": "store",
-      "targetOwner": "serenity"
     },
     {
       "file": "src/components/stock-analysis/__tests__/ValueAssessmentPanel.render.test.tsx",
@@ -698,60 +350,6 @@
       "targetOwner": "theme"
     },
     {
-      "file": "src/components/time-travel/ReplaySweep.tsx",
-      "target": "@/components/tasks/JobCard",
-      "kind": "component",
-      "targetOwner": "tasks"
-    },
-    {
-      "file": "src/components/time-travel/TimeTravelBatchCard.tsx",
-      "target": "@/components/tasks/JobCard",
-      "kind": "component",
-      "targetOwner": "tasks"
-    },
-    {
-      "file": "src/components/viz/VizBlockRenderer.tsx",
-      "target": "@/components/chat/ArtifactPreview/ChartPreview",
-      "kind": "component",
-      "targetOwner": "chat"
-    },
-    {
-      "file": "src/components/workflow/AIPanel/AIPanel.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
-    },
-    {
-      "file": "src/components/workflow/AIPanel/AIPanel.tsx",
-      "target": "@/stores/feature/workflowEditorStore",
-      "kind": "store",
-      "targetOwner": "workflowEditor"
-    },
-    {
-      "file": "src/components/workflow/AIPanel/EvolutionTab.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
-    },
-    {
-      "file": "src/components/workflow/DebugPanel.tsx",
-      "target": "@/stores/feature/workEngineStore",
-      "kind": "store",
-      "targetOwner": "workEngine"
-    },
-    {
-      "file": "src/components/workflow/Diagnostic/DiagnosticDrawer.tsx",
-      "target": "@/stores/feature/workflowEditorStore",
-      "kind": "store",
-      "targetOwner": "workflowEditor"
-    },
-    {
-      "file": "src/components/workflow/Edges/BaseEdge.tsx",
-      "target": "@/stores/feature/workEngineStore",
-      "kind": "store",
-      "targetOwner": "workEngine"
-    },
-    {
       "file": "src/components/workflow/Hooks/useFlowNodes.ts",
       "target": "@/stores/feature/agentStore",
       "kind": "store",
@@ -764,12 +362,6 @@
       "targetOwner": "expert"
     },
     {
-      "file": "src/components/workflow/Nodes/BaseNode.tsx",
-      "target": "@/stores/feature/workEngineStore",
-      "kind": "store",
-      "targetOwner": "workEngine"
-    },
-    {
       "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
       "target": "@/components/chat/ExpertSelector",
       "kind": "component",
@@ -780,18 +372,6 @@
       "target": "@/stores/feature/expertStore",
       "kind": "store",
       "targetOwner": "expert"
-    },
-    {
-      "file": "src/components/workflow/WorkflowEditor.tsx",
-      "target": "@/stores/feature/workEngineStore",
-      "kind": "store",
-      "targetOwner": "workEngine"
-    },
-    {
-      "file": "src/components/workflow/WorkflowExecutor.tsx",
-      "target": "@/stores/feature/workflowEditorStore",
-      "kind": "store",
-      "targetOwner": "workflowEditor"
     }
   ]
 }

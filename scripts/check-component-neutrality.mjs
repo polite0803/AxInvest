@@ -21,6 +21,15 @@
 //   门禁变成 210+ 假阳性灾难。新增中性目录必须在此**逐字登记并写明理由**（AGENTS.md「组件中立性规范」），
 //   不许由命名形态自动推导 —— 否则「把目录改成 kebab 形」就白拿豁免，等于静默扩面。
 //
+// DOMAIN_STORE_OWNERSHIP（C 档域归属映射表，2026-11 消化「面板读自己功能域 store」假阳性）：
+//   与 NEUTRAL_PREFIXES **同构**的登记表 = 唯一权威，精确命中，不许靠命名形态自动扩（#200 判例：
+//   改名白拿豁免即红）。键 = 组件目录 owner（normOwner 后），值 = 该域自有 store owner 列表（normOwner 后）。
+//   语义：store owner ∈ mapping[组件目录 owner] ⇒ 视同自引不报违规。**只作用于 store 支**（component 支不查，
+//   否则与 store 同名的组件目录会白拿豁免）；**单向登记**（stock-analysis→serenity 登记了，不代表
+//   serenity→stockAnalysis 自动豁免）；未登记的跨域仍红。判定抽成纯函数 isSameDomain(componentOwner, storeOwner)，
+//   直引与未来 #222（barrel re-export 解析）共用同一张表。每条映射带中文理由 + 证据文件（见常量处注释）。
+//   ⚠ 这不是「豁免跨域」，是「把本属同域的 store 识别出来」—— 映射对之外的一切跨域引用判据一字不动。
+//
 // 空洞通过防护（2026-11-05 任务 #199）：src/components 缺失 / 扫描面塌方 ⇒ **退 1**，不再「跳过 = 通过」。
 //   --selftest 全是纯函数断言、不碰真实树，拦不住「扫描器看不见任何文件」这种退化（棘轮会静默变绿）。
 //
@@ -59,6 +68,38 @@ const ALLOWLIST_PATH = join(root, "scripts", "component-neutrality-allowlist.jso
 // ── 共享 UI 基元目录（目标侧中性；改动必须同步头部注释）──
 // 登记表 = **唯一权威**，匹配时逐字命中（精确匹配，不随 normOwner 归一；理由见 normOwner 作用域段）。
 const NEUTRAL_PREFIXES = ["layout", "common", "shared", "dynamicUI"];
+
+// ── C 档域归属映射表（与 NEUTRAL_PREFIXES 同构的登记表；改动必须同步头部注释 + selftest）──
+// 键 = 组件目录 owner（normOwner 后：lowercase + 去 -/_）；值 = 该域自有 store owner 列表（normOwner 后，
+//   store 名已由 adjudicateImport 剥 Store 后缀）。匹配经纯函数 isSameDomain，输入原形名内部归一后精确命中。
+// **只认精确登记，不许靠命名形态自动扩**（#200 判例）：未登记的 store / 反向 / component 支一律仍红。
+// 每条映射的理由与证据文件逐条写在下面 —— 新增映射必须照此登记 + 写理由，不许静默扩面。
+const DOMAIN_STORE_OWNERSHIP = {
+  // stock-analysis 域：趋势智选 / 截图诊断 / 模拟组合 / 股票工作流聊天桥都是股票分析功能的自有 store。
+  //   证据：SerenityScreeningPanel.tsx:6-12（趋势智选面板读 serenityStore），后端 commands/stock_workflow/serenity.rs；
+  //   ScreenshotDiagnosisDashboard.tsx:15、PaperPortfolioDashboard.tsx:14；workflowChatCard.ts:7 注释明言
+  //   「生产端 stockWorkflowChatBridge 是股票域文件」（该 store 当前无组件直引，登记为域归属备用，不消账面）。
+  stockanalysis: ["serenity", "screenshotdiagnosis", "paperportfolio", "stockworkflowchatbridge"],
+  // workflow 域：workflowEditor（编辑器态）/ workEngine（引擎执行态）是工作流编辑器的自有 store。
+  //   证据：AIPanel/AIPanel.tsx:5-6、WorkflowEditor.tsx:44、DebugPanel.tsx:9、Edges/BaseEdge.tsx:3、Nodes/BaseNode.tsx:4。
+  workflow: ["workfloweditor", "workengine"],
+  // skill 域：skillExtension 与 skillStore 互引同域 —— skillExtensionStore.ts:21 静态导入 skillStore，
+  //   双方仅函数体内引用对方构成循环依赖（该文件 :18-19 注释自证）⇒ 同一功能域。证据：SkillToolbar.tsx:8。
+  skill: ["skillextension"],
+  // devtools 域：rlTraining 是 RL 训练的唯一 UI 宿主 store。证据：RLTrainingPanel.tsx:6,22（面板读训练态）、
+  //   RLCheckpointManager.tsx:3-4、RLTrainingConfig.tsx:5-6、RLTrainingMonitor.tsx:3。
+  devtools: ["rltraining"],
+  // chat 域：topicGroup（会话内主题分组）/ cognitiveRoute / buddy / cache（按 conversationId 记 prompt 缓存）
+  //   都是聊天功能的自有 store。证据：TopicGroupDivider.tsx:4-5（会话内主题分组）、ChatView.tsx:29、
+  //   CognitiveRoutePanel.tsx、BuddyMessage.tsx / BuddyWidget.tsx、RightPanelContainer.tsx（cacheStore）。
+  chat: ["topicgroup", "cognitiveroute", "buddy", "cache"],
+  // settings 域：deviceSync / theme / userProfile / appConfig / voicePreference 的管理 UI 唯一宿主在 settings。
+  //   证据：EncryptionSettingsPanel.tsx:3,17、ThemeManager.tsx:5、UserProfileSettings.tsx:11、
+  //   SettingsPanel.tsx:5-6（appConfig）、GeneralSettings.tsx:7-8（voicePreference）、RealtimePushPanel.tsx（deviceSync）。
+  settings: ["devicesync", "theme", "userprofile", "appconfig", "voicepreference"],
+  // layout 域：userProfile 的弹窗宿主 UserProfileModal 在 layout（全局用户资料入口）。证据：UserProfileModal.tsx:14。
+  layout: ["userprofile"],
+};
 
 // ── 与存量实测同一套 resolve（@/ 别名 + 相对路径 → src/… posix）──
 export function resolveImportTarget(specifier, fromFile) {
@@ -157,6 +198,21 @@ function isNeutralOwner(targetOwner) {
   return NEUTRAL_PREFIXES.includes(targetOwner);
 }
 
+/**
+ * C 档域归属判定（纯函数，直引与未来 #222 barrel re-export 解析共用）。
+ * 问「storeOwner 这个 store 是否登记为 componentOwner 这个组件域的自有 store」⇒ 是则视同自引。
+ * 输入收**原形名**（组件目录 kebab / store camel 皆可），内部走 normOwner 归一后精确命中 DOMAIN_STORE_OWNERSHIP。
+ * 三条安全边界（与 NEUTRAL 同构，不许静默扩）：
+ *   · 单向：只查 mapping[componentOwner]，不查反向 ⇒ serenity→stockAnalysis 不因 stock-analysis→serenity 自动豁免；
+ *   · 精确：未登记的 store owner 一律 false ⇒ 改名 / 命名形态推导白拿不到豁免（#200）；
+ *   · 仅 store 支调用（见 findViolations）：component 支不查本表，避免与 store 同名的组件目录白拿豁免。
+ * normOwner 幂等（lowercase + 去 -/_），故对已归一名再归一无副作用。
+ */
+export function isSameDomain(componentOwner, storeOwner) {
+  const owned = DOMAIN_STORE_OWNERSHIP[normOwner(componentOwner)];
+  return owned !== undefined && owned.includes(normOwner(storeOwner));
+}
+
 /** 纯函数：给定文件内容 → 违规条目列表（selftest 与正式跑共用）。 */
 export function findViolations({ file, content, owner }) {
   const violations = [];
@@ -174,7 +230,11 @@ export function findViolations({ file, content, owner }) {
     // 两支故意不同判据的理由见 normOwner 注释的作用域段，不要「顺手统一」成三支一起归一或一起全等。
     // targetOwner 与 target 在条目里**存原形**，棘轮键不受归一影响（见 normOwner 注释的作用域）。
     const sameOwner = normOwner(j.targetOwner) === normOwner(selfOwner);
-    const isViolation = j.kind === "store" ? !sameOwner : !sameOwner && !isNeutralOwner(j.targetOwner);
+    // C 档域归属映射**只作用于 store 支**：该 store 登记为 selfOwner 域自有 ⇒ 视同自引。
+    // component 支不查映射（映射值是 store 名，不是组件目录名；若也查会让同名组件目录白拿豁免）。
+    // 未登记的跨域 store / 反向 / 命名形态变体一律仍红 —— isSameDomain 精确命中登记表，不自动扩（#200）。
+    const sameDomain = j.kind === "store" && isSameDomain(selfOwner, j.targetOwner);
+    const isViolation = j.kind === "store" ? !sameOwner && !sameDomain : !sameOwner && !isNeutralOwner(j.targetOwner);
     if (isViolation) {
       violations.push({ file, target: spec, resolvedTarget: j.target, kind: j.kind, targetOwner: j.targetOwner });
     }
@@ -437,6 +497,53 @@ function runSelftest() {
   check(k2.length === 1 && k2[0].target === "@/components/stock-analysis/Panel" && k2[0].targetOwner === "stock-analysis",
     "键形态：kebab 形 target/targetOwner 同样存原文 ⇒ 212 条基线键不会因归一失配");
 
+  // ── C 档域归属映射表（DOMAIN_STORE_OWNERSHIP / isSameDomain）正负对照 ──
+  // ① 正控：登记映射对（stock-analysis→serenityStore）视同自引，不报违规
+  const d1 = findViolations({
+    file: "src/components/stock-analysis/SerenityScreeningPanel.tsx",
+    content: 'import { useSerenityStore } from "@/stores/feature/serenityStore";\n',
+    owner: "stock-analysis",
+  });
+  check(d1.length === 0, "C 档正控①：stock-analysis 引登记自有 store serenityStore 不得假阳性");
+  // ② 负控：未登记的跨域（chat→providerStore）仍红 —— 映射不是「豁免一切跨域」
+  const d2 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import { useProviderStore } from "@/stores/feature/providerStore";\n',
+    owner: "chat",
+  });
+  check(d2.length === 1 && d2[0].kind === "store" && d2[0].targetOwner === "provider",
+    "C 档负控②：chat 引未登记跨域 providerStore 仍必须红（映射只识别本域自有 store，不豁免跨域）");
+  // ③ 负控：映射不许泛化 —— workflowEditor 登记在 workflow 域，stock-analysis 引它仍红
+  const d3 = findViolations({
+    file: "src/components/stock-analysis/X.tsx",
+    content: 'import { useWorkflowEditorStore } from "@/stores/feature/workflowEditorStore";\n',
+    owner: "stock-analysis",
+  });
+  check(d3.length === 1 && d3[0].targetOwner === "workflowEditor",
+    "C 档负控③：stock-analysis 引未登记到本域的 workflowEditorStore 仍红 ⇒ 映射精确命中，不许跨域泛化");
+  // ④ 负控：单向登记 —— 反向不成立（serenity 无真实组件目录，用注入 owner 钉死纯函数语义）：
+  //   stock-analysis→serenity 登记了，不代表 serenity→stockAnalysis 自动豁免。
+  const d4 = findViolations({
+    file: "src/components/serenity/X.tsx",
+    content: 'import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";\n',
+    owner: "serenity",
+  });
+  check(d4.length === 1 && d4[0].targetOwner === "stockAnalysis",
+    "C 档负控④：serenity 引 stockAnalysisStore 仍红 ⇒ 映射是单向登记，反向不自动豁免");
+  // ⑤ 正控：isSameDomain 纯函数收原形名内部归一（供 #222 barrel 复用），且单向
+  check(isSameDomain("stock-analysis", "serenity") && isSameDomain("stock-analysis", "Serenity") &&
+      isSameDomain("workflow", "workflowEditor") && !isSameDomain("serenity", "stockAnalysis"),
+    "C 档正控⑤：isSameDomain 归一原形名（kebab 目录 / camel store）精确命中，反向 false");
+  // ⑥ 负控：映射只作用 store 支 —— theme 登记为 settings 自有 store，但 settings 引 theme **组件目录**仍红
+  //   （component 支不查映射，否则与 store 同名的组件目录白拿豁免）。
+  const d6 = findViolations({
+    file: "src/components/settings/X.tsx",
+    content: 'import { T } from "@/components/theme/ThemePanel";\n',
+    owner: "settings",
+  });
+  check(d6.length === 1 && d6[0].kind === "component" && d6[0].targetOwner === "theme",
+    "C 档负控⑥：settings 引 theme 组件目录仍红 ⇒ 域归属映射只作用 store 支，不渗进 component 支");
+
   if (fail > 0) { return false; }
   console.log(
     `SELFTEST OK（共 ${total} 条断言 · 失败 ${fail}）：` +
@@ -444,7 +551,8 @@ function runSelftest() {
       "owner 两支归一正控 3 组同 owner（stockAnalysis·multiAgent·llmWiki）+ ③e 双支合钉 / " +
       "owner 归一负控（providerStore·跨 kebab·multiAgent×stockAnalysis·gatewayLink 未合并）/ " +
       "NEUTRAL 精确匹配（③c 登记名豁免·③d 未登记变体必须红）/ norm 不剥后缀 / " +
-      "棘轮键存原形 / 空洞通过防护双锚（a 绝对下界·b 相对基线面）全部通过"
+      "棘轮键存原形 / 空洞通过防护双锚（a 绝对下界·b 相对基线面）/ " +
+      "C 档域归属映射（①登记对豁免·②未登记跨域仍红·③不泛化·④单向·⑤isSameDomain 归一·⑥仅 store 支）全部通过"
   );
   return true;
 }
@@ -548,7 +656,7 @@ if (newViolations.length > 0) {
     console.error(`  + ${v.file} → ${v.target}（${v.kind}:${v.targetOwner}）`);
   }
   if (newViolations.length > 30) { console.error(`  … 其余 ${newViolations.length - 30} 条省略`); }
-  console.error(`\n若确属误报（如新中性目录），在 scripts/check-component-neutrality.mjs 的 NEUTRAL_PREFIXES 登记并写明理由，不要静默扩豁免。`);
+  console.error(`\n若确属误报：新中性目录 ⇒ 在 NEUTRAL_PREFIXES 登记；面板读本域自有 store ⇒ 在 DOMAIN_STORE_OWNERSHIP 登记（键=组件域、值=store 名，均 norm 后）并写明理由 + 证据文件。两者都在 scripts/check-component-neutrality.mjs，不要静默扩豁免。`);
   process.exit(1);
 }
 

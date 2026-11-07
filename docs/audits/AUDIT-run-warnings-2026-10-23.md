@@ -1,5 +1,8 @@
 # 审计：10-23 运行日志 WARN 分类与定性
 
+> 状态：active ｜ 日期：2026-10-23 ｜ 对应版本：v2.9.9
+
+
 - 输入：`C:\Users\polit\Documents\PowerShell.txt`（1238 行，单次运行 10:25:15 ~ 10:35:xx，含多个 execution）
 - 方法：按 `(level, 模块, 消息模板)` 聚合 + 按 `execution_id` 对齐时间线 + 源码核对
 - 规模：**WARN 116 种 / 0 ERROR**；其中 `strict_mode enabled` 60 条属正常提示

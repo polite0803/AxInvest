@@ -1,12 +1,15 @@
 # PLAN-r2-daily-replay —— 每日时间旅行回放（R-2）
 
+> 状态：active ｜ 日期：2026-11-03 ｜ 对应版本：v3.0.0+（未定版，待确认）
+
+
 > 2026-10-25 建立。目标：把「回放日」从 3 个推向 30+，让回放样本按天累积。
 
 ---
 
 ## 1. 出发点与结论修正
 
-R-1 接通回放验证后发现回放样本价格错位（详见 `VERDICT-stock-business-profitability-2026-10-25.md` §11）。
+R-1 接通回放验证后发现回放样本价格错位（详见 `AUDIT-stock-business-profitability-2026-10-25.md` §11）。
 修价后回放与实盘在 T+2 上 α 只差 0.02pp ⇒ **回放是可信的验证通道**，值得用来按天攒样本。
 
 但 R-2 一动手就查出一件更基础的事：
@@ -473,7 +476,7 @@ WHERE status='failed' AND (request_json::jsonb->>'analyze')='false' AND total>0 
 
 ## 12. R-3c 定性：回放分析链的「0 买入 / 26% 数据缺失」
 
-> 触发：`VERDICT-stock-business-profitability-2026-10-25.md` §缺陷表第 2 行
+> 触发：`AUDIT-stock-business-profitability-2026-10-25.md` §缺陷表第 2 行
 > 「分析链降级｜买入率 0% vs 实盘 7.0%；数据缺失 26%｜回放测的不是同一个系统」
 > 与 §缺陷表 R-3c「修回放分析链的 as-of 数据缺口（0 买入 / 26% 数据缺失）」。
 

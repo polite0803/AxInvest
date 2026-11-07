@@ -1,6 +1,6 @@
 # 妖股漏检链缺陷收口计划
 
-> 状态：代码已执行，待重启验证（2026-10-22）
+> 状态：active ｜ 日期：2026-10-22 ｜ 对应版本：v2.9.9
 > 范围：`mover_recall` 漏检链（枚举 → 收盘 → 核查 → 事件 → 补分析 → 反思 → 回灌 → 降权）的**全部已知缺陷**
 > 前置：`PLAN-mover-recall-attribution.md`、`PLAN-missed-mover-reflection-closure.md`（本轮不重开已闭合项）
 

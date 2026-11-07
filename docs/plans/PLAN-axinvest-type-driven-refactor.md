@@ -1,5 +1,8 @@
 # AxInvest 类型驱动设计重构方案
 
+> 状态：active ｜ 日期：2026-08-19 ｜ 对应版本：v2.9.5
+
+
 > **状态**: 实施中
 > **创建**: 2026-08-19
 > **对齐**: 上游 `TYPE_DRIVEN_DESIGN.md` 和 `REFACTOR_PLAN.md`

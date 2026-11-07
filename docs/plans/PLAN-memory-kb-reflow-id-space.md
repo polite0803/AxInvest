@@ -1,7 +1,7 @@
 # PLAN — Memory → Knowledge 回流：**错 id 空间**与静默失败（单独立项）
 
 > 立项日：2026-09-17 ｜ 来源：`docs/plans/PLAN-declarative-schema-sync.md` §六 表格 `:2916` 与 §⑨ 遗留 4（`:2959-2961`）
-> 状态：**已实施**（§4.1 选项 A，见下方状态块）｜ 优先级：中（**静默空转**，不影响启动，但功能恒不产出）
+> 状态：active ｜ 日期：2026-10-11 ｜ 对应版本：v2.9.9
 > **状态（2026-09-17 16:50）**：✅ **代码已实施**（按 §4.1 **选项 A**）｜ ✅ **静态检查五层全绿** ｜ ✅ **真 PG 侧：机制实证 + 端到端探针 PASS（含「失败可见」实证）** ｜ ✅ **§6 五条判据全部达标**（见 §5e 第 6/7 节）｜
 > ✅ **§5d 同型穷举已完成**（51/51 逐点核对：A 31 · B 10 · **C 3 处确证缺陷** · D 7 处同型未发作）｜ ✅ dev-deps 变更后**同源重跑两层**：`clippy -p axagent-dao --all-targets` = **全绿**（`1m 38s` / exit 0 / 0 error 0 warning）· `test -p axagent-dao --lib` = **`303 passed; 0 failed`**（24.53s / exit 0）｜
 > ⇒ **本项自身（错 id 空间 + 静默失败）代码 + 验收 + 同型穷举三维均已闭环**。
@@ -310,7 +310,7 @@ knowledge_entities::Entity::insert(am)
 | `src-tauri/crates/dao/src/repo/sync_policy.rs:114` | `Id` | `policy.id` |
 | `src-tauri/crates/dao/src/repo/wiki_graph_cache.rs:127` | `VaultId` | 自然键 |
 | `dao/repo/workflow_template.rs:181` | `Id` | 三个调用方都传**模板自身 id**（`workflow_template_repository.rs:90 template.id`、`cognitive_router_init` / `workflow_reflection` 同源） |
-| `analysis-engine/src/opc/capability_pack.rs:39` | `Id` | `DomainPackManifest.id`（且前一行已 `find_by_id(&m.id)` 保 enabled，是标准 upsert） |
+| `company-runtime/src/opc/capability_pack.rs:39` | `Id` | `DomainPackManifest.id`（且前一行已 `find_by_id(&m.id)` 保 enabled，是标准 upsert） |
 | `trajectory/src/storage.rs:1347` | `Key` | 自然键（PK 用 `pref.id` 但冲突键不是它） |
 | `src-tauri/crates/search/src/file_index.rs:204` / `:299` | `Path` | 自然键 |
 | `search/ast_index.rs:269` | `(CallerFile,CallerFunction,CalleeName,Line)` | 复合自然键 |

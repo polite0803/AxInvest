@@ -1,5 +1,8 @@
 # 认知编排分支缺陷 — 修复实施方案
 
+> 状态：active ｜ 日期：2026-09-17 ｜ 对应版本：v2.9.7
+
+
 > 依据 `src-tauri/src/commands/cognitive.rs` / `crates/harness/src/cognitive_router.rs` /
 > `crates/harness/src/capability.rs` / `crates/tools/src/tools/*.rs` 逐行核对后的结论。
 > 原文 11 条指控：3 条不属实、2 条部分属实、5 条属实，另补 2 条原文漏掉的真问题。

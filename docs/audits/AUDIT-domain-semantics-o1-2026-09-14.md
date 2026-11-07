@@ -1,5 +1,8 @@
 # AUDIT — 领域语义层（O1 概念注册表 + O2 扫描器 v2）
 
+> 状态：active ｜ 日期：2026-09-14 ｜ 对应版本：v2.9.7
+
+
 - **日期**：2026-09-14
 - **权威源**：`src-tauri/crates/harness/src/domain_semantics.rs`（493 行）
 - **配套**：`docs/plans/PLAN-semantica-borrowings.md`（O1/O2 条目）｜`output/domain-semantics-report-2026-09-14.txt`（扫描输出，94 行）

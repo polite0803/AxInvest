@@ -1,5 +1,8 @@
 # AUDIT — task_ledger 时间戳全序化 与 disk-cache 缩进修复 的验收取证
 
+> 状态：active ｜ 日期：2026-09-17 ｜ 对应版本：v2.9.7
+
+
 > 日期：2026-09-17（本地 08:15–08:57，UTC 00:15–00:57）
 > 范围：`crates/dao/src/task_ledger.rs`（`next_event_at` 全序化）、`crates/disk-cache/src/lib.rs:229`
 > 方式：**全程只读取证**（冻结令期间未改任何 `src-tauri/**` 源码）；cargo 类命令由 worker 执行，产物落 `output/`

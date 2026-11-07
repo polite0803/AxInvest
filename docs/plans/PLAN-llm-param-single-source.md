@@ -1,5 +1,8 @@
 # PLAN — LLM 采样参数单一权威
 
+> 状态：active ｜ 日期：2026-10-26 ｜ 对应版本：v2.9.9
+
+
 ## 目标
 
 同一执行体的同一 LLM 参数（max_tokens / temperature / top_p / frequency_penalty）

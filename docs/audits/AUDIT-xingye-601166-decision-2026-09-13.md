@@ -1,5 +1,8 @@
 # 兴业银行（601166）决策一致性审计
 
+> 状态：active ｜ 日期：2026-09-13 ｜ 对应版本：v2.9.7
+
+
 - **审计日期**：2026-09-13
 - **样本记录**：`stock_analyses.id = 3e01fdc5-d788-4074-a554-88c0f90e2ede`（analysis_date = 2026-09-12，created_at = 1789243308401 ms，status = completed）
 - **数据来源**：PostgreSQL `axinvest` 库 → `stock_analyses.decision_json` / `decision_reasoning` / `llm_decision_json` / `blackboard_snapshot`（1,666,192 字符）+ `workflow_templates['stock-analysis'] v39`（nodes / edges）+ 工作流源码

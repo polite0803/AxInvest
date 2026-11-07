@@ -1,5 +1,8 @@
 # AUDIT — EvoFlow vs AxInvest 源码级对比审计
 
+> 状态：active ｜ 日期：2026-09-12 ｜ 对应版本：v2.9.7
+
+
 - **日期**：2026-09-12
 - **对象**：`https://github.com/EvovexAI/EvoFlow`
 - **本地快照**：`output/tmp-evoflow-src/EvoFlow-main`（codeload tarball，73.05 MB）

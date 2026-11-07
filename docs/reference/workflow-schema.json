@@ -1,0 +1,4856 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowTemplateInput",
+  "type": "object",
+  "properties": {
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WorkflowEdge"
+      }
+    },
+    "error_config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ErrorConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "icon": {
+      "type": "string"
+    },
+    "input_schema": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mission_hash": {
+      "description": "mission 哈希（SHA-256），用于 compile_mission_to_template 去重缓存。\n仅当此模板由 mission 编译生成时填充；手动创建时为 None。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "name": {
+      "type": "string"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WorkflowNode"
+      }
+    },
+    "output_schema": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tool_defs": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/RhaiToolDef"
+      }
+    },
+    "trigger_config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TriggerConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Variable"
+      }
+    }
+  },
+  "required": [
+    "name",
+    "icon",
+    "tags",
+    "nodes",
+    "edges",
+    "variables"
+  ],
+  "$defs": {
+    "AgentNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/AgentNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "AgentNodeConfig": {
+      "type": "object",
+      "properties": {
+        "agent_profile_id": {
+          "description": "AgentProfile ID — 唯一标识角色的方式，不再使用旧 role/agent_role_override",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consistency_check": {
+          "description": "结果一致性检查配置（可选，不配置时零影响）",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConsistencyCheckConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "execution_mode": {
+          "description": "执行模式: \"react\" = 逐步思考-行动（默认）, \"plan\" = 先规划为工作流再执行",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exposed_tools": {
+          "description": "暴露给 LLM 的工具名列表（tools 的子集）。为空时暴露全部（向后兼容）。\n固定工具（上游 ToolNode 结果已通过 context_sources 注入）不应暴露。",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "hallucination_guard": {
+          "description": "防幻觉锚定检查配置（可选，不配置时零影响）",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HallucinationGuardConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_mapping": {
+          "description": "输入变量映射：将工作流变量（如 trigger 输出）注入到 Agent 的 system_prompt 中。\nkey = 注入到 prompt 的变量名，value = ExecutionState.variables 中的键。\n运行时自动解析并追加 `【key】:value` 格式到 system_prompt 尾部。\n示例: `{\"stock_code\": \"trigger\", \"stock_name\": \"trigger\"}` → 注入 \"【stock_code】:600036\\n【stock_name】:招商银行\"",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_tool_rounds": {
+          "description": "Agent 多轮工具调用最大轮数，默认 1（不配置则仅单轮）",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_mode": {
+          "$ref": "#/$defs/OutputMode"
+        },
+        "output_var": {
+          "type": "string"
+        },
+        "rag_source_ids": {
+          "description": "RAG 知识源 ID 列表。格式: \"knowledge:<kb_id>\", \"memory:<ns_id>\", \"wiki:<wiki_id>\"。\n执行时从这些源检索与 query 相关的内容注入 system prompt。",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "system_prompt": {
+          "type": "string"
+        },
+        "task_scene": {
+          "description": "3.7 P2:任务场景 — 控制 Agent 节点的输出风格指令。\n\n- `Code`:强调直接给代码、少废话\n- `Research`:强调结构化分析、引用、权衡\n- `General`:无特殊约束(默认)\n- `Auto`:由 `TaskScene::infer(input)` 自动推断\n\n缺省 `None` 时按 `General` 处理;`Some(TaskScene::Auto)` 时\nexecutor 会在拼接 prompt 前对 input 文本调用 `infer` 推断。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskScene"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "tools": {
+          "description": "工具列表，支持向后兼容旧格式 `[\"name1\", \"name2\"]`",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolDef"
+          }
+        }
+      },
+      "required": [
+        "system_prompt",
+        "context_sources",
+        "output_var",
+        "tools",
+        "output_mode"
+      ]
+    },
+    "AggregatorNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/AggregatorNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "AggregatorNodeConfig": {
+      "type": "object",
+      "properties": {
+        "input_sources": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "strategy": {
+          "type": "string",
+          "default": "all"
+        },
+        "subGraph": {
+          "description": "子图定义（可选）。编辑器根据 `isContainer: true` 渲染为可展开/折叠容器框体。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summarize_model": {
+          "description": "llm_summarize 策略的模型",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summarize_prompt": {
+          "description": "llm_summarize 策略的自定义提示词",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wait_for_all": {
+          "description": "等待策略：true=等待所有输入就绪再聚合；false=有输入即聚合（竞速模式）",
+          "type": "boolean",
+          "default": true
+        },
+        "weights": {
+          "description": "加权策略的权重系数（与 input_sources 一一对应）。空数组视为等权。",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      }
+    },
+    "ApprovalNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/ApprovalNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "ApprovalNodeConfig": {
+      "type": "object",
+      "properties": {
+        "approver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "timeout_action": {
+          "type": "string",
+          "default": "auto_reject"
+        },
+        "timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 86400,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "BackoffType": {
+      "type": "string",
+      "enum": [
+        "Linear",
+        "Exponential",
+        "Fixed"
+      ]
+    },
+    "Branch": {
+      "type": "object",
+      "properties": {
+        "branch_timeout_ms": {
+          "description": "分支级别超时（毫秒）。留空则继承节点级别或全局超时。",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "degrade_strategy": {
+          "description": "超时后的降级策略。默认 Skip。",
+          "$ref": "#/$defs/DegradeStrategy",
+          "default": "skip"
+        },
+        "id": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "steps"
+      ]
+    },
+    "CodeNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/CodeNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "CodeNodeConfig": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "execute_directly": {
+          "description": "是否直接执行（不经过工具注册流程），供 Rhai 脚本在 DAG 中直接运行",
+          "type": "boolean",
+          "default": false
+        },
+        "input_mapping": {
+          "description": "输入映射：上游变量到 Rhai scope 变量的映射",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "language": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string"
+        },
+        "tool_name": {
+          "description": "Rhai 脚本注册为工具名（language=\"rhai\" 时生效，为空则用 code_<node_id>）",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "language",
+        "code",
+        "output_var"
+      ]
+    },
+    "CompareOperator": {
+      "type": "string",
+      "enum": [
+        "eq",
+        "ne",
+        "gt",
+        "lt",
+        "gte",
+        "lte",
+        "contains",
+        "notContains",
+        "startsWith",
+        "endsWith",
+        "regexMatch",
+        "isEmpty",
+        "isNotEmpty"
+      ]
+    },
+    "CompensationConfig": {
+      "description": "补偿配置：定义节点失败时的恢复策略",
+      "type": "object",
+      "properties": {
+        "compensation_nodes": {
+          "description": "需要执行补偿的节点 ID 列表（预留扩展，当前由引擎根据 DAG 自动推导下游）",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "strategy": {
+          "$ref": "#/$defs/CompensationStrategy"
+        }
+      },
+      "required": [
+        "strategy"
+      ]
+    },
+    "CompensationStep": {
+      "type": "object",
+      "properties": {
+        "compensate_type": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        },
+        "target_step": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "compensate_type",
+        "target_step"
+      ]
+    },
+    "CompensationStrategy": {
+      "description": "补偿策略：当节点失败时，如何处理其下游节点和输出",
+      "oneOf": [
+        {
+          "description": "仅删除该节点输出，不处理下游",
+          "type": "string",
+          "const": "SkipWithWarning"
+        },
+        {
+          "description": "删除该节点输出，并标记所有下游 Pending/Ready 节点为 Skipped",
+          "type": "string",
+          "const": "Rollback"
+        },
+        {
+          "description": "记录警告，需要人工介入处理",
+          "type": "string",
+          "const": "Escalate"
+        }
+      ]
+    },
+    "Condition": {
+      "type": "object",
+      "properties": {
+        "operator": {
+          "$ref": "#/$defs/CompareOperator"
+        },
+        "value": true,
+        "var_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "var_path",
+        "operator",
+        "value"
+      ]
+    },
+    "ConditionNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/ConditionNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "ConditionNodeConfig": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Condition"
+          }
+        },
+        "confidence_threshold": {
+          "description": "置信度阈值（0.0 - 1.0）。LLM 路由返回的置信度低于此值时，\n降级为启发式判断（已有的 fallback 逻辑）。\nNone = 不检查置信度（向后兼容）。",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "judge_by_llm": {
+          "description": "启用 LLM 动态路由：由 AI 判断走哪条分支（忽略 conditions 静态规则）",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "logical_op": {
+          "$ref": "#/$defs/LogicalOperator"
+        },
+        "routing_model": {
+          "description": "LLM 路由使用模型（为空则用系统默认）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "routing_prompt": {
+          "description": "LLM 路由时的提示词（描述路由判断逻辑）",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "conditions",
+        "logical_op"
+      ]
+    },
+    "ConsistencyCheckConfig": {
+      "description": "一致性检查配置",
+      "type": "object",
+      "properties": {
+        "deviation_threshold": {
+          "description": "结果偏差阈值（0.0-1.0），超过则告警",
+          "type": "number",
+          "format": "double"
+        },
+        "enabled": {
+          "description": "是否启用",
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "检查模式：相同模型重复执行 / 不同模型交叉验证",
+          "$ref": "#/$defs/ConsistencyMode"
+        },
+        "secondary_model": {
+          "description": "可选：用于交叉验证的备用模型名",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "mode",
+        "deviation_threshold"
+      ]
+    },
+    "ConsistencyMode": {
+      "oneOf": [
+        {
+          "description": "相同模型执行 2 次对比",
+          "type": "string",
+          "const": "sameModelRepeated"
+        },
+        {
+          "description": "用不同模型交叉验证",
+          "type": "string",
+          "const": "crossModelCompare"
+        }
+      ]
+    },
+    "DataTransformerNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/DataTransformerNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "DataTransformerNodeConfig": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string"
+        },
+        "input_var": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "input_var",
+        "expression"
+      ]
+    },
+    "DatabaseQueryNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/DatabaseQueryNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "DatabaseQueryNodeConfig": {
+      "type": "object",
+      "properties": {
+        "connection_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "credential_id": {
+          "description": "Credential ID for database connection (DatabaseConnection type)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "params": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "query": {
+          "type": "string"
+        },
+        "timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "DebateNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/DebateNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "DebateNodeConfig": {
+      "type": "object",
+      "properties": {
+        "convergence_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "convergence_model_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "convergence_prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debater_steps": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_rounds": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 2,
+          "minimum": 0
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "subGraph": {
+          "description": "子图定义（可选）。编辑器根据 `isContainer: true` 渲染为可展开/折叠容器框体。\nsub_graph 中的节点/边将替代 debater_steps 的扁平引用模式。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_var": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "DegradeStrategy": {
+      "oneOf": [
+        {
+          "description": "超时后跳过该路径，继续其他分支",
+          "type": "string",
+          "const": "skip"
+        },
+        {
+          "description": "超时后使用默认值",
+          "type": "string",
+          "const": "useDefault"
+        },
+        {
+          "description": "超时即终止整个并行执行",
+          "type": "string",
+          "const": "strict"
+        }
+      ]
+    },
+    "DelayNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/DelayNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "DelayNodeConfig": {
+      "type": "object",
+      "properties": {
+        "delay_type": {
+          "type": "string"
+        },
+        "seconds": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "delay_type",
+        "seconds"
+      ]
+    },
+    "DocumentParserNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/DocumentParserNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "DocumentParserNodeConfig": {
+      "type": "object",
+      "properties": {
+        "input_var": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string"
+        },
+        "parser_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input_var",
+        "parser_type",
+        "output_var"
+      ]
+    },
+    "EdgeType": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "conditionTrue",
+        "conditionFalse",
+        "loopBack",
+        "parallelBranch",
+        "merge",
+        "error",
+        "grouping",
+        "debateRound"
+      ]
+    },
+    "EmailNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/EmailNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "EmailNodeConfig": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "credential_id": {
+          "description": "Credential ID for SMTP configuration (Smtp type). Falls back to inline smtp_* fields.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "smtp_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "smtp_pass": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "smtp_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "smtp_user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "subject": {
+          "type": "string"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body"
+      ]
+    },
+    "EndNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/EndNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "EndNodeConfig": {
+      "type": "object",
+      "properties": {
+        "output_var": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ErrorConfig": {
+      "type": "object",
+      "properties": {
+        "compensation_steps": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/CompensationStep"
+          }
+        },
+        "error_branch": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "on_failure": {
+          "$ref": "#/$defs/OnFailureAction"
+        },
+        "retry_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowRetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "on_failure"
+      ]
+    },
+    "FileOperationNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/FileOperationNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "FileOperationNodeConfig": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "operation",
+        "file_path"
+      ]
+    },
+    "HallucinationGuardConfig": {
+      "description": "防幻觉锚定配置",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "match_threshold": {
+          "description": "引用匹配阈值（0-1），低于此值判定为幻觉",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "enabled",
+        "match_threshold"
+      ]
+    },
+    "HttpRequestNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/HttpRequestNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "HttpRequestNodeConfig": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body_type": {
+          "type": "string",
+          "default": "json"
+        },
+        "credential_id": {
+          "description": "Credential ID for authenticated requests (supports ApiKey, BasicAuth, BearerToken)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "method": {
+          "type": "string",
+          "default": "GET"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "JsonSchema": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "properties": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonSchemaProperty"
+          }
+        },
+        "required": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "JsonSchemaProperty": {
+      "type": "object",
+      "properties": {
+        "default": true,
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enum_values": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "LLMNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/LLMNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "LLMNodeConfig": {
+      "type": "object",
+      "properties": {
+        "consistency_check": {
+          "description": "结果一致性检查配置（可选，不配置时零影响）",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConsistencyCheckConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "functions": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true
+        },
+        "max_context_tokens": {
+          "description": "最大上下文 token 数（可选，默认 128000）",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "messages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true
+        },
+        "model": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "reserved_output_tokens": {
+          "description": "为输出保留的 token 数（可选，默认 4000）",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "tools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "model",
+        "prompt"
+      ]
+    },
+    "LlmClassifierNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/LlmClassifierNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "LlmClassifierNodeConfig": {
+      "type": "object",
+      "properties": {
+        "categories": {
+          "description": "静态分类目录（兜底）。动态目录不可用时的默认类别列表。",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "categories_var": {
+          "description": "动态分类目录注入口：从工作流 variables 读取类别列表的变量名\n（h3 认知编排器：L1/L2 分类目录由能力基座运行时动态构建注入，\n优先使用动态目录，读取失败或为空时回退到静态 categories）。\n变量值支持两种形态：\n- 字符串数组 `[\"a\", \"b\", ...]`：元素直接作为类别名\n- 对象数组 `[{\"name\": \"a\", ...}, ...]`：取 name/id/label/title 字段作为类别名",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence_threshold": {
+          "description": "置信度阈值（0.0 - 1.0）。LLM 返回的置信度低于此值时，\n使用 fallback_label（如果配置）或标记为 low_confidence 并返回错误。\nNone = 不检查置信度（向后兼容）。",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "consistency_check": {
+          "description": "结果一致性检查配置（可选，不配置时零影响）",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConsistencyCheckConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallback_label": {
+          "description": "置信度不足时的降级标签（可选）。不配置时直接标记失败。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input_var": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "categories",
+        "prompt",
+        "input_var"
+      ]
+    },
+    "LoggingNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/LoggingNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "LoggingNodeConfig": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "default": "info"
+        },
+        "message": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "LogicalOperator": {
+      "type": "string",
+      "enum": [
+        "and",
+        "or"
+      ]
+    },
+    "LoopNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/LoopNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "LoopNodeConfig": {
+      "type": "object",
+      "properties": {
+        "body_steps": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "continue_condition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "default": false
+        },
+        "interrupt_after_each": {
+          "description": "每次迭代结束后挂起，等待人工确认后再继续。\n与 `interrupt_nodes` 联合使用：留空且 `interrupt_after_each=true` 时\n每一轮迭代后都进入 Paused。",
+          "type": "boolean",
+          "default": false
+        },
+        "interrupt_nodes": {
+          "description": "触发 interrupt 的 body 节点 ID 集合（通常是 ApprovalNode）。\n当这些节点中任意一个输出 `status=pending` 时，Loop 立即进入 Paused\n并写检查点。",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "items_var": {
+          "description": "数组输入端口（旧名 `items_var`，向后兼容）。\n优先读取 `iter_input_var`，未设置时回退到 `items_var`。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iter_input_var": {
+          "description": "数组输入端口（新名，语义更清晰）。\n解析顺序：`iter_input_var` → `items_var` → `iteratee_var` 推断 → 空。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iter_output_var": {
+          "description": "循环聚合结果的输出端口变量名。\n默认 `iter_output`，留空则使用 `iter_output`。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iteratee_var": {
+          "description": "循环体内部把当前元素写入的变量名。\nbody_steps 中的下游节点可通过 `variables[<iteratee_var>]` 读取当前 item。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "loop_type": {
+          "$ref": "#/$defs/LoopType"
+        },
+        "max_iterations": {
+          "description": "硬上限：实际迭代次数 = min(items.len(), max_iterations, 10_000)。\n留空则按 items.len() 决定，forEach 模式默认 10_000。",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "partial_result_var": {
+          "description": "流式中间结果变量名（在每次迭代完成后写入 context.variables）。\n前端/下游节点可以订阅这个变量来观察进度。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subGraph": {
+          "description": "子图定义（可选）。编辑器根据 `isContainer: true` 渲染为可展开/折叠容器框体。\nsub_graph 中的节点/边将替代 body_steps 的扁平引用模式。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "loop_type"
+      ]
+    },
+    "LoopType": {
+      "type": "string",
+      "enum": [
+        "forEach",
+        "while",
+        "doWhile",
+        "until"
+      ]
+    },
+    "MergeNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/MergeNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "MergeNodeConfig": {
+      "type": "object",
+      "properties": {
+        "auto_inputs_from_branches": {
+          "type": "boolean",
+          "default": false
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "merge_type": {
+          "$ref": "#/$defs/MergeStrategy",
+          "default": "all"
+        }
+      },
+      "required": [
+        "inputs"
+      ]
+    },
+    "MergeStrategy": {
+      "type": "string",
+      "enum": [
+        "all",
+        "any",
+        "race",
+        "majority"
+      ]
+    },
+    "MultiAgentNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/MultiAgentNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "MultiAgentNodeConfig": {
+      "type": "object",
+      "properties": {
+        "max_rounds": {
+          "description": "最大协作轮数",
+          "type": "integer",
+          "format": "uint32",
+          "default": 3,
+          "minimum": 0
+        },
+        "mode": {
+          "description": "协作模式: auto / swarm / debate",
+          "type": "string",
+          "default": ""
+        },
+        "model": {
+          "description": "模型覆盖（可选）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_var": {
+          "description": "输出变量名",
+          "type": "string",
+          "default": ""
+        },
+        "role": {
+          "description": "角色/agent 名称（可选）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "description": "委派任务描述",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "NotificationNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/NotificationNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "NotificationNodeConfig": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "recipients": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "webhook_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "channel",
+        "message",
+        "enabled"
+      ]
+    },
+    "OnFailureAction": {
+      "type": "string",
+      "enum": [
+        "abort",
+        "retryThenAbort",
+        "runErrorBranch",
+        "continueWithDefault"
+      ]
+    },
+    "OutputMode": {
+      "type": "string",
+      "enum": [
+        "json",
+        "text",
+        "artifact"
+      ]
+    },
+    "ParallelNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/ParallelNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "ParallelNodeConfig": {
+      "type": "object",
+      "properties": {
+        "aggregation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MergeStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "auto_input_from_parent": {
+          "type": "boolean",
+          "default": true
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Branch"
+          }
+        },
+        "subGraph": {
+          "description": "子图定义（可选）。编辑器根据 `isContainer: true` 渲染为可展开/折叠容器框体。\nsub_graph 中的节点/边将替代 branches.steps 的扁平引用模式，\n提供更丰富的嵌套子工作流编辑体验。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "wait_for_all": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "branches",
+        "wait_for_all"
+      ]
+    },
+    "Position": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "RetryConfig": {
+      "type": "object",
+      "properties": {
+        "backoff_type": {
+          "$ref": "#/$defs/BackoffType"
+        },
+        "base_delay_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_delay_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "enabled",
+        "max_retries",
+        "backoff_type",
+        "base_delay_ms",
+        "max_delay_ms"
+      ]
+    },
+    "RhaiToolDef": {
+      "description": "Rhai 脚本工具定义（不属于 DAG 节点，仅作为工具注册）",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Rhai 脚本代码",
+          "type": "string"
+        },
+        "description": {
+          "description": "工具描述（发给 LLM）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_name": {
+          "description": "注册为工具名（Agent exposed_tools 引用此名）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "code"
+      ]
+    },
+    "StorageNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/StorageNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "StorageNodeConfig": {
+      "description": "存储持久化节点配置：接收数据输入，存储到指定后端。\n\n# 后端支持\n- `sqlite`：写入 SQLite 表（JSON 值存储）\n- `vectorDb`：写入向量数据库\n- `fileSystem`：写入文件系统\n\n# 操作模式\n- `insert`：追加写入\n- `upsert`：根据 key 覆盖/更新\n- `append`：追加到已有内容（fileSystem 为追加到文件末尾）",
+      "type": "object",
+      "properties": {
+        "backend": {
+          "description": "存储后端：\"sqlite\" | \"vectorDb\" | \"fileSystem\"",
+          "type": "string",
+          "default": "sqlite"
+        },
+        "collection": {
+          "description": "存储目标（SQLite 表名 / VectorDB collection / 文件路径）",
+          "type": "string"
+        },
+        "input_var": {
+          "description": "要存储的数据的变量路径",
+          "type": "string"
+        },
+        "key_var": {
+          "description": "upsert 时用于匹配已有记录的 key 变量路径",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operation": {
+          "description": "操作模式：\"insert\" | \"upsert\" | \"append\"",
+          "type": "string",
+          "default": "insert"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "input_var",
+        "collection"
+      ]
+    },
+    "SubGraph": {
+      "description": "子图定义：嵌入在容器节点中的独立工作流（nodes + edges）。\n编辑器展开容器节点时，渲染 `sub_graph.nodes` 作为内部子节点网格；\n折叠时根据子节点数量显示计数。\n\n子图内的入口/出口节点自动映射为容器节点的端口（port auto-passthrough）。",
+      "type": "object",
+      "properties": {
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkflowEdge"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkflowNode"
+          }
+        }
+      },
+      "required": [
+        "nodes",
+        "edges"
+      ]
+    },
+    "SubWorkflowNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/SubWorkflowNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "SubWorkflowNodeConfig": {
+      "type": "object",
+      "properties": {
+        "input_mapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "is_async": {
+          "type": "boolean"
+        },
+        "output_var": {
+          "type": "string"
+        },
+        "subGraph": {
+          "description": "子图定义（可选）。与 expandedSubWorkflows 配合，编辑器可在容器内部渲染子工作流节点。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sub_workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub_workflow_id",
+        "input_mapping",
+        "output_var",
+        "is_async"
+      ]
+    },
+    "SwarmNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/SwarmNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "SwarmNodeConfig": {
+      "type": "object",
+      "properties": {
+        "agent_steps": {
+          "description": "参与者节点 ID 列表（LLM/Agent 节点）",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "convergence_model": {
+          "description": "收敛判断模型",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "convergence_prompt": {
+          "description": "收敛判断提示文本",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_rounds": {
+          "description": "最大协作轮数",
+          "type": "integer",
+          "format": "uint32",
+          "default": 3,
+          "minimum": 0
+        },
+        "output_var": {
+          "description": "输出变量名",
+          "type": "string",
+          "default": ""
+        },
+        "subGraph": {
+          "description": "子图定义（可选）。编辑器根据 `isContainer: true` 渲染为可展开/折叠容器框体。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SubGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topic_var": {
+          "description": "讨论主题变量",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "SwitchCase": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ]
+    },
+    "SwitchNode": {
+      "description": "SwitchCase 的 expression 模式下，`value` 字段存放 Rhai 表达式，\n接收 `_value` 变量（输入值），返回布尔值决定是否匹配该 case。\n\n例如：`_value > 100`、`_value.contains(\"error\")`",
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/SwitchNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "SwitchNodeConfig": {
+      "type": "object",
+      "properties": {
+        "cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SwitchCase"
+          }
+        },
+        "default_case": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input_var": {
+          "type": "string"
+        },
+        "llm_model": {
+          "description": "路由使用的模型（为空则用会话默认模型）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "llm_prompt": {
+          "description": "LLM 路由的自定义提示词",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "match_mode": {
+          "type": "string",
+          "default": "exact"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "use_llm": {
+          "description": "使用 LLM 进行智能路由（替代 match_mode 的值匹配）",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "input_var",
+        "cases"
+      ]
+    },
+    "TaskScene": {
+      "description": "任务场景 — 决定动态加载哪些 prompt 模块。\n\n工作流 Agent 节点可在 `AgentNodeConfig.task_scene` 显式指定;\n未指定时由 `TaskScene::infer` 从输入文本自动推断。",
+      "oneOf": [
+        {
+          "description": "通用聊天、文档处理、系统操作",
+          "type": "string",
+          "const": "general"
+        },
+        {
+          "description": "代码阅读、项目修改、功能开发、代码搜索",
+          "type": "string",
+          "const": "code"
+        },
+        {
+          "description": "研究型任务:知识抽取、学术检索",
+          "type": "string",
+          "const": "research"
+        },
+        {
+          "description": "自动模式 — 由上下文推断,不显式选择",
+          "type": "string",
+          "const": "auto"
+        }
+      ]
+    },
+    "ToolDef": {
+      "description": "工具定义 —— 包含名称、描述和参数 JSON Schema。\n\n反序列化支持向后兼容：旧格式的纯字符串自动转为 ToolDef { name, ..Default::default() }。",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonSchema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "ToolNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/ToolNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "ToolNodeConfig": {
+      "type": "object",
+      "properties": {
+        "input_mapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "output_var": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "input_mapping",
+        "output_var"
+      ]
+    },
+    "TriggerConfig": {
+      "type": "object",
+      "properties": {
+        "config": true,
+        "type": {
+          "$ref": "#/$defs/TriggerType"
+        }
+      },
+      "required": [
+        "type",
+        "config"
+      ]
+    },
+    "TriggerNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/TriggerConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "TriggerType": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "schedule",
+        "webhook",
+        "event"
+      ]
+    },
+    "ValidationAssertion": {
+      "type": "object",
+      "properties": {
+        "actual": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expression": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "ValidationNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/ValidationNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "ValidationNodeConfig": {
+      "type": "object",
+      "properties": {
+        "assertions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationAssertion"
+          }
+        },
+        "max_retries": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "on_fail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "assertions",
+        "on_fail",
+        "max_retries"
+      ]
+    },
+    "Variable": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "is_secret": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "value": true,
+        "var_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "var_type",
+        "value",
+        "is_secret"
+      ]
+    },
+    "VectorRetrieveNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/VectorRetrieveNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "VectorRetrieveNodeConfig": {
+      "type": "object",
+      "properties": {
+        "knowledge_base_id": {
+          "type": "string"
+        },
+        "output_var": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "similarity_threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "top_k": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "query",
+        "knowledge_base_id",
+        "top_k",
+        "output_var"
+      ]
+    },
+    "WebhookSendNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/WebhookSendNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "WebhookSendNodeConfig": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "credential_id": {
+          "description": "Credential ID for authenticated webhook (supports ApiKey, BasicAuth, BearerToken)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "method": {
+          "type": "string",
+          "default": "GET"
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "WorkflowEdge": {
+      "type": "object",
+      "properties": {
+        "edge_type": {
+          "$ref": "#/$defs/EdgeType"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "targetHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "target",
+        "edge_type"
+      ]
+    },
+    "WorkflowNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "trigger"
+            }
+          },
+          "$ref": "#/$defs/TriggerNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "agent"
+            }
+          },
+          "$ref": "#/$defs/AgentNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "llm"
+            }
+          },
+          "$ref": "#/$defs/LLMNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "condition"
+            }
+          },
+          "$ref": "#/$defs/ConditionNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "parallel"
+            }
+          },
+          "$ref": "#/$defs/ParallelNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "loop"
+            }
+          },
+          "$ref": "#/$defs/LoopNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "merge"
+            }
+          },
+          "$ref": "#/$defs/MergeNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "delay"
+            }
+          },
+          "$ref": "#/$defs/DelayNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "validation"
+            }
+          },
+          "$ref": "#/$defs/ValidationNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "subWorkflow"
+            }
+          },
+          "$ref": "#/$defs/SubWorkflowNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "workflowRef"
+            }
+          },
+          "$ref": "#/$defs/WorkflowRefNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "documentParser"
+            }
+          },
+          "$ref": "#/$defs/DocumentParserNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "vectorRetrieve"
+            }
+          },
+          "$ref": "#/$defs/VectorRetrieveNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "end"
+            }
+          },
+          "$ref": "#/$defs/EndNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "httpRequest"
+            }
+          },
+          "$ref": "#/$defs/HttpRequestNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "switch"
+            }
+          },
+          "$ref": "#/$defs/SwitchNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "databaseQuery"
+            }
+          },
+          "$ref": "#/$defs/DatabaseQueryNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "notification"
+            }
+          },
+          "$ref": "#/$defs/NotificationNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "approval"
+            }
+          },
+          "$ref": "#/$defs/ApprovalNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fileOperation"
+            }
+          },
+          "$ref": "#/$defs/FileOperationNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "dataTransformer"
+            }
+          },
+          "$ref": "#/$defs/DataTransformerNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "webhookSend"
+            }
+          },
+          "$ref": "#/$defs/WebhookSendNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "logging"
+            }
+          },
+          "$ref": "#/$defs/LoggingNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "llmClassifier"
+            }
+          },
+          "$ref": "#/$defs/LlmClassifierNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "aggregator"
+            }
+          },
+          "$ref": "#/$defs/AggregatorNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "email"
+            }
+          },
+          "$ref": "#/$defs/EmailNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "debate"
+            }
+          },
+          "$ref": "#/$defs/DebateNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "swarm"
+            }
+          },
+          "$ref": "#/$defs/SwarmNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "multiAgent"
+            }
+          },
+          "$ref": "#/$defs/MultiAgentNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "storage"
+            }
+          },
+          "$ref": "#/$defs/StorageNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "tool"
+            }
+          },
+          "$ref": "#/$defs/ToolNode",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "code"
+            }
+          },
+          "$ref": "#/$defs/CodeNode",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "WorkflowRefNode": {
+      "type": "object",
+      "properties": {
+        "compensation": {
+          "description": "节点失败时的补偿/回滚策略。None = 不执行任何补偿。",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "config": {
+          "$ref": "#/$defs/WorkflowRefNodeConfig"
+        },
+        "continue_on_fail": {
+          "description": "节点失败时不中断整个工作流，继续执行后续节点。",
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "description": "容器父节点 ID。此字段由前端在保存时注入，\n用于将子节点（如 Parallel 分支步骤）定位到父容器内。",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryConfig"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "position",
+        "retry",
+        "enabled",
+        "config"
+      ]
+    },
+    "WorkflowRefNodeConfig": {
+      "type": "object",
+      "properties": {
+        "context_mode": {
+          "type": "string",
+          "default": "inherit"
+        },
+        "input_mapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "output_var": {
+          "type": "string",
+          "default": ""
+        },
+        "target_workflow_id": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        }
+      },
+      "required": [
+        "target_workflow_id"
+      ]
+    },
+    "WorkflowRetryPolicy": {
+      "type": "object",
+      "properties": {
+        "base_delay_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_delay_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "max_retries",
+        "base_delay_ms",
+        "max_delay_ms"
+      ]
+    }
+  }
+}

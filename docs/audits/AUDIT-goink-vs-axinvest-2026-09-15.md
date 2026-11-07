@@ -1,5 +1,8 @@
 # goink 对比审计：小说书写工作流可借鉴什么
 
+> 状态：active ｜ 日期：2026-09-15 ｜ 对应版本：v2.9.7
+
+
 > **审计对象**：`github.com/sigpanic/goink`（Go + Wails 桌面 AI 小说创作助手，346 star）
 > **对照对象**：本仓 `workflow-cm-literary-creation`（内容媒体行业「文字创作」工作流模板）及其叙事结构子系统
 > **审计日期**：2026-09-15

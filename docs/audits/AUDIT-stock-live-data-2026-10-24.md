@@ -1,5 +1,8 @@
 # 股票业务生产库核验（2026-10-24）
 
+> 状态：done ｜ 日期：2026-10-24 ｜ 对应版本：v2.9.9
+
+
 > 本文回答 `AUDIT-stock-accuracy-2026-10-24.md` §8.9 的 X-1～X-4。
 > 数据来源：`scripts/pg-connect.mjs`（口令在 `~/.axagent` 解密，未进 argv/源码），
 > 库 `axinvest`，PostgreSQL 18.4。**含两次带备份的生产数据修复**（见 §4.1）；

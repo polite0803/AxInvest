@@ -1,5 +1,8 @@
 # AxAgent 仓库依赖图与拆分分析
 
+> 状态：active ｜ 日期：2026-10-31 ｜ 对应版本：v3.0.0
+
+
 > 生成时间：2026‑10‑31  
 > 来源：实际代码扫描（`src-tauri/Cargo.toml` workspace 成员 + `src/` 目录结构）
 

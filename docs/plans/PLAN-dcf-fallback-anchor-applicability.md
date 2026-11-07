@@ -1,5 +1,8 @@
 # PLAN：DCF 适用性门被代理锚「自我论证」——亏损公司三档全是利好（301302 实证）
 
+> 状态：active ｜ 日期：2026-09-27 ｜ 对应版本：v2.9.9
+
+
 日期：2026-09-27 · 状态：已批准并实施——E1 提交 `4e5e011eb`（定点 clippy `--all-targets -D warnings` 绿、`cargo test -p axagent-astock-data --lib mcp_tools` 42/42 绿，含 301302 实参复刻与缺数态反向锁）；D4（面板空回归修复）另提交 `f11579c5b`（模板 v87）；剩 E2/D3 = 重启应用重跑 301302 核对 · 上游事件：`PLAN-live-kline-cache-calendar-storm.md` ②号问题（用户：「现价=估值下限 ⇒ 必涨，凭什么观望」）
 
 ## 一、现象

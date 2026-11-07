@@ -1,5 +1,8 @@
 # AUDIT — Semantica 分层维度专项深度对比（2026-09-13 · 三轮）
 
+> 状态：active ｜ 日期：2026-09-13 ｜ 对应版本：v2.9.7
+
+
 > 触发：用户提问「该开源仓库在分层上没有本地借鉴的内容吗？」
 > 覆盖面：`AUDIT-semantica-vs-axinvest-2026-09-13.md` **12 个维度里不含「架构分层 / 依赖方向」** —— 本轮补上。
 > 取证方式：① 全量静态依赖分析（AST 解析**绝对+相对**导入，见 `output/tmp-semantica-src/analyze_deps.py`）② `cargo metadata --no-deps` 解析 workspace 依赖矩阵（`analyze_crates.py`）③ 5 名并行侦察兵源码级取证 ④ 我方 grep 实证。**git 零接触。**

@@ -1,6 +1,6 @@
 # PLAN-capital-long-evidence — capital×long 证据腿换血（真正实现）
 
-> 状态：立项待排期 ｜ 2026-10-18 ｜ 关联案例：002696（百洋股份）
+> 状态：active ｜ 日期：2026-10-18 ｜ 对应版本：v2.9.9
 > 已落地的前置：`style_matrix::MISFIT_DECLARATIONS` 对 capital×long 做了错配声明
 > （`capital_evidence_is_daily_snapshot_declared_misfit`）——本计划是声明的兑现路径。
 

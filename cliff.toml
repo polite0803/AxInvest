@@ -26,6 +26,8 @@ postprocessors = [
 conventional_commits = true
 filter_unconventional = false
 split_commits = false
+# 只把版号 tag 当作版本分节；backup/*、nightly-* 这类工作 tag 会污染整份 CHANGELOG
+tag_pattern = "^v[0-9]"
 
 # AxAgent 使用中文 emoji 前缀，映射规则:
 # 🚀 → feat / ✨ New Features

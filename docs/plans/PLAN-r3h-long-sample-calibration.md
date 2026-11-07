@@ -1,7 +1,10 @@
 # PLAN-r3h-long-sample-calibration —— 打破「0 买入」死循环（门槛不变，增加 long/mid 样本）
 
+> 状态：active ｜ 日期：2026-11-03 ｜ 对应版本：v3.0.0+（未定版，待确认）
+
+
 > 2026-10-26 建立。用户裁决：**「门槛不能变化，看看如何增加 long 样本」**。
-> 上游：`docs/audits/VERDICT-stock-business-profitability-2026-10-26.md` §2。
+> 上游：`docs/audits/AUDIT-stock-business-profitability-2026-10-26.md` §2。
 
 ---
 

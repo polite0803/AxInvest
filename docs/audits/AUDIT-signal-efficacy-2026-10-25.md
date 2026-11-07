@@ -1,5 +1,8 @@
 # AUDIT：选股信号有效性 — 2026-10-25
 
+> 状态：active ｜ 日期：2026-10-25 ｜ 对应版本：v2.9.9
+
+
 > 本文是 2026-10-25 全天工作的收敛点。前序：
 > `AUDIT-stock-profitability-verdict`（盈利性裁决）→ `AUDIT-limitup-entry`（入场可执行性）→
 > `AUDIT-sample-validity`（样本有效性）→ `PLAN-a2-backfill-validation`（补验证与归因）。

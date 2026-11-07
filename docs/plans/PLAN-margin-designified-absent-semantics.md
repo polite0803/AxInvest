@@ -1,5 +1,8 @@
 # PLAN：两融「设计上没有」被压成裸 null——F 轮语义分层（粤海饲料 001313 实证）
 
+> 状态：active ｜ 日期：2026-09-27 ｜ 对应版本：v2.9.9
+
+
 日期：2026-09-27 · 状态：已批准并实施——F1+F2+F3 提交 `00c0cf6cc`（rt-workflow 门禁 21/21、astock-data 43/43、两 crate clippy/fmt、主 crate check 全绿；模板升 v88）；剩 F4 = 重启重跑 001313 核对 · 前置：`PLAN-dcf-fallback-anchor-applicability.md`（E1 已提交 `4e5e011eb`）
 
 ## 一、用户批准的「方案 1（接两融通道）」被取证推翻

@@ -144,7 +144,7 @@
 
 ## 4. 下沉到哪（具体路径 + 门禁影响）
 
-中性目录的白名单是 `scripts/check-component-neutrality.mjs:53` 的 `NEUTRAL_PREFIXES = ["layout","common","shared","dynamicUI"]`；`src/lib/` 不受该门管（它只扫 `src/components`）。棘轮基线 `scripts/component-neutrality-baseline.json` 只有 212 条、**只减不增**，本轮实跑 `node scripts/check-component-neutrality.mjs` 为 `PASS`（扫描 927 文件 · 原始 228 · 白名单后 225 条 · 基线 212，已修复 1 条）。
+中性目录的白名单是 `scripts/check-component-neutrality.mjs:61` 的 `NEUTRAL_PREFIXES = ["layout","common","shared","dynamicUI"]`；`src/lib/` 不受该门管（它只扫 `src/components`）。棘轮基线 `scripts/component-neutrality-baseline.json` 只有 212 条、**只减不增**，本轮实跑 `node scripts/check-component-neutrality.mjs` 为 `PASS`（扫描 927 文件 · 原始 228 · 白名单后 225 条 · 基线 212，已修复 1 条）。
 
 ### 4.1 `PageHeader` → `src/components/common/PageHeader.tsx`
 

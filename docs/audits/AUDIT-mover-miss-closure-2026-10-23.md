@@ -1,5 +1,8 @@
 # AUDIT：妖股漏检后的 as-of 分析—反思—荐股反思闭环
 
+> 状态：active ｜ 日期：2026-10-23 ｜ 对应版本：v2.9.9
+
+
 - 日期：2026-10-23
 - 范围：`src-tauri/` 股票业务域（`crates/analysis-engine`、`crates/harness`、`crates/dao`、`crates/astock-data`、`src/commands/stock_workflow`、`src/init`）
 - 方法：全链路源码核对（关键结论均经二次人工复核），不动代码、不跑门禁

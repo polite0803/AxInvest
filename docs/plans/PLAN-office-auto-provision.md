@@ -1,5 +1,8 @@
 # PLAN-office-auto-provision — 建房即成队：按域包自动初始化办公室成员与场景
 
+> 状态：active ｜ 日期：2026-09-26 ｜ 对应版本：v2.9.9
+
+
 日期：2026-09-26　状态：✅ 全计划完成——阶段 1+2+3（`983e5228b`/`677c29842`/`75fef2534`/`351f254d9`）、阶段 4-②（并入 `82b59c95c`）、4-①（`a613efd74`）、4-③（`6d30149bd`）。全部门禁绿。唯一遗留：`tauri dev` 桌面金路手测（播种/注入/YAML 场景/多语言名一次看全）
 
 > 4-① 落地方式：一次性 vitest 生成器把 9 个 TS 模板逐字段 dump 为域包 `office_scene.yaml`（幂等拒覆盖、跑后即删），再删 TS 版——`sceneTemplates.ts` 1080→320 行，内置仅剩 2 个通用场景；拦路石以「注册表订阅」拆除（`registerSceneTemplate` 通知 + `useSceneTemplates(useSyncExternalStore)`，快照取版本号），4 个消费组件全部改订阅读取。

@@ -1,5 +1,8 @@
 # PLAN — 趋势智选（serenity）四周期适配收口
 
+> 状态：active ｜ 日期：2026-09-30 ｜ 对应版本：v2.9.9
+
+
 > 承接 `PLAN-multi-horizon-decision-science.md`（分析决策链 A~F）与 `PLAN-reco-horizon-science-alignment.md`（荐股链 R-0~R-F）。
 > 本计划只动**趋势智选名目下的两条链**，不重做已经完成的 A~F / R-*。
 

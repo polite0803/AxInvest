@@ -1,5 +1,8 @@
 # AxAgent Crate 精确依赖矩阵（实测）
 
+> 状态：active ｜ 日期：2026-10-31 ｜ 对应版本：v3.0.0
+
+
 > 生成时间：2026-10-31
 > 数据来源：逐个读取 `src-tauri/crates/*/Cargo.toml`（41 个）+ `src-tauri/schema-gen/Cargo.toml` + `src-tauri/Cargo.toml` 根包
 > 用途：为仓库拆分提供**硬事实**依据，防止凭印象分组

@@ -1,4 +1,7 @@
 # 股票反思工作流四周期化调整实施计划
+
+> 状态：active ｜ 日期：2026-09-23 ｜ 对应版本：v2.9.9
+
 **目标：** 在四周期股票决策已经落地后，让反思、客观绩效判定、持久化、命中率统计和前端展示按 `ultra_short` / `short` / `mid` / `long` 分别运行，同时保持历史单周期记录可读、可统计、可回放。
 **架构：** 保留现有单值字段作为 legacy 主决策与兼容摘要；新增一个统一的四周期反思结果 JSON 契约，记录每个周期的原始决策、实际行情窗口、成熟度、方向判定、目标价/止损价结果和反思结论。`strategy_performance` 继续一条反思一条主记录，并在现有 `horizon_pnl_json` 扩展为四周期结果载体；统计层把四周期 JSON 展开为样本，旧记录没有该 JSON 时回退到现有单值字段。
 **技术栈：** Rust/Tauri、SeaORM/SQLite、Rhai 工作流、React/TypeScript、Vitest、Rust 单元测试、Playwright。

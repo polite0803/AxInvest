@@ -1,5 +1,8 @@
 # AxInvest OPC 实施：一人公司（行业数据资产包 + 台账 + 公司运行时内核）
 
+> 状态：active ｜ 日期：2026-08-02 ｜ 对应版本：v2.8.7
+
+
 > 版本：v3.0　日期：2026-08-02　状态：待评审
 > 仓库：`D:\OneManager\AxInvest`（upstream=polite0803/AxAgent，origin=polite0803/AxInvest）
 > 定位：把 AxOPC 成果（`D:\OneManager\AxOPC`）合并进 AxInvest，实现 9 大垂直行业的「行业 = 数据资产包」架构，**并在 AxInvest 本地实现公司运行时内核**。**AxAgent 零改动**——公司运行时是"一人公司"领域机制，非所有 fork 需要的横切能力（AxSim 做模拟推演不需要），故留在 AxInvest 本地 crate，与投资 crate 同策略（上游无 → 合并永不冲突）。

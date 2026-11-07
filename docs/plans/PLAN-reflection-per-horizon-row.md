@@ -1,5 +1,8 @@
 # 股票反思「每档一行」收口计划
 
+> 状态：active ｜ 日期：2026-09-30 ｜ 对应版本：v2.9.9
+
+
 **目标：** 把股票反思链（`stock_reflections` / `reflection_lessons`）从「一次分析只复盘主档一行」改为**每个周期档各产出一行反思**，并修掉因此暴露的四处档口径缺陷（①~④）。
 **上游关系：** 承接 `PLAN-horizon-four-cycle-closure.md` 的 v2 第 4 条裁定（同一次反思只复盘一个周期）与 `PLAN-stock-reflection-four-horizon.md` 的批次 1~3（四周期行情快照 / 逐周期客观判定 / `horizon_results_json`）。批次 1~3 只做了**判定侧**四周期化；**叙述与教训侧**仍是一行混谈四档，本轮收口。
 **不做：** 不改四周期决策算法本体（见 `PLAN-multi-horizon-decision-science.md`），不碰荐股链 `analysis-engine/src/recommender/`，不碰 OPC 域包反思（`commands/opc_learning_hook.rs`，与周期无关）。

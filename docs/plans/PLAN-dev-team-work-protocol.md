@@ -1,6 +1,6 @@
 # PLAN · 开发团队工作协议（2026-10-30 建团）
 
-> 状态：**生效中**。本文件是团队的作业约定，不是待办清单。
+> 状态：active ｜ 日期：2026-11-03 ｜ 对应版本：v3.0.0+（未定版，待确认）
 > 建团背景：项目已有 47 个 workspace crate、268 个命令文件、164 份 docs、175+ 条记忆判据。
 > 规模已经不是「一个人能靠上下文记住」的量级 ⇒ 需要显式分工与验证契约。
 
@@ -199,7 +199,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 | 文档 | 声称 | 实际 |
 |---|---|---|
 | `PLAN-frontend-information-architecture.md:3` | 「方案定稿，待实施（2026-10-28）」 | 正文 `:195-419` 已记录阶段 1–5 全部落地 ⇒ **头部状态行是假的** |
-| `RESULT-gates-and-headless-scheduler-2026-10-26.md` | `TEMPLATE_VERSION` = 188 | 实际 **193**（v189–v193 五个版本全部未回写） |
+| `AUDIT-gates-and-headless-scheduler-2026-10-26.md` | `TEMPLATE_VERSION` = 188 | 实际 **193**（v189–v193 五个版本全部未回写） |
 | 同上 §7 限制 5 | 「Windows 服务化未做」 | `scripts/install-scheduler-task.ps1` 已完整实现 |
 | `PLAN-r3h-long-sample-calibration.md:84` | 「放宽到至少一源」 | `time_travel_batch.rs:487-499` 已实证推翻该前提 |
 | `PLAN-url-as-truth.md` | §1 事实基线逐条核对 | `redirectToChat` 已被删除（`ContentArea.tsx:181` 留墓碑），`:305` 行号已漂移到 `:327` |

@@ -1,6 +1,6 @@
 # PLAN：领域本体接入智能体（domain-ontology-wiring）
 
-> 状态：**评审中（未实现）** · 评审拍板点见 §7 · 明确不做见 §8
+> 状态：active ｜ 日期：2026-09-17 ｜ 对应版本：v2.9.7
 >
 > 本计划只覆盖「**finance 域业务本体**（`harness::domain_ontology`）如何接入 agent 侧」，不把「能力域」并进本体（理由见 `domain_ontology.rs` 模块头 L1/L2 分层与 `PLAN-domain-single-source.md` §9 事故）。
 

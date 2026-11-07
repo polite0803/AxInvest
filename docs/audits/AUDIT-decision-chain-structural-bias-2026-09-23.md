@@ -1,5 +1,8 @@
 # AUDIT — 决策链的结构性偏置（2026-09-23）
 
+> 状态：active ｜ 日期：2026-09-23 ｜ 对应版本：v2.9.9
+
+
 > 范围：`portfolio-mgr.rhai` 的因子融合 → posterior → action 阶梯 → 凯利仓位 这条链。
 > 定位：本报告与 `AUDIT-valuation-model-scientific-soundness-2026-09-23.md` **互补不重叠** ——
 > 那份查的是 **DCF 内部**（参数取值、区间口径），本份查的是**决策链**（多因子如何合成一个决策）。

@@ -1,5 +1,8 @@
 # PLAN：as-of（时间旅行/回放）模式剩余取数缺口
 
+> 状态：active ｜ 日期：2026-09-25 ｜ 对应版本：v2.9.9
+
+
 > 盘点日期：2026-09-25。判据来源：对 `src-tauri/crates/astock-data/src/lib.rs` 全部
 > `pub fn get_* / search_*` 逐函数体扫描（按 `    pub (async )?fn` 边界切分后检查函数体内
 > 是否出现 `is_asof_active` / `current_as_of` / `truncate_*_by_asof` / `*_with_asof` /

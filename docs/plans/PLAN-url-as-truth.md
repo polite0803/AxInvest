@@ -1,5 +1,8 @@
 # PLAN — URL 作为真相（路由 / 深链收敛）
 
+> 状态：active ｜ 日期：2026-10-27 ｜ 对应版本：v2.9.9
+
+
 > 关联：`PLAN-agent-workbench-enhancement.md`（工作台 Tab 基础设施已落地，本文只处理其 §10.8 遗留的「两套 redirect 并存」与「Tab 状态未完全由 URL 表达」）。
 > 范围：仅前端路由层。不动 Rust、不动业务组件内部结构、不动 `src-tauri/`。
 

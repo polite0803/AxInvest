@@ -1,5 +1,8 @@
 # AUDIT — Mover universe 可行性（Phase 0 演练）2026-09-30
 
+> 状态：active ｜ 日期：2026-09-30 ｜ 对应版本：v2.9.9
+
+
 > 用途：`PLAN-mover-recall-attribution.md` Phase 0 的实测结论与 universe 决策依据。
 > 方法：只读网络探测（`.workbuddy/tmp/crawl_clist.sh`、`probe_throttle.py`、`recovery_probe.py`、`probe_alt.py`、`validate.py`），**未改任何生产代码**。
 > 探测本身会改变被测系统状态（见 §4「观测污染」），数字用于定方案形态，不当成长期 SLA。

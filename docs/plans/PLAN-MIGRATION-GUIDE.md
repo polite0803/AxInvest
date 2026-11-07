@@ -1,5 +1,8 @@
 # AxAgent 仓库拆分迁移手册
 
+> 状态：active ｜ 日期：2026-10-31 ｜ 对应版本：v3.0.0
+
+
 > 创建时间：2026‑10‑31  
 > 适用范围：AxAgent 仓库拆分（Plan A：按技术层拆分）  
 > 关联文档：`PLAN-repo-split.md` · `dependency-graph.md` · `dependency-matrix.md`

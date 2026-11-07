@@ -1,5 +1,8 @@
 # industry → domain 迁移方案（执行前定稿）
 
+> 状态：active ｜ 日期：2026-10-11 ｜ 对应版本：v2.9.9
+
+
 > 目标：取消「行业 / industry」这一概念层，全量统一到 **CapabilityDomain（域）**。
 > 本文只做一件事：把改名映射和执行顺序钉死，避免 6700+ 处改动返工。
 
@@ -958,13 +961,13 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 1. 新建 `crates/tools/src/tools/domain_pack_defs.rs`（按行区间搬迁，`axagent_tools::` → `crate::`）+ `tools/mod.rs` 注册
 2. 新建 `crates/analysis-engine/src/opc/domain_pack.rs`（L1–618，**删 L19 `use std::sync::Arc;`** —— `Arc` 只被 tool_defs 段用，留着即 unused ⇒ clippy `-D warnings` 红）
 3. 搬入 `resolve_domain_packs_dir` / `domain_packs_base_dir` / `copy_dir_recursive`
-4. `analysis-engine/src/opc/mod.rs` 加 `pub mod domain_pack;` + `pub use domain_pack::*;`
+4. `company-runtime/src/opc/mod.rs` 加 `pub mod domain_pack;` + `pub use domain_pack::*;`
 5. 修 `opc/capability_pack.rs:26` 的 rustdoc 链接 `[`super::resolve_domain_packs_dir`]` → `[`resolve_domain_packs_dir`]`
 6. 改 5 个调用点（4 个 `domain_pack` use + 1 个 `*_tool_defs` use + 4 处 `resolve_domain_packs_dir` 调用）
 
 **glob 撞名 go/no-go（已通过）**：`analysis-engine::opc` 是 glob re-export（`pub use X::*;`）。
 检查发现 `AnalysisDataSource` 同名两份 —— `opc/capability_pack.rs:221`（在 `analysis_schema` **子模块内**）
-与 `crates/analysis-engine/src/opc/vendors.rs:185`（`opc` **顶层**）。
+与 `crates/company-runtime/src/opc/vendors.rs:185`（`opc` **顶层**）。
 **不产生歧义**：glob 只提升直接 pub 项，子模块内的同名项藏在 `opc::analysis_schema::` 下。
 ⭐ 判据：判断两模块能否并入同一 glob 命名空间，必须区分「顶层项」与「子模块内的同名项」。
 
@@ -991,7 +994,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 
 | # | 缺陷 | 证据 | 影响 |
 |---|---|---|---|
-| 1 | **`AnalysisDataSource` 同名不同体** | `crates/analysis-engine/src/opc/capability_pack.rs:221`（YAML 解析用）vs `crates/analysis-engine/src/opc/vendors.rs:185`（运行时构造用）；`opc_capability_pack_runtime.rs:635` 经 glob 拿到的是**后者** | 一处改名/改字段，另一处静默不动 ⇒ 二者永不兼容却同享名字（判据「一名多义」族）。**分属两个 crate，当前靠路径区分，尚未爆发** |
+| 1 | **`AnalysisDataSource` 同名不同体** | `crates/company-runtime/src/opc/capability_pack.rs:221`（YAML 解析用）vs `crates/company-runtime/src/opc/vendors.rs:185`（运行时构造用）；`opc_capability_pack_runtime.rs:635` 经 glob 拿到的是**后者** | 一处改名/改字段，另一处静默不动 ⇒ 二者永不兼容却同享名字（判据「一名多义」族）。**分属两个 crate，当前靠路径区分，尚未爆发** |
 | 2 | **`copy_dir_recursive` 三份重复实现** | `commands/opc_workflows/mod.rs:241`（`std::io::Result`）、`commands/dashboard.rs:169`（`Result<(), String>`）、`commands/skills/install.rs:1204`（`Result<(), String>`） | 同一逻辑三处维护；且**签名的 `Err` 类型不一致**（io::Error vs String）⇒ 无法直接合并，需先定统一错误类型 |
 | 3 | **`opc_capability_pack_bridge.rs` 的工具 description 曾硬编码「9 个域包」** | 实测 14 个（`assert_eq!(configs.len(), 14)` @ `opc_capability_pack_actions.rs:2681` + `assert!(configs.len() >= 14)` @ `capability_pack_config.rs:1173`） | **已修**：改为不带数字（数字无信息增量，且已腐烂过一次） |
 
@@ -1193,7 +1196,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 - `LegacyIndustryPathRedirect` — `ContentArea.tsx:114` / `:304`（路由 `/opc/industry/:packId` 的兼容重定向）
 
 **⑥ 重复实现债（实测）**
-- `copy_dir_recursive` **5 份独立实现 / 3 种返回类型**：`analysis-engine/src/opc/capability_pack.rs:819`(`io::Result`) · `migration/migration/mod.rs:89`(`Result<(),String>`) · `tools/tools/skill/mod.rs:1695`(`Result<(),ToolError>`) · `commands/dashboard.rs:169` · `commands/skills/install.rs:1204`
+- `copy_dir_recursive` **5 份独立实现 / 3 种返回类型**：`company-runtime/src/opc/capability_pack.rs:819`(`io::Result`) · `migration/migration/mod.rs:89`(`Result<(),String>`) · `tools/tools/skill/mod.rs:1695`(`Result<(),ToolError>`) · `commands/dashboard.rs:169` · `commands/skills/install.rs:1204`
 - `AnalysisDataSource` **同名两份**：`opc/capability_pack.rs:221`（嵌套模块内）与 `opc/vendors.rs:185`（`pub`）—— 值域是否一致**未核**
 
 **⑦ ★ 新发现：`config/opc/` 三套目录并存（需裁决）**

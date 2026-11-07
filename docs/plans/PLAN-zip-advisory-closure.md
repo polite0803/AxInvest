@@ -1,5 +1,8 @@
 # PLAN：cargo audit 的 zip 三族红收口
 
+> 状态：active ｜ 日期：2026-10-20 ｜ 对应版本：v2.9.9
+
+
 触发：CI `Run cargo audit` 红 —— `error: 9 vulnerabilities found!` + 14 条 allowed unmaintained。
 本仓 audit 的既有豁免先例见 `.github/workflows/ci.yml:814-832`（rkyv / glib 两条，各带影响范围与退役条件）。
 
@@ -16,7 +19,7 @@
 三条判据（RUSTSEC-2026-0367 SUID/SGID、0368 符号链接逃逸、0369 经符号链接套权限）**全部只打在 `ZipArchive::extract()` / `ZipStreamReader::extract()` 这两个「解包到目录」接口上**。
 
 自家代码的 zip 用法实测（`grep -rn "\.extract(\|ZipArchive\|ZipWriter"`）：
-写侧 `ZipWriter`（webdav 备份 `storage/src/webdav.rs:513`、OPC 域包 `analysis-engine/src/opc/capability_pack.rs:650`、文档导出 `tools/src/tools/document.rs:2578`）；
+写侧 `ZipWriter`（webdav 备份 `storage/src/webdav.rs:513`、OPC 域包 `company-runtime/src/opc/capability_pack.rs:650`、文档导出 `tools/src/tools/document.rs:2578`）；
 读侧一律 `ZipArchive::new` + `by_name` 只读（`document-parser/src/lib.rs:462/580/731/878`、`storage/src/webdav.rs:582`）。
 ⇒ **`extract()` 在自家代码零调用点**。真正会调 extract 的只有 updater 插件内部。
 

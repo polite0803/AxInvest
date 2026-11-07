@@ -1,5 +1,8 @@
 # AUDIT — 领域语义四项裁决执行（2026-09-14）
 
+> 状态：active ｜ 日期：2026-09-14 ｜ 对应版本：v2.9.7
+
+
 上游报告：`AUDIT-domain-semantics-o1-2026-09-14.md`（O1 注册表 + O2 扫描器）
 配套计划：`docs/plans/PLAN-semantica-borrowings.md`（O1 / O2 节）
 技能：`rust-consistency-audit` → **方法二十三 ·「一名多义」治理**

@@ -1,7 +1,7 @@
 # PLAN：阶段 0.5 —— 单周期决策命中率验证（反思工作流增强版）
 
 > 关联：`PROPOSAL-stock-decision-four-horizon.md` 第 3.5 节
-> 状态：**v2 重写（2026-09-23）** · ✅ M1-M3 已完成
+> 状态：done ｜ 日期：2026-09-23 ｜ 对应版本：v2.9.9
 > **v2 核心变更：废弃虚拟建仓路径（paper_positions 扩展 / 自动建仓 / 惰性结算全部取消）**。
 > **实施记录**：M1（`was_correct` 确定性化）→ `reflection.rs`；M2（命中率聚合）→ `analysis-engine/reflection_stats.rs`；M3（前端面板）→ `ReflectionPanel.tsx`。M4（样本积累）标记可选，未启动。
 > 原因（用户质疑 + 代码实证）：股票反思是**独立工作流**，且已具备完整后市验证能力（见第 2 节）——

@@ -1,8 +1,11 @@
 # 交付：P0 / P1 实施结果（2026-10-26 06:40~07:30）
 
+> 状态：done ｜ 日期：2026-10-26 ｜ 对应版本：v2.9.9
+
+
 > 用户指令：「按照 p0、p1 顺序执行」
-> 上游裁决：`docs/audits/VERDICT-stock-business-profitability-2026-10-26.md`
-> R-3h 计划：`docs/plans/PLAN-r3h-long-sample-calibration.md`
+> 上游裁决：`AUDIT-stock-business-profitability-2026-10-26.md`
+> R-3h 计划：`PLAN-r3h-long-sample-calibration.md`
 
 ---
 
@@ -192,7 +195,7 @@ DETAIL: 键值"(as_of_date, purpose, period, stock_code, style)=(null, null, lon
 |---|---|
 | `scripts/check-decision-validation-integrity.mjs` | 门禁：孤儿=0 + 匹配窗口>0 + 业务键零重复 + 幂等键零重复 |
 | `docs/plans/PLAN-r3h-long-sample-calibration.md` | R-3h 实施计划（含机制、证据、验收判据、残余风险） |
-| `docs/audits/VERDICT-stock-business-profitability-2026-10-26.md` | 重答版裁决（10-26） |
+| `AUDIT-stock-business-profitability-2026-10-26.md` | 重答版裁决（10-26） |
 
 **改动脚本（1 个）**：`scripts/ci-check.mjs`（挂入新门禁）。
 

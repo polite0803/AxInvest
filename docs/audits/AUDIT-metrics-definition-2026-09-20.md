@@ -1,5 +1,8 @@
 # AUDIT — Metrics 定义关系核查（`MetricType` 是否真重复？）
 
+> 状态：active ｜ 日期：2026-09-20 ｜ 对应版本：v2.9.7
+
+
 - 审计日期：2026-09-20
 - 审计类型：只读，未改动任何代码
 - 审计对象：`agent` / `quant` / `telemetry` 三处 metrics 口径（登记为「可能重复需裁定」）
@@ -15,7 +18,7 @@
 | # | 定义文件:行号 | crate | 变体数 | 语义层 |
 |---|---|---|---|---|
 | 1 | `crates/agent/src/metrics.rs:10` | axagent-agent | 4 | 性能打点类型 |
-| 2 | `crates/analysis-engine/src/opc/analytics.rs:8` | axagent-analysis-engine | 9 | 业务 KPI 类型（stock-analysis 域） |
+| 2 | `crates/company-runtime/src/opc/analytics.rs:8` | axagent-analysis-engine | 9 | 业务 KPI 类型（stock-analysis 域） |
 
 **quant 与 telemetry 没有 `MetricType` 这个类型**：
 
@@ -39,7 +42,7 @@ pub enum MetricType { Counter, Gauge, Histogram, Timing }
 - **用途**：作为 `MetricsCollector`（同文件 `:96`）内存聚合打点的**类型标记**，挂在 `MetricValue::metric_type`（`metrics.rs:32`），区分 counter/gauge/timing 三种聚合语义。
 - **消费范围**：仅 `agent/src/metrics.rs` 内部（构造 `MetricValue`）及自身测试。无跨 crate 消费、无 re-export。
 
-### 2.2 第 2 份 — `crates/analysis-engine/src/opc/analytics.rs:8`（业务 KPI 类型）
+### 2.2 第 2 份 — `crates/company-runtime/src/opc/analytics.rs:8`（业务 KPI 类型）
 
 ```rust
 pub enum MetricType { Counter, Count, Gauge, Histogram, Rate, Ratio, Currency, Percentage, Boolean }
@@ -122,8 +125,8 @@ pub enum MetricType { Counter, Count, Gauge, Histogram, Rate, Ratio, Currency, P
 ## 参考文件清单
 
 - `crates/agent/src/metrics.rs:10`
-- `crates/analysis-engine/src/opc/analytics.rs:8`
-- `crates/analysis-engine/src/opc/capability_pack_config.rs`
+- `crates/company-runtime/src/opc/analytics.rs:8`
+- `crates/company-runtime/src/opc/capability_pack_config.rs`
 - `crates/quant/src/metrics.rs:28`
 - `crates/telemetry/src/collector.rs:7`、`crates/telemetry/src/metrics.rs`
 - `crates/runtime/src/gateway_metrics.rs:31`（`MetricKind`）

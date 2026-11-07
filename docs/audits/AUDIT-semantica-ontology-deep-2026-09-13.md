@@ -1,5 +1,8 @@
 # AUDIT（专项）— Semantica 的 Ontology 层 vs AxInvest
 
+> 状态：active ｜ 日期：2026-09-13 ｜ 对应版本：v2.9.7
+
+
 > 日期：2026-09-13
 > 取证方式：源码级（`output/tmp-semantica-src/semantica-main`，git 零接触）
 > 关联：`AUDIT-semantica-vs-axinvest-2026-09-13.md`（总报告）、`PLAN-semantica-borrowings.md`

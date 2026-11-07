@@ -1,5 +1,8 @@
 # PLAN-office-scene-domain-align — 办公室场景模板与 OPC 域包本体对齐
 
+> 状态：active ｜ 日期：2026-09-25 ｜ 对应版本：v2.9.9
+
+
 日期：2026-09-25　状态：✅ 三阶段全部完成，全量门禁绿，未提交
 
 > 执行纪要：阶段 1+2 产出见上；阶段 2 实际补 **24** 个房间名（最初清单漏记 `finance_invest` 的 `analysis`，由阶段 3 门禁首跑抓出后补）+ `investment_office_desc`。阶段 3 落地 `scripts/check-office-scene-align.mjs`（三条硬拦 + d 报告档 + 豁免清单腐烂硬拦 + `--selftest` 六负控一正控），npm 脚本 `check:office-align[:selftest]`，成对接入 `ci-check.mjs:131-138` 与 `ci.yml`（逐字同源）。终验：typecheck / 全量 vitest 178 文件 2024 用例 / oxlint / dprint / key-parity / check_i18n --strict / EOL 全绿。待办：按计划 §5 分两个 commit（功能 / 门禁）。

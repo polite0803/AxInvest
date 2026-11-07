@@ -1,5 +1,8 @@
 # AUDIT：入场价的实盘可执行性 — 2026-10-25
 
+> 状态：active ｜ 日期：2026-10-25 ｜ 对应版本：v2.9.9
+
+
 > 触发：核查 `PLAN-validation-fill-model.md` §4 提出的「目标价过近」假设。
 > 结论：**该假设被数据推翻**；同时查出比它根本得多的问题 —— **入场价是涨停价，实盘买不进**。
 > 数据源：生产库 `axinvest` 的 `decision_validations` × `market_daily_close` 联查，

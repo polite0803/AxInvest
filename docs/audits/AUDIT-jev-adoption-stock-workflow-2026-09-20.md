@@ -1,5 +1,8 @@
 # AUDIT — 股票分析工作流 Jev 适配度与耗时归因
 
+> 状态：active ｜ 日期：2026-09-20 ｜ 对应版本：v2.9.7
+
+
 **日期**：2026-09-20
 **范围**：`stock-analysis` 工作流（`seed_stock_analysis.rs`，TEMPLATE_VERSION=55（2026-09-20 由 54 升版，见 §2.4⑦），58 个节点）
 **数据源**：本地 PostgreSQL `axinvest` 真库 `workflow_executions`（510 行，2026-07-20 ~ 2026-09-18）

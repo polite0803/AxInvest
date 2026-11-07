@@ -1,5 +1,8 @@
 # AUDIT：openai/codex 与本项目后端的机制级差距对照
 
+> 状态：active ｜ 日期：2026-09-24 ｜ 对应版本：v2.9.9
+
+
 - 日期：2026-09-24
 - 对象：`openai/codex` 的 `codex-rs`（commit `282cd7b019378746cb87bd91a95d8b4bcae12aa3`，2026-09-24），约 100 个 crate
 - 对照方：AxAgent 后端（`src-tauri/`，36 crate 工作区）

@@ -1,5 +1,8 @@
 # PLAN — Semantica 借鉴清单
 
+> 状态：active ｜ 日期：2026-09-15 ｜ 对应版本：v2.9.7
+
+
 配套：`AUDIT-semantica-vs-axinvest-2026-09-13.md`（总报告）+ **`AUDIT-semantica-ontology-deep-2026-09-13.md`（本体专项，二轮）**
 许可：MIT ｜ **全部条目为「用我方栈重新实现设计意图」，非代码移植**
 

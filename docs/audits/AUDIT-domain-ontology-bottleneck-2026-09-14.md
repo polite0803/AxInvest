@@ -1,5 +1,8 @@
 # AUDIT — 瓶颈掘金领域本体（真 O1：类 / 关系 / 公理 + 副本收敛 + CI 一致性门）
 
+> 状态：active ｜ 日期：2026-09-14 ｜ 对应版本：v2.9.7
+
+
 - **日期**：2026-09-14
 - **权威源**：`src-tauri/crates/harness/src/domain_ontology.rs`（806 行｜17 测试）
 - **配套门禁**：`scripts/check-ontology-consistency.mjs`（774 行｜26 selftest 用例）

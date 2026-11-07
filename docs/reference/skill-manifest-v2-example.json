@@ -1,0 +1,139 @@
+{
+  "name": "my-skill",
+  "version": "2.0.0",
+  "description": "这是一个 V2 架构的 Skill 示例，展示了新的 capability 声明方式",
+  "author": "AxAgent",
+  "icon": "lucide:Sparkles",
+
+  "permissions": {
+    "commands": ["read_file", "write_file", "search_files"],
+    "events": ["skill:*"],
+    "storeRead": ["preference", "conversation"],
+    "storeWrite": ["preference"],
+    "navigate": ["/skills/*", "/settings"],
+    "network": [],
+    "filesystem": {
+      "read": ["$WORKSPACE/**"],
+      "write": ["$WORKSPACE/output/**"]
+    },
+    "tools": ["search", "file_reader"]
+  },
+
+  "capabilities": [
+    {
+      "type": "page",
+      "id": "dashboard",
+      "title": "仪表盘",
+      "description": "Skill 主页面",
+      "componentType": "Sandbox",
+      "componentConfig": {
+        "entry": "index.html",
+        "props": { "theme": "auto" },
+        "layout": "default"
+      },
+      "icon": "lucide:LayoutDashboard"
+    },
+    {
+      "type": "page",
+      "id": "readme",
+      "title": "使用说明",
+      "description": "Markdown 格式文档",
+      "componentType": "Markdown",
+      "componentConfig": {
+        "entry": "SKILL.md"
+      },
+      "icon": "lucide:FileText"
+    },
+    {
+      "type": "navigation",
+      "id": "nav-dashboard",
+      "title": "仪表盘",
+      "icon": "lucide:LayoutDashboard",
+      "pageId": "dashboard",
+      "position": 1
+    },
+    {
+      "type": "toolbar",
+      "id": "btn-refresh",
+      "title": "刷新数据",
+      "icon": "lucide:RefreshCw",
+      "tooltip": "刷新仪表盘数据",
+      "position": "left",
+      "priority": 1,
+      "onClick": [
+        {
+          "mode": "declarative",
+          "action": {
+            "type": "invoke",
+            "command": "search_files",
+            "args": { "pattern": "*.ts" }
+          }
+        }
+      ]
+    },
+    {
+      "type": "chatCommand",
+      "id": "cmd-analyze",
+      "title": "代码分析",
+      "commandName": "analyze",
+      "description": "分析当前项目的代码质量",
+      "icon": "lucide:Search",
+      "mode": "agentic",
+      "promptTemplate": "请分析项目 {path} 中的代码质量，重点关注：\n1. 类型安全\n2. 错误处理\n3. 代码复杂度"
+    },
+    {
+      "type": "statusBar",
+      "id": "sb-filecount",
+      "title": "文件数",
+      "alignment": "right",
+      "priority": 1,
+      "dynamicText": {
+        "command": "count_files",
+        "args": { "pattern": "**/*.ts" },
+        "refreshIntervalMs": 30000,
+        "template": "📁 {{value}} 个文件"
+      }
+    },
+    {
+      "type": "panel",
+      "id": "panel-info",
+      "title": "信息面板",
+      "componentType": "Sandbox",
+      "componentConfig": {
+        "entry": "panel.html",
+        "props": { "collapsed": false }
+      },
+      "position": "sidebar",
+      "size": "medium",
+      "collapsible": true,
+      "defaultCollapsed": false
+    },
+    {
+      "type": "settings",
+      "id": "settings-general",
+      "title": "通用设置",
+      "icon": "lucide:Settings",
+      "settingsGroup": "my-skill",
+      "componentType": "Sandbox",
+      "componentConfig": {
+        "entry": "settings.html",
+        "props": { "mode": "edit" }
+      }
+    }
+  ],
+
+  "lifecycle": {
+    "onInstall": [
+      {
+        "mode": "declarative",
+        "action": { "type": "invoke", "command": "init_skill_config", "args": { "name": "my-skill" } }
+      }
+    ],
+    "onEnable": [
+      {
+        "mode": "declarative",
+        "action": { "type": "emit", "event": "skill:my-skill:enabled" }
+      }
+    ]
+  }
+}

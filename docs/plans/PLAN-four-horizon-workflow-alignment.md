@@ -1,6 +1,6 @@
 # PLAN：四周期工作流对齐 —— 十项需求差距分析与实现方案
 
-> 状态：**待批**（未开工）。所有「现状」条目均带 `文件:行号` 实证；标 **未实证** 的是需要先测才能定方案的读数。
+> 状态：active ｜ 日期：2026-11-03 ｜ 对应版本：v3.0.0+（未定版，待确认）
 > 范围声明：本仓「四周期」跨**三条互不消费的链** —— 分析决策链（`src-tauri/src/commands/portfolio-mgr.rhai`）、
 > 荐股链（`src-tauri/crates/analysis-engine/src/recommender/`）、趋势智选链
 > （`src-tauri/src/commands/stock_workflow/serenity.rs`）。本文十项需求**只对分析决策链**立方案；

@@ -1,5 +1,8 @@
 # AUDIT — WeKnora vs AxInvest 源码级对比审计（RAG / Wiki 专项）
 
+> 状态：active ｜ 日期：2026-09-14 ｜ 对应版本：v2.9.7
+
+
 - **日期**：2026-09-14
 - **对象**：`https://github.com/Tencent/WeKnora`（v0.8.0，Tencent 开源）
 - **本地快照**：`output/tmp-weknora-src/WeKnora-main`（3525 文件 / 42 MB 源码级子集）

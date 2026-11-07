@@ -1,5 +1,8 @@
 # PLAN：emweb 财报接口 gzip 响应炸穿解码——reqwest 未开自动解压（L 轮，002371 实证）
 
+> 状态：active ｜ 日期：2026-09-28 ｜ 对应版本：v2.9.9
+
+
 日期：2026-09-28 · 状态：已批准并实施——L1 提交 `cfceda84e`（`cargo check -p axagent-astock-data` 绿；lib.rs 与另一会话的 `mod valuation` 改动同文件，已按 hunk 只暂存本轮两处 `.gzip(true)`）；剩 L2 = 重启重跑 002371 核对 · 触发：用户贴出日志——002371（北方华创）财务数据
 5 源全灭（eastmoney/akshare 同 URL `error decoding response body`、browser_eastmoney
 「no financials data」、xueqiu 缺 list、baidu 要 Acs-Token），DAG 被

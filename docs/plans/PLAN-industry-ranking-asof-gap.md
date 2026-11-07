@@ -1,5 +1,8 @@
 # PLAN：行业排名 as-of 合成全灭——push2\* 族本机被阻断 + 快照归属日按「今天」判致周末永不回填（G 轮）
 
+> 状态：active ｜ 日期：2026-09-27 ｜ 对应版本：v2.9.9
+
+
 日期：2026-09-27 · 状态：已批准并实施（修订版，见文末「实施记录」）· 触发：用户重跑后降级面板「真故障（需要修）·1：
 `get_industry_ranking … 板块指数日 K 全部取数失败 HTTP request failed`（eastmoney 与
 browser_eastmoney 同报）。

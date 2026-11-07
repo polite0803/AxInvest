@@ -1,5 +1,8 @@
 # 审计：UPSERT 裸列名的方言差异缺陷（PG 42702）
 
+> 状态：active ｜ 日期：2026-09-17 ｜ 对应版本：v2.9.7
+
+
 > 日期：2026-09-17 ｜ 触发：用户贴出运行期报错截图
 > 范围：`src-tauri/crates/dao/src/repo/` 下两处 `ON CONFLICT ... DO UPDATE SET`
 > 结论：**PG 专有缺陷，SQLite 完全不可见**；已修 + 已加 PG 端到端回归锁（反事实已证区分力）

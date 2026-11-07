@@ -1,5 +1,8 @@
 # AUDIT — Wiki 图谱「没有边 / 没有分组 / 一片无关系的点」
 
+> 状态：active ｜ 日期：2026-09-15 ｜ 对应版本：v2.9.7
+
+
 日期：2026-09-15 ｜ 范围：`src/components/wiki/GraphView.tsx`、`src-tauri/src/commands/wiki.rs`、`crates/dao/src/repo/note.rs`
 对标对象：WeKnora（`output/tmp-weknora-src/WeKnora-main`，MIT，仅作设计参照，不搬运代码）
 

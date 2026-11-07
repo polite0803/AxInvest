@@ -1,5 +1,8 @@
 # PLAN：codex 后端对齐借鉴项落地
 
+> 状态：active ｜ 日期：2026-09-25 ｜ 对应版本：v2.9.9
+
+
 - 日期：2026-09-25
 - 依据：`AUDIT-codex-parity-gap-2026-09-24.md`（§6 借鉴清单为范围来源，§7–§10 为机制细节来源）
 - 对照对象：`openai/codex` 的 `codex-rs`（commit `282cd7b019378746cb87bd91a95d8b4bcae12aa3`）

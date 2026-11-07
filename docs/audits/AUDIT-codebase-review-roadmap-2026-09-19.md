@@ -1,5 +1,8 @@
 # AUDIT — 全仓代码体检与发展建议（2026-09-19）
 
+> 状态：active ｜ 日期：2026-09-19 ｜ 对应版本：v2.9.7
+
+
 > **定位**：时点快照。本轮为「全面研读 + 发展建议」型体检，不是缺陷修复清单。
 > **方法**：全仓静态扫描（自写脚本，逐字节）+ 四路并行深挖（业务链路 / Rust 架构 / 前端 / 数据层与门禁）+ 主控对 12 处关键结论逐条复核。
 > **去重原则**：`docs/` 下已有 61 份审计/计划。本文对每条结论标注**【已登记】/【新发现】**，已登记项只做「落地状态核对」，不重复开方案。
@@ -1977,7 +1980,7 @@ D 的三类来源**含义不同**，判错了就出假红（v1 原型实录）�
 ### 14.6 ② metrics 口径 = 不是「三份重复」，裁定不合并（审计出报告）
 
 审计报告：`AUDIT-metrics-definition-2026-09-20.md`。核心纠正：
-- **任务前提错误**：名为 `MetricType` 的 enum 实际**只有两份**（`agent/src/metrics.rs:10` 性能打点 Counter/Gauge/Histogram/Timing；`analysis-engine/src/opc/analytics.rs:8` 业务 KPI 9 变体）；**quant / telemetry 没有 `MetricType`**（是 `MetricsReport` / `MetricsCollector` 等 struct DTO）。
+- **任务前提错误**：名为 `MetricType` 的 enum 实际**只有两份**（`agent/src/metrics.rs:10` 性能打点 Counter/Gauge/Histogram/Timing；`company-runtime/src/opc/analytics.rs:8` 业务 KPI 9 变体）；**quant / telemetry 没有 `MetricType`**（是 `MetricsReport` / `MetricsCollector` 等 struct DTO）。
 - **判定不合并**：两份属不同语义层（「怎么聚合」 vs 「数值含义」），交集仅 Counter/Gauge/Histogram，合一会语义污染；且 agent 是 consumer 仅能依赖 harness，无合法通道做 pub use。
 - 附带发现 `runtime/src/gateway_metrics.rs:31` 的 `MetricKind`（Counter/Gauge/Histogram/Summary）才是与 agent 份**真正同语义**的一份（命名不同故未被登记为重复）。
 - **建议保持现状**，仅可选低风险改名消歧（analysis-engine `MetricType`→`KpiMetricType`，35 处同文件引用）以降审计噪音——此项**未擅改**，若产品认可可另行立项。
@@ -2242,7 +2245,7 @@ if !recurring {
    |---|---|---|
    | `harness/src/cognitive_router.rs:214` | 认知路由（Ask/Plan/Act/Workflow/Direct/Delegate/ParameterExtract/Clarify） | 极强（`commands/cognitive.rs` 数十处） |
    | `harness/src/capability.rs:386` | 能力执行模式（Sync/Async/Streaming） | 强（`init/state.rs` 6 处 + assembly_builder） |
-   | `analysis-engine/src/opc/automation.rs:74` | OPC 自动化模式 | 有 |
+   | `company-runtime/src/opc/automation.rs:74` | OPC 自动化模式 | 有 |
 
    只删前端 `types/execution.ts` 那个（manual/semi_auto/full_auto）⇒ **删前必须按「所属域」分类，不能按名**。
 

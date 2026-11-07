@@ -1,5 +1,8 @@
 # PLAN · 一切皆插件 + 动态插件
 
+> 状态：active ｜ 日期：2026-11-01 ｜ 对应版本：v3.0.0+（未定版，待确认）
+
+
 > 参照实现：[`dsh-rs`](https://github.com/redoop/dsh-rs)（cordis 内核的 Rust 移植），其
 > `crates/dsh-plugin-contract` 已逐字核对（见 §5.1）。
 >

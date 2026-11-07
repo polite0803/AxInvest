@@ -1,5 +1,8 @@
 # AUDIT — 模块级分层护栏（L1）落地与实测（2026-09-14）
 
+> 状态：active ｜ 日期：2026-09-14 ｜ 对应版本：v2.9.7
+
+
 上游计划：`PLAN-semantica-borrowings.md` 的 **L1** 节（借鉴清单里**最后一条未执行的 P0**）
 配套报告：`AUDIT-domain-semantics-fixes-2026-09-14.md`（同一轮的四项裁决）
 技能：`rust-consistency-audit` → **方法二十四 · 模块级分层护栏**

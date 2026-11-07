@@ -1,5 +1,8 @@
 # 审计：`verdict` 形态归一（value-investor 修复 + 全仓未归一面清点）
 
+> 状态：active ｜ 日期：2026-10-23 ｜ 对应版本：v2.9.9
+
+
 - 日期：2026-10-23
 - 触发：运行日志 12 条 `Agent 节点 input_mapping 取不到值`（`risk-agg` / `risk-con` / `risk-neu` × `value-investor--{mid,long}.result.verdict.{bull,bear}_score`）
 - 结论：**形态契约缺失**，不是路径写错一个字。已按方案 A 在 `value-verify.rhai` 落地归一（v175），并清出 4 项同族未归一问题。

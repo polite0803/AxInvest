@@ -37,8 +37,12 @@ export interface ABTestResult {
   metric: string;
   valueA: number;
   valueB: number;
-  change: number;
+  /** (B-A)/A×100(B 相对 A 的提升,与 winner 推导自洽);A=0 ⇒ null ⇒ 平局(除零保护) */
+  change: number | null;
+  /** per-metric winner,由 change 正负推导(>0 ⇒ B 胜,<0 ⇒ A 胜,=0/null ⇒ tie) */
   winner: "A" | "B" | "tie";
+  /** 后端整体 winner(report.winner 字符串)原样透出,不与 per-metric 推导混算 */
+  overallWinner?: string;
 }
 
 export interface EvolutionEvent {
@@ -228,64 +232,47 @@ function buildMockEngines(): Record<string, EngineStatus> {
   return engines;
 }
 
-function buildMockSkillVersions(): SkillVersion[] {
-  return [
-    {
-      version: 4,
-      timestamp: Date.now() - 86400000,
-      summary: "优化了推理链步骤顺序，减少了冗余工具调用",
-      metrics: {
-        successRate: { before: 78, after: 85 },
-        tokenUsage: { before: 3200, after: 2800 },
-        avgTime: { before: 12.5, after: 10.2 },
-      },
-      promptDiff: {
-        old: "You are an expert assistant. Think step by step.",
-        new: "You are an expert assistant. Analyze the problem, identify key constraints, then execute efficiently.",
-      },
-    },
-    {
-      version: 3,
-      timestamp: Date.now() - 172800000,
-      summary: "增加了错误处理分支，提高了鲁棒性",
-      metrics: {
-        successRate: { before: 72, after: 78 },
-        errorRate: { before: 15, after: 8 },
-        avgTime: { before: 14.0, after: 12.5 },
-      },
-    },
-    {
-      version: 2,
-      timestamp: Date.now() - 259200000,
-      summary: "引入了并行工具调用策略",
-      metrics: {
-        successRate: { before: 65, after: 72 },
-        tokenUsage: { before: 4000, after: 3500 },
-        avgTime: { before: 18.0, after: 14.0 },
-      },
-      promptDiff: { old: "Call tools one at a time.", new: "When possible, call independent tools in parallel." },
-    },
-    {
-      version: 1,
-      timestamp: Date.now() - 345600000,
-      summary: "初始版本，基础功能实现",
-      metrics: {
-        successRate: { before: 0, after: 65 },
-        tokenUsage: { before: 0, after: 4000 },
-        avgTime: { before: 0, after: 18.0 },
-      },
-    },
-  ];
+// ── A/B 测试结果(任务 #218 批一:接真 evaluator_get_ab_results,不再回退写死 mock) ──
+
+/** 后端 AbTestReport DTO(权威定义:src-tauri/src/commands/evaluator.rs,serde camelCase 输出) */
+export interface AbTestReportDTO {
+  testId: string;
+  skillId: string;
+  versionA: string;
+  versionB: string;
+  /** 后端整体 winner("A"/"B" 字符串),前端原样透出,不参与 per-metric 推导 */
+  winner: string;
+  metrics: { name: string; valueA: number; valueB: number; unit: string }[];
+  conclusion: string;
 }
 
-function buildMockABTestResults(): ABTestResult[] {
-  return [
-    { metric: "成功率", valueA: 85, valueB: 78, change: 8.97, winner: "A" },
-    { metric: "平均 Token 消耗", valueA: 2800, valueB: 3200, change: -12.5, winner: "A" },
-    { metric: "平均执行时间(s)", valueA: 10.2, valueB: 12.5, change: -18.4, winner: "A" },
-    { metric: "用户满意度", valueA: 4.2, valueB: 3.8, change: 10.5, winner: "A" },
-    { metric: "错误率", valueA: 5, valueB: 8, change: -37.5, winner: "A" },
-  ];
+/**
+ * A/B 适配器(任务 #218 裁定口径):
+ * - change% = (B-A)/A×100(B 相对 A 的提升,与 winner 推导自洽;旧 mock 的 (A-B)/B×100 方向反,已废弃)
+ * - A=0 ⇒ change=null ⇒ 平局
+ * - per-metric winner 由 change 正负推导:>0 ⇒ B 胜,<0 ⇒ A 胜,=0/null ⇒ tie
+ * - overall winner(后端 report.winner)原样透出,不与 per-metric 混算
+ */
+export function adaptAbTestReport(report: AbTestReportDTO | null): ABTestResult[] {
+  if (!report || !Array.isArray(report.metrics)) {
+    return [];
+  }
+  return report.metrics.map((m) => {
+    const change = m.valueA === 0 ? null : ((m.valueB - m.valueA) / m.valueA) * 100;
+    const winner: ABTestResult["winner"] = change === null || change === 0
+      ? "tie"
+      : change > 0
+      ? "B"
+      : "A";
+    return {
+      metric: m.name,
+      valueA: m.valueA,
+      valueB: m.valueB,
+      change,
+      winner,
+      overallWinner: report.winner,
+    };
+  });
 }
 
 // ── Store ──
@@ -312,8 +299,8 @@ interface EvolutionState {
   stopEngine: (name: string) => Promise<void>;
   updateEngineConfig: (name: string, config: Record<string, unknown>) => Promise<void>;
   fetchEngineLogs: (name: string) => Promise<void>;
-  getSkillEvolutionHistory: (skillId: string) => SkillVersion[];
-  getABTestResults: (skillId: string) => ABTestResult[];
+  getSkillEvolutionHistory: (skillId: string) => Promise<SkillVersion[]>;
+  getABTestResults: (skillId: string) => Promise<ABTestResult[]>;
   triggerSkillEvolution: (skillId: string) => Promise<void>;
   addEvolutionEvent: (event: EvolutionEvent) => void;
 
@@ -489,12 +476,26 @@ export const useEvolutionStore = create<EvolutionState>((set, get) => ({
     }
   },
 
-  getSkillEvolutionHistory: (_skillId: string) => {
-    return buildMockSkillVersions();
+  // 任务 #218 批一:getter 异步化,返回空数组,不回退写死 mock(空态是诚实行为)。
+  getSkillEvolutionHistory: async (_skillId: string): Promise<SkillVersion[]> => {
+    // 批二:history 持久化轨迹(引擎已捕获 old/new content 但命令层丢弃,需持久化表+命令)。
+    return [];
   },
 
-  getABTestResults: (_skillId: string) => {
-    return buildMockABTestResults();
+  // 任务 #218 批一:接真命令 evaluator_get_ab_results(写入键为 skill_id,来自 run_ab_test,
+  // 查询键必须同键空间)。空串 = 无技能绑定(节点→技能绑定关系盘上不存在,已回报纠正,
+  // 等 leader 改裁)⇒ 短路返回空态,不发注定为空的查询;绑定落地后调用方改传真 skillId 即生效。
+  getABTestResults: async (skillId: string): Promise<ABTestResult[]> => {
+    if (!skillId) {
+      return [];
+    }
+    try {
+      const report = await invoke<AbTestReportDTO | null>("evaluator_get_ab_results", { skillId });
+      return adaptAbTestReport(report);
+    } catch (e) {
+      console.warn("[evolutionStore] getABTestResults failed", e);
+      return []; // 失败 ⇒ 空态,不再回退假数据
+    }
   },
 
   triggerSkillEvolution: async (_skillId: string) => {

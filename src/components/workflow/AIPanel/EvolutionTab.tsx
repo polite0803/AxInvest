@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useEvolutionStore } from "@/stores/feature/evolutionStore";
-import { Badge, Button, Card, Collapse, Empty, Tag, theme, Typography } from "antd";
+import type { ABTestResult, EvolutionPort, SkillVersion } from "@/components/common/evolutionPort";
+import { Button, Card, Collapse, Empty, Tag, theme, Typography } from "antd";
 import { Activity, ChevronDown, Clock, Play, TrendingDown, TrendingUp } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -12,39 +12,15 @@ const { Text } = Typography;
 interface EvolutionTabProps {
   currentWorkflowId: string | null;
   nodes: WorkflowNode[];
+  /** 进化能力端口（任务 #220）：由 AIPanel 透传（源头为 WorkflowPage 注入）。缺省时只读展示空态、触发按钮 no-op。 */
+  evolutionPort?: EvolutionPort;
 }
 
-interface EvolutionEntry {
-  skillId: string;
-  version: number;
-  timestamp: number;
-  type?: string;
-  metrics?: {
-    successRate?: number;
-    avgLatencyMs?: number;
-  };
-  previousMetrics?: {
-    successRate?: number;
-    avgLatencyMs?: number;
-  };
-  abTestWon?: boolean;
-}
-
-interface ABTestResult {
-  variantA: string;
-  variantB: string;
-  winner: string | null;
-  confidence: number;
-  metricsA: Record<string, number>;
-  metricsB: Record<string, number>;
-}
-
-export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWorkflowId, nodes }) => {
+export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWorkflowId, nodes, evolutionPort }) => {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const evolutionStore = useEvolutionStore();
 
-  const [nodeHistories, setNodeHistories] = useState<Record<string, EvolutionEntry[]>>({});
+  const [nodeHistories, setNodeHistories] = useState<Record<string, SkillVersion[]>>({});
   const [abResults, setAbResults] = useState<ABTestResult[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -52,58 +28,72 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
     let cancelled = false;
     setLoading(true);
 
-    try {
-      // fetch evolution history for each node
-      const histories: Record<string, EvolutionEntry[]> = {};
+    // 端口缺省（如测试未注入）：清空数据并结束加载，不再直引 evolution store。
+    if (!evolutionPort) {
+      setNodeHistories({});
+      setAbResults([]);
+      setLoading(false);
+      return;
+    }
+
+    // 端口已异步化(任务 #218 批一):store getter 返回 Promise,包 async IIFE 逐节点拉取。
+    // 传参说明:节点→技能绑定关系盘上不存在(消费方拿不到真实 skillId,已回报纠正,等 leader 改裁),
+    // 按裁定「无绑定 ⇒ 空态」传空串;store 对空串短路返回 [],绑定落地后此处改传真 skillId 即生效。
+    (async () => {
+      // 逐节点取进化版本历史(端口返回 store 权威 SkillVersion[])。
+      const histories: Record<string, SkillVersion[]> = {};
       for (const node of nodes) {
         try {
-          const history = evolutionStore.getSkillEvolutionHistory(node.id) as unknown as EvolutionEntry[]; // SAFE: store method returns IPC data; runtime shape matches EvolutionEntry[]
+          const history = await evolutionPort.getSkillEvolutionHistory("");
           if (history && history.length > 0) {
             histories[node.id] = history;
           }
         } catch {
-          // node has no history — skip
+          // 该节点无历史 —— 跳过
         }
       }
       if (!cancelled) { setNodeHistories(histories); }
 
-      // fetch A/B test results
+      // 取 A/B 测试结果(端口返回 store 权威 ABTestResult[],键空间为 skill_id)。
       try {
-        const results = evolutionStore.getABTestResults(currentWorkflowId ?? "") as unknown as ABTestResult[]; // SAFE: store method returns IPC data; runtime shape matches ABTestResult[]
+        const results = await evolutionPort.getABTestResults("");
         if (!cancelled && results) { setAbResults(results); }
       } catch {
-        // no AB results
+        // 无 A/B 结果
       }
-    } finally {
+
       if (!cancelled) { setLoading(false); }
-    }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [currentWorkflowId, nodes, evolutionStore]);
+  }, [currentWorkflowId, nodes, evolutionPort]);
 
   const handleTriggerAll = useCallback(() => {
+    if (!evolutionPort) { return; }
     for (const node of nodes) {
       try {
-        evolutionStore.triggerSkillEvolution(node.id);
+        evolutionPort.triggerSkillEvolution(node.id);
       } catch {
-        // ignore individual failures
+        // 忽略单个失败
       }
     }
-  }, [nodes, evolutionStore]);
+  }, [nodes, evolutionPort]);
 
   const handleTriggerSingle = useCallback((nodeId: string) => {
+    if (!evolutionPort) { return; }
     try {
-      evolutionStore.triggerSkillEvolution(nodeId);
+      evolutionPort.triggerSkillEvolution(nodeId);
     } catch {
-      // ignore
+      // 忽略
     }
-  }, [evolutionStore]);
+  }, [evolutionPort]);
 
+  // SkillVersion.timestamp 为毫秒时间戳（与 store / AIPanel 口径一致）。
   const formatTime = useCallback((ts: number): string => {
     try {
-      return new Date(ts * 1000).toLocaleString("zh-CN", {
+      return new Date(ts).toLocaleString("zh-CN", {
         month: "2-digit",
         day: "2-digit",
         hour: "2-digit",
@@ -153,14 +143,12 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
             {nodes.map((node) => {
               const history = nodeHistories[node.id];
               const latest = history?.[0];
-              const prev = history?.[1];
 
-              const srDiff = latest?.metrics?.successRate != null && prev?.metrics?.successRate != null
-                ? latest.metrics.successRate - prev.metrics.successRate
-                : null;
-              const latDiff = latest?.metrics?.avgLatencyMs != null && prev?.metrics?.avgLatencyMs != null
-                ? latest.metrics.avgLatencyMs - prev.metrics.avgLatencyMs
-                : null;
+              // SkillVersion.metrics 为 Record<string, { before; after }>，取成功率/耗时的前后差。
+              const sr = latest?.metrics?.successRate;
+              const srDiff = sr ? sr.after - sr.before : null;
+              const lat = latest?.metrics?.avgTime;
+              const latDiff = lat ? lat.after - lat.before : null;
 
               return (
                 <Card
@@ -226,7 +214,7 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
                               >
                                 {srDiff >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                                 {t("workflow.evolution.successRate", {
-                                  diff: `${srDiff >= 0 ? "+" : ""}${(srDiff * 100).toFixed(1)}%`,
+                                  diff: `${srDiff >= 0 ? "+" : ""}${srDiff.toFixed(1)}%`,
                                 })}
                               </span>
                             )}
@@ -241,7 +229,7 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
                               >
                                 {latDiff <= 0 ? <TrendingDown size={10} /> : <TrendingUp size={10} />}
                                 {t("workflow.evolution.latency", {
-                                  diff: `${latDiff >= 0 ? "+" : ""}${latDiff.toFixed(0)}ms`,
+                                  diff: `${latDiff >= 0 ? "+" : ""}${latDiff.toFixed(1)}`,
                                 })}
                               </span>
                             )}
@@ -252,15 +240,22 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
                             {t("workflow.evolution.noEvolutionRecord")}
                           </Text>
                         )}
+                      {latest?.summary && (
+                        <Text
+                          style={{
+                            display: "block",
+                            fontSize: 11,
+                            color: token.colorTextTertiary,
+                            marginTop: 2,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {latest.summary}
+                        </Text>
+                      )}
                     </div>
-
-                    {latest?.abTestWon && (
-                      <Badge
-                        status="success"
-                        text={t("workflow.evolution.abTestWon")}
-                        style={{ fontSize: 10, marginRight: 6 }}
-                      />
-                    )}
 
                     <Button
                       type="link"
@@ -278,7 +273,7 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
           </div>
         )}
 
-      {/* A/B 测试区 */}
+      {/* A/B 测试区（消费 store 权威 ABTestResult：metric / valueA / valueB / change / winner） */}
       <div style={{ marginTop: 16 }}>
         <Collapse
           ghost
@@ -304,9 +299,9 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
                 )
                 : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {abResults.map((res) => (
+                    {abResults.map((res, idx) => (
                       <Card
-                        key={`${res.variantA}-${res.variantB}`}
+                        key={`${res.metric}-${idx}`}
                         size="small"
                         style={{ background: token.colorFillTertiary, border: "none" }}
                         styles={{ body: { padding: "8px 10px" } }}
@@ -320,9 +315,9 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
                           }}
                         >
                           <Text style={{ fontSize: 12, color: token.colorText }}>
-                            {res.variantA} vs {res.variantB}
+                            {res.metric}
                           </Text>
-                          {res.winner && (
+                          {res.winner && res.winner !== "tie" && (
                             <Tag
                               color="green"
                               style={{ fontSize: 10, margin: 0, padding: "0 4px", lineHeight: "16px" }}
@@ -332,17 +327,12 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = React.memo(({ currentWo
                           )}
                         </div>
                         <div style={{ display: "flex", gap: 16, fontSize: 11, color: token.colorTextSecondary }}>
+                          <span>A={res.valueA.toFixed(2)}</span>
+                          <span>B={res.valueB.toFixed(2)}</span>
                           <span>
-                            {t("workflow.evolution.confidence", { value: (res.confidence * 100).toFixed(1) })}
+                            {t("workflow.evolution.diff")}:{" "}
+                            {res.change === null ? "—" : `${res.change >= 0 ? "+" : ""}${res.change.toFixed(1)}%`}
                           </span>
-                          {Object.entries(res.metricsA).map(([k, v]) => (
-                            <span key={k}>
-                              {k}: A={typeof v === "number" ? v.toFixed(2) : String(v)}{" "}
-                              / B={typeof res.metricsB[k] === "number"
-                                ? (res.metricsB[k] as number).toFixed(2)
-                                : String(res.metricsB[k])}
-                            </span>
-                          ))}
                         </div>
                       </Card>
                     ))}

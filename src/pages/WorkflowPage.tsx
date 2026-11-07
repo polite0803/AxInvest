@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { EvolutionPort } from "@/components/common/evolutionPort";
 import { WorkflowSettings } from "@/components/settings";
 import { WorkflowEditor, WorkflowExecutor } from "@/components/workflow";
 import type { WorkflowTemplateResponse } from "@/components/workflow/types";
 import { withoutParams } from "@/lib/workspaceTabs";
+import { useEvolutionStore } from "@/stores/feature/evolutionStore";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 /**
@@ -31,6 +33,21 @@ export function WorkflowPage() {
     WorkflowTemplateResponse | null
   >(null);
   const urlInitDoneRef = useRef(false);
+
+  // 任务 #220：进化能力在页级绑定 store，经端口对象注入 WorkflowEditor → AIPanel → EvolutionTab，
+  // 使 components/workflow 不再直接依赖 evolution feature store（中立性消键）。
+  const engines = useEvolutionStore((s) => s.engines);
+  const getSkillEvolutionHistory = useEvolutionStore((s) => s.getSkillEvolutionHistory);
+  const getABTestResults = useEvolutionStore((s) => s.getABTestResults);
+  const triggerSkillEvolution = useEvolutionStore((s) => s.triggerSkillEvolution);
+  const evolutionPort = useMemo<EvolutionPort>(() => ({
+    engines,
+    getSkillEvolutionHistory,
+    getABTestResults,
+    triggerSkillEvolution: (skillId) => {
+      void triggerSkillEvolution(skillId);
+    },
+  }), [engines, getSkillEvolutionHistory, getABTestResults, triggerSkillEvolution]);
 
   // URL query 参数初始化（仅页面挂载时执行一次）
   useEffect(() => {
@@ -67,6 +84,7 @@ export function WorkflowPage() {
           <WorkflowEditor
             templateId={isCreatingNew ? undefined : editingTemplateId}
             isSystemTemplate={isEditingSystem}
+            evolutionPort={evolutionPort}
             onClose={() => {
               setEditingTemplateId(undefined);
               setIsEditingSystem(false);

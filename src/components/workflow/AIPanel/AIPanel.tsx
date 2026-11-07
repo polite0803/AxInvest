@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { EvolutionPort, SkillVersion } from "@/components/common/evolutionPort";
 import { logIpcError } from "@/lib/invoke";
-import { useEvolutionStore } from "@/stores/feature/evolutionStore";
 import type { AiChatMessage } from "@/stores/feature/workflowEditorStore";
 import { useWorkflowEditorStore } from "@/stores/feature/workflowEditorStore";
 import { NL_PARSE_PROGRESS, useWorkflowStore } from "@/stores/feature/workflowStore";
@@ -27,6 +27,8 @@ interface AIPanelProps {
   onRecommendNodes: (
     context: string,
   ) => Promise<Array<{ nodeType: string; label: string; description: string; confidence: number }> | null>;
+  /** 进化能力端口（任务 #220）：由上层页面注入，本组件不直接依赖 evolution store。缺省时跳过进化富化/历史/徽章。 */
+  evolutionPort?: EvolutionPort;
   onClose: () => void;
   selectedNodeId?: string | null;
   /** 画布多选节点（框选/Shift 多选）。非空时生成聚焦选区上下文。 */
@@ -102,6 +104,7 @@ function renderAssistantContent(content: string) {
 export const AIPanel: React.FC<AIPanelProps> = ({
   onOptimizePrompt,
   onRecommendNodes,
+  evolutionPort,
   onClose,
   selectedNodeId,
   selectedNodeIds,
@@ -156,21 +159,24 @@ export const AIPanel: React.FC<AIPanelProps> = ({
   const [optimizePrompt, setOptimizePrompt] = useState("");
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizedResult, setOptimizedResult] = useState<string | null>(null);
+  // 任务 #218 批一:进化历史改异步端口,渲染期 IIFE 重构为 state+effect,数据由 effect 拉取
+  const [nodeEvolutionHistory, setNodeEvolutionHistory] = useState<SkillVersion[]>([]);
 
   const [recommendContext, setRecommendContext] = useState("");
   const [isRecommending, setIsRecommending] = useState(false);
   const [recommendedNodes, setRecommendedNodes] = useState<
     Array<{ nodeType: string; label: string; description: string; confidence: number }> | null
   >(null);
+  // 任务 #218 批一:推荐节点 A/B/进化徽标改异步端口,渲染期 IIFE 重构为 state+effect
+  const [recommendBadges, setRecommendBadges] = useState<Record<string, { hasAB: boolean; hasHistory: boolean }>>({});
 
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
   const [recommendError, setRecommendError] = useState<string | null>(null);
 
-  // Phase 3/4: NL parse + evolution state
+  // Phase 3/4: NL parse state（进化能力经 evolutionPort 注入，不再直引 evolution store）
   const [nlResult, setNlResult] = useState<NLParseResult | null>(null);
   const workflowStore = useWorkflowStore();
-  const evolutionStore = useEvolutionStore();
   const [chatContextMessage, setChatContextMessage] = useState<string | null>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -193,6 +199,62 @@ export const AIPanel: React.FC<AIPanelProps> = ({
     }, 0);
     return () => clearTimeout(tid);
   }, []);
+
+  // 任务 #218 批一:选中节点的进化历史改异步端口拉取(原为渲染期 IIFE 同步调 getter,接真后必炸)。
+  // 传参说明:节点→技能绑定关系盘上不存在(消费方拿不到真实 skillId,已回报纠正,等 leader 改裁),
+  // 按裁定「无绑定 ⇒ 空态」传空串;store 对空串短路返回 [],绑定落地后此处改传真 skillId 即生效。
+  useEffect(() => {
+    let cancelled = false;
+    if (!evolutionPort || !selectedNodeId) {
+      setNodeEvolutionHistory([]);
+      return;
+    }
+    (async () => {
+      try {
+        const history = await evolutionPort.getSkillEvolutionHistory("");
+        if (!cancelled) { setNodeEvolutionHistory(history ?? []); }
+      } catch {
+        if (!cancelled) { setNodeEvolutionHistory([]); }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [evolutionPort, selectedNodeId]);
+
+  // 任务 #218 批一:推荐节点 A/B/进化徽标改异步端口拉取(原为渲染期 IIFE),按 nodeType 去重。
+  // 推荐节点无技能绑定(同上,已回报纠正)⇒ 传空串短路空态,徽标不显示。
+  useEffect(() => {
+    let cancelled = false;
+    if (!evolutionPort || !recommendedNodes || recommendedNodes.length === 0) {
+      setRecommendBadges({});
+      return;
+    }
+    (async () => {
+      const badges: Record<string, { hasAB: boolean; hasHistory: boolean }> = {};
+      const seen = new Set<string>();
+      for (const node of recommendedNodes) {
+        if (seen.has(node.nodeType)) { continue; }
+        seen.add(node.nodeType);
+        try {
+          const [abResults, historyResults] = await Promise.all([
+            evolutionPort.getABTestResults(""),
+            evolutionPort.getSkillEvolutionHistory(""),
+          ]);
+          badges[node.nodeType] = {
+            hasAB: !!abResults && abResults.length > 0,
+            hasHistory: !!historyResults && historyResults.length > 0,
+          };
+        } catch {
+          // 单个 nodeType 查询失败 —— 无徽标
+        }
+      }
+      if (!cancelled) { setRecommendBadges(badges); }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [evolutionPort, recommendedNodes]);
 
   const handleChatSend = () => {
     if (!chatInput.trim() || chatStreaming) { return; }
@@ -382,10 +444,10 @@ export const AIPanel: React.FC<AIPanelProps> = ({
     setRecommendedNodes(null);
     setRecommendError(null);
     try {
-      // Phase 3: inject evolution stats into context
+      // Phase 3: inject evolution stats into context（经注入端口读取，缺省则不富化）
       let enrichedContext = recommendContext;
       try {
-        const engines = evolutionStore.engines;
+        const engines = evolutionPort?.engines ?? {};
         const evoStats: string[] = [];
         for (const [, engine] of Object.entries(engines)) {
           if (engine.running) {
@@ -399,7 +461,7 @@ export const AIPanel: React.FC<AIPanelProps> = ({
           enrichedContext = `${recommendContext}\n\n【进化引擎统计】\n${evoStats.join("\n")}`;
         }
       } catch {
-        // evolutionStore unavailable, proceed without enrichment
+        // evolution port unavailable, proceed without enrichment
       }
       const result = await onRecommendNodes(enrichedContext);
       if (result) {
@@ -424,9 +486,9 @@ export const AIPanel: React.FC<AIPanelProps> = ({
   const handleApplyToNode = () => {
     if (optimizedResult && selectedNodeId && onApplyPromptToNode) {
       onApplyPromptToNode(selectedNodeId, optimizedResult);
-      // Phase 3: trigger evolution record
+      // Phase 3: trigger evolution record（经注入端口，缺省则跳过）
       try {
-        evolutionStore.triggerSkillEvolution(selectedNodeId);
+        evolutionPort?.triggerSkillEvolution(selectedNodeId);
       } catch (e) {
         console.warn("[AIPanel] triggerSkillEvolution fallback:", e);
       }
@@ -762,53 +824,42 @@ export const AIPanel: React.FC<AIPanelProps> = ({
               {optimizedResult}
             </pre>
           </Card>
-          {/* Phase 3: evolution history for selected node */}
-          {selectedNodeId && (() => {
-            try {
-              const history = evolutionStore.getSkillEvolutionHistory(selectedNodeId);
-              if (history && history.length > 0) {
-                const recent = history.slice(-3);
-                return (
-                  <div style={{ marginTop: 12 }}>
-                    <label
-                      style={{
-                        display: "block",
-                        color: token.colorTextSecondary,
-                        fontSize: 12,
-                        marginBottom: 6,
-                      }}
-                    >
-                      {t("workflow.aiPanel.evolutionHistory")}
-                    </label>
-                    {recent.map((evt) => (
-                      <Card
-                        key={`${evt.version}-${evt.timestamp}`}
-                        size="small"
-                        style={{
-                          background: token.colorFillTertiary,
-                          border: "none",
-                          marginBottom: 4,
-                        }}
-                        styles={{ body: { padding: "6px 10px" } }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                          <span style={{ color: token.colorTextSecondary }}>
-                            v{evt.version} {evt.summary || t("workflow.aiPanel.evolutionFallback")}
-                          </span>
-                          <span style={{ color: token.colorTextTertiary }}>
-                            {new Date(evt.timestamp).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </Card>
-                    ))}
+          {/* Phase 3: evolution history for selected node(任务 #218 批一:effect 异步拉取,此处只读 state) */}
+          {selectedNodeId && nodeEvolutionHistory.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <label
+                style={{
+                  display: "block",
+                  color: token.colorTextSecondary,
+                  fontSize: 12,
+                  marginBottom: 6,
+                }}
+              >
+                {t("workflow.aiPanel.evolutionHistory")}
+              </label>
+              {nodeEvolutionHistory.slice(-3).map((evt) => (
+                <Card
+                  key={`${evt.version}-${evt.timestamp}`}
+                  size="small"
+                  style={{
+                    background: token.colorFillTertiary,
+                    border: "none",
+                    marginBottom: 4,
+                  }}
+                  styles={{ body: { padding: "6px 10px" } }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: token.colorTextSecondary }}>
+                      v{evt.version} {evt.summary || t("workflow.aiPanel.evolutionFallback")}
+                    </span>
+                    <span style={{ color: token.colorTextTertiary }}>
+                      {new Date(evt.timestamp).toLocaleDateString()}
+                    </span>
                   </div>
-                );
-              }
-            } catch {
-              // evolutionStore unavailable
-            }
-            return null;
-          })()}
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -880,37 +931,24 @@ export const AIPanel: React.FC<AIPanelProps> = ({
                     )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8, flexShrink: 0 }}>
-                    {/* Phase 3: evolution badges */}
-                    {(() => {
-                      try {
-                        const abResults = evolutionStore.getABTestResults(node.nodeType);
-                        const historyResults = evolutionStore.getSkillEvolutionHistory(node.nodeType);
-                        const hasABWin = abResults && abResults.length > 0;
-                        const hasHistory = historyResults && historyResults.length > 0;
-                        return (
-                          <>
-                            {hasABWin && (
-                              <Tag
-                                color="green"
-                                style={{ fontSize: 10, margin: 0, padding: "0 4px", lineHeight: "16px" }}
-                              >
-                                {t("workflow.aiPanel.verified")}
-                              </Tag>
-                            )}
-                            {hasHistory && !hasABWin && (
-                              <Tag
-                                color="blue"
-                                style={{ fontSize: 10, margin: 0, padding: "0 4px", lineHeight: "16px" }}
-                              >
-                                {t("workflow.aiPanel.hasEvolution")}
-                              </Tag>
-                            )}
-                          </>
-                        );
-                      } catch {
-                        return null;
-                      }
-                    })()}
+                    {/* Phase 3: evolution badges(任务 #218 批一:effect 异步拉取,此处只读 state) */}
+                    {recommendBadges[node.nodeType]?.hasAB && (
+                      <Tag
+                        color="green"
+                        style={{ fontSize: 10, margin: 0, padding: "0 4px", lineHeight: "16px" }}
+                      >
+                        {t("workflow.aiPanel.verified")}
+                      </Tag>
+                    )}
+                    {recommendBadges[node.nodeType]?.hasHistory
+                      && !recommendBadges[node.nodeType]?.hasAB && (
+                      <Tag
+                        color="blue"
+                        style={{ fontSize: 10, margin: 0, padding: "0 4px", lineHeight: "16px" }}
+                      >
+                        {t("workflow.aiPanel.hasEvolution")}
+                      </Tag>
+                    )}
                     <span
                       style={{
                         color: node.confidence >= 0.8
@@ -1034,6 +1072,7 @@ export const AIPanel: React.FC<AIPanelProps> = ({
           <EvolutionTab
             currentWorkflowId={workflowStore.currentWorkflowId ?? null}
             nodes={nodes}
+            evolutionPort={evolutionPort}
           />
         )}
       </div>

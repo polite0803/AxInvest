@@ -21,6 +21,7 @@ import {
 import html2canvas from "html2canvas";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import "@xyflow/react/dist/style.css";
+import type { EvolutionPort } from "@/components/common/evolutionPort";
 import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import {
@@ -159,12 +160,15 @@ interface WorkflowEditorProps {
   templateId?: string;
   /** 是否为系统模板（认知编排器等）：加载时透传 include_system=true */
   isSystemTemplate?: boolean;
+  /** 进化能力端口（任务 #220）：由 WorkflowPage 注入，透传给 AIPanel，本组件不直接调用 evolution store。 */
+  evolutionPort?: EvolutionPort;
   onClose?: () => void;
 }
 
 export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   templateId,
   isSystemTemplate,
+  evolutionPort,
   onClose,
 }) => {
   const { t } = useTranslation();
@@ -2094,6 +2098,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               onGenerateWorkflow={generateWorkflowFromPrompt}
               onOptimizePrompt={optimizeAgentPrompt}
               onRecommendNodes={recommendNodes}
+              evolutionPort={evolutionPort}
               onClose={() => setAiPanelVisible(false)}
               selectedNodeId={selectedNodeId}
               selectedNodeIds={selectedNodeIds.size > 0 ? Array.from(selectedNodeIds) : undefined}

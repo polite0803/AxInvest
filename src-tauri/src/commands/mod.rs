@@ -196,6 +196,7 @@ pub mod stock_analysis_setup;
 pub mod stock_evolution_approval;
 pub mod stock_pipeline;
 pub mod stock_workflow;
+pub mod task_card_host_actions;
 pub mod time_travel_batch;
 pub mod trade_intent;
 pub mod wf_des;

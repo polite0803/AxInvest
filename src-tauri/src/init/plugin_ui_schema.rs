@@ -295,6 +295,22 @@ async fn delete_row_cascade(db: &DatabaseConnection, id: &str) -> Result<(), Str
     Ok(())
 }
 
+/// 库里**全部**插件来源 schema 的行 id 集合（`origin = "plugin"`）。
+///
+/// 两条运行期复核（任务源的 `detailSchema`、卡片的 `detailSchema`）共用这一份查询：
+/// 各自内联一段同样的 `find().filter(origin).all()` 就是长出第二套口径
+/// （AGENTS.md 禁区 12），而两处一旦漂移，用户看到的是「有的槽关了、有的槽还开着」。
+async fn load_owned_plugin_schema_ids(db: &DatabaseConnection) -> Result<BTreeSet<String>, String> {
+    Ok(SchemaEntity::find()
+        .filter(SchemaColumn::Origin.eq(PLUGIN_SCHEMA_ORIGIN))
+        .all(db)
+        .await
+        .map_err(|e| format!("查询插件 UI Schema 失败：{e}"))?
+        .into_iter()
+        .map(|model| model.id)
+        .collect())
+}
+
 /// 运行期复核：`plugin_list_task_sources` 的 `detailSchema` 必须指向**本插件在库里真实存在**
 /// 的那一行（`plugin.{pluginId}.{key}`，`origin = "plugin"`）。
 ///
@@ -305,14 +321,7 @@ pub async fn retain_owned_detail_schemas(
     db: &DatabaseConnection,
     infos: &mut [axagent_plugins::PluginTaskSourcesInfo],
 ) -> Result<(), String> {
-    let owned: BTreeSet<String> = SchemaEntity::find()
-        .filter(SchemaColumn::Origin.eq(PLUGIN_SCHEMA_ORIGIN))
-        .all(db)
-        .await
-        .map_err(|e| format!("查询插件 UI Schema 失败：{e}"))?
-        .into_iter()
-        .map(|model| model.id)
-        .collect();
+    let owned = load_owned_plugin_schema_ids(db).await?;
 
     for info in infos.iter_mut() {
         for source in info.task_sources.iter_mut() {
@@ -326,6 +335,37 @@ pub async fn retain_owned_detail_schemas(
                     "任务源 detailSchema 指向的插件 schema 不存在（库中查无此行），详情槽已关闭"
                 );
                 source.detail_schema = None;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 运行期复核：`plugin_list_task_cards` 的 `detailSchema` 必须指向**本插件在库里真实存在**的
+/// 那一行（任务 #216 前置 ②）。
+///
+/// 与 [`retain_owned_detail_schemas`] 逐条同形、共用同一份归属集合（`load_owned_plugin_schema_ids`），
+/// 只是字段落在 `task_cards[].detail_schema` 上。复核不过 **置 `None`**：
+/// 卡片退化成纯计数卡（不消失）—— 整张卡消失会让用户以为「插件坏了」，
+/// 而纯计数卡仍然如实显示计数，缺的只是「点开看详情」。
+pub async fn retain_owned_card_schemas(
+    db: &DatabaseConnection,
+    infos: &mut [axagent_plugins::PluginTaskCardsInfo],
+) -> Result<(), String> {
+    let owned = load_owned_plugin_schema_ids(db).await?;
+
+    for info in infos.iter_mut() {
+        for card in info.task_cards.iter_mut() {
+            let Some(key) = card.detail_schema.as_deref() else { continue };
+            let expected = ui_schema::row_id(&info.id, key);
+            if !owned.contains(&expected) {
+                tracing::warn!(
+                    plugin_id = %info.id,
+                    card = %card.id,
+                    key = %key,
+                    "卡片 detailSchema 指向的插件 schema 不存在（库中查无此行），卡片退化为纯计数卡"
+                );
+                card.detail_schema = None;
             }
         }
     }

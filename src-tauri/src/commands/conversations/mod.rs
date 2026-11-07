@@ -3202,6 +3202,9 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
         // 能力发现系统 + 认知编排器
         capability_router: test_capability_router,
         capability_indexer: test_capability_indexer_impl,
+        pack_registry: Arc::new(
+            axagent_company_runtime::opc::capability_pack::LocalCapabilityPackRegistry,
+        ),
         session_state_store: Arc::new(axagent_harness::test_support::MemorySessionStateStore::new()),
         cognitive_router: test_cognitive_router,
         // 动态防护规则管理器 + 任务形态 LLM 兜底分类器 + 审批通道（测试替身）

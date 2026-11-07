@@ -822,6 +822,13 @@ pub use capability_indexer::{
     CAPABILITY_COLLECTION, CAPABILITY_NEGATIVE_COLLECTION, CapabilityIndexStats, CapabilityIndexer,
     IndexResult,
 };
+pub mod capability_pack_registry;
+pub use capability_pack_registry::{
+    CapabilityCarrier, CapabilityMatchPredicate, CapabilityPackCapabilityClaim,
+    CapabilityPackCapabilityReport, CapabilityPackManifest, CapabilityPackOffice,
+    CapabilityPackRegistry, CapabilityPackSeedMember, DomainRegistrationProposal,
+    MissingCapability, UncoveredCapability,
+};
 pub mod capability_retriever;
 pub use capability_retriever::{
     CapabilityCandidate, CapabilityLayer, CapabilityQuery, CapabilityRetrievalResult,

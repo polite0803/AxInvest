@@ -2011,6 +2011,9 @@ pub async fn create_app_state_with_resource_dir(
         // 能力发现系统
         capability_router,
         capability_indexer,
+        pack_registry: Arc::new(
+            axagent_company_runtime::opc::capability_pack::LocalCapabilityPackRegistry,
+        ),
         session_state_store,
         // 认知编排器
         cognitive_router,
@@ -2047,6 +2050,7 @@ async fn register_all_capabilities(
     db: &sea_orm::DatabaseConnection,
     skill_state: &crate::state::SkillState,
     app_dir: &std::path::Path,
+    pack_registry: &Arc<dyn axagent_harness::CapabilityPackRegistry>,
 ) {
     use axagent_harness::{
         CapabilityIndexer, CapabilityPassport, CapabilityPassportDto, PlanningComplexity,
@@ -2438,9 +2442,8 @@ async fn register_all_capabilities(
 
     // 期一·3 能力集封闭校验：护照收集 + 索引重建完成后，对全部启用域包做一次
     // 非阻塞审计（承诺 ⊆ 实际），base 目录用 app_dir（产线）或仓库根（开发）。
-    let base =
-        axagent_company_runtime::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
-    audit_and_log_capability_packs_capability(indexer, &base).await;
+    let base = pack_registry.resolve_packs_dir(Some(app_dir));
+    audit_and_log_capability_packs_capability(pack_registry.as_ref(), &**indexer, &base).await;
 
     // 5. 注册系统级能力（CognitiveRouter 编排器等）
     let system_passports = register_system_capabilities(indexer).await;
@@ -2473,22 +2476,20 @@ async fn register_all_capabilities(
 /// 日志口径：`!closed` → `warn!`（列出 missing 的来源/类型/谓词 + domain_proposals 的
 /// domain_id/suggestion）；`closed` → `info!` 一行「域包 {} 能力封闭校验通过（{} 项承诺）」。
 pub(crate) async fn audit_and_log_capability_packs_capability(
-    indexer: &axagent_tools::CapabilityIndexerImpl,
+    registry: &dyn axagent_harness::CapabilityPackRegistry,
+    indexer: &dyn axagent_harness::CapabilityIndexer,
     base_dir: &std::path::Path,
 ) {
     use std::collections::HashMap;
 
-    let manifests = axagent_company_runtime::opc::capability_pack::scan_capability_packs(base_dir);
+    let manifests = registry.scan_manifests(base_dir);
     let claim_counts: HashMap<String, usize> = manifests
         .iter()
         .filter(|m| m.enabled)
         .map(|m| (m.id.clone(), m.capabilities.len()))
         .collect();
 
-    let reports = axagent_company_runtime::opc::capability_pack::audit_capability_packs_capability(
-        indexer, base_dir,
-    )
-    .await;
+    let reports = registry.audit_capability_closure(indexer, base_dir).await;
     for report in &reports {
         if !report.closed {
             let missing_detail = report
@@ -2965,6 +2966,7 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
         &app_state.harness.db(),
         &app_state.skill,
         &app_state.app_data_dir,
+        &app_state.pack_registry,
     )
     .await;
 

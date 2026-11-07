@@ -2,7 +2,7 @@
   "note": "L1 反向阻塞的 H 桶（宿主永久持有）白名单。消费方 = scripts/audit-l1-blockers.mjs；复扫命令 = node scripts/audit-l1-blockers.mjs --check-allowlist。",
   "why": "PLAN §54 R5：终态判据不并入 ownedRe（并入会让所有 init/ 装配代码变成不计入阻塞，读数失去意义 —— services.rs 28 处里有 9 处是 M 桶、该被看见），改成「待改写归零 + H 桶等于本名单」。名单可逐条拿 anchorText 回盘上原文复核，正则扩面不可复核。",
   "schema": "entries[] = { file: 仓库相对路径, anchorText: 该行原文的**连续子串**（不存行号，行号随编辑漂移）, reason: 为什么必须留宿主 }",
-  "seed": "2026-11-03 首批 10 条；**2026-11-04 B6 删 app_state.rs 6 条 ⇒ 4 条 / 3 文件**（六个字段随 B6 摘出 AppState，字段类型行整体消失）；**2026-11-04 B7b 再删 gateway 1 条 ⇒ 3 条 / 3 文件**（客户端改从 `init/stock_domain_state` 取，显式 `Option<Arc<AStockClient>>` 类型注解消失；`HttpPollingStreamer` 那条仍在）。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。",
+  "seed": "2026-11-03 首批 10 条；**2026-11-04 B6 删 app_state.rs 6 条 ⇒ 4 条 / 3 文件**（六个字段随 B6 摘出 AppState，字段类型行整体消失）；**2026-11-04 B7b 再删 gateway 1 条 ⇒ 3 条 / 3 文件**（客户端改从 `init/stock_domain_state` 取，显式 `Option<Arc<AStockClient>>` 类型注解消失；`HttpPollingStreamer` 那条仍在）。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。**2026-11-07 #221 增 OPC 3 条 ⇒ 6 条 / 6 文件**（capability_pack trait 化：契约上收 harness、权威实现留 company-runtime，`AppState.pack_registry` 的 1 处生产注入点 + 2 处测试构造点必须引用域 crate 才能构造实现；来源是本批代码事实、grep 逐行可复核，非 res109 派生 —— 上面「state.rs 不入」针对的是 res109 桶计数派生，与此批来源不同）。",
   "todo": "H 桶在 res109 的机械归桶里读数是 35 处 / 9 文件，本名单只点到 3 处 / 3 文件 ⇒ 余 32 处等后续批次按行落名（同批必须补 anchorText，不许只补文件）。**(B6 前为 10 处 / 4 文件；app_state.rs 六条已随字段摘除一并删除 —— 保留即 --check-allowlist 的「锚点腐烂」。)**",
   "entries": [
     {
@@ -19,6 +19,21 @@
       "file": "src-tauri/src/init/browser_fetcher.rs",
       "anchorText": "use axagent_astock_data::vendors::browser_eastmoney::BrowserHttpFetch;",
       "reason": "宿主为 vendor 提供 HTTP 能力的注入口（res109 A2 判「不可消」，§E-6）；MCP / 取数重试扇出同族，属宿主取数设施。"
+    },
+    {
+      "file": "src-tauri/src/init/state.rs",
+      "anchorText": "axagent_company_runtime::opc::capability_pack::LocalCapabilityPackRegistry",
+      "reason": "#221 trait 化后的生产注入点：CapabilityPackRegistry 契约在 harness、权威实现在 company-runtime，AppState.pack_registry 构造必须引用域 crate；#32 独立仓后此行随插件装载通道改写。"
+    },
+    {
+      "file": "src-tauri/src/commands/conversations/compress.rs",
+      "anchorText": "axagent_company_runtime::opc::capability_pack::LocalCapabilityPackRegistry",
+      "reason": "#221 trait 化后的测试构造点：AppState 测试替身补 pack_registry 字段（与 init/state.rs 生产注入点同型）。"
+    },
+    {
+      "file": "src-tauri/src/commands/conversations/mod.rs",
+      "anchorText": "axagent_company_runtime::opc::capability_pack::LocalCapabilityPackRegistry",
+      "reason": "#221 trait 化后的测试构造点：AppState 测试替身补 pack_registry 字段（与 init/state.rs 生产注入点同型）。"
     }
   ],
   "anchorRule": "锚点取「限定类型名 + 其包装」里最长的**单行不变**片段。rustfmt 在 >100 列处按逗号折行 ⇒ 以 `pub 字段名:` 起手的整行锚点会假报腐烂（2026-11-03 实测：app_state.rs 的 quote_watcher 被 #103 会话升成 Arc 后折成两行）；`std::sync::Arc<包::类型>` 这段不被拆开，锚点取它。"

@@ -14,7 +14,6 @@
 use axagent_harness::CapabilityDomain;
 use axagent_harness::util_fns::now_ts;
 use sea_orm::DatabaseConnection;
-use serde::Deserialize;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -32,123 +31,12 @@ pub const CAPABILITY_PACKS_DIR: &str = "config/opc/domain_packs";
 /// 使回退静默退化为「指向同一个目录」（实测已发生过一次）。
 pub const LEGACY_CAPABILITY_PACKS_DIR: &str = concat!("config/opc/", "industries");
 
-// ── manifest.yaml schema ──────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CapabilityPackManifest {
-    pub id: String,
-    pub name: String,
-    #[serde(default = "default_icon")]
-    pub icon: String,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default = "default_version")]
-    pub version: i32,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// 分析配置文件（P0-4 四件套之一），缺省 "analysis.yaml"，None 表示无分析配置
-    /// 供 `analysis_schema::load_capability_pack_analysis` 读取（capability_pack.rs:261）
-    #[serde(default = "default_analysis_file")]
-    pub analysis: String,
-    /// 学习配置文件（P0-4 四件套之一），缺省 "learning.yaml"；读取见
-    /// `opc_capability_pack_actions::capability_pack_learning_config_path`
-    /// （`capability_pack_learning_config_path` 经 `read_manifest` 消费本字段决定实际文件名）
-    #[serde(default = "default_learning_file")]
-    pub learning: String,
-    /// 运行时配置文件（P0-4 四件套之一），缺省 "runtime.yaml"。
-    /// KPI **元数据**（key/name/unit/metric_type）与展示卡片的权威来源，
-    /// 读取见 `runtime_schema::load_capability_pack_runtime`。
-    #[serde(default = "default_runtime_file")]
-    pub runtime: String,
-    /// 该域包工作流模板 ID 的前缀（**不含** `workflow-`），缺省为
-    /// `id` 的下划线转连字符形式（`content_media` → `content-media`）。
-    ///
-    /// 存在的原因：个别域包的模板 ID 用的是缩写（content_media 的模板是
-    /// `workflow-cm-*`），与域包 id 不构成前缀关系，靠字符串推导不出 ——
-    /// 显式声明，避免在代码里写死映射。
-    #[serde(default)]
-    pub template_prefix: Option<String>,
-    /// 该域包归属的**本体域**（`CapabilityDomain` 用户域子集，见
-    /// `PLAN-domain-pack-consolidation.md` §3.1）。缺省 `None` 表示未声明 ——
-    /// 兼容旧 manifest，回退现行为（`Automation`）。值必须 ⊆ `DOMAIN_NODES` 用户域，
-    /// 校验器 `assert_capability_pack_capability_closed` 保证。
-    #[serde(default)]
-    pub domain: Option<CapabilityDomain>,
-    /// **承诺能力契约**（能力集封闭校验的承诺集合）。缺省空 = 未声明（不参与校验）。
-    /// 每个承诺描述「归属哪个来源 + 哪类能力 + 用何种谓词匹配」，非裸 id 白名单。
-    #[serde(default)]
-    pub capabilities: Vec<CapabilityPackCapabilityClaim>,
-    /// 办公室「建房即成队」声明段（`PLAN-office-auto-provision.md` 阶段 3）。
-    /// 缺省 `None` = 未声明，消费方回退 Rust 专家名册（`domain_pack_roster`）。
-    #[serde(default)]
-    pub office: Option<CapabilityPackOffice>,
-}
-
-/// manifest 的 `office` 段 —— 域包办公室声明（数据驱动，新增域包无需改代码）。
-#[derive(Debug, Clone, Deserialize)]
-pub struct CapabilityPackOffice {
-    /// 建房自动入房的成员名册。非空即**整表覆盖** Rust 名册推导的默认名单。
-    #[serde(default)]
-    pub seed_members: Vec<CapabilityPackSeedMember>,
-}
-
-/// `office.seed_members` 元素 —— `expert` 是专家 key（profile id = `opc-<expert>`），
-/// `room` 显式指定 Phaser 房间站位；缺省 = 前端按 defaultRoomId 优先轮转分配。
-#[derive(Debug, Clone, Deserialize)]
-pub struct CapabilityPackSeedMember {
-    pub expert: String,
-    #[serde(default)]
-    pub room: Option<String>,
-}
-
-fn default_analysis_file() -> String {
-    "analysis.yaml".into()
-}
-
-// ── 承诺能力契约（能力集封闭） ──────────────────────────────────────
-
-/// 域包承诺能力条目 —— manifest 的 `capabilities` 元素。
-///
-/// 语义：域包声明「我应当提供这些能力」，与能力索引的**实际归属**对账。
-/// 承诺 ⊆ 实际：不满足则提示缺失；实际 ⊄ 承诺：触发「提示增加域」。
-#[derive(Debug, Clone, Deserialize)]
-pub struct CapabilityPackCapabilityClaim {
-    /// 能力**来源**（Tool / Skill / McpTool / Workflow / Agent），复用 `opc::capability::CapabilitySource`。
-    pub source: super::capability::CapabilitySource,
-    /// 能力类型谓词（`capability_type` 匹配目标；配合 `predicate` 判定——如
-    /// `l1_classifier` / `analysis_source`，具体取值由域包业务自定）。
-    pub capability_type: String,
-    /// 匹配谓词：声明「承诺覆盖该身份子集的哪个范围」。
-    pub predicate: CapabilityMatchPredicate,
-}
-
-/// 匹配谓词 —— 声明一条承诺覆盖的实际能力范围。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum CapabilityMatchPredicate {
-    /// 该来源下的**全部**能力（能力包整来源封闭）。
-    All,
-    /// 承诺 id 以该前缀开头的全部能力。
-    IdPrefix { prefix: String },
-    /// 承诺单个精确 id 的能力。
-    IdExact { id: String },
-}
-fn default_learning_file() -> String {
-    "learning.yaml".into()
-}
-fn default_runtime_file() -> String {
-    "runtime.yaml".into()
-}
-
-fn default_icon() -> String {
-    "🏢".into()
-}
-fn default_version() -> i32 {
-    1
-}
-fn default_true() -> bool {
-    true
-}
+// ── manifest schema 家族：权威定义在 harness（#221 上收），此处 pub use 零 From ──
+pub use axagent_harness::capability_pack_registry::{
+    CapabilityCarrier, CapabilityMatchPredicate, CapabilityPackCapabilityClaim,
+    CapabilityPackCapabilityReport, CapabilityPackManifest, CapabilityPackOffice,
+    CapabilityPackSeedMember, DomainRegistrationProposal, MissingCapability, UncoveredCapability,
+};
 
 // ── 包加载 ────────────────────────────────────────────────────────
 
@@ -839,71 +727,10 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
 // 期一·3：对账「域包 manifest 承诺能力」与「该域包实际能力」，产出结构化报告。
 // 校验器是**纯函数**（不依赖 capability_indexer trait / 数据库），实际侧数据由
 // wiring 层（seed / import / 索引重建）准备好后灌入，保证单一职责 + 可单测。
-// 本文件为权威 schema 所在（CapabilityPackManifest / CapabilityPackCapabilityClaim /
-// CapabilityMatchPredicate），校验器就近放置，避免跨 crate 重复类型。
+// 权威 schema（Manifest/Claim/Predicate/Report 家族）已上收 harness
+// capability_pack_registry（#221），校验器仍就近此文件（实现在域内）。
 
 use axagent_harness::capability::CapabilityPassportDto;
-
-/// 能力封闭校验报告——一次对账的完整结果（供前端展示 + 日志）。
-/// `closed == true` 表示「承诺 ⊆ 实际」成立且无待注册域提案。
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CapabilityPackCapabilityReport {
-    /// 被校验的域包 id
-    pub domain_pack_id: String,
-    /// 域包声明的本体域归属
-    pub domain: Option<CapabilityDomain>,
-    /// 是否闭合：承诺 ⊆ 实际且无未落本体域的实际能力
-    pub closed: bool,
-    /// 承诺了但没有实际能力承接的清单（承诺 ⊄ 实际，缺口）
-    pub missing: Vec<MissingCapability>,
-    /// 该域包实际存在、但未被任何承诺覆盖的能力（实际 ⊄ 承诺）
-    pub uncovered: Vec<UncoveredCapability>,
-    /// 「提示增加域」提案：uncovered 能力若归属域未落入现存本体域，
-    /// 汇总为结构化「待注册域」提案（引导走新增全局域流程，非硬失败）。
-    pub domain_proposals: Vec<DomainRegistrationProposal>,
-}
-
-/// 承诺缺口：域包声明了能力，但在该域包实际能力集里找不到承接。
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MissingCapability {
-    /// 承诺的能力来源（tool / skill / mcp_tool / workflow / agent）
-    pub source: super::capability::CapabilitySource,
-    /// 承诺的能力类型（业务自定义标签，如 `opc_tool` / `analysis_source`）
-    pub capability_type: String,
-    /// 匹配谓词的人类可读描述（All / id_prefix:xxx / id_exact:xxx）
-    pub predicate_desc: String,
-    /// 在「承诺 ⊆ 实际」对账中未命中的原因提示
-    pub note: String,
-}
-
-/// 未承诺的实际能力：域包实际能力集里没有被任何承诺覆盖的项。
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UncoveredCapability {
-    /// 能力护照 id（`{kind}:{id}`）
-    pub capability_id: String,
-    pub name: String,
-    pub description: String,
-    /// 该护照归属的能力域（若未落入现存本体域 → 触发「提示增加域」）
-    pub domain: CapabilityDomain,
-}
-
-/// 「提示增加域」提案——动态扩展口，非硬失败。
-/// 当出现未落现存本体域的实际能力时，据此引导注册全局域并挂靠域包。
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DomainRegistrationProposal {
-    /// 建议注册的域 id（本质域 slug，从护照归属域派生）
-    pub domain_id: String,
-    /// 该提案来源的能力来源标签（触发能力护照 id，去重、排序后的稳定串）
-    pub capability_sources: Vec<String>,
-    /// 触发的实际能力示例（能力名，去重）
-    pub example_scenarios: Vec<String>,
-    /// 建议的归属说明（当前护照归属域 → 建议域）
-    pub suggestion: String,
-}
 
 /// 校验器：对账「manifest 承诺能力」⊆「该域包实际能力」，并产出「提示增加域」提案。
 ///
@@ -1095,7 +922,7 @@ fn predicate_bare(
 /// 对账口径与 `assert_capability_pack_capability_closed` 一致：工具共享、不背单指针，
 /// 故实际护照取「全局工具护照 ∪ 反指本域包的动态（workflow/skill/agent）护照」。
 /// 校验为**审计性质**（非硬失败）：报告用于日志/前端提示，不阻断任何流程。
-pub async fn audit_capability_packs_capability<I: axagent_harness::CapabilityIndexer>(
+pub async fn audit_capability_packs_capability<I: axagent_harness::CapabilityIndexer + ?Sized>(
     indexer: &I,
     base_dir: &std::path::Path,
 ) -> Vec<CapabilityPackCapabilityReport> {
@@ -1120,6 +947,36 @@ pub async fn audit_capability_packs_capability<I: axagent_harness::CapabilityInd
             assert_capability_pack_capability_closed(&manifest, &actual, &user_domains)
         })
         .collect()
+}
+
+// ── CapabilityPackRegistry 实现（#221：主壳消费面经 trait 对象） ──────────
+
+/// 域包装配/查询的域内权威实现 —— 转调本文件的读写/审计函数。
+pub struct LocalCapabilityPackRegistry;
+
+#[async_trait::async_trait]
+impl axagent_harness::capability_pack_registry::CapabilityPackRegistry
+    for LocalCapabilityPackRegistry
+{
+    fn resolve_packs_dir(&self, app_dir: Option<&std::path::Path>) -> std::path::PathBuf {
+        resolve_capability_packs_dir(app_dir)
+    }
+
+    fn read_manifest(&self, pack_dir: &std::path::Path) -> Option<CapabilityPackManifest> {
+        read_manifest(pack_dir)
+    }
+
+    fn scan_manifests(&self, base_dir: &std::path::Path) -> Vec<CapabilityPackManifest> {
+        scan_capability_packs(base_dir)
+    }
+
+    async fn audit_capability_closure(
+        &self,
+        indexer: &dyn axagent_harness::CapabilityIndexer,
+        base_dir: &std::path::Path,
+    ) -> Vec<CapabilityPackCapabilityReport> {
+        audit_capability_packs_capability(indexer, base_dir).await
+    }
 }
 
 #[cfg(test)]

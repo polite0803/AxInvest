@@ -855,20 +855,22 @@ pub async fn list_domain_pack_profiles(
     use crate::commands::opc_setup::capability_pack_agents::{
         domain_pack_profile_id, domain_pack_roster,
     };
-    use axagent_company_runtime::opc::capability_pack;
     use axagent_entities::agent_profiles;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     // manifest office 段（目录名容忍 kebab→snake 变体，见 opc_capability_pack_runtime.rs 先例）
-    let base = capability_pack::resolve_capability_packs_dir(Some(&app_state.app_data_dir));
+    let base = app_state.pack_registry.resolve_packs_dir(Some(&app_state.app_data_dir));
     let direct = base.join(&domain_pack_id);
     let pack_dir = if direct.is_dir() {
         direct
     } else {
         base.join(domain_pack_id.replace('-', "_"))
     };
-    let declared =
-        capability_pack::read_manifest(&pack_dir).and_then(|m| m.office).map(|o| o.seed_members);
+    let declared = app_state
+        .pack_registry
+        .read_manifest(&pack_dir)
+        .and_then(|m| m.office)
+        .map(|o| o.seed_members);
 
     let roster = domain_pack_roster(&domain_pack_id);
     let members = resolve_seed_members(roster.map(|(e, _)| e).unwrap_or(&[]), declared);
@@ -911,7 +913,7 @@ pub async fn list_domain_pack_profiles(
 /// 播种名单裁决：manifest `office.seed_members` 非空 ⇒ 整表覆盖；否则回退 Rust 名册推导。
 fn resolve_seed_members(
     roster_experts: &[(&str, &str, &str)],
-    declared: Option<Vec<axagent_company_runtime::opc::capability_pack::CapabilityPackSeedMember>>,
+    declared: Option<Vec<axagent_harness::CapabilityPackSeedMember>>,
 ) -> Vec<(String, Option<String>)> {
     if let Some(members) = declared.filter(|v| !v.is_empty()) {
         return members.into_iter().map(|m| (m.expert, m.room)).collect();
@@ -975,9 +977,7 @@ pub struct OfficeSceneFurnitureDto {
 pub async fn list_office_scene_templates(
     app_state: State<'_, AppState>,
 ) -> Result<Vec<OfficeSceneTemplateDto>, ErrorResponse> {
-    use axagent_company_runtime::opc::capability_pack;
-
-    let base = capability_pack::resolve_capability_packs_dir(Some(&app_state.app_data_dir));
+    let base = app_state.pack_registry.resolve_packs_dir(Some(&app_state.app_data_dir));
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(&base) else {
         warn!("[fleet] list_office_scene_templates: 域包目录不存在: {}", base.display());
@@ -1009,9 +1009,7 @@ pub async fn list_office_scene_templates(
 #[cfg(test)]
 mod office_provision_tests {
     use super::{OfficeSceneTemplateDto, resolve_seed_members};
-    use axagent_company_runtime::opc::capability_pack::{
-        CapabilityPackManifest, CapabilityPackSeedMember,
-    };
+    use axagent_harness::{CapabilityPackManifest, CapabilityPackSeedMember};
 
     #[test]
     fn manifest_office_section_parses_and_defaults() {

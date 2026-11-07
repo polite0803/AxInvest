@@ -8,30 +8,12 @@
 
 use serde::{Deserialize, Serialize};
 
+// `CapabilitySource`（承载形态 Tool/Skill/McpTool/Workflow/Agent）的权威定义在
+// harness `capability_pack_registry`（#221 上收），harness 侧消歧名 `CapabilityCarrier`
+// —— 与 harness::capability::CapabilitySource（护照注册来源 Builtin/Plugin）语义不同。
+pub use axagent_harness::capability_pack_registry::CapabilityCarrier as CapabilitySource;
+
 // ── DTO 定义 ──────────────────────────────────────────────────
-
-/// 能力来源类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilitySource {
-    Tool,
-    Skill,
-    McpTool,
-    Workflow,
-    Agent,
-}
-
-impl CapabilitySource {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Tool => "tool",
-            Self::Skill => "skill",
-            Self::McpTool => "mcp_tool",
-            Self::Workflow => "workflow",
-            Self::Agent => "agent",
-        }
-    }
-}
 
 /// 能力条目
 #[derive(Debug, Clone, Serialize, Deserialize)]

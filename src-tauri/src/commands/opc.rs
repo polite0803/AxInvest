@@ -649,15 +649,15 @@ pub async fn opc_import_capability_pack(
     };
     // 期一·3 能力封闭校验：导入成功后全量对账一次（非阻塞审计，坏只 warning）。
     // 期一·4：把刚导入域包的审计摘要（missing / domain_proposals）随成功信息带回前端展示。
-    let base =
-        axagent_company_runtime::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
-    crate::init::state::audit_and_log_capability_packs_capability(&state.capability_indexer, &base)
-        .await;
-    let reports = axagent_company_runtime::opc::capability_pack::audit_capability_packs_capability(
+    let base = state.pack_registry.resolve_packs_dir(Some(app_dir));
+    crate::init::state::audit_and_log_capability_packs_capability(
+        state.pack_registry.as_ref(),
         &*state.capability_indexer,
         &base,
     )
     .await;
+    let reports =
+        state.pack_registry.audit_capability_closure(&*state.capability_indexer, &base).await;
     if let Some(report) = reports.into_iter().find(|r| r.domain_pack_id == id) {
         if !report.closed {
             let missing_detail = report

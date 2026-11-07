@@ -983,6 +983,9 @@ mod tests_conversation {
             // 能力发现系统 + 认知编排器
             capability_router: test_capability_router,
             capability_indexer: test_capability_indexer_impl,
+            pack_registry: Arc::new(
+                axagent_company_runtime::opc::capability_pack::LocalCapabilityPackRegistry,
+            ),
             session_state_store: Arc::new(
                 axagent_harness::test_support::MemorySessionStateStore::new(),
             ),

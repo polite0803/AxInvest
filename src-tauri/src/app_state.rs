@@ -418,6 +418,8 @@ pub struct AppState {
     pub capability_router: Arc<DefaultCapabilityRouter>,
     /// 能力索引器（用于注册/删除/查询能力护照）
     pub capability_indexer: Arc<CapabilityIndexerImpl>,
+    /// 域包装配/查询（#221 trait 化：主壳消费面走 harness 契约，权威实现在 company-runtime）
+    pub pack_registry: Arc<dyn axagent_harness::CapabilityPackRegistry>,
     /// 会话状态存储（CapabilityLoad 写入 / 下轮注入器读取的解耦点）
     pub session_state_store: Arc<dyn axagent_harness::SessionStateStore>,
     /// 认知编排器（三层路由树协调器，全局用户消息唯一入口）

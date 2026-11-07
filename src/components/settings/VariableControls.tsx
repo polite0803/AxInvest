@@ -18,8 +18,8 @@
  * 不走 `varTypeOf` 的 snake_case 兼容层），且需要 `disabled` 与「按变量名翻译 enum label」
  * 两个本文件没有的能力。强行合并会把 OPC 面板的行为一起改掉 ⇒ 保留其本地实现。
  */
-import type { Variable } from "@/components/workflow/types";
 import { varTypeOf } from "@/lib/workflowVariables";
+import type { Variable } from "@/types";
 import { Input, InputNumber, Select, Slider, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { inferNumberBounds } from "./numberBounds";

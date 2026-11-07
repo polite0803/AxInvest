@@ -9,7 +9,7 @@
  * | 载体 | 位置 | 何时生效 |
  * |---|---|---|
  * | **权威源** | `src-tauri/src/commands/stock_analysis_setup/seed_variables.rs` 的 `Variable { value: serde_json::json!(…) }` | 播种 / 换代时写进模板 `variables` |
- * | 前端兜底 | `src/components/settings/StockAnalysisConfigPanel.tsx` 的 `getDefaultVariables()` 里 `b(name, 值, 描述键, 类型)` | ① 模板 `variables` 为空时**当作初值写回库**；② 面板取不到后端值时的显示兜底；③ `WhatIfBacktest` 的滑块默认值与标签 |
+ * | 前端兜底 | `src/lib/stock-analysis-defaults.ts` 的 `getDefaultVariables()` 里 `b(name, 值, 描述键, 类型)` | ① 模板 `variables` 为空时**当作初值写回库**；② 面板取不到后端值时的显示兜底；③ `WhatIfBacktest` 的滑块默认值与标签 |
  *
  * 两侧一旦不等，「跑出来的数取决于走了哪条初始化路径」—— 本仓已实证过两次：
  * · `risk_max_drawdown_limit` 后端 20 / 面板 15（见 `getDefaultVariables()` 上方注释）；
@@ -61,7 +61,8 @@ import { crateRepoRel } from "./lib/workspace-roots.mjs";
 const ROOT = path.resolve(import.meta.dirname, "..");
 
 const SEED_VARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
-const PANEL = "src/components/settings/StockAnalysisConfigPanel.tsx";
+// 组件中立性 A 档：getDefaultVariables 由设置面板下沉到中性 lib，本门锚点随权威源迁移。
+const PANEL = "src/lib/stock-analysis-defaults.ts";
 
 /** 解析面下限：现网种子 357 条 / 面板 134 条 —— 低于下限即判「脚本失效」，不当「无违规」 */
 const MIN_SEED_VARS = 250;

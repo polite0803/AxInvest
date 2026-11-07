@@ -22,7 +22,7 @@
  *   I1  `min <= 默认值 <= max` —— 上限低于现值会让滑杆一拖就把参数往下改
  *   I2  `(默认值 - min) / step` 为整数 —— 现值在步长网格上，否则显示与写回不一致
  */
-import type { Variable } from "@/components/workflow/types";
+import type { Variable } from "@/types";
 
 export function inferNumberBounds(v: Variable): { min: number; max: number; step: number } {
   // 温度类参数的 0.1 步进特判已于 2026-10-26 随 `agent_temperature` 变量退役删除：

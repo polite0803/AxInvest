@@ -1,7 +1,6 @@
 import { invoke } from "@/lib/invoke";
-import { analystBaseOf } from "@/lib/stock-analysis-utils";
+import { analystBaseOf, TOOL_NODE_I18N_KEY } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
-import { TOOL_NODE_I18N_KEY } from "@/stores/feature/stockWorkflowChatBridge";
 import { Button, message, Progress, Steps, Tag } from "antd";
 import { Pause, Play } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";

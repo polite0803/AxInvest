@@ -1,10 +1,10 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
-import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { backendErrorText } from "@/lib/errorI18n";
 import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke, listen } from "@/lib/invoke";
 import { horizonIcAbsenceKey, horizonLabelKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
+import type { AiChatAction } from "@/types";
 import type {
   FailureModeBoard,
   FailureModeCell,

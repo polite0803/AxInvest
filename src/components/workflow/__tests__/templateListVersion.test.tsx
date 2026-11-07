@@ -29,7 +29,8 @@ describe("工作流模板列表的代（version）呈现", () => {
   });
 
   it("前端响应类型把 version 声明成必填（不得可选）", () => {
-    const ts = read("src/components/workflow/types/workflow.types.ts");
+    // 权威定义已下沉到 src/types/workflow.ts（组件中立性 A 档），锚点随迁。
+    const ts = read("src/types/workflow.ts");
     const start = ts.indexOf("export interface WorkflowTemplateResponse");
     expect(start, "应存在 WorkflowTemplateResponse").toBeGreaterThan(-1);
     const body = ts.slice(start, start + 900);

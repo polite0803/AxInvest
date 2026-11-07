@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { SystemTemplateList, TemplateList } from "@/components/workflow/Templates";
-import type { WorkflowTemplateResponse } from "@/components/workflow/types";
 import { WorkflowMarketplace } from "@/pages/WorkflowMarketplace";
+import type { WorkflowTemplateResponse } from "@/types";
 import { Tabs } from "antd";
 import { BrainCircuit, GitBranch, Store } from "lucide-react";
 import { useTranslation } from "react-i18next";

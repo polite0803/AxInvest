@@ -6,9 +6,8 @@ import { WorkflowLogPanel } from "@/components/workflow/WorkflowLogPanel";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { isSecretOf } from "@/lib/workflowVariables";
-import type { LlmDiagnoseV2 } from "@/stores/feature/workflowEditorStore";
 import { useWorkflowStore, WORKFLOW_EXEC_CANCELLED } from "@/stores/feature/workflowStore";
-import type { WorkflowDefinition, WorkflowExecution } from "@/types";
+import type { LlmDiagnoseV2, WorkflowDefinition, WorkflowExecution } from "@/types";
 import {
   App,
   Button,

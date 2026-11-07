@@ -268,3 +268,153 @@ export interface ToolUpgradeSuggestion {
   outputSchema: Record<string, unknown> | null;
   reasoning: string;
 }
+
+// ============================================================
+// 工作流模板共享 DTO（组件中立性 A 档，与上方 ToolUpgradeSuggestion 同族）
+// 由 src/components/workflow/types/workflow.types.ts 与 stores/feature/workflowEditorStore.ts
+// 下沉：settings / stock-analysis 跨域消费这些类型，不该反向依赖 components/workflow
+// 的类型模块或 workflowEditor store。原位置保留薄 re-export 供工作流内部存量消费方。
+// ============================================================
+
+// 字段类型仍引用编辑器域内类型（type-only，编译后擦除，无运行时耦合）。
+// WorkflowNode/WorkflowEdge 必须用别名：本文件上方已有 NL2Workflow 的简化版同名类型，
+// 二者语义不同（编辑器版含 retry/timeout/enabled 等），不可混用。
+import type {
+  DiagnosticFix,
+  EditAssetOperation,
+  ErrorConfig,
+  JsonSchema,
+  RhaiToolDef,
+  TriggerConfig,
+  ValidationSpec,
+  WorkflowEdge as EditorWorkflowEdge,
+  WorkflowNode as EditorWorkflowNode,
+} from "@/components/workflow/types/workflow.types";
+
+export interface Variable {
+  name: string;
+  varType: string;
+  value: unknown;
+  description?: string;
+  isSecret: boolean;
+}
+
+export interface WorkflowTemplateInput {
+  name: string;
+  description?: string;
+  icon: string;
+  tags: string[];
+  triggerConfig?: TriggerConfig;
+  nodes: EditorWorkflowNode[];
+  edges: EditorWorkflowEdge[];
+  inputSchema?: JsonSchema;
+  outputSchema?: JsonSchema;
+  variables: Variable[];
+  errorConfig?: ErrorConfig;
+  toolDefs?: RhaiToolDef[];
+  /** L2 集群 ID（三层路由第二层，命令层可从 tags 推导） */
+  clusterId?: string;
+  /** 三层路由路径（命令层可从 tags 推导，格式 /{domain}/{cluster}/{capability}） */
+  routePath?: string;
+}
+
+export interface WorkflowTemplateResponse {
+  id: string;
+  name: string;
+  description?: string;
+  icon: string;
+  tags: string[];
+  version: number;
+  isPreset: boolean;
+  isEditable: boolean;
+  isPublic: boolean;
+  /** 是否为系统模板（认知编排器等），由后端按 isPreset + cognitiveRouter 标签权威判定 */
+  isSystem: boolean;
+  triggerConfig?: TriggerConfig;
+  nodes: EditorWorkflowNode[];
+  edges: EditorWorkflowEdge[];
+  inputSchema?: JsonSchema;
+  outputSchema?: JsonSchema;
+  variables: Variable[];
+  errorConfig?: ErrorConfig;
+  toolDefs?: RhaiToolDef[];
+  missionHash?: string;
+  /** L2 集群 ID（三层路由第二层） */
+  clusterId?: string;
+  /** 三层路由路径（格式 /{domain}/{cluster}/{capability}） */
+  routePath?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * AI 聊天面板产出的工作流变更动作。
+ * 与后端 workflow_ai_chat_stream 系统 prompt 中的 :::action 块对应，
+ * 前端以 discriminated union 解析，applyAiChatAction 按 action_type 分发。
+ */
+export type AiChatAction =
+  | { actionType: "generate_workflow"; data: { nodes: EditorWorkflowNode[]; edges: EditorWorkflowEdge[] } }
+  | { actionType: "add_node"; data: { node: EditorWorkflowNode; position?: { x: number; y: number } } }
+  | { actionType: "add_nodes"; data: { nodes: EditorWorkflowNode[] } }
+  | { actionType: "update_node"; data: { nodeId: string; changes: Partial<EditorWorkflowNode> } }
+  | { actionType: "modify_node"; data: { nodeId: string; changes: Record<string, unknown> } }
+  | { actionType: "delete_node"; data: { nodeId: string } }
+  | { actionType: "delete_nodes"; data: { nodeIds: string[] } }
+  | { actionType: "add_edge"; data: { edge: EditorWorkflowEdge } }
+  | { actionType: "update_edge"; data: { edgeId: string; changes: Partial<EditorWorkflowEdge> } }
+  | { actionType: "delete_edge"; data: { edgeId: string } }
+  | { actionType: "optimize_prompt"; data: { nodeId: string; optimizedPrompt: string } }
+  // ── v2.0 基础设施类 action(与后端 workflow_ai_protocol::ChatAction 对齐)──
+  | { actionType: "update_variable"; data: { templateId: string; name: string; value: unknown } }
+  | { actionType: "rollback_to_version"; data: { templateId: string; version: number } }
+  | {
+    actionType: "update_input_mapping";
+    data: {
+      nodeId: string;
+      mappings: Array<{ target: string; source: string }>;
+    };
+  }
+  | {
+    actionType: "edit_asset_file";
+    data: {
+      path: string;
+      operation: EditAssetOperation;
+      anchorLine: number;
+      /** insert_after / replace 时必填;delete 时可省 */
+      code?: string;
+      description: string;
+    };
+  }
+  | {
+    actionType: "apply_diff_with_validation";
+    data: {
+      actions: AiChatAction[];
+      validation: ValidationSpec;
+      rollbackOnFailure?: boolean;
+    };
+  };
+
+/** AiChatAction 的 actionType 联合类型（用于 switch 穷尽性检查） */
+export type AiChatActionType = AiChatAction["actionType"];
+
+/**
+ * V2 协议 LLM diagnose 报告原始 schema(后端 `llm_diagnose_workflow` 返回):
+ * 4 档 severity + 顶层 fixes[] + autoApply 标志
+ *
+ * 导出供 WorkflowExecutor 等跨上下文场景复用(禁止重复定义)。
+ */
+export interface LlmDiagnoseV2 {
+  summary: string;
+  issues: Array<{
+    severity: string;
+    category: string;
+    nodeId: string | null;
+    title: string;
+    detail: string;
+    suggestion: string;
+    fix?: DiagnosticFix;
+  }>;
+  suggestions: string[];
+  fixes?: DiagnosticFix[];
+  autoApply?: boolean;
+}

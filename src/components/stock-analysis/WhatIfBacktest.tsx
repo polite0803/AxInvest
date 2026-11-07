@@ -12,8 +12,8 @@
  * 前提：portfolio-mgr 已从 Agent 改为 CodeNode（Rhai 确定性公式）
  */
 
-import { getDefaultVariables } from "@/components/settings/StockAnalysisConfigPanel";
 import { invoke } from "@/lib/invoke";
+import { getDefaultVariables } from "@/lib/stock-analysis-defaults";
 import { parseRiskLevel, StockRiskLevel } from "@/lib/stock-analysis-utils";
 import { Button, Card, Collapse, Empty, InputNumber, Select, SelectProps, Slider, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";

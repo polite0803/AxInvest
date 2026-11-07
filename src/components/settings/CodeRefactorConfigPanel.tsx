@@ -1,6 +1,6 @@
-import type { Variable, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
+import type { Variable, WorkflowTemplateResponse } from "@/types";
 import { App, Button, Input, InputNumber, Select, Switch, Tag, theme, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

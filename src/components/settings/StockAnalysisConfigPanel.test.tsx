@@ -12,6 +12,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const PANEL_PATH = resolve(__dirname, "./StockAnalysisConfigPanel.tsx");
+// 组件中立性 A 档：getDefaultVariables 的 b() 默认值声明已下沉到中性 lib，
+// 面板只保留 resolve() 分组结构。抓默认值清单的断言须读此源，抓分组的仍读面板。
+const DEFAULTS_PATH = resolve(__dirname, "../../../src/lib/stock-analysis-defaults.ts");
 const RUST_SETUP_PATH = resolve(
   __dirname,
   "../../../src-tauri/src/commands/stock_analysis_setup/mod.rs",
@@ -118,6 +121,10 @@ const KNOWN_UNWIRED_PARAMS = new Set<string>([]);
 
 function readPanelSource(): string {
   return readFileSync(PANEL_PATH, "utf8");
+}
+
+function readDefaultsSource(): string {
+  return readFileSync(DEFAULTS_PATH, "utf8");
 }
 
 function readRustSource(): string {
@@ -246,16 +253,17 @@ function extractEffectiveParamsFields(): string[] {
 
 /** 从 `b("name", ...)` 调用与 `resolve(["name", ...])` 分组清单中抽取出所有变量名 */
 function extractVarNamesFromPanel(): string[] {
-  const src = readPanelSource();
   const names = new Set<string>();
-  // 形态①：`b("key", 默认值, 描述键, 类型)` —— 面板自己声明默认值的那批。
+  // 形态①：`b("key", 默认值, 描述键, 类型)` —— 默认值声明表（已下沉到中性 lib）。
+  const defaultsSrc = readDefaultsSource();
   const re = /b\(\s*"([a-z_][a-z0-9_]*)"/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) { names.add(m[1]); }
+  while ((m = re.exec(defaultsSrc)) !== null) { names.add(m[1]); }
   // 形态②：分组声明里的 `vars: resolve(["key", ...])` —— 只登记键、默认值取自后端种子。
   // ⚠ 漏掉这一形态会让面板的真实暴露面从 328 缩成 137（实测 2026-10-14），
   //   于是所有「面板 ⊇ 后端」方向的对账都查不到那 191 个键。
-  for (const g of src.matchAll(/resolve\(\[([\s\S]*?)\]\)/g)) {
+  const panelSrc = readPanelSource();
+  for (const g of panelSrc.matchAll(/resolve\(\[([\s\S]*?)\]\)/g)) {
     for (const x of g[1].matchAll(/"([a-z_][a-z0-9_]*)"/g)) { names.add(x[1]); }
   }
   return [...names];
@@ -263,7 +271,7 @@ function extractVarNamesFromPanel(): string[] {
 
 describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () => {
   it("UI defaults 全部使用 snake_case（无 camelCase / 混合格式）", () => {
-    const src = readPanelSource();
+    const src = readPanelSource() + readDefaultsSource();
     // 旧的 camelCase key 不应再出现
     const deprecated = [
       "analysis_maxDebateRounds",
@@ -660,7 +668,7 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
  */
 describe("debate_rounds 默认值同源", () => {
   it("面板兜底值 == 后端 DEFAULT_DEBATE_ROUNDS，且落在建图夹紧区间内", () => {
-    const panelSrc = readPanelSource();
+    const panelSrc = readDefaultsSource();
     const seedSrc = readFileSync(SEED_VARS_PATH, "utf8");
     const setupSrc = readRustSource();
 

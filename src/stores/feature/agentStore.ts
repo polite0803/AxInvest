@@ -29,9 +29,6 @@ import type {
 import type { ToolExecution } from "@/types";
 import { create } from "zustand";
 import { setupExecutionEventListeners, useExecutionStore } from "./executionStore";
-import type { CurrentToolCall } from "./executionToolCallUtils";
-
-export type { CurrentToolCall };
 
 interface QueryStats {
   numTurns?: number;
@@ -39,8 +36,6 @@ interface QueryStats {
   outputTokens?: number;
   costUsd?: number;
 }
-
-/** 当前正在执行（或最近执行）的工具调用追踪（类型复用自 executionToolCallUtils） */
 
 interface AgentStore {
   // Session cache (truth lives in backend DB)
@@ -57,7 +52,6 @@ interface AgentStore {
   // 执行进度追踪（仅 agentStore 独有的标志——agentPool/agentStatus/sdkIdToExecId 由 executionStore 管理）
   isExecuting: Record<string, boolean>; // conversationId → 是否正在执行工具
   executingConversationIds: string[]; // 当前有工具在执行的对话 ID 列表（有序）
-  currentToolCall: CurrentToolCall | null;
   sdkIdToExecId: Record<string, string>;
   toolCalls: Record<string, ToolCallState>;
   agentStatus: Record<string, string>;
@@ -147,7 +141,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   subAgentCards: {},
   isExecuting: {},
   executingConversationIds: [],
-  currentToolCall: null,
   sdkIdToExecId: {},
   toolCalls: {},
   agentStatus: {},
@@ -786,9 +779,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         pausedConversations,
         isExecuting,
         executingConversationIds,
-        currentToolCall: s.currentToolCall?.conversationId === conversationId
-          ? null
-          : s.currentToolCall,
         queryStats,
         subAgentCards,
       };
@@ -879,7 +869,7 @@ export function setupAgentEventListeners(): () => void {
     }),
   );
 
-  // ── Agent 生命周期事件（清理 agentStatus、isExecuting、currentToolCall 等） ─
+  // ── Agent 生命周期事件（清理 agentStatus、isExecuting 等；currentToolCall 由 executionStore 清理） ─
 
   unlisteners.push(
     listen<AgentDoneEvent>("agent-done", (event) => {

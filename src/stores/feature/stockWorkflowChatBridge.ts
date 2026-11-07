@@ -7,6 +7,7 @@ import {
   debatePeerNodeId,
   horizonLabelKey,
   parseDebateRoundRef,
+  TOOL_NODE_I18N_KEY,
 } from "@/lib/stock-analysis-utils";
 import { useConversationStore } from "@/stores/domain/conversationStore";
 import type { Message } from "@/types";
@@ -35,48 +36,7 @@ function analystClusterKey(nodeId: string): string {
   return i > 0 ? nodeId.slice(0, i) : nodeId;
 }
 
-/**
- * 工具节点 ID → i18n key（**未求值**，供调用方用 `t()` 动态解析）。
- *
- * T-1 P3(2026-09-12) 两处改进：
- * ① 原实现直接存 `i18next.t(...)` 的**求值结果**，而模块常量只在首次 import 时
- *    计算一次 → 用户切换语言后这些标签不会更新（显示旧语言）。
- *    `AnalysisProgress` 要展示「当前正在执行哪个节点」，必须随语言实时变化。
- * ② 单一权威源：`TOOL_NODE_TO_LABEL` 改由本表派生，不再维护两份同义映射。
- */
-export const TOOL_NODE_I18N_KEY: Record<string, string> = {
-  "t-market-data": "stockAnalysis.tool.marketData",
-  "t-kline-data": "stockAnalysis.tool.klineData",
-  "t-financial-data": "stockAnalysis.tool.financialData",
-  "t-news-data": "stockAnalysis.tool.newsData",
-  "t-money-flow": "stockAnalysis.tool.moneyFlow",
-  "t-sentiment-data": "stockAnalysis.tool.sentimentData",
-  "t-policy-data": "stockAnalysis.tool.policyData",
-  "t-fundamentals-data": "stockAnalysis.tool.fundamentalsData",
-  "t-hotmoney-data": "stockAnalysis.tool.hotMoneyData",
-  "t-lockup-data": "stockAnalysis.tool.lockupData",
-  // v72(2026-09-21): a-lockup 的第二个前置数据源（股权质押）。
-  // 缺此映射时 `AnalysisProgress` 的兜底是 `currentNodeId` ⇒ 进度条上会直接
-  // 显示裸 id `t-pledge-data`（非中文界面下尤其突兀）。
-  "t-pledge-data": "stockAnalysis.tool.pledgeData",
-  "t-research-data": "stockAnalysis.tool.researchData",
-  "t-sector-data": "stockAnalysis.tool.sectorData",
-  "t-scoring": "stockAnalysis.tool.scoring",
-  "t-valuation": "stockAnalysis.tool.valuation",
-  "t-portfolio-risk": "stockAnalysis.tool.portfolioRisk",
-  "t-peers-data": "stockAnalysis.tool.peersData",
-  "t-option-data": "stockAnalysis.tool.optionData",
-  "t-index-data": "stockAnalysis.tool.indexData",
-  "t-announcement-data": "stockAnalysis.tool.announcement",
-  "t-northbound-data": "stockAnalysis.tool.northbound",
-  "t-dragon-tiger-data": "stockAnalysis.tool.dragonTiger",
-  "t-cls-flash-data": "stockAnalysis.tool.clsFlash",
-  "t-block-trade-data": "stockAnalysis.tool.blockTrade",
-  "t-institutional-data": "stockAnalysis.tool.institutional",
-  "t-consensus-data": "stockAnalysis.tool.consensus",
-  "t-concept-data": "stockAnalysis.tool.concept",
-};
-
+// TOOL_NODE_I18N_KEY 已下沉到 `@/lib/stock-analysis-utils`（组件中立性 A 档），经顶部 import 派生下方标签表。
 const TOOL_NODE_TO_LABEL: Record<string, string> = Object.fromEntries(
   Object.entries(TOOL_NODE_I18N_KEY).map(([id, key]) => [id, i18next.t(key)]),
 );

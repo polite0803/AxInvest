@@ -1,10 +1,10 @@
 /**
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
-import type { Variable } from "@/components/workflow/types";
 import { invalidate } from "@/lib/cacheInvalidation";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
+import type { Variable } from "@/types";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

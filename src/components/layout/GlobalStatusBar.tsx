@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useSkillExtensionStore } from "@/stores";
+import { useSkillStatusBarCount } from "@/hooks/useSkillStatusBarCount";
 import { SkillStatusBar } from "./../skill/SkillStatusBar";
 import { BackendStatusIndicator } from "./BackendStatusIndicator";
 
@@ -11,7 +11,7 @@ import { BackendStatusIndicator } from "./BackendStatusIndicator";
  * 本应用内置引擎，无需显示连接状态。
  */
 export function GlobalStatusBar() {
-  const count = useSkillExtensionStore((s) => s.statusBarItems.length);
+  const count = useSkillStatusBarCount();
 
   return (
     <div className="statusbar">

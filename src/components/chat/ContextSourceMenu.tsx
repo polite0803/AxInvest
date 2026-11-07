@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
-import { useConversationStore, useKnowledgeStore, useLlmWikiStore, useMemoryStore } from "@/stores";
+import { useContextSourceMenu } from "@/hooks/useContextSourceMenu";
+import { useConversationStore } from "@/stores";
 import { Badge, Button, Modal, theme } from "antd";
 import { Database } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -15,9 +16,7 @@ export function ContextSourceMenu() {
   const navigate = useNavigate();
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
 
-  const knowledgeBases = useKnowledgeStore((s) => s.bases);
-  const memoryNamespaces = useMemoryStore((s) => s.namespaces);
-  const wikis = useLlmWikiStore((s) => s.wikis);
+  const { knowledgeBases, memoryNamespaces, wikis } = useContextSourceMenu();
   const activeConversationId = useConversationStore(
     (s) => s.activeConversationId,
   );

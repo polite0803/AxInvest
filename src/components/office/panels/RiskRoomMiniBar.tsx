@@ -20,7 +20,7 @@
  *   - 折叠 / 展开场景列表（默认展开）
  */
 
-import { useStockAnalysisStore } from "@/stores";
+import { useOfficePortfolioRisk } from "@/hooks/useOfficeStockPanels";
 import type { PortfolioStressResult } from "@/stores";
 import { Button, Empty, Spin, Tag, theme, Tooltip, Typography } from "antd";
 import type { TFunction } from "i18next";
@@ -79,12 +79,8 @@ export function RiskRoomMiniBar({ sceneTemplateSlug }: RiskRoomMiniBarProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
-  const portfolioDashboard = useStockAnalysisStore((s) => s.portfolioDashboard);
-  const portfolioRefreshing = useStockAnalysisStore((s) => s.portfolioRefreshing);
-  const portfolioLastError = useStockAnalysisStore((s) => s.portfolioLastError);
-  const fetchPortfolioDashboard = useStockAnalysisStore(
-    (s) => s.fetchPortfolioDashboard,
-  );
+  const { portfolioDashboard, portfolioRefreshing, portfolioLastError, fetchPortfolioDashboard } =
+    useOfficePortfolioRisk();
 
   const [collapsed, setCollapsed] = useState(false);
 

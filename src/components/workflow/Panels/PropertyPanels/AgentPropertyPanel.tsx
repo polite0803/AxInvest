@@ -2,16 +2,19 @@
 
 import { ExpertSelector } from "@/components/chat/ExpertSelector";
 import { ModelSelect } from "@/components/shared/ModelSelect";
+import { useAgentProfileLookup } from "@/hooks/useAgentProfile";
+import { usePromptTemplateUsage } from "@/hooks/usePromptTemplateUsage";
+import {
+  createCustomAgentProfile,
+  listAllAgentProfiles,
+  useWorkflowAgentProfileSync,
+} from "@/hooks/useWorkflowAgentProfiles";
+import { useWorkflowKnowledgeBases } from "@/hooks/useWorkflowKnowledgeBases";
+import { useWorkflowPromptTemplates } from "@/hooks/useWorkflowPromptTemplates";
+import { useWorkflowToolGroups } from "@/hooks/useWorkflowToolGroups";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
-import {
-  useAgentStore,
-  useKnowledgeStore,
-  useLocalToolStore,
-  useProviderStore,
-  useWorkflowEditorStore,
-} from "@/stores";
-import { usePromptTemplateStore } from "@/stores";
+import { useProviderStore, useWorkflowEditorStore } from "@/stores";
 import { useExpertStore } from "@/stores/feature/expertStore";
 import type { CreateAgentProfileInput, PromptTemplate } from "@/types";
 import { Button, Divider, Input, InputNumber, Modal, Select, Tag, theme } from "antd";
@@ -72,8 +75,8 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
-  const { templates, loadTemplates } = usePromptTemplateStore();
-  const incrementUsage = usePromptTemplateStore((s) => s.incrementUsage);
+  const { templates, loadTemplates } = useWorkflowPromptTemplates();
+  const incrementUsage = usePromptTemplateUsage();
   useEffect(() => {
     loadTemplates();
   }, [loadTemplates]);
@@ -187,17 +190,16 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
   };
 
   const getExpert = useExpertStore((s) => s.getRoleById);
-  // useExpertStore 和 useAgentStore 是两个独立数据源，需要合并查找
-  const getProfileById = useAgentStore((s) => s.getProfileById);
-  const agentProfilesLoaded = useAgentStore((s) => s.loaded);
-  const loadAgentProfiles = useAgentStore((s) => s.loadProfiles);
+  // useExpertStore 和 agentStore 是两个独立数据源，需要合并查找
+  const getProfileById = useAgentProfileLookup();
+  const { agentProfilesLoaded, loadAgentProfiles } = useWorkflowAgentProfileSync();
   const selectedExpert = config.agentProfileId
     ? (getExpert(config.agentProfileId) ?? getProfileById(config.agentProfileId))
     : null;
 
-  const { groups: toolGroups, loadGroups: loadToolGroups } = useLocalToolStore();
+  const { groups: toolGroups, loadGroups: loadToolGroups } = useWorkflowToolGroups();
   const templateToolDefs = useWorkflowEditorStore((s) => s.currentTemplate?.toolDefs);
-  const { bases: knowledgeBases, loadBases: loadKnowledgeBases } = useKnowledgeStore();
+  const { bases: knowledgeBases, loadBases: loadKnowledgeBases } = useWorkflowKnowledgeBases();
   const { providers, fetchProviders } = useProviderStore();
 
   // 加载 AgentProfile 数据，角色列表从 expertStore 读取（同源）
@@ -367,7 +369,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
         return;
       }
       // 查找是否已有匹配的 profile
-      const existingProfiles = useAgentStore.getState().getAllProfiles();
+      const existingProfiles = listAllAgentProfiles();
       const matched = existingProfiles.find(
         (p) => p.agentRole === roleId && p.expertId === expertId,
       );
@@ -393,9 +395,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
         recommendedTools: expert.recommendedTools,
         recommendedWorkflows: expert.recommendedWorkflows,
       };
-      const profile = await useAgentStore
-        .getState()
-        .createCustomProfile(input);
+      const profile = await createCustomAgentProfile(input);
       handleConfigChange("agentProfileId", profile.id);
       message.success(t("workflow.props.profileCreated"));
     } catch (e) {

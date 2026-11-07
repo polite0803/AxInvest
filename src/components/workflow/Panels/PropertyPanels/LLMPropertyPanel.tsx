@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { ModelSelect } from "@/components/shared/ModelSelect";
+import { usePromptTemplateUsage } from "@/hooks/usePromptTemplateUsage";
+import { useWorkflowPromptTemplates } from "@/hooks/useWorkflowPromptTemplates";
 import { message } from "@/lib/toast";
-import { usePromptTemplateStore, useProviderStore, useWorkflowEditorStore } from "@/stores";
+import { useProviderStore, useWorkflowEditorStore } from "@/stores";
 import type { PromptTemplate } from "@/types";
 import { Button, Input, InputNumber, Modal, theme } from "antd";
 import React, { useEffect, useState } from "react";
@@ -40,7 +42,7 @@ export const LLMPropertyPanel: React.FC<LLMPropertyPanelProps> = ({
   };
 
   const { providers, fetchProviders } = useProviderStore();
-  const { templates, loadTemplates } = usePromptTemplateStore();
+  const { templates, loadTemplates } = useWorkflowPromptTemplates();
 
   useEffect(() => {
     if (providers.length === 0) {
@@ -62,7 +64,7 @@ export const LLMPropertyPanel: React.FC<LLMPropertyPanelProps> = ({
     setTemplateModalOpen(true);
   };
 
-  const incrementUsage = usePromptTemplateStore((s) => s.incrementUsage);
+  const incrementUsage = usePromptTemplateUsage();
 
   const handleApplyTemplate = () => {
     if (!selectedTemplate) {

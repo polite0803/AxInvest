@@ -11,7 +11,8 @@
  * 下方展示当前 fleet 的成员 token 用量（today / total），按今日用量降序。
  */
 
-import { useOfficeStore, usePaperPortfolioStore } from "@/stores";
+import { usePaperPortfolioDetails } from "@/hooks/usePaperPortfolioDetails";
+import { useOfficeStore } from "@/stores";
 import type { FleetMember } from "@/types";
 import { Button, Empty, Spin, Table, Tag, theme, Typography } from "antd";
 import type { TFunction } from "i18next";
@@ -52,9 +53,7 @@ export function TokenPanel({ fleetId }: { fleetId: string }) {
   const [resetting, setResetting] = useState(false);
 
   // 组合总览数据（聚合所有 active 组合）
-  const activeDetails = usePaperPortfolioStore((s) => s.activeDetails);
-  const fetchActiveDetails = usePaperPortfolioStore((s) => s.fetchActiveDetails);
-  const loadingPortfolio = usePaperPortfolioStore((s) => s.loadingList);
+  const { activeDetails, fetchActiveDetails, loadingList: loadingPortfolio } = usePaperPortfolioDetails();
 
   // 进入 Token tab 时拉取一次 active 组合详情（用于顶部总览卡）
   useEffect(() => {

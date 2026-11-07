@@ -51,28 +51,26 @@ import { Bot, Check, Copy, MessageSquare, Pencil, RotateCcw, Save, Scissors, Tra
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useAgentPendingAskUser, usePendingPermissions as useAgentPendingPermissions } from "@/hooks/useAgentRuntime";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useAgentToolCalls } from "@/hooks/useCurrentToolCall";
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
 import { useResolvedDarkMode } from "@/hooks/useResolvedDarkMode";
+import { useUserProfile } from "@/hooks/useUserProfile";
 import { type ChatMarkdownNode, parseChatMarkdown, stripAxAgentTags } from "@/lib/chatMarkdown";
 import { hasMultipleModelVersions } from "@/lib/chatMultiModel";
 import { getConvIcon } from "@/lib/convIcon";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri } from "@/lib/invoke";
 import { parseSearchContent } from "@/lib/searchUtils";
-import {
-  useAgentStore,
-  useCompressStore,
-  useConversationStore,
-  useExecutionStore,
-  useExpertStore,
-  useProviderStore,
-  useSettingsStore,
-  useStreamStore,
-  useTopicGroupStore,
-  useUIStore,
-  useUserProfileStore,
-} from "@/stores";
+import { useCompressStore } from "@/stores/domain/compressStore";
+import { useConversationStore } from "@/stores/domain/conversationStore";
+import { useStreamStore } from "@/stores/domain/streamStore";
+import { useExpertStore } from "@/stores/feature/expertStore";
+import { useProviderStore } from "@/stores/feature/providerStore";
+import { useSettingsStore } from "@/stores/feature/settingsStore";
+import { useTopicGroupStore } from "@/stores/feature/topicGroupStore";
+import { useUIStore } from "@/stores/shared/uiStore";
 import type { Message } from "@/types";
 
 import { Tooltip } from "@/components/layout/Tooltip";
@@ -121,7 +119,7 @@ export function useChatViewMessages({
   const { message: messageApi } = App.useApp();
 
   const settings = useSettingsStore((s) => s.settings);
-  const profile = useUserProfileStore((s) => s.profile);
+  const profile = useUserProfile();
   const resolvedAvatarSrc = useResolvedAvatarSrc(
     profile.avatarType,
     profile.avatarValue,
@@ -179,9 +177,9 @@ export function useChatViewMessages({
   );
   const deleteCompression = useCompressStore((s) => s.deleteCompression);
   const providers = useProviderStore((s) => s.providers);
-  const agentToolCalls = useExecutionStore((s) => s.toolCalls);
-  const agentPendingPermissions = useAgentStore((s) => s.pendingPermissions);
-  const agentPendingAskUser = useAgentStore((s) => s.pendingAskUser);
+  const agentToolCalls = useAgentToolCalls();
+  const agentPendingPermissions = useAgentPendingPermissions();
+  const agentPendingAskUser = useAgentPendingAskUser();
   const consumeSwitch = useExpertStore((s) => s.consumeSwitch);
   const getRoleById = useExpertStore((s) => s.getRoleById);
 

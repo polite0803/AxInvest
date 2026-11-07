@@ -4,8 +4,8 @@ import { useAgentStatus } from "@/hooks/useAgentStatus";
 import { useExecutionPhase } from "@/hooks/useExecutionPhase";
 import { useIntentClarification } from "@/hooks/useIntentClarification";
 import { usePendingApprovals } from "@/hooks/usePendingApprovals";
+import { useTtsChannel } from "@/hooks/useTtsChannel";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
-import { useTTSChannelStore } from "@/stores";
 import type { RealtimeConfig, VoiceSessionState } from "@/types";
 import { Alert, Button, Empty, Switch, Tag, theme, Typography } from "antd";
 import { AlertCircle, Loader, Mic, MicOff, Phone, Volume2 } from "lucide-react";
@@ -107,10 +107,12 @@ export function VoiceCall({
     workflowExecutionId,
   } = useIntentClarification();
 
-  const ttsEnabled = useTTSChannelStore((s) => s.enabled);
-  const setTtsEnabled = useTTSChannelStore((s) => s.setEnabled);
-  const handleProgressBrief = useTTSChannelStore((s) => s.handleProgressBrief);
-  const ttsMessages = useTTSChannelStore((s) => s.messages);
+  const {
+    enabled: ttsEnabled,
+    setEnabled: setTtsEnabled,
+    handleProgressBrief,
+    messages: ttsMessages,
+  } = useTtsChannel();
 
   const { pendingApprovals, loading: approvalLoading, fetchPendingApprovals } = usePendingApprovals();
 

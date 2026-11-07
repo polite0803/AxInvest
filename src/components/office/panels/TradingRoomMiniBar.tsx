@@ -16,7 +16,7 @@
  * 着色规则：A 股惯例 — 红涨绿跌（涨 > 0 红色 / 跌 < 0 绿色 / 平 灰色）。
  */
 
-import { useStockAnalysisStore } from "@/stores";
+import { useOfficeStockQuote } from "@/hooks/useOfficeStockPanels";
 import type { StockSearchResult } from "@/types";
 import { Button, Modal, Spin, Switch, Tag, theme, Tooltip, Typography } from "antd";
 import type { TFunction } from "i18next";
@@ -125,16 +125,18 @@ export function TradingRoomMiniBar({ sceneTemplateSlug }: TradingRoomMiniBarProp
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
-  const stockCode = useStockAnalysisStore((s) => s.stockCode);
-  const stockName = useStockAnalysisStore((s) => s.stockName);
-  const quote = useStockAnalysisStore((s) => s.quote);
-  const quoteLoading = useStockAnalysisStore((s) => s.quoteLoading);
-  const quoteError = useStockAnalysisStore((s) => s.quoteError);
-  const autoRefresh = useStockAnalysisStore((s) => s.autoRefresh);
-  const setAutoRefresh = useStockAnalysisStore((s) => s.setAutoRefresh);
-  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
-  const searchStock = useStockAnalysisStore((s) => s.searchStock);
-  const searchResults = useStockAnalysisStore((s) => s.searchResults);
+  const {
+    stockCode,
+    stockName,
+    quote,
+    quoteLoading,
+    quoteError,
+    autoRefresh,
+    setAutoRefresh,
+    getStockQuote,
+    searchStock,
+    searchResults,
+  } = useOfficeStockQuote();
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [keyword, setKeyword] = useState("");

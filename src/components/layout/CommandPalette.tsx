@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useSkillCommands } from "@/hooks/useSkillCommands";
 import { useWorkspaceTabNavigator } from "@/hooks/useWorkspaceTabNavigator";
 import { CHAT_ICON_COLORS } from "@/lib/iconColors";
 import { executeActionChain } from "@/lib/skillActionExecutor";
@@ -11,7 +12,7 @@ import {
   WORKSPACE_TAB_ICONS,
   WORKSPACE_TABS,
 } from "@/lib/workspaceTabs";
-import { useSettingsStore, useSkillExtensionStore, useUIStore } from "@/stores";
+import { useSettingsStore, useUIStore } from "@/stores";
 import { Input, Modal, Tag, theme, Typography } from "antd";
 import { MessageSquare, Network, PanelLeftClose, Plus, Puzzle, Search, Settings, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -284,7 +285,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   }, [open, setActiveIndex]);
 
   // 注册技能扩展命令
-  const skillCommands = useSkillExtensionStore((s) => s.commands);
+  const skillCommands = useSkillCommands();
   useEffect(() => {
     const registeredIds: string[] = [];
     for (const cmd of skillCommands) {

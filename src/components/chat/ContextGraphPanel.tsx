@@ -23,7 +23,7 @@ import { BookOpen, Brain, ChevronDown, ChevronUp, GitBranch, Link2, Puzzle, Sear
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "@xyflow/react/dist/style.css";
-import { useKnowledgeStore, useMcpStore, useMemoryStore, useSkillExtensionStore } from "@/stores";
+import { useContextGraphSources } from "@/hooks/useContextGraphSources";
 import type { KnowledgeBase, McpServer, MemoryNamespace, Skill } from "@/types";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -242,10 +242,7 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
 
   // Get detail info from various stores
-  const knowledgeBases = useKnowledgeStore((s) => s.bases ?? []);
-  const memoryNamespaces = useMemoryStore((s) => s.namespaces ?? []);
-  const mcpServers = useMcpStore((s) => s.servers ?? []);
-  const installedSkills = useSkillExtensionStore((s) => s.skills ?? []);
+  const { knowledgeBases, memoryNamespaces, mcpServers, installedSkills } = useContextGraphSources();
 
   const graphData = useMemo(() => {
     const nodes: ContextGraphNode[] = [];

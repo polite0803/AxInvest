@@ -9,10 +9,10 @@
  * - room_id 下拉项来自当前 fleet 的场景模板房间列表
  */
 import { useSceneTemplates } from "@/components/office/phaser/sceneTemplates";
+import { useAgentRoles } from "@/hooks/useAgentRoles";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
-import { useAgentRoleStore } from "@/stores";
 import { useOfficeStore } from "@/stores";
 import type { AddMemberInput, SubAgent } from "@/types";
 import { Button, Form, Input, Modal, Select, Space } from "antd";
@@ -37,8 +37,7 @@ interface FormValues {
 export function AddMemberModal({ open, fleetId, sceneTemplateSlug, onClose }: AddMemberModalProps) {
   const { t } = useTranslation();
   const addMember = useOfficeStore((s) => s.addMember);
-  const roles = useAgentRoleStore((s) => s.roles);
-  const fetchRoles = useAgentRoleStore((s) => s.fetchRoles);
+  const { roles, fetchRoles } = useAgentRoles();
 
   const [subAgents, setSubAgents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(false);

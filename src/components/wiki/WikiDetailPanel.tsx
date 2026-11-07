@@ -3,10 +3,10 @@
 import { MonacoEditor } from "@/components/shared/MonacoEditor";
 import type { GraphData, GraphNode } from "@/components/wiki/GraphView";
 import { highlightWikilink } from "@/components/wiki/wikilinkHighlight";
+import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
 import { useWikiAutoSave } from "@/hooks/useWikiAutoSave";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
-import { useKnowledgeStore } from "@/stores";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { BacklinkInfo, KnowledgeBase, Note, NoteLink } from "@/types";
 import { DeleteOutlined, LinkOutlined, SaveOutlined } from "@ant-design/icons";
@@ -40,7 +40,7 @@ export function WikiDetailPanel({
   const { token } = theme.useToken();
   const { t } = useTranslation();
   const { getNote, updateNote, deleteNote, getNoteLinks, getNoteBacklinks } = useWikiStore();
-  const { bases: knowledgeBases, loadBases } = useKnowledgeStore();
+  const { knowledgeBases, loadKnowledgeBases: loadBases } = useKnowledgeBases();
 
   const [note, setNote] = useState<Note | null>(null);
   const [content, setContent] = useState("");

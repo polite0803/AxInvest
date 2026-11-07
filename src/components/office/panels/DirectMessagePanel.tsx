@@ -18,7 +18,8 @@
  * 做定向咨询（例如让 risk agent 评估当前股票的风控建议）。
  */
 
-import { useOfficeStore, useStockAnalysisStore } from "@/stores";
+import { useOfficeStockContext } from "@/hooks/useOfficeStockPanels";
+import { useOfficeStore } from "@/stores";
 import type { DispatchEvent, FleetMember, FleetMessage } from "@/types";
 import { conversationDm, conversationKey } from "@/types";
 import { Button, Input, Space, Tag, theme, Tooltip, Typography } from "antd";
@@ -56,9 +57,7 @@ export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePan
         : NO_MESSAGES,
   );
   // 从 stockAnalysisStore 拉取当前股票代码/名称
-  const stockCode = useStockAnalysisStore((s) => s.stockCode);
-  const stockName = useStockAnalysisStore((s) => s.stockName);
-  const analysisStatus = useStockAnalysisStore((s) => s.status);
+  const { stockCode, stockName, analysisStatus } = useOfficeStockContext();
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);

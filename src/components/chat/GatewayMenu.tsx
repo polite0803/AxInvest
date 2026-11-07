@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { DropdownMenu } from "@/components/layout/DropdownMenu";
 import type { DropdownItem } from "@/components/layout/DropdownMenu";
 import { Tooltip } from "@/components/layout/Tooltip";
-import { useGatewayLinkStore } from "@/stores";
+import { useGatewayLinks } from "@/hooks/useGatewayLinks";
 
 interface GatewayMenuProps {
   /** 选择网关回调（由 InputArea 记录选中值，用于发送时创建网关会话） */
@@ -20,7 +20,7 @@ interface GatewayMenuProps {
  */
 export function GatewayMenu({ onSelect }: GatewayMenuProps) {
   const { t } = useTranslation();
-  const gatewayLinks = useGatewayLinkStore((s) => s.links);
+  const gatewayLinks = useGatewayLinks() ?? [];
 
   const connectedGateways = gatewayLinks.filter(
     (l) => l.enabled && l.status === "connected",

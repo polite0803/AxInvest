@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { useApproveToolUse } from "@/hooks/useAgentRuntime";
 import { logIpcError } from "@/lib/invoke";
-import { useAgentStore } from "@/stores";
 import { Button, Card, Modal, Space, Tag, theme, Typography } from "antd";
 import type { GlobalToken } from "antd/es/theme/interface";
 import {
@@ -170,7 +170,7 @@ const PermissionCard: React.FC<PermissionCardProps> = ({
   const [expanded, setExpanded] = useState(false);
   const [showDangerConfirm, setShowDangerConfirm] = useState(false);
   const [appeared, setAppeared] = useState(false);
-  const approveToolUse = useAgentStore((state) => state.approveToolUse);
+  const approveToolUse = useApproveToolUse();
   const [loading, setLoading] = useState<string | null>(null);
 
   useEffect(() => {

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
+import { useUserProfile } from "@/hooks/useUserProfile";
 import { stripAxAgentTags } from "@/lib/chatMarkdown";
-import { useConversationStore, useProviderStore, useSettingsStore, useUserProfileStore } from "@/stores";
+import { useConversationStore, useProviderStore, useSettingsStore } from "@/stores";
 import type { Message } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
 import { Avatar, theme, Typography } from "antd";
@@ -263,7 +264,7 @@ function ModelName({
 /** Renders the user avatar matching the chat bubble style */
 function UserAvatarIcon({ size }: { size: number }) {
   const { token } = theme.useToken();
-  const profile = useUserProfileStore((s) => s.profile);
+  const profile = useUserProfile();
   const resolvedSrc = useResolvedAvatarSrc(
     profile.avatarType,
     profile.avatarValue,

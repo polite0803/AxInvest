@@ -23,22 +23,22 @@ vi.mock("@/lib/toast", () => ({
   message: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
-vi.mock("@/stores", () => ({
-  usePluginStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel({
-      plugins: pluginsRef.current,
-      loading: false,
-      installing: null,
-      validating: false,
-      loadPlugins: vi.fn(),
-      validateSource: vi.fn(),
-      installPlugin: vi.fn(),
-      enablePlugin: vi.fn(),
-      disablePlugin: vi.fn(),
-      uninstallPlugin: vi.fn(),
-    }),
-  useCapabilityStore: (sel: (s: Record<string, unknown>) => unknown) =>
-    sel({ registry: [], isLoading: false, loadRegistry: vi.fn() }),
+vi.mock("@/hooks/usePluginMarketplace", () => ({
+  usePluginMarketplace: () => ({
+    plugins: pluginsRef.current,
+    loading: false,
+    installing: null,
+    validating: false,
+    loadPlugins: vi.fn(),
+    validateSource: vi.fn(),
+    installPlugin: vi.fn(),
+    enablePlugin: vi.fn(),
+    disablePlugin: vi.fn(),
+    uninstallPlugin: vi.fn(),
+    registry: [],
+    registryLoading: false,
+    loadRegistry: vi.fn(),
+  }),
 }));
 
 import { PluginMarketplace } from "../PluginMarketplace";

@@ -325,6 +325,89 @@ vi.mock("@/stores/feature/expertStore", () => ({
   useExpertStore: makeStoreHook(() => expertStoreState),
 }));
 
+// 组件 #222 改造后经深路径与 hooks 层消费 store（不再走 @/stores barrel），
+// 以下深路径 mock 把原 barrel 状态控制面迁到组件实际消费面上。
+vi.mock("@/stores/domain/conversationStore", () => ({
+  useConversationStore: makeStoreHook(() => conversationState),
+}));
+
+vi.mock("@/stores/domain/streamStore", () => ({
+  useStreamStore: makeStoreHook(() => streamState),
+}));
+
+vi.mock("@/stores/domain/compressStore", () => ({
+  useCompressStore: makeStoreHook(() => compressState),
+}));
+
+vi.mock("@/stores/feature/providerStore", () => ({
+  useProviderStore: makeStoreHook(() => providerState),
+}));
+
+vi.mock("@/stores/feature/settingsStore", () => ({
+  useSettingsStore: makeStoreHook(() => settingsState),
+}));
+
+vi.mock("@/stores/shared/uiStore", () => ({
+  useUIStore: makeStoreHook(() => uiState),
+}));
+
+// hooks 层替身：bootstrap 类 no-op（否则真实 loadXxx 会调被 mock 的 invoke
+// 并把返回的 undefined 写进真实 store），读值/动作类返回受控常量。
+vi.mock("@/hooks/useSearchProviders", () => ({
+  useSearchProviders: () => searchState.providers,
+  useSearchProvidersBootstrap: () => {},
+}));
+
+vi.mock("@/hooks/useAgentModeClearActions", () => ({
+  useAgentModeClearActions: () => ({
+    clearAgentConversation: vi.fn(),
+    clearExecutionConversation: vi.fn(),
+    clearActivePlan: vi.fn(),
+  }),
+}));
+
+vi.mock("@/hooks/useGatewayLinks", () => ({
+  useCreateGatewayConversation: () => vi.fn(),
+  useGatewayLinksBootstrap: () => {},
+  useGatewayLinks: () => gatewayLinkState.links,
+}));
+
+vi.mock("@/hooks/useKnowledgeBases", () => ({
+  useKnowledgeBasesBootstrap: () => {},
+}));
+
+vi.mock("@/hooks/useLlmWikiLazyLoad", () => ({
+  useLlmWikiLazyLoad: () => {},
+}));
+
+vi.mock("@/hooks/useMcpServers", () => ({
+  useMcpServersBootstrap: () => {},
+}));
+
+vi.mock("@/hooks/useMemoryNamespaces", () => ({
+  useMemoryNamespacesBootstrap: () => {},
+}));
+
+vi.mock("@/hooks/usePromptTemplateUsage", () => ({
+  usePromptTemplateUsage: () => vi.fn(),
+}));
+
+vi.mock("@/hooks/useVoiceGatewayKey", () => ({
+  useVoiceGatewayKey: () => "",
+}));
+
+vi.mock("@/hooks/useVoicePreferences", () => ({
+  useVoicePreferences: () => ({
+    ttsVoice: "",
+    sttProviderId: null,
+    ttsProviderId: null,
+  }),
+}));
+
+vi.mock("@/hooks/useVoiceWakeup", () => ({
+  useVoiceWakeup: () => ({ active: false, start: vi.fn(), stop: vi.fn() }),
+}));
+
 vi.mock("@/lib/modelCapabilities", () => ({
   findModelByIds: () => ({
     model_id: "model-1",
@@ -335,7 +418,8 @@ vi.mock("@/lib/modelCapabilities", () => ({
   modelHasCapability: () => false,
 }));
 
-vi.mock("@/lib/shortcuts", () => ({
+vi.mock("@/lib/shortcuts", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getShortcutBinding: () => "",
   formatShortcutForDisplay: () => "",
 }));
@@ -348,6 +432,7 @@ vi.mock("@/lib/tokenEstimator", () => ({
 vi.mock("@/lib/invoke", () => ({
   invoke: vi.fn(),
   isTauri: false,
+  logIpcError: () => () => {},
 }));
 
 vi.mock("@lobehub/icons", () => ({

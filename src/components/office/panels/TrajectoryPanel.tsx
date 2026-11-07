@@ -17,7 +17,8 @@
  * 点击节点会触发 onNavigateToStock(tabKey, panelKey) 回调（可选）。
  */
 
-import { useOfficeStore, useStockAnalysisStore } from "@/stores";
+import { useOfficeStockContext } from "@/hooks/useOfficeStockPanels";
+import { useOfficeStore } from "@/stores";
 import type { DispatchEvent } from "@/types";
 import type { TimelineNode, TimelinePhase } from "@/types/stock-analysis";
 import { Empty, Tag, theme, Timeline } from "antd";
@@ -95,9 +96,7 @@ export function TrajectoryPanel({ onNavigateToStock }: TrajectoryPanelProps) {
   const { t } = useTranslation();
   const { token: themeToken } = theme.useToken();
   const dispatchEvents = useOfficeStore((s) => s.dispatchEvents);
-  const timeline = useStockAnalysisStore((s) => s.timeline);
-  const stockCode = useStockAnalysisStore((s) => s.stockCode);
-  const analysisStatus = useStockAnalysisStore((s) => s.status);
+  const { timeline, stockCode, analysisStatus } = useOfficeStockContext();
   const [hideDispatch, setHideDispatch] = useState(false);
 
   // 进入面板时若 timeline 为空但分析状态在 running/loading，说明跨页面切换丢失，

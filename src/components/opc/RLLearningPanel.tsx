@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useDomainLearningStore } from "@/stores";
+import { useRLLearningPanel } from "@/hooks/useRLLearningPanel";
 import type { ExperiencePoolStats, RLPolicyUpdate } from "@/types";
 import {
   BarChartOutlined,
@@ -40,7 +40,7 @@ export function RLLearningPanel({ capabilityPackId, compact = false }: RLLearnin
     autoLearningHistory,
     rlLoading,
     getConfig,
-  } = useDomainLearningStore();
+  } = useRLLearningPanel();
 
   const stats = capabilityPackId ? rlStats.get(capabilityPackId) ?? emptyStats() : rlGlobalStats ?? emptyStats();
   const config = capabilityPackId ? getConfig(capabilityPackId) : undefined;

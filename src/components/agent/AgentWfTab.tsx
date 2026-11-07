@@ -2,8 +2,8 @@
 
 import { NL2SkillResultView } from "@/components/common/NL2SkillResultView";
 import { NL2UIResultView } from "@/components/common/NL2UIResultView";
+import { useCreateDynamicSchema } from "@/hooks/useCreateDynamicSchema";
 import { useNLGenerationActions } from "@/hooks/useNLGenerationActions";
-import { useDynamicUIStore } from "@/stores";
 import type { NL2SkillRequest, NL2SkillResult, NL2UIRequest, NL2UIResult, SkillDefinition, UISchema } from "@/types";
 import { LayoutOutlined, SendOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { App, Button, Empty, Input, Progress, Select, Space, Tabs, Typography } from "antd";
@@ -33,7 +33,7 @@ export function AgentWfTab() {
   // NL 生成相关 action 跨域（workflowStore / skillStore）消费收敛进中立 hook（组件中立性消键）
   const { parseSkillFromNaturalLanguage, parseUIFromNaturalLanguage, parseProgress, createSkill } =
     useNLGenerationActions();
-  const createSchema = useDynamicUIStore((s) => s.createSchema);
+  const createSchema = useCreateDynamicSchema();
 
   const [skillResult, setSkillResult] = useState<NL2SkillResult | null>(null);
   const [uiResult, setUIResult] = useState<NL2UIResult | null>(null);

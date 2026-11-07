@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useEvolutionStore } from "@/stores";
+import { useEvolutionEvidence } from "@/hooks/useEvolutionPanel";
 import type { EvolutionDecision } from "@/types";
 import { Button, Card, Empty, Progress, Skeleton, Space, Tag, theme, Typography } from "antd";
 import { BarChart3, Brain, CircleDot, RefreshCw, Route, TrendingUp } from "lucide-react";
@@ -23,9 +23,7 @@ const DECISION_COLORS: Record<EvolutionDecision, string> = {
 export function EvolutionEvidencePanel({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const evidence = useEvolutionStore((s) => s.evolutionEvidence);
-  const loading = useEvolutionStore((s) => s.evidenceLoading);
-  const fetchEvolutionEvidence = useEvolutionStore((s) => s.fetchEvolutionEvidence);
+  const { evidence, loading, fetchEvolutionEvidence } = useEvolutionEvidence();
 
   const load = useCallback(() => {
     void fetchEvolutionEvidence(conversationId);

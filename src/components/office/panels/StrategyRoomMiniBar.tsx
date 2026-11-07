@@ -11,8 +11,8 @@
  * 支持折叠 / 刷新 / 跳转到 quant 页面。
  */
 
+import { useOfficeStrategies } from "@/hooks/useOfficeStrategies";
 import { investPath } from "@/lib/investRoutes";
-import { useStrategyStore } from "@/stores";
 import type { StrategyMeta, StrategyType } from "@/types/quant";
 import { Button, Empty, Spin, Tag, theme, Tooltip, Typography } from "antd";
 import { ChevronRight, RefreshCw, Target } from "lucide-react";
@@ -56,10 +56,7 @@ export function StrategyRoomMiniBar({ sceneTemplateSlug }: StrategyRoomMiniBarPr
   const { token } = theme.useToken();
   const navigate = useNavigate();
 
-  const strategies = useStrategyStore((s) => s.strategies);
-  const isLoading = useStrategyStore((s) => s.isLoading);
-  const error = useStrategyStore((s) => s.error);
-  const loadStrategies = useStrategyStore((s) => s.loadStrategies);
+  const { strategies, isLoading, error, loadStrategies } = useOfficeStrategies();
 
   const [collapsed, setCollapsed] = useState(false);
 

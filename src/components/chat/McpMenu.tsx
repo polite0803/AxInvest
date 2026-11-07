@@ -2,7 +2,8 @@
 
 import { Tooltip } from "@/components/layout/Tooltip";
 import { McpServerIcon } from "@/components/shared/McpServerIcon";
-import { useConversationStore, useMcpStore, useUIStore } from "@/stores";
+import { useMcpServerMenu } from "@/hooks/useMcpCatalog";
+import { useConversationStore, useUIStore } from "@/stores";
 import type { CreateMcpServerInput, McpServer } from "@/types";
 import { App, Badge, Button, Checkbox, Form, Input, Modal, Popover, Select, theme } from "antd";
 import { Plug } from "lucide-react";
@@ -17,9 +18,7 @@ export function McpMenu() {
   const navigate = useNavigate();
   const setSettingsSection = useUIStore((s) => s.setSettingsSection);
 
-  const mcpServers = useMcpStore((s) => s.servers);
-  const createMcpServer = useMcpStore((s) => s.createServer);
-  const updateMcpServer = useMcpStore((s) => s.updateServer);
+  const { servers: mcpServers, createServer: createMcpServer, updateServer: updateMcpServer } = useMcpServerMenu();
   const enabledMcpServerIds = useConversationStore(
     (s) => s.enabledMcpServerIds,
   );

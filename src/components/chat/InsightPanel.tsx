@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useNudgeStore } from "@/stores";
+import { useNudgeInsightFeed } from "@/hooks/useNudgeInsights";
 import type { InsightCategory } from "@/types";
 import { Lightbulb } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -27,9 +27,7 @@ export function InsightPanel() {
   const [flushTarget, setFlushTarget] = useState<"memory" | "user">("memory");
   const [error, setError] = useState(false);
   const mountedRef = useRef(true);
-  const insights = useNudgeStore((s) => s.insights);
-  const fetchInsights = useNudgeStore((s) => s.fetchInsights);
-  const memoryFlush = useNudgeStore((s) => s.memoryFlush);
+  const { insights, fetchInsights, memoryFlush } = useNudgeInsightFeed();
 
   useEffect(() => {
     mountedRef.current = true;

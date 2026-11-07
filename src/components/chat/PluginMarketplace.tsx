@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { usePluginMarketplace } from "@/hooks/usePluginMarketplace";
 import { message } from "@/lib/toast";
-import { useCapabilityStore, usePluginStore } from "@/stores";
 import type { PluginManifestDto } from "@/types";
 import { Badge, Button, Card, Descriptions, Input, Modal, Space, Tag, Typography } from "antd";
 import { Boxes, CheckCircle, Code2, Loader2, PackageSearch, XCircle } from "lucide-react";
@@ -14,22 +14,22 @@ const { Text, Title } = Typography;
 export function PluginMarketplace() {
   const { t } = useTranslation();
 
-  // 从 usePluginStore 获取状态和方法
-  const plugins = usePluginStore((s) => s.plugins);
-  const loading = usePluginStore((s) => s.loading);
-  const installing = usePluginStore((s) => s.installing);
-  const validating = usePluginStore((s) => s.validating);
-  const loadPlugins = usePluginStore((s) => s.loadPlugins);
-  const validateSource = usePluginStore((s) => s.validateSource);
-  const installPlugin = usePluginStore((s) => s.installPlugin);
-  const enablePlugin = usePluginStore((s) => s.enablePlugin);
-  const disablePlugin = usePluginStore((s) => s.disablePlugin);
-  const uninstallPlugin = usePluginStore((s) => s.uninstallPlugin);
-
-  // 能力注册表（capability_registry_dump，缺陷 #6：前端消费后端检视命令）
-  const registry = useCapabilityStore((s) => s.registry);
-  const registryLoading = useCapabilityStore((s) => s.isLoading);
-  const loadRegistry = useCapabilityStore((s) => s.loadRegistry);
+  // 插件清单 + 能力注册表读面（hook 内部聚合 pluginStore 与 capabilityStore）
+  const {
+    plugins,
+    loading,
+    installing,
+    validating,
+    loadPlugins,
+    validateSource,
+    installPlugin,
+    enablePlugin,
+    disablePlugin,
+    uninstallPlugin,
+    registry,
+    registryLoading,
+    loadRegistry,
+  } = usePluginMarketplace();
 
   // 组件本地 UI 状态（不适合放入全局 Store 的交互状态）
   const [installInput, setInstallInput] = useState("");

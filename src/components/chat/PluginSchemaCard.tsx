@@ -36,8 +36,8 @@
 
 import { DynamicUIRenderer } from "@/components/dynamicUI/DynamicUIRenderer";
 import { SchemaIdContext } from "@/components/dynamicUI/SchemaIdContext";
+import { usePluginSchemaCard } from "@/hooks/usePluginSchemaCard";
 import { permissionsForSchemaRecord } from "@/lib/dynamicUI/schemaActionPermissions";
-import { useDynamicUIStore } from "@/stores";
 import type { DynamicAction, DynamicUISchemaRecord, UISchema } from "@/types";
 import { Alert, Spin } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -70,7 +70,7 @@ export interface PluginSchemaCardProps {
  */
 export function PluginSchemaCard({ spec, onAction, style }: PluginSchemaCardProps) {
   const { t } = useTranslation();
-  const getSchema = useDynamicUIStore((s) => s.getSchema);
+  const getSchema = usePluginSchemaCard();
   const [schema, setSchema] = useState<UISchema | null>(null);
   // 记录本身留一份：权限面要从**这张卡自己的记录**判来源，不能靠全局 `currentSchema` 回查
   // （同屏多张卡片时后加载者会覆盖它 ⇒ 先渲染的那张落到 undefined ⇒ 不受限）。

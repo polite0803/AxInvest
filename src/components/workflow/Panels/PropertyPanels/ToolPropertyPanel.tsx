@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useLocalToolStore } from "@/stores";
+import { useWorkflowToolGroups } from "@/hooks/useWorkflowToolGroups";
 import { Button, Divider, Input, Select, theme } from "antd";
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,7 +27,7 @@ export const ToolPropertyPanel: React.FC<ToolPropertyPanelProps> = ({
     outputVar: "",
   };
 
-  const { groups: toolGroups, loadGroups } = useLocalToolStore();
+  const { groups: toolGroups, loadGroups } = useWorkflowToolGroups();
 
   useEffect(() => {
     if (toolGroups.length === 0) {

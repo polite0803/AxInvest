@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { SessionSearchPanel } from "@/components/search/SessionSearchPanel";
+import { useConversationWorkflowPreview } from "@/hooks/useConversationWorkflowPreview";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
 import { getConvIcon } from "@/lib/convIcon";
 import { showBackendError } from "@/lib/errorI18n";
 import {
@@ -16,15 +18,7 @@ import {
 import { invoke, logIpcError } from "@/lib/invoke";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
-import {
-  useConversationStore,
-  useKnowledgeStore,
-  useProviderStore,
-  useSettingsStore,
-  useStreamStore,
-  useUIStore,
-  useWorkflowEditorStore,
-} from "@/stores";
+import { useConversationStore, useProviderStore, useSettingsStore, useStreamStore, useUIStore } from "@/stores";
 import { isSidebarAutoSelectSuppressed, resetSidebarAutoSelectSuppression } from "@/stores/domain/conversationStore";
 import type { Conversation, Message } from "@/types";
 import type { ConversationItemType } from "@ant-design/x/es/conversations/interface";
@@ -162,12 +156,9 @@ export function ChatSidebar({
   );
   const batchDelete = useConversationStore((s) => s.batchDelete);
   const batchArchive = useConversationStore((s) => s.batchArchive);
-  const knowledgeBases = useKnowledgeStore((s) => s.bases);
-  const loadKnowledgeBases = useKnowledgeStore((s) => s.loadBases);
+  const { knowledgeBases, loadKnowledgeBases } = useKnowledgeBases();
   const activeStreams = useStreamStore((s) => s.activeStreams);
-  const loadConversationWorkflowPreview = useWorkflowEditorStore(
-    (s) => s.loadConversationWorkflowPreview,
-  );
+  const loadConversationWorkflowPreview = useConversationWorkflowPreview();
   const openWorkflowEditor = useUIStore((s) => s.openWorkflowEditor);
 
   const providers = useProviderStore((s) => s.providers);

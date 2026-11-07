@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useWorkflowKnowledgeBases } from "@/hooks/useWorkflowKnowledgeBases";
 import { message } from "@/lib/toast";
-import { useKnowledgeStore } from "@/stores";
 import { Divider, Input, InputNumber, Select, theme } from "antd";
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,7 +29,7 @@ export const VectorRetrievePropertyPanel: React.FC<
     outputVar: "",
   };
 
-  const { bases, loadBases } = useKnowledgeStore();
+  const { bases, loadBases } = useWorkflowKnowledgeBases();
 
   useEffect(() => {
     if (bases.length === 0) {

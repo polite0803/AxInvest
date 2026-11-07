@@ -9,23 +9,18 @@ import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "rea
 import { useTranslation } from "react-i18next";
 
 import { ModuleErrorBoundary } from "@/components/layout/ModuleErrorBoundary";
+import { useActivePlan, useEnsureActivePlanLoaded } from "@/hooks/useAgentPlan";
+import { useAgentStatusMessage, useAgentToolHistoryLoad } from "@/hooks/useAgentRuntime";
+import { useChatEventWiring } from "@/hooks/useChatEventWiring";
 import { useResolvedDarkMode } from "@/hooks/useResolvedDarkMode";
 import { translateBackendError } from "@/lib/errorI18n";
 import { logIpcError } from "@/lib/invoke";
-import {
-  setupAgentEventListeners,
-  setupDreamEventListeners,
-  setupPlanEventListeners,
-  setupTaskShapeApprovalListeners,
-  useAgentStore,
-  useCacheStore,
-  useCompressStore,
-  useConversationStore,
-  usePlanStore,
-  useProviderStore,
-  useSettingsStore,
-  useStreamStore,
-} from "@/stores";
+import { useCompressStore } from "@/stores/domain/compressStore";
+import { useConversationStore } from "@/stores/domain/conversationStore";
+import { useStreamStore } from "@/stores/domain/streamStore";
+import { useCacheStore } from "@/stores/feature/cacheStore";
+import { useProviderStore } from "@/stores/feature/providerStore";
+import { useSettingsStore } from "@/stores/feature/settingsStore";
 import { useTopicGroupStore } from "@/stores/feature/topicGroupStore";
 
 import { registerHighlight } from "stream-markdown";
@@ -175,26 +170,9 @@ function ChatViewInner({
     fetchCacheState();
   }, [fetchCacheState, activeConversationId]);
 
-  useEffect(() => {
-    if (!activeConversationId) {
-      return;
-    }
-    const conversation = conversations.find(
-      (c) => c.id === activeConversationId,
-    );
-    if (conversation?.mode === "agent") {
-      const { activePlans, loadActivePlan } = usePlanStore.getState();
-      if (!activePlans[activeConversationId]) {
-        void loadActivePlan(activeConversationId);
-      }
-    }
-  }, [activeConversationId, conversations]);
+  useEnsureActivePlanLoaded(activeConversationId, conversations);
 
-  useEffect(() => {
-    if (activeConversation?.mode === "agent" && activeConversationId) {
-      useAgentStore.getState().loadToolHistory(activeConversationId);
-    }
-  }, [activeConversationId, activeConversation?.mode]);
+  useAgentToolHistoryLoad(activeConversationId, activeConversation?.mode);
 
   useEffect(() => {
     if (storeError) {
@@ -203,18 +181,7 @@ function ChatViewInner({
     }
   }, [storeError, messageApi]);
 
-  useEffect(() => {
-    const cleanupAgent = setupAgentEventListeners();
-    const cleanupPlan = setupPlanEventListeners();
-    const cleanupDream = setupDreamEventListeners();
-    const cleanupTaskShapeApproval = setupTaskShapeApprovalListeners();
-    return () => {
-      cleanupAgent();
-      cleanupPlan();
-      cleanupDream();
-      cleanupTaskShapeApproval();
-    };
-  }, []);
+  useChatEventWiring();
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -229,9 +196,7 @@ function ChatViewInner({
     };
   }, []);
 
-  const currentAgentStatus = useAgentStore((s) =>
-    activeConversationId ? s.agentStatus[activeConversationId] : undefined
-  );
+  const currentAgentStatus = useAgentStatusMessage(activeConversationId);
 
   const bubbleListRef = useRef<HTMLDivElement & { scrollBoxNativeElement?: HTMLElement | null } | null>(null);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
@@ -661,7 +626,7 @@ export function ChatView({
 }
 
 function PlanCardWrapper({ conversationId }: { conversationId: string }) {
-  const plan = usePlanStore((s) => s.activePlans[conversationId]);
+  const plan = useActivePlan(conversationId);
   if (!plan) {
     return null;
   }

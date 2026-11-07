@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useSkillMutations } from "@/hooks/useSkillMutations";
 import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
-import { useSkillStore } from "@/stores";
 import { Form, Input, Modal } from "antd";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,7 +17,7 @@ export const SkillCreateModal: React.FC<SkillCreateModalProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
-  const createSkill = useSkillStore((s) => s.createSkill);
+  const { createSkill } = useSkillMutations();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -98,8 +98,7 @@ export const SkillEditModal: React.FC<SkillEditModalProps> = ({
   mode,
 }) => {
   const { t } = useTranslation();
-  const patchSkill = useSkillStore((s) => s.patchSkill);
-  const editSkill = useSkillStore((s) => s.editSkill);
+  const { patchSkill, editSkill } = useSkillMutations();
   const [content, setContent] = useState(initialContent);
   const [loading, setLoading] = useState(false);
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useEvolutionConsent } from "@/hooks/useEvolutionPanel";
 import { logIpcError } from "@/lib/invoke";
-import { useEvolutionStore } from "@/stores";
 import type { CapabilityGapProposal, CapabilityGapType } from "@/types";
 import { Badge, Button, Popover, Space, Tag, Typography } from "antd";
 import { AlertTriangle, CheckCircle, Lightbulb, Shield, ShieldOff, Sparkles, XCircle } from "lucide-react";
@@ -54,8 +54,7 @@ const GAP_TYPE_CONFIG: Record<
  */
 export const EvolutionConsentModal: React.FC = () => {
   const { t } = useTranslation();
-  const pendingConsent = useEvolutionStore((s) => s.pendingConsent);
-  const respondConsent = useEvolutionStore((s) => s.respondConsent);
+  const { pendingConsent, respondConsent } = useEvolutionConsent();
   const [loading, setLoading] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
 

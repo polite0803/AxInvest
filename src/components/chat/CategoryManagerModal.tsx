@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { useCategoryManage } from "@/hooks/useCategoryManage";
 import { message } from "@/lib/toast";
-import { useCategoryStore, useConversationStore } from "@/stores";
+import { useConversationStore } from "@/stores";
 import { type ConversationCategory, ModelRef, type NullableModelRef } from "@/types";
 import { Avatar, Button, Empty, Modal, Popconfirm, theme } from "antd";
 import { FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
@@ -32,7 +33,7 @@ export function CategoryManagerModal({
     createCategory,
     updateCategory,
     deleteCategory,
-  } = useCategoryStore();
+  } = useCategoryManage();
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<EditTarget | null>(

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { usePlanStore } from "@/stores";
+import { Tooltip } from "@/components/layout/Tooltip";
+import { usePlanHistoryPanel } from "@/hooks/usePlanPanel";
 import type { Plan } from "@/types";
 import { CheckCircleFilled, CloseCircleFilled } from "@ant-design/icons";
-const _EMPTY: never[] = [];
-import { Tooltip } from "@/components/layout/Tooltip";
 import { Badge, Button, Drawer, Tag, theme } from "antd";
 import { ClipboardList, History, RotateCcw } from "lucide-react";
 import React, { useEffect, useState } from "react";
@@ -26,10 +25,7 @@ export function PlanHistoryPanel({ conversationId }: PlanHistoryPanelProps) {
   const { token } = theme.useToken();
   const [open, setOpen] = useState(false);
 
-  const activePlan = usePlanStore((s) => s.activePlans[conversationId]);
-  const history = usePlanStore((s) => s.planHistory[conversationId] || _EMPTY);
-  const loadPlanHistory = usePlanStore((s) => s.loadPlanHistory);
-  const resumePlan = usePlanStore((s) => s.resumePlan);
+  const { activePlan, history, loadPlanHistory, resumePlan } = usePlanHistoryPanel(conversationId);
 
   // Merge active plan with history for display
   const allPlans: Plan[] = React.useMemo(() => {

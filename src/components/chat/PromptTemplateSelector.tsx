@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { usePromptTemplateStore } from "@/stores";
+import { usePromptTemplates } from "@/hooks/usePromptTemplates";
 import type { PromptTemplate } from "@/types";
 import { Input, Modal, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
@@ -15,7 +15,7 @@ export function PromptTemplateSelector({
   onSelect,
 }: PromptTemplateSelectorProps) {
   const { t } = useTranslation();
-  const { templates, loading, loadTemplates } = usePromptTemplateStore();
+  const { templates, loading, loadTemplates } = usePromptTemplates();
   const [searchText, setSearchText] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [variableValues, setVariableValues] = useState<Record<string, string>>(

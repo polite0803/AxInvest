@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useMcpToolDescriptors } from "@/hooks/useMcpCatalog";
 import i18n from "@/i18n";
-import { useMcpStore } from "@/stores";
 import { BookOpen, FileText, FolderOpen, Globe, MessageSquarePlus, Square, Terminal, Wrench } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 
@@ -95,7 +95,7 @@ export const CommandSuggest: React.FC<CommandSuggestProps> = ({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [triggerType, setTriggerType] = useState<"/" | "@" | null>(null);
-  const mcpTools = useMcpStore((s) => s.toolDescriptors);
+  const mcpTools = useMcpToolDescriptors();
 
   // Parse the current input to detect trigger
   /* eslint-disable react-hooks/set-state-in-effect */

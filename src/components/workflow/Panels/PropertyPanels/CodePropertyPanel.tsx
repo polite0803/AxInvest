@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { MonacoEditor } from "@/components/shared/MonacoEditor";
+import { useWorkflowToolGroups } from "@/hooks/useWorkflowToolGroups";
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
-import { useLocalToolStore, useProviderStore, useWorkflowEditorStore } from "@/stores";
+import { useProviderStore, useWorkflowEditorStore } from "@/stores";
 import type { ArtifactLanguage } from "@/types";
 import { Button, Divider, Dropdown, Input, Select, Tag, theme, Tooltip } from "antd";
 import { Sparkles, Wand2, Wrench } from "lucide-react";
@@ -88,7 +89,7 @@ export const CodePropertyPanel: React.FC<CodePropertyPanelProps> = ({
 
   const [aiGenerating, setAiGenerating] = useState(false);
   const [showTools, setShowTools] = useState(false);
-  const { groups: toolGroups } = useLocalToolStore();
+  const { groups: toolGroups } = useWorkflowToolGroups();
   const { nodes } = useWorkflowEditorStore();
   const { providers } = useProviderStore();
 

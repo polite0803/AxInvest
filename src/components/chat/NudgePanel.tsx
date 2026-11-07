@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useConversationStore, useNudgeStore } from "@/stores";
+import { useNudgePanelData } from "@/hooks/useNudgeInsights";
+import { useConversationStore } from "@/stores";
 import type { Nudge, PeriodicNudge } from "@/types";
 import { Bell, Check, Clock, Lightbulb, X } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -152,18 +153,18 @@ export const NudgePanel: React.FC = () => {
   const activeConversationId = useConversationStore(
     (s) => s.activeConversationId,
   );
-  const pendingNudges = useNudgeStore((s) => s.pendingNudges);
-  const closedLoopNudges = useNudgeStore((s) => s.closedLoopNudges);
-  const stats = useNudgeStore((s) => s.stats);
-  const fetchPendingNudges = useNudgeStore((s) => s.fetchPendingNudges);
-  const fetchClosedLoopNudges = useNudgeStore((s) => s.fetchClosedLoopNudges);
-  const fetchStats = useNudgeStore((s) => s.fetchStats);
-  const dismissNudge = useNudgeStore((s) => s.dismissNudge);
-  const snoozeNudge = useNudgeStore((s) => s.snoozeNudge);
-  const executeNudge = useNudgeStore((s) => s.executeNudge);
-  const acknowledgeClosedLoopNudge = useNudgeStore(
-    (s) => s.acknowledgeClosedLoopNudge,
-  );
+  const {
+    pendingNudges,
+    closedLoopNudges,
+    stats,
+    fetchPendingNudges,
+    fetchClosedLoopNudges,
+    fetchStats,
+    dismissNudge,
+    snoozeNudge,
+    executeNudge,
+    acknowledgeClosedLoopNudge,
+  } = useNudgePanelData();
 
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState(false);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useTaskShapeApprovalStore } from "@/stores";
+import { useTaskShapeApproval } from "@/hooks/useTaskShapeApproval";
 import { Button, Modal, Progress, Tag, Typography } from "antd";
 import { AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -9,10 +9,7 @@ const { Text, Paragraph } = Typography;
 
 export function TaskShapeApprovalModal() {
   const { t } = useTranslation();
-  const pendingApproval = useTaskShapeApprovalStore((s) => s.pendingApproval);
-  const loading = useTaskShapeApprovalStore((s) => s.loading);
-  const approve = useTaskShapeApprovalStore((s) => s.approve);
-  const reject = useTaskShapeApprovalStore((s) => s.reject);
+  const { pendingApproval, loading, approve, reject } = useTaskShapeApproval();
 
   if (!pendingApproval) { return null; }
 

@@ -18,7 +18,8 @@
  * `finally` 从库重读 ⇒ 界面显示的永远是库里的真源。
  */
 
-import { useOfficeStore, useStockAnalysisStore } from "@/stores";
+import { useOfficeStockContext } from "@/hooks/useOfficeStockPanels";
+import { useOfficeStore } from "@/stores";
 import type { DispatchEvent, FleetMessage } from "@/types";
 import { CONVERSATION_GROUP, conversationKey } from "@/types";
 import { Button, Input, Space, Spin, Tag, theme, Tooltip, Typography } from "antd";
@@ -44,9 +45,7 @@ export function ChatPanel({ fleetId }: { fleetId: string }) {
   const clearEvents = useOfficeStore((s) => s.clearDispatchEvents);
 
   // 注入股票业务上下文：用户在 stock-analysis 页选中的当前股票
-  const stockCode = useStockAnalysisStore((s) => s.stockCode);
-  const stockName = useStockAnalysisStore((s) => s.stockName);
-  const quote = useStockAnalysisStore((s) => s.quote);
+  const { stockCode, stockName, quote } = useOfficeStockContext();
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);

@@ -110,12 +110,6 @@
       "targetOwner": "time-travel"
     },
     {
-      "file": "src/components/stock-analysis/ScreenshotDiagnosisDashboard.tsx",
-      "target": "@/stores/feature/providerStore",
-      "kind": "store",
-      "targetOwner": "provider"
-    },
-    {
       "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
       "target": "@/components/settings/StockAnalysisSettings",
       "kind": "component",

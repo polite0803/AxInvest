@@ -9,7 +9,9 @@
  */
 
 import { invoke } from "@/lib/invoke";
-import { useCrossMarketStore } from "@/stores";
+// 经 useCrossMarket 的钳制通道拿真实 store:setState/getState 需要 store 归位逻辑
+// （invoke 失败 → errors 按区落位）保持被测,mock 掉 hook 会让负控变假绿。
+import { useCrossMarketStore } from "@/hooks/useCrossMarket";
 import type { KLine } from "@/types";
 import { render, screen } from "@testing-library/react";
 import { App } from "antd";

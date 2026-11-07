@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useCapabilityStore } from "@/stores";
+import { useCapabilityDiscovery } from "@/hooks/useCapabilityDiscovery";
 import type { CapabilityLevel, CapabilityPassportDto } from "@/types";
 import { Button, Card, Collapse, Empty, Input, message, Skeleton, Space, Tag, theme, Typography } from "antd";
 import { Database, Plug, RefreshCw, Rocket, Search, ShieldCheck, Tag as TagIcon, Zap } from "lucide-react";
@@ -44,16 +44,18 @@ function canEvolve(p: CapabilityPassportDto): boolean {
 export function CapabilityDiscoveryPanel() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const passports = useCapabilityStore((s) => s.passports);
-  const stats = useCapabilityStore((s) => s.stats);
-  const discoveryResult = useCapabilityStore((s) => s.discoveryResult);
-  const isLoading = useCapabilityStore((s) => s.isLoading);
-  const isDiscovering = useCapabilityStore((s) => s.isDiscovering);
-  const error = useCapabilityStore((s) => s.error);
-  const listPassports = useCapabilityStore((s) => s.listPassports);
-  const getStats = useCapabilityStore((s) => s.getStats);
-  const discover = useCapabilityStore((s) => s.discover);
-  const evolveCapability = useCapabilityStore((s) => s.evolveCapability);
+  const {
+    passports,
+    stats,
+    discoveryResult,
+    isLoading,
+    isDiscovering,
+    error,
+    listPassports,
+    getStats,
+    discover,
+    evolveCapability,
+  } = useCapabilityDiscovery();
 
   const [query, setQuery] = useState("");
   const [evolvingId, setEvolvingId] = useState<string | null>(null);

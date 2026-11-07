@@ -5,9 +5,16 @@ import { DropdownMenu } from "@/components/layout/DropdownMenu";
 import type { DropdownItem } from "@/components/layout/DropdownMenu";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { PROVIDER_TYPE_LABELS, SearchProviderTypeIcon } from "@/components/shared/SearchProviderIcon";
+import { useAgentModeClearActions } from "@/hooks/useAgentModeClearActions";
+import { useCreateGatewayConversation, useGatewayLinksBootstrap } from "@/hooks/useGatewayLinks";
+import { useKnowledgeBasesBootstrap } from "@/hooks/useKnowledgeBases";
 import { useLlmWikiLazyLoad } from "@/hooks/useLlmWikiLazyLoad";
+import { useMcpServersBootstrap } from "@/hooks/useMcpServers";
+import { useMemoryNamespacesBootstrap } from "@/hooks/useMemoryNamespaces";
 import { usePromptTemplateUsage } from "@/hooks/usePromptTemplateUsage";
+import { useSearchProviders, useSearchProvidersBootstrap } from "@/hooks/useSearchProviders";
 import { useVoiceGatewayKey } from "@/hooks/useVoiceGatewayKey";
+import { useVoicePreferences } from "@/hooks/useVoicePreferences";
 import { useVoiceWakeup } from "@/hooks/useVoiceWakeup";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
@@ -15,23 +22,12 @@ import { findModelByIds, modelHasCapability, supportsReasoning } from "@/lib/mod
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
 import { estimateMessageTokens, estimateTokens } from "@/lib/tokenEstimator";
-import {
-  useAgentStore,
-  useCompressStore,
-  useConversationStore,
-  useExecutionStore,
-  useGatewayLinkStore,
-  useKnowledgeStore,
-  useMcpStore,
-  useMemoryStore,
-  usePlanStore,
-  useProviderStore,
-  useSearchStore,
-  useSettingsStore,
-  useStreamStore,
-  useUIStore,
-  useVoicePreferenceStore,
-} from "@/stores";
+import { useCompressStore } from "@/stores/domain/compressStore";
+import { useConversationStore } from "@/stores/domain/conversationStore";
+import { useStreamStore } from "@/stores/domain/streamStore";
+import { useProviderStore } from "@/stores/feature/providerStore";
+import { useSettingsStore } from "@/stores/feature/settingsStore";
+import { useUIStore } from "@/stores/shared/uiStore";
 import type { PromptTemplate } from "@/types";
 import { type AttachmentInput, type RealtimeConfig } from "@/types";
 import { AudioOutlined, TeamOutlined } from "@ant-design/icons";
@@ -215,7 +211,10 @@ export function InputArea() {
   const setSearchProviderId = useConversationStore(
     (s) => s.setSearchProviderId,
   );
-  const searchProviders = useSearchStore((s) => s.providers);
+  const searchProviders = useSearchProviders();
+  // Agent→chat 模式切换清理与网关会话创建（store action 接入收敛进中立 hook）
+  const { clearAgentConversation, clearExecutionConversation, clearActivePlan } = useAgentModeClearActions();
+  const createGatewayConversation = useCreateGatewayConversation();
   // 兜底策略（三级）：
   // 1. 用户明确选择的 → 直接使用
   // 2. 未选但有启用的 → 自动取第一个
@@ -285,38 +284,15 @@ export function InputArea() {
 
   // Mount 时加载各 store 数据：依赖必须为空数组，避免 store 在 IPC 失败时
   // set 新空数组导致引用变化 → useEffect 重新执行 → 无限循环
-  useEffect(() => {
-    if ((useSearchStore.getState().providers ?? []).length === 0) {
-      useSearchStore.getState().loadProviders();
-    }
-  }, []);
-
-  useEffect(() => {
-    if ((useMcpStore.getState().servers ?? []).length === 0) {
-      useMcpStore.getState().loadServers();
-    }
-  }, []);
-
-  useEffect(() => {
-    if ((useKnowledgeStore.getState().bases ?? []).length === 0) {
-      useKnowledgeStore.getState().loadBases();
-    }
-  }, []);
-
-  useEffect(() => {
-    if ((useMemoryStore.getState().namespaces ?? []).length === 0) {
-      useMemoryStore.getState().loadNamespaces();
-    }
-  }, []);
+  useSearchProvidersBootstrap();
+  useMcpServersBootstrap();
+  useKnowledgeBasesBootstrap();
+  useMemoryNamespacesBootstrap();
 
   // LLM Wiki 数据挂载期懒加载（store 消费收敛进中立 hook，组件中立性消键）
   useLlmWikiLazyLoad();
 
-  useEffect(() => {
-    if ((useGatewayLinkStore.getState().links ?? []).length === 0) {
-      useGatewayLinkStore.getState().fetchLinks();
-    }
-  }, []);
+  useGatewayLinksBootstrap();
 
   // Set default workspace directory when in agent mode and no conversation is active
   useEffect(() => {
@@ -740,9 +716,7 @@ export function InputArea() {
     }
   }, [companionStorageKey]);
 
-  const ttsVoice = useVoicePreferenceStore((s) => s.ttsVoice);
-  const sttProviderId = useVoicePreferenceStore((s) => s.sttProviderId);
-  const ttsProviderId = useVoicePreferenceStore((s) => s.ttsProviderId);
+  const { ttsVoice, sttProviderId, ttsProviderId } = useVoicePreferences();
 
   const voiceConfig: RealtimeConfig = React.useMemo(
     () => ({
@@ -886,10 +860,9 @@ export function InputArea() {
           }
         } else {
           // Switching to chat mode: clear agent-related stores to prevent stale UI state
-          const { clearConversation } = useAgentStore.getState();
-          clearConversation(activeConversation.id);
-          useExecutionStore.getState().clearConversation(activeConversation.id);
-          usePlanStore.getState().clearActivePlan(activeConversation.id);
+          clearAgentConversation(activeConversation.id);
+          clearExecutionConversation(activeConversation.id);
+          clearActivePlan(activeConversation.id);
         }
       } finally {
         isSwitchingModeRef.current = false;
@@ -902,6 +875,9 @@ export function InputArea() {
       companionStorageKey,
       messageApi,
       t,
+      clearAgentConversation,
+      clearExecutionConversation,
+      clearActivePlan,
     ],
   );
 
@@ -942,9 +918,9 @@ export function InputArea() {
     try {
       if (!activeConversationId) {
         if (currentMode === "gateway" && selectedGatewayId) {
-          const conversationId = await useGatewayLinkStore
-            .getState()
-            .createGatewayConversation(selectedGatewayId);
+          const conversationId = await createGatewayConversation(
+            selectedGatewayId,
+          );
           useConversationStore.getState().setActiveConversation(conversationId);
         } else {
           const resolved = resolveDefaultProviderModel();
@@ -1035,6 +1011,7 @@ export function InputArea() {
     selectedGatewayId,
     effectiveSearchProviderId,
     quotedMessageId,
+    createGatewayConversation,
   ]);
 
   const handleFillLastMessage = useCallback(() => {

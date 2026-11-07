@@ -2,7 +2,7 @@
 
 import { KnowledgeBaseIcon } from "@/components/shared/KnowledgeBaseIcon";
 import { NamespaceIcon } from "@/components/shared/NamespaceIcon";
-import { useContextSourceStore } from "@/stores";
+import { useContextSources } from "@/hooks/useContextSources";
 import type { KnowledgeBase, MemoryNamespace, Wiki } from "@/types";
 import { Button, Checkbox, Radio, theme } from "antd";
 import { BookOpen, Brain, ChevronDown, ChevronRight, Library } from "lucide-react";
@@ -53,8 +53,7 @@ export function SourcePickerPanel({
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
-  const contextSources = useContextSourceStore((s) => s.sources);
-  const loadSources = useContextSourceStore((s) => s.loadSources);
+  const { contextSources, loadSources } = useContextSources();
 
   // 切换会话时加载 context sources
   useEffect(() => {

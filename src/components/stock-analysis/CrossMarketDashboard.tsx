@@ -17,7 +17,7 @@
  */
 
 import { KLineChart } from "@/components/stock-analysis/KLineChart";
-import { useCrossMarketStore } from "@/stores";
+import { useCrossMarket } from "@/hooks/useCrossMarket";
 import { Alert, App, Button, Empty, Input, Select, Space, Statistic, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
@@ -72,7 +72,7 @@ export function CrossMarketDashboard() {
     fetchIntlKline,
     fetchBenchmarkKline,
     fetchForexKline,
-  } = useCrossMarketStore();
+  } = useCrossMarket();
 
   const [codeInput, setCodeInput] = useState("");
   const [benchmarkSel, setBenchmarkSel] = useState<string>("SPX");

@@ -2,8 +2,8 @@
 
 import { useAgentPool } from "@/hooks/useAgentPool";
 import { useAgentStatus } from "@/hooks/useAgentStatus";
+import { useActivePlan } from "@/hooks/usePlanPanel";
 import { useToolCallStates } from "@/hooks/useToolCallStates";
-import { usePlanStore } from "@/stores";
 import type { PlanStep } from "@/types";
 import type { AgentPoolItem, ToolCallState } from "@/types";
 
@@ -182,7 +182,7 @@ export const ExecutionTimeline = React.memo(function ExecutionTimeline({
     return null;
   }, []);
 
-  const plan = usePlanStore((s) => s.activePlans[conversationId]);
+  const plan = useActivePlan(conversationId);
   const toolCalls = useToolCallStates();
   const poolItems = useAgentPool(conversationId);
   const agentStatus = useAgentStatus(conversationId);

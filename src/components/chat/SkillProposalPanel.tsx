@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /* eslint-disable react-refresh/only-export-components */
+import { useSkillProposals } from "@/hooks/useSkillProposals";
 import { message } from "@/lib/toast";
-import { useSkillStore } from "@/stores";
 import type { SkillProposal } from "@/types";
 import { Button, Card, Empty, Modal, Space, Spin, Tag, theme, Typography } from "antd";
 import { Check, Lightbulb, Sparkles, X } from "lucide-react";
@@ -141,7 +141,7 @@ export const SkillProposalPanel: React.FC<SkillProposalPanelProps> = ({
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [loading, setLoading] = useState(false);
-  const { loadSkillProposals, createSkillFromProposal } = useSkillStore();
+  const { loadSkillProposals, createSkillFromProposal } = useSkillProposals();
   const [localProposals, setLocalProposals] = useState<SkillProposal[]>([]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -237,7 +237,7 @@ export const SkillProposalPanel: React.FC<SkillProposalPanelProps> = ({
 };
 
 export const useSkillProposalBadge = () => {
-  const { skillProposals, loadSkillProposals } = useSkillStore();
+  const { skillProposals, loadSkillProposals } = useSkillProposals();
 
   useEffect(() => {
     loadSkillProposals();

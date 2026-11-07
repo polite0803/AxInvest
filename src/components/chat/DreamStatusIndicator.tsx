@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useDreamStore } from "@/stores";
+import { useDreamStatus } from "@/hooks/useDreamStatus";
 import { CheckCircleOutlined } from "@ant-design/icons";
 import { Brain, Moon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -16,11 +16,7 @@ import "./DreamStatusIndicator.css";
  * - 隐藏 = 空闲
  */
 export function DreamStatusIndicator() {
-  const status = useDreamStore((s) => s.status);
-  const lastResult = useDreamStore((s) => s.lastResult);
-  const totalConsolidations = useDreamStore((s) => s.totalConsolidations);
-  const totalMemories = useDreamStore((s) => s.totalMemoriesExtracted);
-  const totalPatterns = useDreamStore((s) => s.totalPatternsDiscovered);
+  const { status, lastResult, totalConsolidations, totalMemories, totalPatterns } = useDreamStatus();
   const { t } = useTranslation();
 
   const [showResult, setShowResult] = useState(false);

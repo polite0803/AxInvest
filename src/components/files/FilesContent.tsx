@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useKnowledgeFileBrowser } from "@/hooks/useKnowledgeFileBrowser";
 import { showBackendError } from "@/lib/errorI18n";
-import { useKnowledgeStore } from "@/stores";
 import { Alert, App, Button, Empty, Input, Popconfirm, Space } from "antd";
 import { Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -39,7 +39,7 @@ export function FilesContent({ activeCategory }: FilesContentProps) {
     clearError,
     revealEntry,
     deleteEntry,
-  } = useKnowledgeStore();
+  } = useKnowledgeFileBrowser();
 
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 

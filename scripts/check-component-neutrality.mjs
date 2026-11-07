@@ -79,7 +79,10 @@ const DOMAIN_STORE_OWNERSHIP = {
   //   证据：SerenityScreeningPanel.tsx:6-12（趋势智选面板读 serenityStore），后端 commands/stock_workflow/serenity.rs；
   //   ScreenshotDiagnosisDashboard.tsx:15、PaperPortfolioDashboard.tsx:14；workflowChatCard.ts:7 注释明言
   //   「生产端 stockWorkflowChatBridge 是股票域文件」（该 store 当前无组件直引，登记为域归属备用，不消账面）。
-  stockanalysis: ["serenity", "screenshotdiagnosis", "paperportfolio", "stockworkflowchatbridge"],
+  stockanalysis: ["serenity", "screenshotdiagnosis", "paperportfolio", "stockworkflowchatbridge",
+    // #222 补洞扩登（2026-11-08）：workspaceStore 被 _workspace/ 整个子树消费（shell/TabBar/Switcher/views/
+    //   useSimpleMode 及 density/integration 测试）—— 股票工作区壳层自有 store。证据：StockWorkspaceShell.tsx。
+    "workspace"],
   // workflow 域：workflowEditor（编辑器态）/ workEngine（引擎执行态）是工作流编辑器的自有 store。
   //   证据：AIPanel/AIPanel.tsx:5-6、WorkflowEditor.tsx:44、DebugPanel.tsx:9、Edges/BaseEdge.tsx:3、Nodes/BaseNode.tsx:4。
   workflow: ["workfloweditor", "workengine"],
@@ -96,9 +99,28 @@ const DOMAIN_STORE_OWNERSHIP = {
   // settings 域：deviceSync / theme / userProfile / appConfig / voicePreference 的管理 UI 唯一宿主在 settings。
   //   证据：EncryptionSettingsPanel.tsx:3,17、ThemeManager.tsx:5、UserProfileSettings.tsx:11、
   //   SettingsPanel.tsx:5-6（appConfig）、GeneralSettings.tsx:7-8（voicePreference）、RealtimePushPanel.tsx（deviceSync）。
-  settings: ["devicesync", "theme", "userprofile", "appconfig", "voicepreference"],
+  // #222 补洞扩登（2026-11-08）：settings 目录是**全功能设置面板聚集地**——下列 19 个 store 的管理面板
+  //   物理宿主在 settings/（组件名即证据），barrel 改判后逐条显形为「跨域读」，裁其域归属：
+  //   provider（ProviderSettings/ProviderList/ProviderDetail/DefaultModelSettings/AdvancedSettings/
+  //     BalanceBadge/LocalModelPanel/ModelDownloadPanel）、backup（BackupCenter/SchedulerSettings）、
+  //   localTool（LocalToolSettings/ToolManager）、mcp（McpServerSettings）、memory（MemorySettings）、
+  //   knowledge（KnowledgeBaseDocuments/PaperOverviewPanel/SourceManager/KnowledgeGraphSearchPanel）、
+  //   scheduler（SchedulerSettings）、search（SearchProviderSettings）、readingList（ReadingListSettings）、
+  //   platform（GatewayConfigPanel/MessageChannelSettings/PlatformStatusCard）、knowledgeGraph、
+  //   source（SourceManager/DirectoryImportWizard）、llmWiki（DirectoryImportWizard）、
+  //   dynamicUI（DynamicPagesSettings）、onboarding（AboutPage 重置引导）、currency（GeneralSettings 币种）、
+  //   paper（PaperOverviewPanel）、skillExtension（SettingsSidebar 开关）、knowledgeSource（SourceManager）。
+  settings: [
+    "devicesync", "theme", "userprofile", "appconfig", "voicepreference",
+    "provider", "backup", "localtool", "mcp", "memory", "knowledge", "scheduler",
+    "search", "readinglist", "platform", "knowledgegraph", "source", "llmwiki",
+    "dynamicui", "onboarding", "currency", "paper", "skillextension", "knowledgesource",
+  ],
   // layout 域：userProfile 的弹窗宿主 UserProfileModal 在 layout（全局用户资料入口）。证据：UserProfileModal.tsx:14。
   layout: ["userprofile"],
+  // link 域：网关链功能页目录（AddGatewayLinkModal/Detail/List/Models/Overview/Policies/Skills）全读
+  //   gatewayLinkStore —— 该目录整个就是 gateway-link 功能域，管理面自引。#222 补洞扩登（2026-11-08）。
+  link: ["gatewaylink"],
 };
 
 // ── 横切 store 登记表（#194 批 D 后续，2026-11-08）：这些 store 是全局关注点，任何组件域
@@ -116,6 +138,30 @@ const CROSS_CUTTING_STORES = {
   // expert：专家名册（全局清单），选择器 / 属性面板 / 聊天侧徽标都要列专家 —— 名册读面横切。
   //   证据：ExpertSelector.tsx（chat）、AgentPropertyPanel.tsx（workflow）、ExpertBadge.tsx（chat）。
   expert: "专家名册，选择器 / 徽标 / 属性面板跨域读",
+  // ── #222 补洞扩登（2026-11-08）── 以下 4 个 store 的读面横切同样是语义本相（barrel 改判后显形）：
+  // settings：全局偏好配置（模型参数 / 温度 / 语言 / 主题），任何显示模型选择或偏好读取的面板都要读。
+  //   证据：chat ModelSelector.tsx / ChatMinimap.tsx / ChatViewMessages.tsx、layout AppInitializer.tsx。
+  settings: "全局偏好配置，读面横切（ModelSelector / AppInitializer 等）",
+  // provider：LLM 提供商与模型注册表（清单数据源），任何模型选择 UI 都要列提供商。
+  //   证据：chat ModelSelector.tsx、shared ModelSelect.tsx / EmbeddingModelSelect.tsx、
+  //   workflow LLMPropertyPanel.tsx（属性面板选模型）。
+  provider: "LLM 提供商注册表，模型选择 UI 跨域读",
+  // currency：币种格式化工具（formatCny / useFormatCny），任何显示金额的面板都要读 —— 纯展示工具。
+  //   证据：devtools CostChart.tsx / TraceDetail.tsx、settings GeneralSettings.tsx、chat AgentStatsPanel.tsx。
+  currency: "币种格式化工具，金额显示面板跨域读",
+  // onboarding：新手引导状态（引导气泡全局弹出 / 完成度），全局壳与帮助页都要查引导态。
+  //   证据：layout AppHeader.tsx / AppInitializer.tsx / Sidebar.tsx、chat TabBar.tsx、help HelpPanel.tsx。
+  onboarding: "新手引导状态，全局壳与帮助页跨域读",
+  // ── #222 补洞批裁定（2026-11-08，Lane B 报告 AppInitializer 未做项）：以下 2 个 store 的消费
+  // 全部是启动序列 getState() 直读（无订阅、无渲染依赖），与 conversation（domain 层不判）、
+  // onboarding（已登记横切）、settings（:75）在同一启动三连里并列 —— 显红是登记缺位而非跨域
+  // UI 耦合；hook 化要么引入原实现没有的重渲时机（改语义），要么只是让门禁失明的绕过。
+  // gateway：网关生命周期（自启开关，AppInitializer.tsx:119 startGateway）—— 网关自启是全局
+  //   关注点（"只有开关没有执行方，2026-10-25 接通"，AppInitializer.tsx:115-123 注释自证）。
+  gateway: "网关生命周期，全局启动序列 getState 直读（AppInitializer.tsx:119）",
+  // skillExtension：技能扩展清单预热（AppInitializer.tsx:142 fetchSkills，启动三连之一）。
+  //   ⚠ 键必须写 norm 形态（全小写）：本表 lookup 只归一查询侧（storeOwner），键侧不归一。
+  skillextension: "技能扩展清单预热，全局启动序列 getState 直读（AppInitializer.tsx:142）",
 };
 
 // ── 双向同域组（#194 存疑 7 裁定，2026-11-08）：组内任两域**互认同域**（store 支双向豁免）。
@@ -137,6 +183,71 @@ export function isBidirectionalSameGroup(ownerA, ownerB) {
   return BIDIRECTIONAL_GROUPS.some(
     (g) => g.includes(normOwner(ownerA)) && g.includes(normOwner(ownerB)),
   );
+}
+
+// ── @/stores barrel 改判（#222 覆盖洞，2026-11-08）──
+// 洞：组件写 `import { useXStore } from "@/stores"`（走 barrel）时 resolveImportTarget 得
+// "src/stores"，store 支正则 /^src\/stores\/feature\// 不命中 ⇒ 整条 import 静默绕过扫描。
+// 实测组件目录 246 处 barrel 导入。修法：启动时解析 src/stores/index.ts 的 re-export 表
+// （值导出符号 → 真实 store 路径），barrel 导入按**导入符号**逐个改判回真实路径再走原判定。
+// 判定链（sameOwner / DOMAIN_STORE_OWNERSHIP / 横切 / 双向）与深路径完全共用，不给 barrel 任何额外豁免。
+// 只收**值导出**：`export type` 与 `{ type X }` 修饰的符号不入表 —— 类型导入无运行时依赖，不判。
+// `export *` 在 src/stores/index.ts 中不存在（2026-11-08 grep 证实零命中）。若未来引入，
+// buildStoreBarrelMap 不会展开它 ⇒ 对应符号查表 miss 静默跳过 ⇒ **重新打开覆盖洞**。
+// 引入者必须同步扩展 buildStoreBarrelMap 递归解析子模块，并补 selftest 断言。
+let storeBarrelMap = new Map();
+
+/** 注入 barrel 映射（main 读盘构建后注入；selftest 注入手造表保持纯函数可测）。 */
+export function setStoreBarrelMap(map) {
+  storeBarrelMap = map;
+}
+
+/** 解析 stores barrel 文本 → Map<导出符号名, "src/stores/…">。仅值导出；`A as B` 记对外名 B。 */
+export function buildStoreBarrelMap(content) {
+  const map = new Map();
+  const EXPORT_RE = /export\s*\{([^}]*)\}\s*from\s*["'](\.[^"']+)["']/g;
+  let em;
+  while ((em = EXPORT_RE.exec(content)) !== null) {
+    const base = "src/stores/" + em[2].replace(/^\.\//, "").replace(/\.js$/, "");
+    for (const raw of em[1].split(",")) {
+      const item = raw.trim();
+      if (!item || item.startsWith("type ")) { continue; }
+      const asM = item.match(/^(\S+)\s+as\s+(\S+)$/);
+      const exportedName = asM ? asM[2] : item;
+      map.set(exportedName, base);
+    }
+  }
+  return map;
+}
+
+/**
+ * 提取 import 语句的导入符号（as 前原始名 —— 那是模块侧导出名，即 barrel map 的 key）。
+ * start = 语句的 `import` 起点索引，end = FROM_RE 本次 match 的结束索引。
+ * type-only 整条语句（`import type { X } from …`）返回 []（无运行时依赖）。
+ */
+export function importedNamesAt(content, start, end) {
+  const stmt = content.slice(start, end);
+  if (/^import\s+type\b/.test(stmt)) { return []; }
+  const braceM = stmt.match(/\{([^}]*)\}/);
+  if (!braceM) { return []; } // default / namespace 导入：barrel 无此形态，跳过
+  const names = [];
+  for (const raw of braceM[1].split(",")) {
+    const item = raw.trim();
+    if (!item || item.startsWith("type ")) { continue; }
+    const asM = item.match(/^(\S+)\s+as\s+(\S+)$/);
+    names.push(asM ? asM[1] : item);
+  }
+  return names;
+}
+
+/** 单条判定结果的违规裁决（store 支查映射/横切/双向三支，component 支查 NEUTRAL）——深路径与 barrel 共用。 */
+export function isViolationOf(j, selfOwner) {
+  const sameOwner = normOwner(j.targetOwner) === normOwner(selfOwner);
+  const sameDomain = j.kind === "store"
+    && (isSameDomain(selfOwner, j.targetOwner)
+      || isCrossCuttingStore(j.targetOwner)
+      || isBidirectionalSameGroup(selfOwner, j.targetOwner));
+  return j.kind === "store" ? !sameOwner && !sameDomain : !sameOwner && !isNeutralOwner(j.targetOwner);
 }
 
 // ── 与存量实测同一套 resolve（@/ 别名 + 相对路径 → src/… posix）──
@@ -262,22 +373,28 @@ export function findViolations({ file, content, owner }) {
     if (!resolved) { continue; }
     const selfOwner = owner ?? ownerOf(resolved);
     if (!selfOwner) { continue; }
+    // ── @/stores barrel 改判（#222）：按导入符号逐个映射回真实 store 路径再判定 ──
+    // 未命中映射的符号（纯类型 / 非 store 工具函数）无 store 语义，跳过；target 存原形 "@/stores"。
+    if (resolved === "src/stores" || resolved === "src/stores/index") {
+      const stmtStart = content.lastIndexOf("import", m.index);
+      for (const name of importedNamesAt(content, stmtStart, FROM_RE.lastIndex)) {
+        const realPath = storeBarrelMap.get(name);
+        if (!realPath) { continue; }
+        const jb = adjudicateImport(realPath);
+        if (!jb) { continue; }
+        if (isViolationOf(jb, selfOwner)) {
+          violations.push({ file, target: spec, resolvedTarget: jb.target, kind: jb.kind, targetOwner: jb.targetOwner });
+        }
+      }
+      continue;
+    }
     const j = adjudicateImport(resolved);
     if (!j) { continue; }
     // owner 两支（selfOwner / targetOwner）同走 normOwner 归一；NEUTRAL 支逐字命中登记表（#200）。
     // 两支故意不同判据的理由见 normOwner 注释的作用域段，不要「顺手统一」成三支一起归一或一起全等。
     // targetOwner 与 target 在条目里**存原形**，棘轮键不受归一影响（见 normOwner 注释的作用域）。
-    const sameOwner = normOwner(j.targetOwner) === normOwner(selfOwner);
-    // C 档域归属映射**只作用于 store 支**：该 store 登记为 selfOwner 域自有 ⇒ 视同自引。
-    // component 支不查映射（映射值是 store 名，不是组件目录名；若也查会让同名组件目录白拿豁免）。
-    // 未登记的跨域 store / 反向 / 命名形态变体一律仍红 —— isSameDomain 精确命中登记表，不自动扩（#200）。
-    // 横切 store 与双向同域组同只作用于 store 支，三支并列（登记见各自表头注释）。
-    const sameDomain = j.kind === "store"
-      && (isSameDomain(selfOwner, j.targetOwner)
-        || isCrossCuttingStore(j.targetOwner)
-        || isBidirectionalSameGroup(selfOwner, j.targetOwner));
-    const isViolation = j.kind === "store" ? !sameOwner && !sameDomain : !sameOwner && !isNeutralOwner(j.targetOwner);
-    if (isViolation) {
+    // 判定体已抽 isViolationOf（深路径与 #222 barrel 改判共用，不给 barrel 额外豁免）。
+    if (isViolationOf(j, selfOwner)) {
       violations.push({ file, target: spec, resolvedTarget: j.target, kind: j.kind, targetOwner: j.targetOwner });
     }
   }
@@ -436,13 +553,14 @@ function runSelftest() {
   check(n1c.length === 0, "归一正控④b：第三个碰撞组 llm-wiki/llmWiki 同形消除（store 与 component 两支都归一）");
 
   // ② 负控：归一≠什么都不报。真跨域必须仍红
+  // #222 补洞扩登后 provider 已横切（读面跨域），不能再用它当「未登记跨域」反例 ⇒ 换 plan
   const n2 = findViolations({
     file: "src/components/stock-analysis/BacktestPage.tsx",
-    content: 'import { useProviderStore } from "@/stores/feature/providerStore";\n',
+    content: 'import { usePlanStore } from "@/stores/feature/planStore";\n',
     owner: "stock-analysis",
   });
-  check(n2.length === 1 && n2[0].kind === "store" && n2[0].targetOwner === "provider",
-    "归一负控②：stock-analysis 引 providerStore 仍必须红");
+  check(n2.length === 1 && n2[0].kind === "store" && n2[0].targetOwner === "plan",
+    "归一负控②：stock-analysis 引 planStore 仍必须红");
   const n2b = findViolations({
     file: "src/components/multi-agent/X.tsx",
     content: 'import { A } from "@/stores/feature/stockAnalysisStore";\n',
@@ -515,22 +633,25 @@ function runSelftest() {
   check(floorB.length === 1 && floorB[0].includes("条件 b"),
     "空洞防护负控 b：条件 a 已过（1000 ≥ 300）但基线面 1001 > 扫描面 1000 ⇒ 红，且报的是条件 b ⇒ 两条锚各自独立生效");
 
-  // 未合并组自证：gatewayLink（store 剥后缀名）与 gateway / link（两个不同目录）不许归一成同名
+  // 未合并组自证：gatewayLink（store 剥后缀名）不许与任一目录名归一成同名。
+  // #222 补洞扩登后 link 域已登记 gatewaylink（link→gatewayLinkStore 豁免），
+  // 原反例组合失效 ⇒ 换同样未登记 gatewaylink 的 multi-agent，钉住的是归一逻辑不是登记面
   const n4 = findViolations({
-    file: "src/components/link/X.tsx",
+    file: "src/components/multi-agent/X.tsx",
     content: 'import { A } from "@/stores/feature/gatewayLinkStore";\n',
-    owner: "link",
+    owner: "multi-agent",
   });
-  check(n4.length === 1, "归一负控：link 引 gatewayLinkStore 仍红 ⇒ 归一未把 gatewayLink 与 link 合并");
+  check(n4.length === 1, "归一负控：multi-agent 引 gatewayLinkStore 仍红 ⇒ 归一未把 gatewayLink 与目录名合并");
 
   // ⑤ 键形态钉住：棘轮键 = file + " → " + import 字面量原文；归一不许渗进 target/targetOwner
   const k1 = findViolations({
     file: "src/components/stock-analysis/BacktestPage.tsx",
-    content: 'import { useProviderStore } from "@/stores/feature/providerStore";\n',
+    content: 'import { usePlanStore } from "@/stores/feature/planStore";\n',
     owner: "stock-analysis",
   });
-  check(k1.length === 1 && k1[0].target === "@/stores/feature/providerStore" && k1[0].targetOwner === "provider" &&
-      k1[0].resolvedTarget === "src/stores/feature/providerStore", "键形态：target/targetOwner 存原形，未归一");
+  check(k1.length === 1 && k1[0].target === "@/stores/feature/planStore" && k1[0].targetOwner === "plan" &&
+      k1[0].resolvedTarget === "src/stores/feature/planStore", "键形态：target/targetOwner 存原形，未归一");
+      // 注：原用 providerStore 当反例 —— #222 扩登后 provider 横切 ⇒ 绿，换未登记的 plan 钉同一键形态
   const k2 = findViolations({
     file: "src/components/multi-agent/X.tsx",
     content: 'import { A } from "@/components/stock-analysis/Panel";\n',
@@ -547,14 +668,15 @@ function runSelftest() {
     owner: "stock-analysis",
   });
   check(d1.length === 0, "C 档正控①：stock-analysis 引登记自有 store serenityStore 不得假阳性");
-  // ② 负控：未登记的跨域（chat→providerStore）仍红 —— 映射不是「豁免一切跨域」
+  // ② 负控：未登记的跨域（chat→planStore）仍红 —— 映射不是「豁免一切跨域」。
+  //   注：不能用 providerStore 当反例 —— provider 已横切登记（#222 扩登）⇒ 绿；plan 未登记。
   const d2 = findViolations({
     file: "src/components/chat/X.tsx",
-    content: 'import { useProviderStore } from "@/stores/feature/providerStore";\n',
+    content: 'import { usePlanStore } from "@/stores/feature/planStore";\n',
     owner: "chat",
   });
-  check(d2.length === 1 && d2[0].kind === "store" && d2[0].targetOwner === "provider",
-    "C 档负控②：chat 引未登记跨域 providerStore 仍必须红（映射只识别本域自有 store，不豁免跨域）");
+  check(d2.length === 1 && d2[0].kind === "store" && d2[0].targetOwner === "plan",
+    "C 档负控②：chat 引未登记跨域 planStore 仍必须红（映射只识别本域自有 store，不豁免跨域）");
   // ③ 负控：映射不许泛化 —— workflowEditor 登记在 workflow 域，stock-analysis 引它仍红
   const d3 = findViolations({
     file: "src/components/stock-analysis/X.tsx",
@@ -586,21 +708,112 @@ function runSelftest() {
   check(d6.length === 1 && d6[0].kind === "component" && d6[0].targetOwner === "theme",
     "C 档负控⑥：settings 引 theme 组件目录仍红 ⇒ 域归属映射只作用 store 支，不渗进 component 支");
 
+  // ── #222 barrel 改判正负控（2026-11-08）──
+  // 手造映射表（不读盘，保持 selftest 纯函数）：覆盖 type 修饰 / as 改名两种行形。
+  setStoreBarrelMap(buildStoreBarrelMap([
+    'export { useVoiceStore } from "./feature/voiceStore";',
+    'export { useAppConfigStore } from "./feature/appConfigStore";',
+    'export { useThemeStore } from "./feature/themeStore";',
+    'export { type BuddyInfo, useBuddyStore } from "./feature/buddyStore";',
+    'export { useCurrencyStore as useMoneyStore } from "./feature/currencyStore";',
+    'export { usePlanStore } from "./feature/planStore";',
+  ].join("\n")));
+  // ① buildStoreBarrelMap：type 修饰跳过 / as 记对外名 / 值导出全收
+  const bmap = storeBarrelMap;
+  check(bmap.get("useVoiceStore") === "src/stores/feature/voiceStore" &&
+      bmap.get("useMoneyStore") === "src/stores/feature/currencyStore" &&
+      bmap.get("BuddyInfo") === undefined && bmap.get("useBuddyStore") === "src/stores/feature/buddyStore" &&
+      bmap.size === 6,
+    "#222 正控①：barrel 映射 type 修饰跳过 / as 记对外名 useMoneyStore / 值导出全收（size 6）");
+  // ② 正控：chat 经 barrel 引未登记 voice store ⇒ 红，target 存原形 "@/stores"，resolvedTarget 为深路径
+  const b1 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import { useVoiceStore } from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b1.length === 1 && b1[0].kind === "store" && b1[0].targetOwner === "voice" &&
+      b1[0].target === "@/stores" && b1[0].resolvedTarget === "src/stores/feature/voiceStore",
+    "#222 正控②：chat 经 barrel 引 voiceStore 红且 target 存原形 '@/stores'（棘轮键不受改判影响）");
+  // ③ 负控：横切 store 经 barrel 同豁免（判定链与深路径共用，无额外豁免也无额外歧视）
+  const b2 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import { useAppConfigStore } from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b2.length === 0, "#222 负控③：横切 appconfig 经 barrel 同豁免");
+  // ④ 负控：域自有登记对经 barrel 同豁免（settings → theme）
+  const b3 = findViolations({
+    file: "src/components/settings/X.tsx",
+    content: 'import { useThemeStore } from "@/stores";\n',
+    owner: "settings",
+  });
+  check(b3.length === 0, "#222 负控④：settings→theme 登记对经 barrel 同豁免");
+  // ⑤ 正控：混合语句 { type X, useY } 只判值符号 useVoiceStore 一条（type 符号无运行时依赖）。
+  //   注：buddy 不能用 —— chat 域登记了 buddy 自有 ⇒ 绿；voice 未登记给 chat ⇒ 红。
+  const b4 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import {\n  type BuddyInfo,\n  useVoiceStore,\n} from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b4.length === 1 && b4[0].targetOwner === "voice",
+    "#222 正控⑤：多行混合语句只判值符号 voice 一条（type 符号跳过、无重复计数）");
+  // ⑥ 负控：type-only 整条语句不判（无运行时依赖）
+  const b5 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import type { useVoiceStore } from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b5.length === 0, "#222 负控⑥：type-only import 不判");
+  // ⑦ 负控：符号不在映射（非 store 工具函数）⇒ 无 store 语义跳过
+  const b6 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import { formatCny } from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b6.length === 0, "#222 负控⑦：映射外符号（工具函数）跳过");
+  // ⑧ 正控：连续两条 import（深路径 + barrel）互不干扰，起点 lastIndexOf 不错位。
+  //   两条都引 voice（chat 未登记 ⇒ 各红一条），target 一深一 barrel。
+  const b7 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import { useVoiceStore } from "@/stores/feature/voiceStore";\n' +
+      'import { useVoiceStore } from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b7.length === 2 &&
+      b7.some((v) => v.target === "@/stores/feature/voiceStore") &&
+      b7.some((v) => v.target === "@/stores"),
+    "#222 正控⑧：深路径 + barrel 连续两条各抓一条，语句起点不错位");
+  // ⑨ as 改名的导入侧取 as 前原始名（= 模块导出名，即 map key）——plan 未登记给 chat ⇒ 红。
+  //   注：不能用 currency 当反例 —— currency 已横切登记 ⇒ 绿；plan 仍是要抓的跨域。
+  const b8 = findViolations({
+    file: "src/components/chat/X.tsx",
+    content: 'import { usePlanStore as plan } from "@/stores";\n',
+    owner: "chat",
+  });
+  check(b8.length === 1 && b8[0].targetOwner === "plan",
+    "#222 正控⑨：导入侧 as 前原始名 usePlanStore 命中映射 ⇒ plan 跨域红");
+
   if (fail > 0) { return false; }
   console.log(
     `SELFTEST OK（共 ${total} 条断言 · 失败 ${fail}）：` +
       "resolve（@/ 与相对路径）/ 自引剥后缀 / 跨 feature 双向负控 / " +
       "owner 两支归一正控 3 组同 owner（stockAnalysis·multiAgent·llmWiki）+ ③e 双支合钉 / " +
-      "owner 归一负控（providerStore·跨 kebab·multiAgent×stockAnalysis·gatewayLink 未合并）/ " +
+      "owner 归一负控（planStore·跨 kebab·multiAgent×stockAnalysis·gatewayLink 未合并）/ " +
       "NEUTRAL 精确匹配（③c 登记名豁免·③d 未登记变体必须红）/ norm 不剥后缀 / " +
       "棘轮键存原形 / 空洞通过防护双锚（a 绝对下界·b 相对基线面）/ " +
-      "C 档域归属映射（①登记对豁免·②未登记跨域仍红·③不泛化·④单向·⑤isSameDomain 归一·⑥仅 store 支）全部通过"
+      "C 档域归属映射（①登记对豁免·②未登记跨域仍红·③不泛化·④单向·⑤isSameDomain 归一·⑥仅 store 支）+ " +
+      "#222 barrel 改判（①映射表 type/as 形态·②原形 target+深路径 resolved·③横切同豁免·④登记对同豁免·" +
+      "⑤混合语句只判值符号·⑥type-only 不判·⑦映射外跳过·⑧连续 import 不错位·⑨as 前原始名命中）全部通过"
   );
   return true;
 }
 
 // ── main ──
 if (SELFTEST) { process.exit(runSelftest() ? 0 : 1); }
+
+// 库模式：对账/普查脚本 import 本文件的导出函数时设 NEUTRALITY_LIB=1，跳过 main ——
+// main 顶层会 process.exit（判定红即退 1），import 方还没来得及用导出函数就被杀。
+async function runMain() {
 
 if (!existsSync(SRC_COMPONENTS)) {
   console.error(`FAIL: src/components 不存在（应含本仓全部组件目录）—— 本轮对组件中立性**零验证**，` +
@@ -609,6 +822,18 @@ if (!existsSync(SRC_COMPONENTS)) {
     `② 构建/裁剪产物 ⇒ 门禁不该在无源码的树里跑（此时 CI 该 skip 整个 step，而不是让它报绿）。`);
   process.exit(1);
 }
+
+// ── #222 barrel 改判的前置：读 src/stores/index.ts 构建「符号 → 真实 store 路径」映射 ──
+// 缺失即 FAIL（与 SRC_COMPONENTS 同一口径）：barrel 改判依赖该表，读不到 ⇒ 246 处 barrel
+// 导入全部漏检 ⇒ 「没读到」不等于「没有违规」。
+const STORES_INDEX = join(root, "src/stores/index.ts");
+if (!existsSync(STORES_INDEX)) {
+  console.error(`FAIL: src/stores/index.ts 不存在 —— #222 barrel 改判失去映射来源，` +
+    `组件里 from "@/stores" 的导入将整批漏检。若 barrel 被改名/拆除（#190 分批计划），` +
+    `同步本文件的 STORES_INDEX 并复核 barrel 改判断言。`);
+  process.exit(1);
+}
+setStoreBarrelMap(buildStoreBarrelMap(readFileSync(STORES_INDEX, "utf8")));
 
 const allowlist = existsSync(ALLOWLIST_PATH)
   ? JSON.parse(readFileSync(ALLOWLIST_PATH, "utf8"))
@@ -704,3 +929,8 @@ if (newViolations.length > 0) {
 
 console.log(`PASS: 无新增违规（基线 ${baseKeys.size} 条，本轮已修复 ${fixedCount} 条可择机 --update-baseline 收紧）。`);
 process.exit(0);
+}
+
+if (process.env.NEUTRALITY_LIB !== "1") {
+  runMain().catch((e) => { console.error(e); process.exit(1); });
+}

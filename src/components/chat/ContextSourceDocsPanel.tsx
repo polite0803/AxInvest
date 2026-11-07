@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useKnowledgeStore } from "@/stores";
-import { useMemoryStore } from "@/stores";
-import { useContextSourceStore } from "@/stores";
-import { useWikiStore } from "@/stores";
+import { useContextSourceDocs } from "@/hooks/useContextSourceDocs";
 import type { KnowledgeDocument, MemoryItem, Note } from "@/types";
 import { Checkbox, Empty, theme, Tooltip } from "antd";
 import { FileText, Loader2 } from "lucide-react";
@@ -35,15 +32,16 @@ export function ContextSourceDocsPanel({
 }: ContextSourceDocsPanelProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const setDocIds = useContextSourceStore((s) => s.setDocIds);
-
   // 各 store 的文档加载与列表（按 sourceType 选择性订阅）
-  const knowledgeDocuments = useKnowledgeStore((s) => s.documents);
-  const loadKnowledgeDocuments = useKnowledgeStore((s) => s.loadDocuments);
-  const memoryItems = useMemoryStore((s) => s.items);
-  const loadMemoryItems = useMemoryStore((s) => s.loadItems);
-  const wikiNotes = useWikiStore((s) => s.notes);
-  const loadWikiNotes = useWikiStore((s) => s.loadNotes);
+  const {
+    setDocIds,
+    knowledgeDocuments,
+    loadKnowledgeDocuments,
+    memoryItems,
+    loadMemoryItems,
+    wikiNotes,
+    loadWikiNotes,
+  } = useContextSourceDocs();
 
   const [loading, setLoading] = useState(false);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);

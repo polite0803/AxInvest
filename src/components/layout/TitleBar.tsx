@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import appLogo from "@/assets/image/logo.png";
+import { useTitleBarBackup } from "@/hooks/useTitleBarBackup";
 import { useUpdateChecker } from "@/hooks/useUpdateChecker";
 import { TITLEBAR_ICON_COLORS } from "@/lib/iconColors";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
-import { useBackupStore, useSettingsStore, useUIStore } from "@/stores";
+import { useSettingsStore, useUIStore } from "@/stores";
 import type { PageKey } from "@/types";
 import { App, Divider, Popover, Space, Spin, theme, Typography } from "antd";
 import {
@@ -233,7 +234,7 @@ export function TitleBar() {
     string | null
   >(null);
 
-  const { backupSettings, loadBackupSettings } = useBackupStore();
+  const { backupSettings, loadBackupSettings } = useTitleBarBackup();
   const evolutionStatus = useEvolutionStatus();
 
   const fmtCountdown = useCallback((ms: number) => {

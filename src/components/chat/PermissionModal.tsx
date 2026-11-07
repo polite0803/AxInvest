@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useApproveToolUse, usePendingPermissions } from "@/hooks/useAgentRuntime";
 import { logIpcError } from "@/lib/invoke";
-import { useAgentStore } from "@/stores";
 import type { PermissionRequestEvent } from "@/types";
 import { Button, Modal, Space, Tag, theme, Typography } from "antd";
 import type { GlobalToken } from "antd/es/theme/interface";
@@ -124,8 +124,8 @@ function generateOperationSummary(
 export const PermissionModal: React.FC = () => {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const pendingPermissions = useAgentStore((s) => s.pendingPermissions);
-  const approveToolUse = useAgentStore((s) => s.approveToolUse);
+  const pendingPermissions = usePendingPermissions();
+  const approveToolUse = useApproveToolUse();
 
   // 当前显示的权限请求（取 pending 列表中的第一个）
   const pendingEntries = useMemo(

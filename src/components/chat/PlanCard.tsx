@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { usePlanStore } from "@/stores";
+import { usePlanActions } from "@/hooks/usePlanPanel";
 import type { Plan, PlanStep, PlanStepStatus } from "@/types";
 import {
   CheckCircleFilled,
@@ -89,12 +89,7 @@ export function PlanCard({
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
-  const approvePlan = usePlanStore((s) => s.approvePlan);
-  const rejectPlan = usePlanStore((s) => s.rejectPlan);
-  const modifyStep = usePlanStore((s) => s.modifyStep);
-  const resumePlan = usePlanStore((s) => s.resumePlan);
-  const cancelPlan = usePlanStore((s) => s.cancelPlan);
-  const loading = usePlanStore((s) => s.loading[conversationId]);
+  const { approvePlan, rejectPlan, modifyStep, resumePlan, cancelPlan, loading } = usePlanActions(conversationId);
 
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   const [localSteps, setLocalSteps] = useState<PlanStep[]>(plan.steps);

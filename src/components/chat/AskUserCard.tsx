@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useAgentStore } from "@/stores";
+import { useRespondAskUser } from "@/hooks/useAgentRuntime";
 import { Button, Card, Input, Radio, Space, theme, Typography } from "antd";
 import { CheckCircle2, Loader2, MessageCircleQuestion, Send } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
@@ -28,7 +28,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [appeared, setAppeared] = useState(false);
-  const respondAskUser = useAgentStore((s) => s.respondAskUser);
+  const respondAskUser = useRespondAskUser();
 
   useEffect(() => {
     const timer = setTimeout(() => setAppeared(true), 50);

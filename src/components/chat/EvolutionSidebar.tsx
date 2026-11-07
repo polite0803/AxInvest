@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useNudgeStore } from "@/stores";
+import { useNudgeSidebarSummary } from "@/hooks/useNudgeInsights";
 import { theme } from "antd";
 import { X } from "lucide-react";
 import { useEffect } from "react";
@@ -22,11 +22,8 @@ interface EvolutionSidebarProps {
 export function EvolutionSidebar({ onClose }: EvolutionSidebarProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const insightCount = useNudgeStore((s) => s.insights.length);
-  const pendingNudges = useNudgeStore((s) => s.pendingNudges);
-  const closedLoopNudges = useNudgeStore((s) => s.closedLoopNudges);
-  const fetchInsights = useNudgeStore((s) => s.fetchInsights);
-  const fetchClosedLoopNudges = useNudgeStore((s) => s.fetchClosedLoopNudges);
+  const { insightCount, pendingNudges, closedLoopNudges, fetchInsights, fetchClosedLoopNudges } =
+    useNudgeSidebarSummary();
 
   const nudgeCount = pendingNudges.length
     + closedLoopNudges.filter((n) => !n.acknowledged).length;

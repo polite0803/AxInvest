@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useAgentPauseResume, useAgentQueryStats } from "@/hooks/useAgentRuntime";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
-import { useAgentStore, useConversationStore, useCurrencyStore, useStreamStore } from "@/stores";
+import { useConversationStore, useCurrencyStore, useStreamStore } from "@/stores";
 import { Activity, AlertTriangle, Clock, HelpCircle, IterationCw, Pause, Play, Shield, Wrench } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -54,12 +55,8 @@ export const AgentStatsPanel: React.FC = () => {
     ? activeConversationId in activeStreams
     : false;
   const streamingMessageId = useStreamStore((s) => s.streamingMessageId);
-  const pauseAgent = useAgentStore((s) => s.pauseAgent);
-  const resumeAgent = useAgentStore((s) => s.resumeAgent);
-  const isPaused = useAgentStore((s) => s.isAgentPaused);
-  const currentQueryStats = useAgentStore((s) =>
-    streamingMessageId ? (s.queryStats[streamingMessageId] ?? null) : null
-  );
+  const { pauseAgent, resumeAgent, isAgentPaused: isPaused } = useAgentPauseResume();
+  const currentQueryStats = useAgentQueryStats(streamingMessageId);
   const prog = stats?.executionProgress ?? null;
 
   const startTimeRef = useRef(0);

@@ -13,10 +13,10 @@ use sea_orm::ActiveModelTrait;
 use tauri::State;
 
 use axagent_company_runtime::opc::{
-    AnalyticsService, BlogPost, ContactSubmission, ContentAsset, ContentAssetService,
-    CreateBlogPostInput, CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput,
-    CreateKpiInput, CreateLandingPageInput, CreateProjectInput, CreatePublishScheduleInput,
-    Customer, CustomerFilter, CustomerService, DashboardSummary, DefaultAnalyticsService,
+    AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService,
+    CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput, CreateKpiInput,
+    CreateLandingPageInput, CreateProjectInput, CreatePublishScheduleInput, Customer,
+    CustomerFilter, CustomerService, DashboardSummary, DefaultAnalyticsService,
     DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService, DefaultProjectService,
     DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice, Invoice, InvoiceService,
     InvoiceStatus, KpiRecord, LandingPage, Milestone, Project, ProjectFilter, ProjectService,
@@ -441,38 +441,6 @@ pub async fn opc_publish_landing_page(
     })
 }
 
-// ── Blog Post Commands ──────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建博客文章")]
-#[tauri::command]
-pub async fn opc_create_blog_post(
-    state: State<'_, AppState>,
-    input: CreateBlogPostInput,
-) -> Result<BlogPost, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.create_blog_post(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "发布博客文章")]
-#[tauri::command]
-pub async fn opc_publish_blog_post(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<BlogPost, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.publish_blog_post(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 // ── Contact Commands ────────────────────────────────────────────────
 
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出联系提交")]
@@ -748,19 +716,6 @@ pub async fn opc_create_work_item(
 pub async fn opc_delete_landing_page(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let svc = DefaultSiteService::new(state.harness.db().clone());
     svc.delete_landing_page(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 删除博客文章（修复 P0-5）。#180-③：判据同上（走 service，缺行 ⇒ `NotFound`）。
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除博客文章")]
-#[tauri::command]
-pub async fn opc_delete_blog_post(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.delete_blog_post(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,

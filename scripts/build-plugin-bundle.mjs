@@ -550,10 +550,11 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36 第 5 批）：worker 通道 + 2 条命名命令（博客列表 = 只读接缝取数、发布博客 = 写面第一 op），待 P6.2 逐批接入",
+      "OPC 域功能包（#36 第 5 批）：worker 通道 + 4 条命名命令（博客列表 = 只读接缝取数；发布 / 删除 / 新建 = opc.store 写面）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
-    // ⚠ `write` 是**本批新加**的第二条：宿主分派层 `worker.rs` 的 `required_permission_for`
-    // 给 `("opc.store","publish_blog_post")` 登记了 `Write`，而 `has_permission` 是**精确
+    // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
+    // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
+    // 三个写 op 登记了 `Write`，而 `has_permission` 是**精确
     // `contains`**（刻意不套 `implies_*`，免得 `subprocess_execution` 这类宽权限悄悄补齐写面
     // 准入）⇒ 清单缺这一条时登记即拒：命令会在接缝调用前落 `PLUGIN_PERMISSION_DENIED`，
     // 表现为「插件装得上、describe 正常、发布恒失败」。权限与 op 登记必须同批。
@@ -579,8 +580,8 @@ function opcManifest({ version, binaryName, sha256 }) {
         },
       },
       {
-        // 双声明中途形态（先例 #144）：宿主 `commands/opc.rs` 的同名 Tauri 命令**仍在**，
-        // 走 service 并回整行 BlogPost；本条走插件通道，回宿主的两态枚举串。前端切通道属下一批。
+        // 先例 #144 的双声明已在 #36 blog 刀收口：宿主 `commands/opc.rs` 的同名 Tauri 命令
+        // 已删，本条是发布博客的唯一通道，回宿主的两态枚举串。
         name: "opc_publish_blog_post",
         description: "发布一篇 OPC 博客（经宿主 opc.store 写面；回 published / not_found 两态）",
         command: "worker://opc_publish_blog_post",
@@ -590,6 +591,38 @@ function opcManifest({ version, binaryName, sha256 }) {
             id: { type: "string", description: "文章 id（接缝主键；空值由宿主 provider 拒收）" },
           },
           required: ["id"],
+        },
+      },
+      {
+        // 删除：入参同 publish（平铺 `id`），出参是三态枚举串逐字透传 —— 命令层与宿主
+        // provider 各判一半（形状 / 语义），前端对 not_found / protected 自行翻提示。
+        name: "opc_delete_blog_post",
+        description: "删除一篇 OPC 博客（经宿主 opc.store 写面；回 removed / not_found / protected 三态）",
+        command: "worker://opc_delete_blog_post",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "文章 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        // 新建：入参按清单 `inputSchema` 收平铺五字段（形状判在 worker 命令层，非空 /
+        // 字节预算判在宿主 provider）；出参 = 创建行的列裁剪视图（含 id 句柄）。
+        name: "opc_create_blog_post",
+        description: "新建一篇 OPC 博客（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
+        command: "worker://opc_create_blog_post",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "标题" },
+            slug: { type: "string", description: "URL 标识（唯一性由宿主 provider 判）" },
+            excerpt: { type: "string", description: "摘要" },
+            content: { type: "string", description: "正文（字节预算由宿主按契约常量判）" },
+            tags: { type: "array", items: { type: "string" }, description: "标签" },
+          },
+          required: ["title", "slug", "excerpt", "content", "tags"],
         },
       },
     ],

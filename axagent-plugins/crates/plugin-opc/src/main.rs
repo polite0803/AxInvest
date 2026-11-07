@@ -70,20 +70,17 @@ const OPC_STORE_CREATE_BLOG_POST: &str = "create_blog_post";
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
-/// 发布命令。**与宿主 Tauri 命令同名**（`src-tauri/src/commands/opc.rs` 的
-/// `opc_publish_blog_post` 仍在，走 service 并回整行 `BlogPost`）—— 这是迁出中途的
-/// **双声明**既接受形态（先例 #144：宿主命令保留到前端切完通道那一批再删），
-/// 两条通道分别是「IPC 命令」与「插件命令」，前端按 `resolvePluginForCommand` 择路。
+/// 发布命令。宿主同名 Tauri 命令已在 #36 blog 刀删除（先例 #144 的双声明收口：
+/// 前端已切完通道）——本条是发布博客的唯一通道，回宿主的两态枚举串。
 const COMMAND_PUBLISH_BLOG_POST: &str = "opc_publish_blog_post";
-/// 删除命令。与宿主 Tauri 命令 `opc_delete_blog_post`（`src-tauri/src/commands/opc.rs`，
-/// 走 service）**双声明**并存 —— 形态同 publish（先例 #144：宿主命令保留到前端切完通道那批）。
+/// 删除命令。宿主同名 Tauri 命令已随 #36 blog 刀删除 —— 本条是删除博客的唯一通道，
+/// 出参是三态枚举串逐字透传。
 const COMMAND_DELETE_BLOG_POST: &str = "opc_delete_blog_post";
-/// 新建命令。同样与宿主 Tauri 命令 `opc_create_blog_post` 双声明并存。
+/// 新建命令。宿主同名 Tauri 命令已随 #36 blog 刀删除 —— 本条是新建博客的唯一通道。
 ///
-/// ⚠ 入参形状与宿主命令**不同名不同形**：宿主命令是 `{ input: CreateBlogPostInput }`
+/// ⚠ 入参形状与已删的宿主命令**不同名不同形**：宿主命令曾是 `{ input: CreateBlogPostInput }`
 /// （Tauri 具名参数），本命令按清单 `inputSchema` 收**平铺**的五个字段（与 `opc_publish_blog_post`
-/// 的平铺 `id` 同风格）。前端切通道那一批要把 `invoke` 的载荷从 `{ input }` 改成平铺 ——
-/// 已在 `docs/plans/PLAN-shell-plus-plugins.md` 的 #180 段记为本批之外的前端待办。
+/// 的平铺 `id` 同风格）。
 const COMMAND_CREATE_BLOG_POST: &str = "opc_create_blog_post";
 
 fn main() -> ExitCode {

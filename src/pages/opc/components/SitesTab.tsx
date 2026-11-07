@@ -16,6 +16,22 @@ import { useTranslation } from "react-i18next";
  * 仍由宿主命令喂的数据（`LandingPage` / `ContactSubmission`，线格式仍是 snake_case）互不相干。
  */
 const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
+// 博客写面三条（#36 blog 刀）：宿主同名 Tauri 命令已删，插件命令是唯一通道。
+// 入参全部平铺（插件清单 `inputSchema` 口径），出参的枚举串语义见各 handle。
+const PUBLISH_BLOG_POST_COMMAND = "opc_publish_blog_post";
+const DELETE_BLOG_POST_COMMAND = "opc_delete_blog_post";
+const CREATE_BLOG_POST_COMMAND = "opc_create_blog_post";
+
+// 写命令的插件通道执行（与上面 load() 的取数同形）：按清单解析启用插件 ⇒ 宿主
+// `plugin_execute_command` 派发。插件未装 / 未启用抛错，与取数失败同一路径处置，
+// 不新造错误码（新增 UI 文案要齐 11 语言）。
+async function execPluginCommand(name: string, input: Record<string, unknown>): Promise<string> {
+  const pluginId = await resolvePluginForCommand(name);
+  if (!pluginId) {
+    throw new Error(`no enabled plugin provides command \`${name}\``);
+  }
+  return invoke<string>("plugin_execute_command", { pluginId, name, input });
+}
 
 interface LandingPage {
   id: string;
@@ -281,14 +297,14 @@ function BlogPostsPanel() {
 
   const handleCreate = async (values: Record<string, unknown>) => {
     try {
-      await invoke("opc_create_blog_post", {
-        input: {
-          title: values.title,
-          slug: values.slug,
-          excerpt: (values.excerpt as string) || "",
-          content: "",
-          tags: values.tags ? (values.tags as string).split(",").map((s) => s.trim()).filter(Boolean) : [],
-        },
+      // 插件命令收平铺五字段（清单 inputSchema），不再套宿主命令时代的 `{ input }` 外层；
+      // 出参是创建行的列裁剪视图（含 id 句柄），本处不消费，刷新列表即见。
+      await execPluginCommand(CREATE_BLOG_POST_COMMAND, {
+        title: values.title,
+        slug: values.slug,
+        excerpt: (values.excerpt as string) || "",
+        content: "",
+        tags: values.tags ? (values.tags as string).split(",").map((s) => s.trim()).filter(Boolean) : [],
       });
       message.success(t("opc.site.postCreated"));
       setModalOpen(false);
@@ -301,7 +317,12 @@ function BlogPostsPanel() {
 
   const handlePublish = async (id: string) => {
     try {
-      await invoke("opc_publish_blog_post", { id });
+      // 两态枚举逐字透传（payload，不走错误码）：not_found 在旧宿主命令里是 Err，
+      // 这里显式翻回失败提示，不让「行已不存在」伪装成发布成功。
+      const status = JSON.parse(await execPluginCommand(PUBLISH_BLOG_POST_COMMAND, { id }));
+      if (status !== "published") {
+        throw new Error(String(status));
+      }
       message.success(t("opc.site.published"));
       load();
     } catch (e) {
@@ -318,7 +339,18 @@ function BlogPostsPanel() {
 
   const handleBatchDelete = async () => {
     try {
-      await Promise.all(selectedRowKeys.map((id) => invoke("opc_delete_blog_post", { id })));
+      // 三态出参（payload，不走错误码）：旧宿主命令对 not_found 回 Err；protected 是
+      // 接缝层新增的契约（受保护 id 拒删）。任一非 removed 都显式翻成失败提示，
+      // 不让「行已不存在 / 受保护」伪装成批量删除成功。
+      const statuses = await Promise.all(
+        selectedRowKeys.map(async (id) =>
+          JSON.parse(await execPluginCommand(DELETE_BLOG_POST_COMMAND, { id })) as string
+        ),
+      );
+      const blocked = statuses.filter((s) => s !== "removed");
+      if (blocked.length > 0) {
+        throw new Error(blocked.join(", "));
+      }
       message.success(t("opc.common.batchDeleteSuccess"));
       setSelectedRowKeys([]);
       load();

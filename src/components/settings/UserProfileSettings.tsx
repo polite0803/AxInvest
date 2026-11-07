@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { StylePreviewPanel } from "@/components/style";
-import { useStyleStore } from "@/stores/feature/styleStore";
+import { StylePreviewPanel } from "@/components/common/StylePreviewPanel";
+import { useUserStyleProfile } from "@/hooks/useUserStyleProfile";
 import {
   type CommentStyle,
   type DetailLevel,
@@ -29,7 +29,7 @@ export function UserProfileSettings() {
     updateCommunicationPrefs,
   } = useUserProfileStore();
 
-  const { currentProfile, loadStyleProfile, getStats } = useStyleStore();
+  const { currentProfile, loadStyleProfile, getStats } = useUserStyleProfile();
 
   const [stats, setStats] = useState<
     {

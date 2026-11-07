@@ -377,7 +377,7 @@ vi.mock("@/components/shared/McpServerIcon", () => ({
   McpServerIcon: () => null,
 }));
 
-vi.mock("@/components/skill/SkillToolbar", () => ({
+vi.mock("@/components/common/SkillToolbar", () => ({
   SkillToolbar: () => null,
 }));
 

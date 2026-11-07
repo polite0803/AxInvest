@@ -20,64 +20,10 @@
       "targetOwner": "skill"
     },
     {
-      "file": "src/components/agent/AgentWfTab.tsx",
-      "target": "@/components/workflow/AIPanel/NL2SkillResultView",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/agent/AgentWfTab.tsx",
-      "target": "@/components/workflow/AIPanel/NL2UIResultView",
-      "kind": "component",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/agent/AgentWfTab.tsx",
-      "target": "@/stores/feature/skillStore",
-      "kind": "store",
-      "targetOwner": "skill"
-    },
-    {
-      "file": "src/components/agent/AgentWfTab.tsx",
-      "target": "@/stores/feature/workflowStore",
-      "kind": "store",
-      "targetOwner": "workflow"
-    },
-    {
-      "file": "src/components/chat/AgentExecutionPanel.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
-    },
-    {
-      "file": "src/components/chat/AgentHierarchyTree.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
-    },
-    {
       "file": "src/components/chat/AgentProgressBar.tsx",
       "target": "@/stores/feature/agentStore",
       "kind": "store",
       "targetOwner": "agent"
-    },
-    {
-      "file": "src/components/chat/AwarenessPanel.tsx",
-      "target": "@/stores/feature/appConfigStore",
-      "kind": "store",
-      "targetOwner": "appConfig"
-    },
-    {
-      "file": "src/components/chat/ChatMarkdownNodes.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
     },
     {
       "file": "src/components/chat/ChatSidebar.tsx",
@@ -92,112 +38,10 @@
       "targetOwner": "proactive"
     },
     {
-      "file": "src/components/chat/ConversationSettingsModal.tsx",
-      "target": "@/stores/feature/agentStore",
-      "kind": "store",
-      "targetOwner": "agent"
-    },
-    {
-      "file": "src/components/chat/DelegateTaskModal.tsx",
-      "target": "@/stores/feature/multiAgentStore",
-      "kind": "store",
-      "targetOwner": "multiAgent"
-    },
-    {
-      "file": "src/components/chat/ExecutionTimeline.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
-    },
-    {
-      "file": "src/components/chat/ExpertBadge.tsx",
-      "target": "@/stores/feature/agentStore",
-      "kind": "store",
-      "targetOwner": "agent"
-    },
-    {
-      "file": "src/components/chat/ExpertSelector.tsx",
-      "target": "@/stores/feature/expertStore",
-      "kind": "store",
-      "targetOwner": "expert"
-    },
-    {
-      "file": "src/components/chat/ExtractMemoriesModal.tsx",
-      "target": "@/stores/feature/memoryStore",
-      "kind": "store",
-      "targetOwner": "memory"
-    },
-    {
-      "file": "src/components/chat/InputArea.tsx",
-      "target": "@/components/skill/SkillToolbar",
-      "kind": "component",
-      "targetOwner": "skill"
-    },
-    {
-      "file": "src/components/chat/InputArea.tsx",
-      "target": "@/stores/feature/gatewayStore",
-      "kind": "store",
-      "targetOwner": "gateway"
-    },
-    {
-      "file": "src/components/chat/InputArea.tsx",
-      "target": "@/stores/feature/llmWikiStore",
-      "kind": "store",
-      "targetOwner": "llmWiki"
-    },
-    {
-      "file": "src/components/chat/InputArea.tsx",
-      "target": "@/stores/feature/promptTemplateStore",
-      "kind": "store",
-      "targetOwner": "promptTemplate"
-    },
-    {
-      "file": "src/components/chat/InputAreaControls.tsx",
-      "target": "@/components/skill/SkillToolbar",
-      "kind": "component",
-      "targetOwner": "skill"
-    },
-    {
-      "file": "src/components/chat/SuggestionPanel.tsx",
-      "target": "@/stores/feature/appConfigStore",
-      "kind": "store",
-      "targetOwner": "appConfig"
-    },
-    {
-      "file": "src/components/chat/SuggestionPanel.tsx",
-      "target": "@/stores/feature/proactiveStore",
-      "kind": "store",
-      "targetOwner": "proactive"
-    },
-    {
-      "file": "src/components/chat/TeammatePanel.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
-    },
-    {
-      "file": "src/components/chat/TrajectoryReplay.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
-    },
-    {
       "file": "src/components/chat/VizBlockNode.tsx",
       "target": "@/components/viz/VizBlockRenderer",
       "kind": "component",
       "targetOwner": "viz"
-    },
-    {
-      "file": "src/components/chat/VoiceCall.tsx",
-      "target": "@/stores/feature/approvalStore",
-      "kind": "store",
-      "targetOwner": "approval"
-    },
-    {
-      "file": "src/components/chat/VoiceCall.tsx",
-      "target": "@/stores/feature/executionStore",
-      "kind": "store",
-      "targetOwner": "execution"
     },
     {
       "file": "src/components/chat/VoiceCall.tsx",
@@ -224,12 +68,6 @@
       "targetOwner": "voice"
     },
     {
-      "file": "src/components/dynamicUI/DynamicUIRenderer.tsx",
-      "target": "@/stores/feature/securityStore",
-      "kind": "store",
-      "targetOwner": "security"
-    },
-    {
       "file": "src/components/invest/InvestHub.tsx",
       "target": "@/components/time-travel/PageTimeAnchor",
       "kind": "component",
@@ -242,52 +80,16 @@
       "targetOwner": "skill"
     },
     {
-      "file": "src/components/layout/UserProfileModal.tsx",
-      "target": "@/components/style",
-      "kind": "component",
-      "targetOwner": "style"
-    },
-    {
-      "file": "src/components/layout/UserProfileModal.tsx",
-      "target": "@/stores/feature/styleStore",
-      "kind": "store",
-      "targetOwner": "style"
-    },
-    {
       "file": "src/components/memory/MemoryGraphView.tsx",
       "target": "@/components/wiki/GraphView",
       "kind": "component",
       "targetOwner": "wiki"
     },
     {
-      "file": "src/components/multi-agent/MultiAgentDashboard.tsx",
-      "target": "@/stores/feature/providerStore",
-      "kind": "store",
-      "targetOwner": "provider"
-    },
-    {
       "file": "src/components/plugin/PluginPanelHost.tsx",
       "target": "@/components/skill/SkillSandboxContainer",
       "kind": "component",
       "targetOwner": "skill"
-    },
-    {
-      "file": "src/components/settings/DirectoryImportWizard.tsx",
-      "target": "@/stores/feature/sourceStore",
-      "kind": "store",
-      "targetOwner": "source"
-    },
-    {
-      "file": "src/components/settings/UserProfileSettings.tsx",
-      "target": "@/components/style",
-      "kind": "component",
-      "targetOwner": "style"
-    },
-    {
-      "file": "src/components/settings/UserProfileSettings.tsx",
-      "target": "@/stores/feature/styleStore",
-      "kind": "store",
-      "targetOwner": "style"
     },
     {
       "file": "src/components/settings/WorkflowSettings.tsx",
@@ -338,12 +140,6 @@
       "targetOwner": "invest"
     },
     {
-      "file": "src/components/stock-analysis/__tests__/ValueAssessmentPanel.render.test.tsx",
-      "target": "@/stores/feature/settingsStore",
-      "kind": "store",
-      "targetOwner": "settings"
-    },
-    {
       "file": "src/components/terminal/IntegratedTerminal.tsx",
       "target": "@/stores/feature/themeStore",
       "kind": "store",
@@ -356,22 +152,10 @@
       "targetOwner": "agent"
     },
     {
-      "file": "src/components/workflow/Hooks/useFlowNodes.ts",
-      "target": "@/stores/feature/expertStore",
-      "kind": "store",
-      "targetOwner": "expert"
-    },
-    {
       "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
       "target": "@/components/chat/ExpertSelector",
       "kind": "component",
       "targetOwner": "chat"
-    },
-    {
-      "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
-      "target": "@/stores/feature/expertStore",
-      "kind": "store",
-      "targetOwner": "expert"
     }
   ]
 }

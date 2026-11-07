@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { StylePreviewPanel } from "@/components/common/StylePreviewPanel";
 import { IconEditor } from "@/components/shared/IconEditor";
-import { StylePreviewPanel } from "@/components/style";
+import { useUserStyleProfile } from "@/hooks/useUserStyleProfile";
 import { logIpcError } from "@/lib/invoke";
-import { useStyleStore } from "@/stores/feature/styleStore";
 import {
   type AvatarType,
   type CommentStyle,
@@ -63,7 +63,7 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
     updateCodingStyle,
     updateCommunicationPrefs,
   } = useUserProfileStore();
-  const { currentProfile, loadStyleProfile, getStats } = useStyleStore();
+  const { currentProfile, loadStyleProfile, getStats } = useUserStyleProfile();
 
   const [name, setName] = useState(profile.name);
   const [avatarType, setAvatarType] = useState<AvatarType>(profile.avatarType);

@@ -10,8 +10,8 @@
  * 数据源：useMultiAgentStore
  */
 
+import { useProviderOptions } from "@/hooks/useProviderOptions";
 import { useMultiAgentStore } from "@/stores/feature/multiAgentStore";
-import { useProviderStore } from "@/stores/feature/providerStore";
 import type { MultiAgentRoleInfo, ProviderConfig } from "@/types";
 import {
   CheckCircleOutlined,
@@ -130,7 +130,7 @@ interface DelegateFormProps {
 
 function DelegateForm({ roles, onSubmit, submitting }: DelegateFormProps) {
   const { t } = useTranslation();
-  const { providers, fetchProviders } = useProviderStore();
+  const { providers, fetchProviders } = useProviderOptions();
   const [roleName, setRoleName] = useState<string>("");
   const [task, setTask] = useState<string>("");
   const [contextJson, setContextJson] = useState<string>("");

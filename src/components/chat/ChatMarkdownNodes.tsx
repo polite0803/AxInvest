@@ -27,11 +27,11 @@ import NodeRenderer, {
 
 import { Tooltip } from "@/components/layout/Tooltip";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useToolCallState } from "@/hooks/useToolCallStates";
 import { CHAT_CUSTOM_HTML_TAGS, type ChatMarkdownNode, injectCiteRefTags, parseChatMarkdown } from "@/lib/chatMarkdown";
 import type { MemorySourceResult } from "@/lib/memoryUtils";
 import { formatDuration } from "@/lib/tokenFormat";
 import { useSettingsStore } from "@/stores";
-import { useExecutionStore } from "@/stores/feature/executionStore";
 import { useTranslation } from "react-i18next";
 import { RetrievalMessageIdContext } from "./BaseRetrievalNode";
 import { CodeBlockHeaderActions } from "./CodeBlockHeaderActions";
@@ -1028,14 +1028,12 @@ function ToolCallNode(
   const { node } = props;
   const { token } = theme.useToken();
   const { t } = useTranslation();
-  const toolCalls = useExecutionStore((s) => s.toolCalls);
-  const [expanded, setExpanded] = useState(false);
-
   const execId = getCustomAttr(node.attrs, "id") ?? "";
   const toolName = getCustomAttr(node.attrs, "name") ?? "";
   const summary = String(node.content ?? "");
+  const tc = useToolCallState(execId);
+  const [expanded, setExpanded] = useState(false);
 
-  const tc = toolCalls[execId];
   const status = tc?.executionStatus ?? "success";
   const statusColor = getToolCallStatusColor(status, token);
   const isLoading = status === "queued" || status === "running";

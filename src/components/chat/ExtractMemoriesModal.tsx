@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useMemoryNamespaces } from "@/hooks/useMemoryNamespaces";
 import { invoke } from "@/lib/invoke";
-import { useMemoryStore } from "@/stores/feature/memoryStore";
 import { App, Button, Empty, Modal, Select, Spin, theme, Typography } from "antd";
 import { Brain } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -22,9 +22,8 @@ export function ExtractMemoriesModal({
   const { token } = theme.useToken();
   const { message: messageApi } = App.useApp();
 
-  const namespaces = useMemoryStore((s) => s.namespaces);
-  const loadNamespaces = useMemoryStore((s) => s.loadNamespaces);
-  const loading = useMemoryStore((s) => s.loading);
+  // memoryStore 消费收敛进中立 hook（组件中立性消键）
+  const { namespaces, loading, loadNamespaces } = useMemoryNamespaces();
 
   const [selectedNamespaceId, setSelectedNamespaceId] = useState<string | null>(
     null,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
-import { useAgentStore } from "@/stores/feature/agentStore";
+import { useAgentProfileLookup } from "@/hooks/useAgentProfile";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -11,7 +11,7 @@ interface ExpertBadgeProps {
 }
 
 export function ExpertBadge({ agentProfileId, onClick }: ExpertBadgeProps) {
-  const getProfileById = useAgentStore((s) => s.getProfileById);
+  const getProfileById = useAgentProfileLookup();
   const { t } = useTranslation();
 
   const profile = agentProfileId ? getProfileById(agentProfileId) : null;

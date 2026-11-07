@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useMultiAgentDelegate } from "@/hooks/useMultiAgent";
 import { useConversationStore } from "@/stores";
-import { useMultiAgentStore } from "@/stores/feature/multiAgentStore";
 import { App, Input, Modal, Segmented, Space, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,7 +19,7 @@ export function DelegateTaskModal({
 }: DelegateTaskModalProps) {
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp();
-  const multiAgentStore = useMultiAgentStore();
+  const { roles, delegating, fetchRoles, delegateTask: delegateTaskAction } = useMultiAgentDelegate();
   const activeConversation = useConversationStore((s) =>
     s.activeConversationId
       ? s.conversations.find((c) => c.id === s.activeConversationId)
@@ -32,11 +32,11 @@ export function DelegateTaskModal({
   useEffect(() => {
     if (open) {
       setDelegateTask(initialTask);
-      if (multiAgentStore.roles.length === 0) {
-        multiAgentStore.fetchRoles();
+      if (roles.length === 0) {
+        fetchRoles();
       }
-      if (!delegateRole && multiAgentStore.roles.length > 0) {
-        setDelegateRole(multiAgentStore.roles[0].id);
+      if (!delegateRole && roles.length > 0) {
+        setDelegateRole(roles[0].id);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -47,14 +47,14 @@ export function DelegateTaskModal({
       title={t("multiAgent.delegateTitle")}
       open={open}
       onCancel={onClose}
-      confirmLoading={multiAgentStore.delegating}
+      confirmLoading={delegating}
       onOk={async () => {
         if (!delegateRole || !delegateTask.trim()) {
           messageApi.warning(t("multiAgent.fillRequired"));
           return;
         }
         try {
-          await multiAgentStore.delegateTask({
+          await delegateTaskAction({
             roleName: delegateRole,
             task: delegateTask.trim(),
             providerId: activeConversation?.providerId || "",
@@ -76,7 +76,7 @@ export function DelegateTaskModal({
             block
             value={delegateRole}
             onChange={(v) => setDelegateRole(v as string)}
-            options={multiAgentStore.roles.map((r) => ({
+            options={roles.map((r) => ({
               label: r.name,
               value: r.id,
             }))}

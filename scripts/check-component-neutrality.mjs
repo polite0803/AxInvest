@@ -101,6 +101,44 @@ const DOMAIN_STORE_OWNERSHIP = {
   layout: ["userprofile"],
 };
 
+// ── 横切 store 登记表（#194 批 D 后续，2026-11-08）：这些 store 是全局关注点，任何组件域
+// 直读都合法 —— 豁免按 **store 目标**（不分读方域），与 DOMAIN_STORE_OWNERSHIP 的「域自有」
+// 语义互补。登记须带 reason，normOwner 归一后精确命中，不许静默扩（#200）。
+// 仅 store 支调用（findViolations），component 支不查 —— 组件跨域走 NEUTRAL 登记，语义不同。
+const CROSS_CUTTING_STORES = {
+  // appConfig：全局应用配置（主题 / 快捷键 / 面板开关），读方遍布 chat（AwarenessPanel /
+  //   SuggestionPanel）、settings（SettingsPanel，已另登记为 settings 自有）等 —— 全局配置读面
+  //   横切是语义本相，不是某个域的自有 store。证据：AwarenessPanel.tsx、SuggestionPanel.tsx。
+  appconfig: "全局应用配置，读面横切（chat AwarenessPanel / SuggestionPanel 等）",
+  // security：数据源安全设置（归属闸门 / 权限面），dynamicUI 渲染器渲染任何卡片前都要查安全归属。
+  //   证据：DynamicUIRenderer.tsx（渲染前查 securityStore）。
+  security: "数据源安全设置，dynamicUI 渲染器渲染前必查",
+  // expert：专家名册（全局清单），选择器 / 属性面板 / 聊天侧徽标都要列专家 —— 名册读面横切。
+  //   证据：ExpertSelector.tsx（chat）、AgentPropertyPanel.tsx（workflow）、ExpertBadge.tsx（chat）。
+  expert: "专家名册，选择器 / 徽标 / 属性面板跨域读",
+};
+
+// ── 双向同域组（#194 存疑 7 裁定，2026-11-08）：组内任两域**互认同域**（store 支双向豁免）。
+// 与 DOMAIN_STORE_OWNERSHIP 的单向不同：这里两个方向都合法。仅 store 支。
+// chat ↔ proactive：SuggestionPanel（chat）读 proactiveStore 取建议数据；proactive 域组件读
+//   chat 会话态取上下文 —— 两个功能域共享一条数据流（proactive 建议源自聊天上下文）。
+//   证据：SuggestionPanel.tsx（chat 读 proactive）。
+const BIDIRECTIONAL_GROUPS = [
+  ["chat", "proactive"],
+];
+
+/** 横切 store 判定（纯函数）：storeOwner 登记为全局关注点 ⇒ 任何域直读合法。归一后精确命中。 */
+export function isCrossCuttingStore(storeOwner) {
+  return CROSS_CUTTING_STORES[normOwner(storeOwner)] !== undefined;
+}
+
+/** 双向同域判定（纯函数）：两 owner 同属 BIDIRECTIONAL_GROUPS 某一组 ⇒ 互认。组外一律 false。 */
+export function isBidirectionalSameGroup(ownerA, ownerB) {
+  return BIDIRECTIONAL_GROUPS.some(
+    (g) => g.includes(normOwner(ownerA)) && g.includes(normOwner(ownerB)),
+  );
+}
+
 // ── 与存量实测同一套 resolve（@/ 别名 + 相对路径 → src/… posix）──
 export function resolveImportTarget(specifier, fromFile) {
   if (specifier.startsWith("@/")) { return "src/" + specifier.slice(2); }
@@ -233,7 +271,11 @@ export function findViolations({ file, content, owner }) {
     // C 档域归属映射**只作用于 store 支**：该 store 登记为 selfOwner 域自有 ⇒ 视同自引。
     // component 支不查映射（映射值是 store 名，不是组件目录名；若也查会让同名组件目录白拿豁免）。
     // 未登记的跨域 store / 反向 / 命名形态变体一律仍红 —— isSameDomain 精确命中登记表，不自动扩（#200）。
-    const sameDomain = j.kind === "store" && isSameDomain(selfOwner, j.targetOwner);
+    // 横切 store 与双向同域组同只作用于 store 支，三支并列（登记见各自表头注释）。
+    const sameDomain = j.kind === "store"
+      && (isSameDomain(selfOwner, j.targetOwner)
+        || isCrossCuttingStore(j.targetOwner)
+        || isBidirectionalSameGroup(selfOwner, j.targetOwner));
     const isViolation = j.kind === "store" ? !sameOwner && !sameDomain : !sameOwner && !isNeutralOwner(j.targetOwner);
     if (isViolation) {
       violations.push({ file, target: spec, resolvedTarget: j.target, kind: j.kind, targetOwner: j.targetOwner });

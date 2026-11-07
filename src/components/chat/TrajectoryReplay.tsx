@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useExecutionStore } from "@/stores/feature/executionStore";
+import { useTrajectories } from "@/hooks/useTrajectories";
 import type { TrajectoryDetail, TrajectoryStep } from "@/types";
 import { theme } from "antd";
 import { ChevronLeft, ChevronRight, Loader2, Pause, Play, SkipBack, SkipForward } from "lucide-react";
@@ -14,18 +14,10 @@ interface TrajectoryReplayProps {
 
 const SPEED_OPTIONS = [0.5, 1, 2, 4] as const;
 
-const _EMPTY_TRAJECTORIES: never[] = [];
-
 export function TrajectoryReplay({ conversationId }: TrajectoryReplayProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const fetchList = useExecutionStore((s) => s.fetchTrajectoryList);
-  const fetchDetail = useExecutionStore((s) => s.fetchTrajectoryDetail);
-  const trajectories = useExecutionStore(
-    (s) => s.trajectoriesByConversation[conversationId] || _EMPTY_TRAJECTORIES,
-  );
-  const loadingList = useExecutionStore((s) => s.loadingTrajectories);
-  const details = useExecutionStore((s) => s.trajectoryDetails);
+  const { trajectories, loadingList, details, fetchList, fetchDetail } = useTrajectories(conversationId);
 
   // 选择状态
   const [selectedId, setSelectedId] = useState<string | null>(null);

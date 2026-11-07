@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { NL2SkillResultView } from "@/components/workflow/AIPanel/NL2SkillResultView";
-import { NL2UIResultView } from "@/components/workflow/AIPanel/NL2UIResultView";
+import { NL2SkillResultView } from "@/components/common/NL2SkillResultView";
+import { NL2UIResultView } from "@/components/common/NL2UIResultView";
+import { useNLGenerationActions } from "@/hooks/useNLGenerationActions";
 import { useDynamicUIStore } from "@/stores";
-import { useSkillStore } from "@/stores/feature/skillStore";
-import { useWorkflowStore } from "@/stores/feature/workflowStore";
 import type { NL2SkillRequest, NL2SkillResult, NL2UIRequest, NL2UIResult, SkillDefinition, UISchema } from "@/types";
 import { LayoutOutlined, SendOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { App, Button, Empty, Input, Progress, Select, Space, Tabs, Typography } from "antd";
@@ -31,11 +30,9 @@ export function AgentWfTab() {
   const [uiType, setUIType] = useState<NL2UIRequest["uiType"]>("dashboard");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const parseSkillFromNaturalLanguage = useWorkflowStore((s) => s.parseSkillFromNaturalLanguage);
-  const parseUIFromNaturalLanguage = useWorkflowStore((s) => s.parseUIFromNaturalLanguage);
-  const parseProgress = useWorkflowStore((s) => s.parseProgress);
-
-  const createSkill = useSkillStore((s) => s.createSkill);
+  // NL 生成相关 action 跨域（workflowStore / skillStore）消费收敛进中立 hook（组件中立性消键）
+  const { parseSkillFromNaturalLanguage, parseUIFromNaturalLanguage, parseProgress, createSkill } =
+    useNLGenerationActions();
   const createSchema = useDynamicUIStore((s) => s.createSchema);
 
   const [skillResult, setSkillResult] = useState<NL2SkillResult | null>(null);

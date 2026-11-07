@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useExecutionStore } from "@/stores/feature/executionStore";
+import { useAgentPool } from "@/hooks/useAgentPool";
+import { useCurrentToolCall } from "@/hooks/useCurrentToolCall";
 import { Tabs, theme } from "antd";
 import { Bot, GitBranch, History } from "lucide-react";
 import { useMemo } from "react";
@@ -17,8 +18,6 @@ interface AgentExecutionPanelProps {
   onToggleCompact?: () => void;
 }
 
-const _EMPTY_POOL: never[] = [];
-
 export function AgentExecutionPanel({
   conversationId,
   compactMode = false,
@@ -26,10 +25,8 @@ export function AgentExecutionPanel({
 }: AgentExecutionPanelProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const poolItems = useExecutionStore(
-    (s) => s.agentPool[conversationId] || _EMPTY_POOL,
-  );
-  const currentToolCall = useExecutionStore((s) => s.currentToolCall);
+  const poolItems = useAgentPool(conversationId);
+  const currentToolCall = useCurrentToolCall();
 
   const poolSummary = useMemo(() => {
     if (poolItems.length === 0) {

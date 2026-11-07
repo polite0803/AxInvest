@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { addExpertRole, useExpertRoles } from "@/hooks/useExpertRoles";
 import { CAPABILITY_DOMAIN_OPTIONS } from "@/lib/domainMeta";
-import { useExpertStore } from "@/stores/feature/expertStore";
 import { EXPERT_CATEGORY_KEYS, EXPERT_CATEGORY_LABELS } from "@/types";
 import type { AgentProfile, ExpertCategory, ExpertCategoryKey } from "@/types";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -26,18 +26,20 @@ export function ExpertSelector({
   selectedRoleId,
 }: ExpertSelectorProps) {
   const { token } = theme.useToken();
-  const getAllRoles = useExpertStore((s) => s.getAllRoles);
-  const importAgencyExperts = useExpertStore((s) => s.importAgencyExperts);
-  const loadAgencyRoles = useExpertStore((s) => s.loadAgencyRoles);
-  const clearAgencyExperts = useExpertStore((s) => s.clearAgencyExperts);
-  const deleteAgencyExpert = useExpertStore((s) => s.deleteAgencyExpert);
-  const updateAgencyExpert = useExpertStore((s) => s.updateAgencyExpert);
-  const exportAgencyExperts = useExpertStore((s) => s.exportAgencyExperts);
-  const agencyRoles = useExpertStore((s) => s.agencyRoles);
-  const agencyLoaded = useExpertStore((s) => s.agencyLoaded);
-  const removeCustomRole = useExpertStore((s) => s.removeCustomRole);
-  const updateCustomRole = useExpertStore((s) => s.updateCustomRole);
-  const exportCustomRoles = useExpertStore((s) => s.exportCustomRoles);
+  const {
+    getAllRoles,
+    importAgencyExperts,
+    loadAgencyRoles,
+    clearAgencyExperts,
+    deleteAgencyExpert,
+    updateAgencyExpert,
+    exportAgencyExperts,
+    agencyRoles,
+    agencyLoaded,
+    removeCustomRole,
+    updateCustomRole,
+    exportCustomRoles,
+  } = useExpertRoles();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [importPath, setImportPath] = useState("");
@@ -338,7 +340,7 @@ export function ExpertSelector({
       recommendedTools: newRole.recommendedTools,
       recommendedWorkflows: newRole.recommendedWorkflows,
     };
-    useExpertStore.getState().addCustomRole(role);
+    addExpertRole(role);
     app.message.success(t("expertSelector.added"));
     setShowAddModal(false);
     setNewRole({

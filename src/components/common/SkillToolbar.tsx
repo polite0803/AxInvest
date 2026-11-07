@@ -2,16 +2,16 @@
 
 import { DropdownMenu } from "@/components/layout/DropdownMenu";
 import { Tooltip } from "@/components/layout/Tooltip";
+import { useSkillToolbarButtons } from "@/hooks/useSkillToolbarButtons";
+import type { MergedToolbarButton } from "@/hooks/useSkillToolbarButtons";
 import { executeActionChain } from "@/lib/skillActionExecutor";
 import { resolveIconComponent } from "@/lib/skillIcons";
-import { useSkillExtensionStore } from "@/stores";
-import type { MergedToolbarButton } from "@/stores/feature/skillExtensionStore";
 import { Button, Space } from "antd";
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
 export function SkillToolbar() {
-  const toolbarButtons = useSkillExtensionStore((s) => s.toolbarButtons);
+  const toolbarButtons = useSkillToolbarButtons();
   const navigate = useNavigate();
 
   const buttons = [...toolbarButtons].sort((a, b) => a.priority - b.priority);

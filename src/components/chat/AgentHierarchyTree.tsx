@@ -2,9 +2,7 @@
 
 // Agent 层级树 — 展示 fork/子 Agent 的父子关系
 
-import { useExecutionStore } from "@/stores/feature/executionStore";
-
-const _EMPTY: never[] = [];
+import { useAgentPool } from "@/hooks/useAgentPool";
 import type { AgentPoolItem } from "@/types";
 import { BranchesOutlined, CaretRightOutlined, RobotOutlined } from "@ant-design/icons";
 import { Tag, Tree, Typography } from "antd";
@@ -72,7 +70,7 @@ export function AgentHierarchyTree({
   conversationId,
 }: AgentHierarchyTreeProps) {
   const { t } = useTranslation();
-  const pool = useExecutionStore((s) => s.agentPool[conversationId] || _EMPTY);
+  const pool = useAgentPool(conversationId);
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const treeData = useMemo(() => {

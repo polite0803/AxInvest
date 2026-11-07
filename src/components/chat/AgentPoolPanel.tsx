@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useExecutionStore } from "@/stores/feature/executionStore";
+import { useAgentPool } from "@/hooks/useAgentPool";
 import type { AgentPoolItem, AgentPoolSummary, WorkerMessage } from "@/types";
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, RightOutlined } from "@ant-design/icons";
-
-const _EMPTY: never[] = [];
 import { AlertTriangle, ChevronDown, ChevronRight, Clock, SkipForward } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -361,7 +359,7 @@ export function AgentPoolPanel({
   conversationId,
   visible = true,
 }: AgentPoolPanelProps) {
-  const pool = useExecutionStore((s) => s.agentPool[conversationId] || _EMPTY);
+  const pool = useAgentPool(conversationId);
 
   const summary = useMemo(() => {
     const total = pool.length;

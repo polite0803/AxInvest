@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { type StyleDimensions, useStyleStore } from "@/stores/feature/styleStore";
+import { useUserStyleProfile } from "@/hooks/useUserStyleProfile";
+import type { StyleDimensions } from "@/types";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,7 +25,7 @@ export function StylePreviewPanel({
     applyStyleToCode,
     adjustStyleDimension,
     resetToDefaults,
-  } = useStyleStore();
+  } = useUserStyleProfile();
 
   const [originalCode, setOriginalCode] = useState(code);
   const [styledCode, setStyledCode] = useState(code);

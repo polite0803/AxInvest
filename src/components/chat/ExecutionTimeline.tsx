@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useAgentPool } from "@/hooks/useAgentPool";
+import { useAgentStatus } from "@/hooks/useAgentStatus";
+import { useToolCallStates } from "@/hooks/useToolCallStates";
 import { usePlanStore } from "@/stores";
-import { useExecutionStore } from "@/stores/feature/executionStore";
 import type { PlanStep } from "@/types";
 import type { AgentPoolItem, ToolCallState } from "@/types";
 
-const _EMPTY: never[] = [];
 import { SyncOutlined } from "@ant-design/icons";
 import { Progress, Tag, theme, Timeline, Typography } from "antd";
 import type { GlobalToken, TimelineItemProps } from "antd";
@@ -181,13 +182,10 @@ export const ExecutionTimeline = React.memo(function ExecutionTimeline({
     return null;
   }, []);
 
-  // Read from all three stores
   const plan = usePlanStore((s) => s.activePlans[conversationId]);
-  const toolCalls = useExecutionStore((s) => s.toolCalls);
-  const poolItems = useExecutionStore(
-    (s) => s.agentPool[conversationId] ?? _EMPTY,
-  );
-  const agentStatus = useExecutionStore((s) => s.agentStatus[conversationId]);
+  const toolCalls = useToolCallStates();
+  const poolItems = useAgentPool(conversationId);
+  const agentStatus = useAgentStatus(conversationId);
 
   const events = useMemo(() => {
     const result: TimelineEvent[] = [];

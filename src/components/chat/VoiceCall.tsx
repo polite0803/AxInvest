@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useAgentStatus } from "@/hooks/useAgentStatus";
+import { useExecutionPhase } from "@/hooks/useExecutionPhase";
 import { useIntentClarification } from "@/hooks/useIntentClarification";
+import { usePendingApprovals } from "@/hooks/usePendingApprovals";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
 import { useTTSChannelStore } from "@/stores";
-import { useApprovalStore } from "@/stores/feature/approvalStore";
-import { useExecutionStore } from "@/stores/feature/executionStore";
 import type { RealtimeConfig, VoiceSessionState } from "@/types";
 import { Alert, Button, Empty, Switch, Tag, theme, Typography } from "antd";
 import { AlertCircle, Loader, Mic, MicOff, Phone, Volume2 } from "lucide-react";
@@ -111,17 +112,11 @@ export function VoiceCall({
   const handleProgressBrief = useTTSChannelStore((s) => s.handleProgressBrief);
   const ttsMessages = useTTSChannelStore((s) => s.messages);
 
-  const pendingApprovals = useApprovalStore((s) => s.pendingApprovals);
-  const approvalLoading = useApprovalStore((s) => s.loading);
-  const fetchPendingApprovals = useApprovalStore((s) => s.fetchPendingApprovals);
+  const { pendingApprovals, loading: approvalLoading, fetchPendingApprovals } = usePendingApprovals();
 
-  // 从 executionStore 派生 DAG 状态
-  const executionPhase = useExecutionStore((s) => {
-    return workflowExecutionId ? s.phases[workflowExecutionId] : undefined;
-  });
-  const agentStatusMessage = useExecutionStore((s) => {
-    return workflowExecutionId ? s.agentStatus[workflowExecutionId] : undefined;
-  });
+  // 从执行状态 hook 派生 DAG 状态
+  const executionPhase = useExecutionPhase(workflowExecutionId);
+  const agentStatusMessage = useAgentStatus(workflowExecutionId);
 
   const [dagNodes, setDagNodes] = useState<DagNodeProgress[]>([]);
   const [dagStatus, setDagStatus] = useState<"idle" | "running" | "completed" | "failed" | "waiting_for_approval">(

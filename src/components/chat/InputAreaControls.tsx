@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SkillToolbar } from "@/components/common/SkillToolbar";
 import { DropdownMenu } from "@/components/layout/DropdownMenu";
 import type { DropdownItem } from "@/components/layout/DropdownMenu";
 import { Tooltip } from "@/components/layout/Tooltip";
-import { SkillToolbar } from "@/components/skill/SkillToolbar";
 import type { ShortcutAction } from "@/lib/shortcuts";
 import type { McpServer } from "@/types";
 import { Badge, Button, Popover, theme } from "antd";

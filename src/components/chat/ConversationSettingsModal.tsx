@@ -3,10 +3,10 @@
 import { ModelParamSliders } from "@/components/common/ModelParamSliders";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { IconEditor } from "@/components/shared/IconEditor";
+import { getAgentProfile } from "@/hooks/useAgentProfile";
 import { CONV_ICON_KEY, type ConvIcon, type ConvIconType } from "@/lib/convIcon";
 import { useConversationStore, useSettingsStore } from "@/stores";
 import { DISABLED_TOOLS_KEY, getConversationDisabledTools } from "@/stores/domain/conversationStoreSend";
-import { useAgentStore } from "@/stores/feature/agentStore";
 import { ModelIcon } from "@lobehub/icons";
 import { Button, Card, Input, Modal, Select, Slider, Tag, theme } from "antd";
 import type { MenuProps } from "antd";
@@ -248,7 +248,7 @@ export function ConversationSettingsModal({
                 {(() => {
                   const profileId = conversation.agentProfileId;
                   const profile = profileId
-                    ? useAgentStore.getState().getProfileById(profileId)
+                    ? getAgentProfile(profileId)
                     : undefined;
                   return profile
                     ? `${profile.icon} ${profile.name}`

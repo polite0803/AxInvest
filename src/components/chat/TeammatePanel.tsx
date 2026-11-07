@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useExecutionStore } from "@/stores/feature/executionStore";
+import { useAgentPool, useUpsertPoolItem } from "@/hooks/useAgentPool";
 import type { AgentPoolItem, TeammateStatus, WorkerMessage } from "@/types";
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, TeamOutlined } from "@ant-design/icons";
 
-const _EMPTY: never[] = [];
 import { message } from "@/lib/toast";
 import { Button, Collapse, Tag, theme, Typography } from "antd";
 import { useCallback, useMemo, useState } from "react";
@@ -91,8 +90,8 @@ export function TeammatePanel({
   conversationId,
   visible = true,
 }: TeammatePanelProps) {
-  const pool = useExecutionStore((s) => s.agentPool[conversationId] || _EMPTY);
-  const upsertPoolItem = useExecutionStore((s) => s.upsertPoolItem);
+  const pool = useAgentPool(conversationId);
+  const upsertPoolItem = useUpsertPoolItem();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [teamModalOpen, setTeamModalOpen] = useState(false);

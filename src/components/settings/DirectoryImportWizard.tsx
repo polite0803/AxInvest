@@ -10,7 +10,7 @@ import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { addNotification } from "@/lib/notification";
 import { useLlmWikiStore, useSourceStore } from "@/stores";
-import type { UnifiedSource } from "@/stores/feature/sourceStore";
+import type { UnifiedSource } from "@/types";
 import type {
   ConflictPolicy,
   DirectoryScanFile,

@@ -25,8 +25,10 @@ vi.mock("@/stores", async () => {
   };
 });
 
-import { useSettingsStore } from "@/stores/feature/settingsStore";
-import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+// 与上方 vi.mock("@/stores") 同一入口取 store：走 barrel 才拿到 mock 后的同一
+// 函数引用，setup 写入的状态才会进被测组件（深路径 import 会拿到真 store，
+// 绕过 mock 且与组件用的实例脱节）。
+import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { ReportMarkdown } from "../ReportMarkdown";
 import { ValueAssessmentPanel } from "../ValueAssessmentPanel";
 

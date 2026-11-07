@@ -1,29 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import type { SourceConfig, UnifiedSource } from "@/types";
 import { create } from "zustand";
 
-export interface SourceConfig {
-  embeddingProvider?: string;
-  embeddingDimensions?: number;
-  retrievalThreshold?: number;
-  retrievalTopK?: number;
-}
-
-export interface UnifiedSource {
-  id: string;
-  name: string;
-  description?: string;
-  containerType: string;
-  embeddingProvider?: string;
-  embeddingDimensions?: number;
-  retrievalThreshold?: number;
-  retrievalTopK?: number;
-  iconType?: string;
-  iconValue?: string;
-  sortOrder: number;
-  enabled: boolean;
-}
+// 从 @/types 重导出，保持向后兼容（权威定义已收归 types/knowledge.ts，同 llmWikiStore 模式）
+export type { SourceConfig, UnifiedSource };
 
 export interface SourceRef {
   containerType: string;

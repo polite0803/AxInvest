@@ -230,3 +230,29 @@ export type RAGPipelineConfig = {
   /// Graph RAG 增强检索（后端 `EntityGraphConfig`）
   entityGraph?: EntityGraphConfig;
 };
+
+// ── 统一数据源 DTO（此前定义在 sourceStore 内，统一收归 @/types；store 侧保留兼容重导出，同 llmWiki 先例）──
+
+/** 数据源容器的向量/检索配置（后端 get_source_config DTO） */
+export interface SourceConfig {
+  embeddingProvider?: string;
+  embeddingDimensions?: number;
+  retrievalThreshold?: number;
+  retrievalTopK?: number;
+}
+
+/** 跨 knowledge/memory/wiki/obsidian_vault 的统一数据源条目（后端 list_all_sources DTO） */
+export interface UnifiedSource {
+  id: string;
+  name: string;
+  description?: string;
+  containerType: string;
+  embeddingProvider?: string;
+  embeddingDimensions?: number;
+  retrievalThreshold?: number;
+  retrievalTopK?: number;
+  iconType?: string;
+  iconValue?: string;
+  sortOrder: number;
+  enabled: boolean;
+}

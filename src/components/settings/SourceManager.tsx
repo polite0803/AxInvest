@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { MemoryGraphView } from "@/components/memory/MemoryGraphView";
 import { EmbeddingModelSelect } from "@/components/shared/EmbeddingModelSelect";
 import { useEmbeddingProviderLabel } from "@/components/shared/ModelSelect";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { useKnowledgeSourceStore, useKnowledgeStore } from "@/stores";
 import { useProviderStore, useSourceStore } from "@/stores";
-import { useLlmWikiStore, type Wiki } from "@/stores/feature/llmWikiStore";
-import { useMemoryStore } from "@/stores/feature/memoryStore";
-import type { SourceConfig, UnifiedSource } from "@/stores/feature/sourceStore";
-import type { KnowledgeBase } from "@/types";
+import type { KnowledgeBase, MemoryNamespace, SourceConfig, UnifiedSource, Wiki } from "@/types";
 import {
   App as AntdApp,
   Button,
@@ -54,7 +50,7 @@ import {
   Vault as VaultIcon,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { DirectoryImportWizard } from "./DirectoryImportWizard";
@@ -118,6 +114,28 @@ function TypeBadge({ containerType }: { containerType: string }) {
       {t(meta.labelKey, containerType)}
     </Tag>
   );
+}
+
+/**
+ * 页级注入契约（任务 #219，组件中立性门禁）：SourceManager 是跨 memory / llmWiki / source
+ * 三域的中枢，settings 域不得直接引用其它域的 store 与组件，改由唯一页面消费方
+ * KnowledgeHubPage 订阅对应 store 后经 props 注入；记忆图视图同理由页面提供渲染函数。
+ */
+export interface SourceManagerProps {
+  /** 记忆域切片：命名空间列表 + 加载态 + 重载动作 */
+  memory: {
+    namespaces: MemoryNamespace[];
+    loading: boolean;
+    loadNamespaces: () => Promise<void>;
+  };
+  /** Wiki 域切片：wiki 列表 + 加载 / 删除动作 */
+  wiki: {
+    wikis: Wiki[];
+    loadWikis: () => Promise<void>;
+    deleteWiki: (wikiId: string) => Promise<void>;
+  };
+  /** 记忆图渲染注入：MemoryGraphView 属 memory 域，由页面侧给出渲染函数 */
+  renderMemoryGraph: (onClose: () => void) => ReactNode;
 }
 
 function SourceConfigModal({
@@ -434,12 +452,15 @@ function SourceCard({
   onViewConfig,
   onViewDocument,
   onNavigateToTab,
+  loadMemoryNamespaces,
 }: {
   source: UnifiedSource;
   onViewConfig: (s: UnifiedSource) => void;
   onViewDocument?: (s: UnifiedSource) => void;
   /** AllSourcesTab 等无独立详情页的场景下，点击"进入"后切换到对应 tab */
   onNavigateToTab?: (tab: string) => void;
+  /** 页级注入的记忆命名空间重载动作（删除源后刷新 memory 域内部列表） */
+  loadMemoryNamespaces: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -484,11 +505,11 @@ function SourceCard({
       onOk: async () => {
         try {
           await deleteSource(source);
-          // 刷新所有来源列表（knowledge / memory store 内部列表也需重载）
+          // 刷新所有来源列表（knowledge / memory 内部列表也需重载；memory 动作由页级注入）
           await Promise.all([
             fetchSources(),
             useKnowledgeStore.getState().loadBases?.(),
-            useMemoryStore.getState().loadNamespaces?.(),
+            loadMemoryNamespaces(),
           ]).catch(() => {
             // 单个 store 失败不阻塞
           });
@@ -593,9 +614,12 @@ function SourceCard({
 function KnowledgeTab({
   onViewConfig,
   onCreate,
+  loadMemoryNamespaces,
 }: {
   onViewConfig: (s: UnifiedSource) => void;
   onCreate?: () => void;
+  /** 页级注入：透传给 SourceCard 的删除后刷新动作 */
+  loadMemoryNamespaces: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -707,7 +731,12 @@ function KnowledgeTab({
                   <Row gutter={[10, 10]}>
                     {knowledgeSources.map((source) => (
                       <Col key={source.id} xs={24} sm={12} lg={8} xl={6}>
-                        <SourceCard source={source} onViewConfig={onViewConfig} onViewDocument={handleViewDocument} />
+                        <SourceCard
+                          source={source}
+                          onViewConfig={onViewConfig}
+                          onViewDocument={handleViewDocument}
+                          loadMemoryNamespaces={loadMemoryNamespaces}
+                        />
                       </Col>
                     ))}
                   </Row>
@@ -786,9 +815,15 @@ function KnowledgeTab({
 function MemoryTab({
   onViewConfig,
   onCreate,
+  memory,
+  renderMemoryGraph,
 }: {
   onViewConfig: (s: UnifiedSource) => void;
   onCreate?: () => void;
+  /** 页级注入的记忆域切片 */
+  memory: SourceManagerProps["memory"];
+  /** 页级注入的记忆图渲染函数 */
+  renderMemoryGraph: SourceManagerProps["renderMemoryGraph"];
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -797,7 +832,7 @@ function MemoryTab({
     namespaces,
     loadNamespaces,
     loading: memoryLoading,
-  } = useMemoryStore();
+  } = memory;
   const allSources = useSourceStore((s) => s.sources);
   const memorySources = useMemo(
     () => allSources.filter((s) => s.containerType === "memory"),
@@ -877,7 +912,11 @@ function MemoryTab({
             <Row gutter={[10, 10]}>
               {memorySources.map((source) => (
                 <Col key={source.id} xs={24} sm={12} lg={8} xl={6}>
-                  <SourceCard source={source} onViewConfig={onViewConfig} />
+                  <SourceCard
+                    source={source}
+                    onViewConfig={onViewConfig}
+                    loadMemoryNamespaces={loadNamespaces}
+                  />
                 </Col>
               ))}
             </Row>
@@ -948,7 +987,7 @@ function MemoryTab({
         )}
       </Spin>
 
-      {showGraph && <MemoryGraphView onClose={() => setShowGraph(false)} />}
+      {showGraph && renderMemoryGraph(() => setShowGraph(false))}
     </div>
   );
 }
@@ -956,13 +995,19 @@ function MemoryTab({
 function WikiTab({
   onViewConfig,
   onCreate,
+  wiki,
+  loadMemoryNamespaces,
 }: {
   onViewConfig: (s: UnifiedSource) => void;
   onCreate?: () => void;
+  /** 页级注入的 Wiki 域切片 */
+  wiki: SourceManagerProps["wiki"];
+  /** 页级注入：透传给 SourceCard 的删除后刷新动作 */
+  loadMemoryNamespaces: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const { wikis, loadWikis } = useLlmWikiStore();
+  const { wikis, loadWikis, deleteWiki } = wiki;
   const fetchSources = useSourceStore((s) => s.fetchSources);
   const allSources = useSourceStore((s) => s.sources);
   const wikiSources = useMemo(
@@ -1047,7 +1092,11 @@ function WikiTab({
               >
                 {wikiSources.map((source) => (
                   <Col key={source.id} xs={24} sm={12} lg={8} xl={6}>
-                    <SourceCard source={source} onViewConfig={onViewConfig} />
+                    <SourceCard
+                      source={source}
+                      onViewConfig={onViewConfig}
+                      loadMemoryNamespaces={loadMemoryNamespaces}
+                    />
                   </Col>
                 ))}
               </Row>
@@ -1065,9 +1114,9 @@ function WikiTab({
                   </Text>
                 </div>
                 <Row gutter={[10, 10]}>
-                  {wikis.map((wiki) => (
-                    <Col key={wiki.id} xs={24} sm={12} lg={8} xl={6}>
-                      <WikiCard wiki={wiki} />
+                  {wikis.map((w) => (
+                    <Col key={w.id} xs={24} sm={12} lg={8} xl={6}>
+                      <WikiCard wiki={w} deleteWiki={deleteWiki} />
                     </Col>
                   ))}
                 </Row>
@@ -1079,11 +1128,10 @@ function WikiTab({
   );
 }
 
-function WikiCard({ wiki }: { wiki: Wiki }) {
+function WikiCard({ wiki, deleteWiki }: { wiki: Wiki; deleteWiki: (wikiId: string) => Promise<void> }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const navigate = useNavigate();
-  const deleteWiki = useLlmWikiStore((s) => s.deleteWiki);
   const { message: messageApi } = AntdApp.useApp();
 
   const handleDelete = async () => {
@@ -1184,11 +1232,14 @@ function AllSourcesTab({
   onNavigateToTab,
   onCreateClick,
   onOpenImportModal,
+  loadMemoryNamespaces,
 }: {
   onViewConfig: (s: UnifiedSource) => void;
   onNavigateToTab: (tab: string) => void;
   onCreateClick: () => void;
   onOpenImportModal: (mode: "create" | "update") => void;
+  /** 页级注入：透传给 SourceCard 的删除后刷新动作 */
+  loadMemoryNamespaces: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -1568,6 +1619,7 @@ function AllSourcesTab({
                     source={source}
                     onViewConfig={onViewConfig}
                     onNavigateToTab={onNavigateToTab}
+                    loadMemoryNamespaces={loadMemoryNamespaces}
                   />
                 </Col>
               ))}
@@ -1633,7 +1685,7 @@ function AllSourcesTab({
   );
 }
 
-function SourceManager() {
+function SourceManager({ memory, wiki, renderMemoryGraph }: SourceManagerProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { fetchSources } = useSourceStore();
@@ -1735,21 +1787,32 @@ function SourceManager() {
             onNavigateToTab={setActiveTab}
             onCreateClick={() => setCreateOpen(true)}
             onOpenImportModal={openImportModal}
+            loadMemoryNamespaces={memory.loadNamespaces}
           />
         )}
         {activeTab === "knowledge" && (
           <KnowledgeTab
             onViewConfig={setConfigSource}
             onCreate={() => setCreateOpen(true)}
+            loadMemoryNamespaces={memory.loadNamespaces}
           />
         )}
         {activeTab === "memory" && (
           <MemoryTab
             onViewConfig={setConfigSource}
             onCreate={() => setCreateOpen(true)}
+            memory={memory}
+            renderMemoryGraph={renderMemoryGraph}
           />
         )}
-        {activeTab === "wiki" && <WikiTab onViewConfig={setConfigSource} onCreate={() => setCreateOpen(true)} />}
+        {activeTab === "wiki" && (
+          <WikiTab
+            onViewConfig={setConfigSource}
+            onCreate={() => setCreateOpen(true)}
+            wiki={wiki}
+            loadMemoryNamespaces={memory.loadNamespaces}
+          />
+        )}
       </div>
 
       <SourceConfigModal

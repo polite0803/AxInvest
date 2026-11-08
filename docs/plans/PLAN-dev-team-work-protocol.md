@@ -202,7 +202,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 | `AUDIT-gates-and-headless-scheduler-2026-10-26.md` | `TEMPLATE_VERSION` = 188 | 实际 **193**（v189–v193 五个版本全部未回写） |
 | 同上 §7 限制 5 | 「Windows 服务化未做」 | `scripts/install-scheduler-task.ps1` 已完整实现 |
 | `PLAN-r3h-long-sample-calibration.md:84` | 「放宽到至少一源」 | `time_travel_batch.rs:487-499` 已实证推翻该前提 |
-| `PLAN-url-as-truth.md` | §1 事实基线逐条核对 | `redirectToChat` 已被删除（`ContentArea.tsx:181` 留墓碑），`:305` 行号已漂移到 `:327` |
+| `PLAN-url-as-truth.md` | §1 事实基线逐条核对 | `redirectToChat` 已被删除（`ContentArea.tsx:117` 留墓碑），`:305` 行号已漂移到 `:327` |
 | `CHECKS.md` | 「12 步全部通过 = 可发版」 | 4 条口径不符、1 条（eslint）必崩、漏 ~45 条真实门禁 |
 | `AGENTS.md:342` | implementor 含 `scanner` | `crates/scanner` **不存在** |
 | `AGENTS.md:47/157` | 36 个 crate（+schema-gen = 37） | 实际 **41**（+schema-gen = 42） |
@@ -238,7 +238,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));   // 块注释
 ```
 
-`ContentArea.tsx:383` 的 `` path={`${BUILTIN_PAGE_PATH.settings}/*`} `` —— **splat 通配 `/*` 落在模板串内**，
+`ContentArea.tsx:319` 的 `` path={`${BUILTIN_PAGE_PATH.settings}/*`} `` —— **splat 通配 `/*` 落在模板串内**，
 被块注释正则当作起点，配到文件后面最近的「块注释结束符」，**吞掉其间全部内容**：
 
 | 后果（实测） | 证据 |
@@ -277,7 +277,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 
 | 项 | 定性 | 证据 |
 |---|---|---|
-| `/llm-wiki/:wikiId/ingest` **无任何入口** | ✅ 真缺陷（此前隐身） | `ContentArea.tsx:399-406` 有路由，渲染 `SafeLazyPage Page={LazyIngestPage}`；但全仓 `navigate`/`to`/`href` 对 `/ingest` **零命中** ⇒ 该页面**没有任何可达路径** |
+| `/llm-wiki/:wikiId/ingest` **无任何入口** | ✅ 真缺陷（此前隐身） | `ContentArea.tsx:335-342` 有路由，渲染 `SafeLazyPage Page={LazyIngestPage}`；但全仓 `navigate`/`to`/`href` 对 `/ingest` **零命中** ⇒ 该页面**没有任何可达路径** |
 | `wiki: "/wiki"` **孤儿键** | ✅ 真缺陷 | `pageRegistry.ts:73` 有键、ContentArea 零 Route；`e2e/wiki.spec.ts:5` 的 `page.goto("/wiki")` 必 404 |
 | `/llm-wiki/:wikiId/graph`、`…/edit/:noteId` | △ 仅页面内跳转（弱入口） | 有入口但仅来自页面内 `navigate`，导航与命令面板都到不了 —— 信息项，非失败 |
 
@@ -396,5 +396,5 @@ Lead 接手后查出**两处编译/运行级缺陷**（都不是设计问题，�
 | **D-6** | 命令模块横向互调豁免（`background_tasks` 5 命令 / `analyst_feedback` 6 命令） | 豁免理由写「不承载业务」与事实不符：(a) 抽 service 层（1.5–2 人日）(b) 改判据措辞（0.3 人日） |
 | **D-7** | `platforms/*.rs` 8 个 stub 删除 | 宿主注释已预授权，但删除动作需授权（且须用 Node 删，非 `rm -rf`） |
 | **D-8** | 6 条行级数据语义承接（v131/v137/v203/v225/v228/v230） | 「等价判据」的具体形态属测试设计决策 |
-| **D-9** | `/llm-wiki/:wikiId/ingest` 无任何入口（`ContentArea.tsx:399-406`，渲染 `LazyIngestPage`） | 三选一：① 补入口（Wiki 页面内加「导入」按钮）② 删该路由 + 删 `LazyIngestPage`（若功能已废弃）③ 若属深链专用则显式登记为 internal 白名单。**修复前它连「不可达」都没被报出来**（解析盲区），故必须先决定它是否该存在 |
+| **D-9** | `/llm-wiki/:wikiId/ingest` 无任何入口（`ContentArea.tsx:335-342`，渲染 `LazyIngestPage`） | 三选一：① 补入口（Wiki 页面内加「导入」按钮）② 删该路由 + 删 `LazyIngestPage`（若功能已废弃）③ 若属深链专用则显式登记为 internal 白名单。**修复前它连「不可达」都没被报出来**（解析盲区），故必须先决定它是否该存在 |
 | **D-10** | `check-route-reachability` 是否接入 CI | 判据已修好，但它**至今不在 `ci.yml` 也不在 `ci-check.mjs`**（`package.json:105/106/142` 三条命令无任何 workflow 调用）⇒ 「判据修好了但没人跑」。接入需决定挂哪个 job + 是否带 `--strict` |

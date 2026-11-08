@@ -58,7 +58,7 @@ import {
   type CapabilityInventory,
   type Delivery,
   DELIVERY_STATUS_COLOR_MAP,
-} from "./opc/utils/constants";
+} from "./utils/constants";
 
 /** 连接器类型（与后端 add_platform 的 platform_type 一致） */
 const PLATFORM_TYPES = ["scanner", "api", "mock", "manual"] as const;

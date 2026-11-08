@@ -22,7 +22,7 @@
 | 模型 | 表现 | 证据 |
 |---|---|---|
 | Chat-first | `dashboard` / `workflow` / `terminal` / `files` / `knowledge` / `multiAgent` 重定向到 chat 内 tab | `src/components/layout/ContentArea.tsx:272-279` |
-| Workspace-first | `/invest`、`/opc`、`/tasks`、`/settings`、`/wiki` 是独立页面 | `src/components/layout/ContentArea.tsx:281-430` |
+| Workspace-first | `/invest`、`/opc`、`/tasks`、`/settings`、`/wiki` 是独立页面 | `src/components/layout/ContentArea.tsx:217-366` |
 
 黏合层是 query + store 双向同步，`ChatPage` 需要 `syncingRef` 防循环（`src/pages/ChatPage.tsx:221-268`）。
 

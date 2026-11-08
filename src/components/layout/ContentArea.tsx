@@ -9,6 +9,7 @@ import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
 import { workspaceTabPath } from "@/lib/workspaceTabs";
+import { LazyDemandDiscoveryPage, LazyOpcPage, OPC_DOMAIN_ROUTES } from "@/pages/opc/routes";
 
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense } from "react";
@@ -40,9 +41,6 @@ const LazyDynamicPageViewer = lazy(() =>
   import("@/pages/DynamicPageViewer").then((m) => ({ default: m.DynamicPageViewer }))
 );
 const LazyDomainHubPage = lazy(() => import("@/pages/DomainHubPage").then((m) => ({ default: m.DomainHubPage })));
-const LazyDemandDiscoveryPage = lazy(() =>
-  import("@/pages/DemandDiscoveryPage").then((m) => ({ default: m.DemandDiscoveryPage }))
-);
 const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage })));
 const LazyReplayWorkbenchPage = lazy(() =>
   import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
@@ -50,68 +48,6 @@ const LazyReplayWorkbenchPage = lazy(() =>
 const LazyTasksCenterPage = lazy(() =>
   import("@/pages/TasksCenterPage/TasksCenterPage").then((m) => ({ default: m.TasksCenterPage }))
 );
-const LazyOpcPage = lazy(() => import("@/pages/OpcPage").then((m) => ({ default: m.OpcPage })));
-// ── 能力包页（OPC 能力包，2026-09-06 按能力域恢复接线；2026-09-15 「行业」→「域」概念统一） ──
-const LazyFinanceInvestDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.FinanceInvestPage }))
-);
-const LazyAccountingDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.AccountingPage }))
-);
-const LazySalesGrowthDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.SalesGrowthPage }))
-);
-const LazyProjectManagementDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.ProjectManagementPage }))
-);
-const LazyConsultingDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.ConsultingPage }))
-);
-const LazyEcommerceDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.EcommercePage }))
-);
-const LazySoftwareDevDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.SoftwareDevPage }))
-);
-const LazySecurityDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.SecurityPage }))
-);
-const LazyGeospatialDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.GeospatialPage }))
-);
-const LazyAiResearchDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.AiResearchPage }))
-);
-const LazyContentMediaDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.ContentMediaPage }))
-);
-const LazyDesignDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.DesignPage }))
-);
-const LazyEducationDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.EducationPage }))
-);
-const LazyGameDevDomainPage = lazy(() =>
-  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.GameDevPage }))
-);
-
-/** 能力包页路由表：[BuiltinPageKey（即能力域导航 key）, 页面组件] */
-const DOMAIN_ROUTES: ReadonlyArray<[string, React.LazyExoticComponent<React.ComponentType>]> = [
-  ["finance-analysis", LazyFinanceInvestDomainPage],
-  ["finance-accounting", LazyAccountingDomainPage],
-  ["automation-sales", LazySalesGrowthDomainPage],
-  ["automation-projects", LazyProjectManagementDomainPage],
-  ["automation-consulting", LazyConsultingDomainPage],
-  ["automation-ecommerce", LazyEcommerceDomainPage],
-  ["devops-software", LazySoftwareDevDomainPage],
-  ["devops-security", LazySecurityDomainPage],
-  ["data-geospatial", LazyGeospatialDomainPage],
-  ["data-ai-research", LazyAiResearchDomainPage],
-  ["content-media", LazyContentMediaDomainPage],
-  ["content-design", LazyDesignDomainPage],
-  ["content-education", LazyEducationDomainPage],
-  ["ai-media-game", LazyGameDevDomainPage],
-];
 
 /**
  * 旧链兼容：`/opc/industry/:packId` → `/opc/domain/:packId`。
@@ -341,7 +277,7 @@ export const ContentArea = memo(function ContentArea() {
             }
           />
           {/* ── AxInvest 能力包页（OPC 能力包，路径 /opc/domain/:id，按能力域归位） ── */}
-          {DOMAIN_ROUTES.map(([pageKey, Page]) => (
+          {OPC_DOMAIN_ROUTES.map(([pageKey, Page]) => (
             <Route
               key={pageKey}
               path={BUILTIN_PAGE_PATH[pageKey]}

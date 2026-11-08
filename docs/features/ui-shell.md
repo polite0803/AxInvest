@@ -10,7 +10,7 @@
 
 ### 1. 路由与页面注册
 
-路由是**显式注册**，不是文件系统扫描：`ContentArea` 维护一张 `<Route path=... element=...>` 列表，页面组件从 `src/pages/` 直接 import；`useNavigate` 在同一个组件里负责交互跳转（`src/components/layout/ContentArea.tsx:157`、`:213-347`）。动态页面（插件 / dynamicUI）走最后一条带参数的通配路由（`:347`），不会覆盖静态路由。
+路由是**显式注册**，不是文件系统扫描：`ContentArea` 维护一张 `<Route path=... element=...>` 列表，页面组件从 `src/pages/` 直接 import；`useNavigate` 在同一个组件里负责交互跳转（`src/components/layout/ContentArea.tsx:93`、`:149-283`）。动态页面（插件 / dynamicUI）走最后一条带参数的通配路由（`:283`），不会覆盖静态路由。
 
 页面注册集中在一处的好处是「可达性」可审计：新增页面必须同时给出路径与入口，不能只加文件不加路由。导航模型的上游计划见 `PLAN-frontend-information-architecture.md`（v2.9.9）。
 
@@ -70,7 +70,10 @@ Monaco 的语法高亮是**白名单制**：新增语言必须在 `vite.config.t
 ## 关键代码入口
 
 - 路由 / 顶栏：
-  - `src/components/layout/ContentArea.tsx:3`（`AppHeader` import）、`:157`（`useNavigate`）、`:208`（`<AppHeader />`）、`:213-347`（路由表）
+  - `src/components/layout/ContentArea.tsx:3`（`AppHeader` import）
+- `src/components/layout/ContentArea.tsx:93`（`useNavigate`）
+- `src/components/layout/ContentArea.tsx:144`（`<AppHeader />` 渲染）
+- `src/components/layout/ContentArea.tsx:149-283`（路由表）
   - `src/components/layout/AppHeader.tsx:20`（股票工作台头）、`:45`（组件导出）、`:59-61`（按页面抑制）、`:68-69`（40px）
 - i18n：
   - `src/i18n/index.ts:10-21`（10 种懒加载语言）、`:51-56`（`lng` / `fallbackLng`）、`:68-76`（`changeLanguage` 拦截）

@@ -54,8 +54,8 @@
 | A3 | `src/components/settings/index.ts:30` | `../chat/PluginMarketplace` | 误报 | `src/components/chat/PluginMarketplace.tsx:112` 取键 `chat.plugins.marketplace.title`——`market` = **插件市场** | — | 不改 |
 | A4 | `src/pages/SettingsPage.tsx:71` | `@/components/chat/PluginMarketplace`（动态 `import()`） | 误报 | 同上（同一组件，另一处装载） | — | 不改 |
 | A5 | `src/components/settings/WorkflowSettings.tsx:5` | `@/pages/WorkflowMarketplace` | 误报 | `src/pages/WorkflowMarketplace.tsx:18`「目录条目类型，与后端 `axagent_harness::marketplace::CatalogItem` 对齐」= 工作流模板市场 | — | 不改 |
-| A6 | `src/pages/OpcPage.tsx:22` | `./opc/components/MarketPackTab` | 误报（**两域判据不同源**） | `src/pages/opc/components/MarketPackTab.tsx:20` 调 `invoke("opc_market_list")`——`market` 是 OPC 的**能力市场**；导入方与目标同属 OPC | — | 不改（前端补 `cross` 桶另行裁定） |
-| A7 | `src/pages/OpcPage.tsx:25` | `./opc/components/TalentMarketTab` | 误报（同上） | `src/pages/opc/components/TalentMarketTab.tsx:10` + `TALENT_CATEGORIES`——人才市场 | — | 不改 |
+| A6 | `src/pages/opc/OpcPage.tsx:22` | `./components/MarketPackTab` | 误报（**两域判据不同源**） | `src/pages/opc/components/MarketPackTab.tsx:20` 调 `invoke("opc_market_list")`——`market` 是 OPC 的**能力市场**；导入方与目标同属 OPC | — | 不改（前端补 `cross` 桶另行裁定） |
+| A7 | `src/pages/opc/OpcPage.tsx:25` | `./components/TalentMarketTab` | 误报（同上） | `src/pages/opc/components/TalentMarketTab.tsx:10` + `TALENT_CATEGORIES`——人才市场 | — | 不改 |
 
 > 与 §91.2 ① 的差异：§91 记 6 处，漏了 A5（`WorkflowMarketplace` 同样是 marketplace 假阳性）。今天实为 **7 处 / 6 文件**。
 
@@ -97,7 +97,7 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| D1 | `src/components/layout/ContentArea.tsx:46` | `InvestPage`（lazy） | 域特定 | 宿主路由表的投资中心入口；同文件 `:443` 注释「2026-10-28：股票旧路由已全部删除，统一走 `/invest`」 | 中（插件 `pages[]`） | B8-2 |
+| D1 | `src/components/layout/ContentArea.tsx:44` | `InvestPage`（lazy） | 域特定 | 宿主路由表的投资中心入口；同文件 `:379` 注释「2026-10-28：股票旧路由已全部删除，统一走 `/invest`」 | 中（插件 `pages[]`） | B8-2 |
 | D2 | `src/pages/ScreenerPage.tsx:1` | `stock-analysis/ScreenerPage` | 域特定 | 薄壳（同文件 5 行），由 `src/components/invest/InvestHub.tsx:15` lazy 装载 | 低 | B8-2 |
 | D3 | `src/pages/ScreenshotDiagnosisPage.tsx:1` | `ScreenshotDiagnosisDashboard` | 域特定 | 薄壳（同文件 5 行），`InvestHub.tsx:20` lazy 装载 | 低 | B8-2 |
 | D4 | `src/pages/TasksCenterPage/OverviewTab.tsx:3` | `EvolutionApprovalDrawer` | 域特定 | 任务中心概览内联**股票进化审批**抽屉 | 中 | B8-2 |

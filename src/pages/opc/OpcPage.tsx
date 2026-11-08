@@ -14,15 +14,15 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { ContentMediaTab } from "./opc/components/ContentMediaTab";
-import { CustomersTab } from "./opc/components/CustomersTab";
-import { DashboardTab } from "./opc/components/DashboardTab";
-import { InvoicesTab } from "./opc/components/InvoicesTab";
-import { KanbanTab } from "./opc/components/KanbanTab";
-import { MarketPackTab } from "./opc/components/MarketPackTab";
-import { ProjectsTab } from "./opc/components/ProjectsTab";
-import { SitesTab } from "./opc/components/SitesTab";
-import { TalentMarketTab } from "./opc/components/TalentMarketTab";
+import { ContentMediaTab } from "./components/ContentMediaTab";
+import { CustomersTab } from "./components/CustomersTab";
+import { DashboardTab } from "./components/DashboardTab";
+import { InvoicesTab } from "./components/InvoicesTab";
+import { KanbanTab } from "./components/KanbanTab";
+import { MarketPackTab } from "./components/MarketPackTab";
+import { ProjectsTab } from "./components/ProjectsTab";
+import { SitesTab } from "./components/SitesTab";
+import { TalentMarketTab } from "./components/TalentMarketTab";
 
 const { Title } = Typography;
 

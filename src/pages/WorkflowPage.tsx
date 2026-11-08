@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { EvolutionPort } from "@/components/common/evolutionPort";
-import { WorkflowSettings } from "@/components/settings";
 import { WorkflowEditor, WorkflowExecutor } from "@/components/workflow";
 import type { WorkflowTemplateResponse } from "@/components/workflow/types";
+import { WorkflowSettings } from "@/components/workflow/WorkflowSettings";
 import { withoutParams } from "@/lib/workspaceTabs";
 import { useEvolutionStore } from "@/stores/feature/evolutionStore";
 import { ReactFlowProvider } from "@xyflow/react";

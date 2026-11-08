@@ -540,7 +540,7 @@ export interface SandboxInboundMessageEvent {
  * 校验点在哪、由谁保证（认符号不认号；行号会随编辑漂，函数名是锚）：
  * - `src/sdk/rpcBridge.ts` 的 `createHostApiBridge().handleRpcRequest` —— 入参是**整个事件**
  *   而非裸帧，就是为了让这一判据长在宿主自己身上，不靠调用方自觉；不符即**丢弃且不回包**；
- * - `src/components/skill/SkillSandboxContainer.tsx` 的 `messageHandler`（ready / contentError）
+ * - `src/components/shared/SkillSandboxContainer.tsx` 的 `messageHandler`（ready / contentError）
  *   与 `handleRpc` —— 容器在把事件交给桥之前先判一次（ready 帧会创建桥、撤加载超时，
  *   这一步本身不能被外来帧触发）；
  * - `src/sdk/rpcBridge.ts` 的 `createHostRpcBridge`：`handleMessage` 与 `callSkillMethod`
@@ -565,7 +565,7 @@ export function isFrameFromSandboxSource(event: SandboxInboundMessageEvent, sand
  * 为什么收成单点（与 {@link SANDBOX_RPC_TIMEOUT_MS} 同一个理由）：这条超时决定的是
  * 「内容没就绪时用户看到什么」，两种粒度必须是同一种症状；写两份就会漂成
  * 「面板 30 s 报错、页面 60 s 才报错」。权威消费方：
- * - `src/components/skill/SkillSandboxContainer.tsx`（panel / skill 的 srcdoc 通道）
+ * - `src/components/shared/SkillSandboxContainer.tsx`（panel / skill 的 srcdoc 通道）
  * - `src/components/plugin/PluginPageHost.tsx`（page 的 asset 通道）
  *
  * ⚠ 刻意**不进** {@link SANDBOX_FRAME_PROTOCOL_TABLE}：这是宿主自己的计时，沙箱侧读了它

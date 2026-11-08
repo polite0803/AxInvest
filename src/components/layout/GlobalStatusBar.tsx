@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useSkillStatusBarCount } from "@/hooks/useSkillStatusBarCount";
-import { SkillStatusBar } from "./../skill/SkillStatusBar";
 import { BackendStatusIndicator } from "./BackendStatusIndicator";
+import { SkillStatusBar } from "./SkillStatusBar";
 
 /**
  * 全局底部状态栏 — 始终可见。

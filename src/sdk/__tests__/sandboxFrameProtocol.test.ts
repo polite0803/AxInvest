@@ -163,7 +163,7 @@ const CONSUMER_FILES = [
   "src/sdk/types.ts",
   "src/sdk/pluginClientBridge.ts",
   "src/components/plugin/pluginSandboxBridge.ts",
-  "src/components/skill/SkillSandboxContainer.tsx",
+  "src/components/shared/SkillSandboxContainer.tsx",
   "src/components/plugin/PluginPanelHost.tsx",
   // 页面（bundle 粒度）容器（任务 #64）：它接的是同一条桥，抄一份帧词汇就等于长出第二套协议
   "src/components/plugin/PluginPageHost.tsx",

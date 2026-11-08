@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { GraphData, GraphNode } from "@/components/shared/GraphView";
 import { MonacoEditor } from "@/components/shared/MonacoEditor";
-import type { GraphData, GraphNode } from "@/components/wiki/GraphView";
 import { highlightWikilink } from "@/components/wiki/wikilinkHighlight";
 import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
 import { useWikiAutoSave } from "@/hooks/useWikiAutoSave";

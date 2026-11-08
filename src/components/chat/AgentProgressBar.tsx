@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useCurrentToolCall } from "@/hooks/useCurrentToolCall";
-import { useAgentStore } from "@/stores/feature/agentStore";
+import { useIsConversationExecuting } from "@/hooks/useIsConversationExecuting";
 import { Progress, Spin, Tag, theme, Typography } from "antd";
 import { Wrench } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +47,8 @@ function getToolDisplayName(
  * Agent 执行进度指示器
  *
  * 在聊天界面中显示当前 agent 的工具执行状态：
- * - currentToolCall 取自 executionStore（活源），isExecuting 取自 agentStore（按对话的标志）
+ * - currentToolCall 取自 executionStore（活源，经 useCurrentToolCall），isExecuting
+ *   取自 agentStore（按对话的标志，经 useIsConversationExecuting）
  * - 显示当前正在执行的工具名称
  */
 export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
@@ -56,7 +57,7 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const currentToolCall = useCurrentToolCall();
-  const isExecuting = !!useAgentStore((s) => s.isExecuting[conversationId]);
+  const isExecuting = useIsConversationExecuting(conversationId);
 
   // 持久化最后一次看到的工具名称，解决 currentToolCall 被 handleToolResult 置 null
   // 但 phase 仍为 executing 时（工具间隙），UI 显示空转无名称的问题。

@@ -3,7 +3,7 @@
 import { Tooltip } from "@/components/layout/Tooltip";
 import { QualityScore } from "@/components/llm-wiki/QualityScore";
 import { SyncStatus } from "@/components/llm-wiki/SyncStatus";
-import { GraphData, GraphView, type GraphViewHandle } from "@/components/wiki/GraphView";
+import { GraphData, GraphView, type GraphViewHandle } from "@/components/shared/GraphView";
 import { WikiDetailPanel } from "@/components/wiki/WikiDetailPanel";
 import { WikiFilePanel } from "@/components/wiki/WikiFilePanel";
 import { WikiNodeContextMenu } from "@/components/wiki/WikiNodeContextMenu";

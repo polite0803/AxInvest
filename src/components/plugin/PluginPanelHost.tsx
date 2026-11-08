@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { createPluginBridgeApi, createPluginBridgePermissions } from "@/components/plugin/pluginSandboxBridge";
-import { SkillSandboxContainer } from "@/components/skill/SkillSandboxContainer";
+import { SkillSandboxContainer } from "@/components/shared/SkillSandboxContainer";
 import type { SkillPermissions } from "@/sdk/types";
 import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
 

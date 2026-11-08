@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { useXtermTheme } from "@/hooks/useXtermTheme";
 import { isTauri, listen, logIpcError, type UnlistenFn } from "@/lib/invoke";
 import { type PtySessionInfo, useTerminalStore } from "@/stores/feature/terminalStore";
-import { getXtermTheme, useThemeStore } from "@/stores/feature/themeStore";
 import { Badge, Button, Empty, Select } from "antd";
 import { AlertTriangle, CheckCircle, Maximize2, Minimize2, Plus, RefreshCw, Terminal, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +24,7 @@ export function IntegratedTerminal({
   onError,
 }: IntegratedTerminalProps) {
   const { t } = useTranslation();
-  const currentTheme = useThemeStore((s) => s.currentTheme);
+  const { currentTheme, getThemeName, getXtermTheme } = useXtermTheme();
   const {
     sessions,
     activeSessionId,
@@ -99,7 +99,7 @@ export function IntegratedTerminal({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-        theme: getXtermTheme(useThemeStore.getState().currentTheme),
+        theme: getXtermTheme(getThemeName()),
       });
 
       const fitAddon = new FitAddon();

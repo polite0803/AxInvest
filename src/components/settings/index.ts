@@ -38,4 +38,3 @@ export { ImageGenSettings } from "./ImageGenSettings";
 export { StorageSpaceManager } from "./StorageSpaceManager";
 export { ThemeManager } from "./ThemeManager";
 export { UserProfileSettings } from "./UserProfileSettings";
-export { WorkflowSettings } from "./WorkflowSettings";

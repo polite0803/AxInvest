@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { AgentExecutionPanel } from "@/components/chat/AgentExecutionPanel";
+import { useTrajectoryListFetcher } from "@/hooks/useTrajectories";
 import { useConversationStore } from "@/stores";
-import { useExecutionStore } from "@/stores/feature/executionStore";
 import { Empty } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next";
 export function AgentExecutionTab() {
   const { t } = useTranslation();
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
-  const fetchTrajectoryList = useExecutionStore((s) => s.fetchTrajectoryList);
+  const fetchTrajectoryList = useTrajectoryListFetcher();
 
   // 有活跃会话时自动加载轨迹列表
   useEffect(() => {

@@ -10,7 +10,7 @@
 // 通用判据：**代码里出现的每个 var(--x) 名字，都必须能在定义面找到**
 // （index.css / 其它 .css 的声明，或运行时 `setProperty("--x", …)` 的投影）。
 // 三个函数都是纯函数，负控喂合成文本即可拆穿；不靠改坏真文件来自证。
-import { NODE_KIND_HUE } from "@/components/wiki/graphViewUtils";
+import { NODE_KIND_HUE } from "@/components/shared/graphViewUtils";
 import { RECO_STYLE_ALIASES, RECO_STYLE_HUE } from "@/lib/stock-analysis-utils";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

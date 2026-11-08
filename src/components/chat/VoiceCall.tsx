@@ -13,10 +13,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ApprovalCard } from "../approval/ApprovalCard";
-import { DagProgressCard } from "../voice/DagProgressCard";
-import type { DagNodeProgress } from "../voice/DagProgressCard";
-import { IntentClarificationPanel } from "../voice/IntentClarificationPanel";
-import { VoiceWaveform } from "../voice/VoiceWaveform";
+import { DagProgressCard } from "./DagProgressCard";
+import type { DagNodeProgress } from "./DagProgressCard";
+import { IntentClarificationPanel } from "./IntentClarificationPanel";
+import { VoiceWaveform } from "./VoiceWaveform";
 
 interface VoiceCallProps {
   visible: boolean;

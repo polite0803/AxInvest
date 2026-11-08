@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ExpertSelector } from "@/components/chat/ExpertSelector";
+import { ExpertSelector } from "@/components/shared/ExpertSelector";
 import { ModelSelect } from "@/components/shared/ModelSelect";
 import { useAgentProfileLookup } from "@/hooks/useAgentProfile";
 import { usePromptTemplateUsage } from "@/hooks/usePromptTemplateUsage";

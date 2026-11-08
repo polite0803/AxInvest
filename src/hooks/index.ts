@@ -11,4 +11,4 @@ export { addExpertRole, useExpertRoles } from "./useExpertRoles";
 export { useMultiAgentDelegate } from "./useMultiAgent";
 export { usePendingApprovals } from "./usePendingApprovals";
 export { useToolCallState, useToolCallStates } from "./useToolCallStates";
-export { useTrajectories } from "./useTrajectories";
+export { useTrajectories, useTrajectoryListFetcher } from "./useTrajectories";

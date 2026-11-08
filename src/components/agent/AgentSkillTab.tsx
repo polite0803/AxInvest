@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useSkillStore } from "@/stores/feature/skillStore";
+import { useSkillDirectory } from "@/hooks/useSkillDirectory";
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { Empty, Input, Switch, Tag, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
@@ -12,49 +12,12 @@ const { Text } = Typography;
  * 技能管理标签页
  *
  * 展示已安装的技能列表，支持启用/禁用切换。
- * 复用 skillStore 的数据和 toggleSkill 方法。
+ * 数据经 useSkillDirectory hook 读写（活源 skillStore，组件中立性消键）。
  */
 export function AgentSkillTab() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
-  const [skills, setSkills] = useState<Array<{ name: string; description: string; enabled: boolean }>>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unsub: (() => void) | undefined;
-    (async () => {
-      try {
-        const store = useSkillStore.getState();
-        if (store.skills.length === 0) {
-          await store.loadSkills();
-        }
-        if (!cancelled) {
-          setSkills(useSkillStore.getState().skills);
-          setLoading(false);
-          unsub = useSkillStore.subscribe((s) => {
-            if (!cancelled) {
-              setSkills(s.skills);
-            }
-          });
-        }
-      } catch {
-        if (!cancelled) { setLoading(false); }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
-  }, []);
-
-  const handleToggle = async (name: string, enabled: boolean) => {
-    try {
-      await useSkillStore.getState().toggleSkill(name, enabled);
-    } catch {
-      // 静默失败
-    }
-  };
+  const { skills, loading, toggleSkill } = useSkillDirectory();
 
   const filtered = skills.filter((s) => {
     if (!search.trim()) { return true; }
@@ -125,7 +88,7 @@ export function AgentSkillTab() {
             <Switch
               size="small"
               checked={skill.enabled}
-              onChange={(checked) => handleToggle(skill.name, checked)}
+              onChange={(checked) => toggleSkill(skill.name, checked)}
             />
           </div>
         ))}

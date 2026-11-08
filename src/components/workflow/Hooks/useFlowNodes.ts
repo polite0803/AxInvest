@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useAgentProfileMeta } from "@/hooks/useAgentProfileMeta";
 import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { type NodePositionLike, toRelativePosition } from "@/lib/workflowLayout";
 import { getNodeSize } from "@/lib/workflowLayout";
 import type { ValidateIssue } from "@/lib/workflowLayout";
 import { useWorkflowEditorStore } from "@/stores";
-import { useAgentStore } from "@/stores/feature/agentStore";
-import { useExpertStore } from "@/stores/feature/expertStore";
 import { hueColor } from "@/theme/categoricalColors";
 import { type Edge, type Node } from "@xyflow/react";
 import { useMemo } from "react";
@@ -45,6 +44,8 @@ export function useFlowNodes(params: UseFlowNodesParams) {
 
   const expandedSubWorkflows = useWorkflowEditorStore((s) => s.expandedSubWorkflows);
   const isDark = useIsDarkTheme();
+  // Agent 名册 fallback 链（expertStore → agentStore）经 hook 注入，组件中立性消键
+  const resolveAgentProfile = useAgentProfileMeta();
   // 提取 only token 中实际用到的值，避免整个 token 对象作为 useMemo 依赖（引用随渲染变化）
   const fallbackColor = token.colorTextQuaternary;
 
@@ -274,12 +275,7 @@ export function useFlowNodes(params: UseFlowNodesParams) {
                 const profileId = (node as AgentNodeType).config
                   .agentProfileId;
                 if (profileId) {
-                  const profile = useExpertStore
-                    .getState()
-                    .getRoleById(profileId)
-                    ?? useAgentStore
-                      .getState()
-                      .getProfileById(profileId);
+                  const profile = resolveAgentProfile(profileId);
                   if (profile) {
                     return {
                       agentRole: profile.agentRole || undefined,
@@ -739,5 +735,6 @@ export function useFlowNodes(params: UseFlowNodesParams) {
     expandedSubWorkflows,
     fallbackColor,
     isDark,
+    resolveAgentProfile,
   ]);
 }

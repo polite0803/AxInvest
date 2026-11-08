@@ -6,7 +6,7 @@
  * GraphData 格式，实现图谱视图在 Memory 模块中的复用。
  */
 
-import type { GraphData, GraphEdge, GraphEdgeType, GraphNode, GraphNodeType } from "@/components/wiki/GraphView";
+import type { GraphData, GraphEdge, GraphEdgeType, GraphNode, GraphNodeType } from "@/components/shared/GraphView";
 
 // ── 后端数据类型（与 Rust Entity/Relationship 对应） ──
 

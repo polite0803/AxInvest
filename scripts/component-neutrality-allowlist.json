@@ -1,6 +1,41 @@
 {
   "fileExemptions": [
     {
+      "file": "src/components/agent/AgentExecutionTab.tsx",
+      "targets": [
+        "@/components/chat/AgentExecutionPanel"
+      ],
+      "reason": "双宿主装载：该 Tab 按运行时上下文在 agent/chat 两域执行面板间二选一，收敛成中立执行面板组件属独立批次（#194 裁定 #1）"
+    },
+    {
+      "file": "src/components/chat/ChatSidebar.tsx",
+      "targets": [
+        "@/components/search/SessionSearchPanel"
+      ],
+      "reason": "侧栏搜索面板复用 search 域既有会话搜索组件，是既有产品形态；收敛需先立中立 SearchPanel 接口（#194 裁定 #4，另批）"
+    },
+    {
+      "file": "src/components/chat/VizBlockNode.tsx",
+      "targets": [
+        "@/components/viz/VizBlockRenderer"
+      ],
+      "reason": "消息块按数据类型分派 viz 渲染器，renderer 本身全类型中立、归 viz 目录属历史命名，归位另批（#194 裁定 #6）"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "targets": [
+        "../approval/ApprovalCard"
+      ],
+      "reason": "通话内审批卡复用 approval 域既有卡片，产品语义即审批组件、非中立性缺陷；通用审批槽另批（#194 裁定 #7）"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/ScreenerToWorkspace.integration.test.tsx",
+      "targets": [
+        "@/components/invest/InvestHub"
+      ],
+      "reason": "集成测试锁「选股器 → 投资中枢」端到端链路，跨域 import 是被测行为本身，测试文件按行为面豁免（#194 裁定 #21）"
+    },
+    {
       "file": "src/components/shared/PageContextProvider.tsx",
       "targets": [
         "@/stores/feature/evolutionStore",

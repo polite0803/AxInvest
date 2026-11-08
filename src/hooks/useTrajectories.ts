@@ -24,3 +24,13 @@ export function useTrajectories(conversationId: string) {
 
   return { trajectories, loadingList, details, fetchList, fetchDetail };
 }
+
+/**
+ * 轨迹列表拉取动作（store action 引用，引用稳定）。
+ *
+ * 只需要触发加载、不需要订阅轨迹数据的场景（如 AgentExecutionTab 的
+ * 会话切换自动加载）经此取用，避免 useTrajectories 带来的额外订阅面。
+ */
+export function useTrajectoryListFetcher() {
+  return useExecutionStore((s) => s.fetchTrajectoryList);
+}

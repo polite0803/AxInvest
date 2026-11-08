@@ -25,7 +25,6 @@ import { useTopicGroupStore } from "@/stores/feature/topicGroupStore";
 
 import { registerHighlight } from "stream-markdown";
 
-import { PrefetchIndicator } from "../proactive/PrefetchIndicator";
 import { AgentProgressBar } from "./AgentProgressBar";
 import { AgentStatsPanel } from "./AgentStatsPanel";
 import { BreadcrumbBar } from "./BreadcrumbBar";
@@ -46,6 +45,7 @@ import { ExtractMemoriesModal } from "./ExtractMemoriesModal";
 import { InputArea } from "./InputArea";
 import { PermissionModal } from "./PermissionModal";
 import { PlanCard } from "./PlanCard";
+import { PrefetchIndicator } from "./PrefetchIndicator";
 import { TaskShapeApprovalModal } from "./TaskShapeApprovalModal";
 // QuickCommandBar removed: /clear, /compact, /model are covered by bottom toolbar & header ModelSelector
 import { WorkflowProgressPanel } from "./WorkflowProgressPanel";

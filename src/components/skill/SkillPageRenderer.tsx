@@ -4,8 +4,8 @@ import type { SkillPermissions } from "@/sdk/types";
 import type { UISchema } from "@/types";
 
 import { DynamicUIRenderer } from "@/components/dynamicUI/DynamicUIRenderer";
+import { SkillSandboxContainer } from "@/components/shared/SkillSandboxContainer";
 import { SkillMarkdownPage } from "./SkillMarkdownPage";
-import { SkillSandboxContainer } from "./SkillSandboxContainer";
 
 interface SkillPageRendererProps {
   componentType: string;

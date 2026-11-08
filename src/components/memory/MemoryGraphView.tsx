@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { GraphData, GraphView, type GraphViewHandle } from "@/components/wiki/GraphView";
+import { GraphData, GraphView, type GraphViewHandle } from "@/components/shared/GraphView";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { adaptMemoryToGraphData, computeBacklinkCounts, type MemoryGraphResponse } from "@/lib/memoryGraphAdapter";

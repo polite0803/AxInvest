@@ -26,7 +26,7 @@ vi.mock(import("@/lib/invoke"), async (importOriginal) => {
   return { ...actual, invoke: vi.fn(), logIpcError: () => () => {} };
 });
 
-import { SkillSandboxContainer } from "@/components/skill/SkillSandboxContainer";
+import { SkillSandboxContainer } from "@/components/shared/SkillSandboxContainer";
 
 const SKILL_NAME = "probe-skill";
 const ENTRY_HTML = '<html><body><div id="probe">hi</div></body></html>';

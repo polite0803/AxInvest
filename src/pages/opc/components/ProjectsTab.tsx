@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { DeleteOutlined, EditOutlined, FlagOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   Button,
@@ -27,15 +28,36 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { Customer, Project } from "../utils/constants";
+import type { Project } from "../utils/constants";
 import { getProjectStatusKey, PROJ_STATUS_COLOR_MAP } from "../utils/constants";
+
+const LIST_CUSTOMERS_COMMAND = "opc_list_customers";
+
+// 客户下拉取数走插件通道（先例 SitesTab / InvoicesTab）：按清单解析启用插件 ⇒ 宿主
+// `plugin_execute_command` 派发。插件未装 / 未启用抛错，与取数失败同一路径处置，不新造错误码。
+async function execPluginCommand(name: string, input: Record<string, unknown>): Promise<string> {
+  const pluginId = await resolvePluginForCommand(name);
+  if (!pluginId) {
+    throw new Error(`no enabled plugin provides command \`${name}\``);
+  }
+  return invoke<string>("plugin_execute_command", { pluginId, name, input });
+}
+
+// 插件命令 `opc_list_customers` 的下拉选项类型 = 接缝视图 `CustomerSummaryView` 的本面板
+// 已读子集（出参线格式 = 视图 camelCase 键，插件出口不改写，禁区 13）。dev mock 下
+// `plugin_execute_command` 返回空串 ⇒ 取数失败提示（mock 不模拟插件子进程）。
+interface CustomerOption {
+  id: string;
+  name: string;
+  email: string;
+}
 
 const { Text } = Typography;
 
 export function ProjectsTab() {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
@@ -51,12 +73,12 @@ export function ProjectsTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [proj, cust] = await Promise.all([
+      const [proj, rawCust] = await Promise.all([
         invoke<Project[]>("opc_list_projects", { filter: {} }),
-        invoke<Customer[]>("opc_list_customers", { filter: {} }),
+        execPluginCommand(LIST_CUSTOMERS_COMMAND, {}),
       ]);
       setProjects(proj);
-      setCustomers(cust);
+      setCustomers(JSON.parse(rawCust) as CustomerOption[]);
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
       setProjects([]);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { DeleteOutlined, PlusOutlined, SwapOutlined } from "@ant-design/icons";
 import {
   Button,
@@ -25,19 +26,59 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { Customer, Invoice } from "../utils/constants";
 import { getInvoiceStatusKey, STATUS_COLOR_MAP } from "../utils/constants";
+
+// 本面板的取数与写面四条命令（`plugin.opc` 命名命令，与 manifest `commands[].name` 逐字一致）。
+// `opc_list_invoices` / `opc_create_invoice` / `opc_transition_invoice` 在 #36 批 1–3 已迁插件，
+// `opc_delete_invoice` 在 #32 批 A 补齐 —— ⚠ 它删的是**域包发票**，宿主同名 Tauri 命令删的是
+// 交付域发票（两套体系同名不同义）；旧版本文件把 list/delete 走交付域、create/transition 走
+// 域包，新建的发票在列表里永远看不到，本批起四个通道统一走域包插件命令（行为修正）。
+const LIST_INVOICES_COMMAND = "opc_list_invoices";
+const CREATE_INVOICE_COMMAND = "opc_create_invoice";
+const TRANSITION_INVOICE_COMMAND = "opc_transition_invoice";
+const DELETE_INVOICE_COMMAND = "opc_delete_invoice";
+const LIST_CUSTOMERS_COMMAND = "opc_list_customers";
+
+// 写命令的插件通道执行（与 load() 的取数同形，先例 SitesTab）：按清单解析启用插件 ⇒ 宿主
+// `plugin_execute_command` 派发。插件未装 / 未启用抛错，与取数失败同一路径处置，不新造错误码。
+async function execPluginCommand(name: string, input: Record<string, unknown>): Promise<string> {
+  const pluginId = await resolvePluginForCommand(name);
+  if (!pluginId) {
+    throw new Error(`no enabled plugin provides command \`${name}\``);
+  }
+  return invoke<string>("plugin_execute_command", { pluginId, name, input });
+}
+
+// 插件命令 `opc_list_invoices` 的行类型 = 接缝视图 `InvoiceSummaryView` 的本面板已读子集
+// （出参线格式 = 视图 camelCase 键，插件出口不改写，禁区 13）。`dueAt` / `createdAt` 是
+// epoch 秒（宿主 `now_ts()` 写入）⇒ 渲染要 `* 1000`。dev mock 下 `plugin_execute_command`
+// 返回空串 ⇒ 取数失败提示（mock 不模拟插件子进程，同 SitesTab 博客面板的既有形态）。
+interface InvoiceRow {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  total: number;
+  dueAt: number | null;
+  createdAt: number;
+}
+
+// 创建表单客户下拉的行类型 = `CustomerSummaryView` 的已读子集。
+interface CustomerOption {
+  id: string;
+  name: string;
+  email: string;
+}
 
 const { Text } = Typography;
 
 export function InvoicesTab() {
   const { t } = useTranslation();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [transitionOpen, setTransitionOpen] = useState(false);
-  const [transitionInvoice, setTransitionInvoice] = useState<Invoice | null>(null);
+  const [transitionInvoice, setTransitionInvoice] = useState<InvoiceRow | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [form] = Form.useForm();
@@ -45,12 +86,10 @@ export function InvoicesTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [inv, cust] = await Promise.all([
-        invoke<Invoice[]>("opc_list_invoices", { filter: {} }),
-        invoke<Customer[]>("opc_list_customers", { filter: {} }),
-      ]);
-      setInvoices(inv);
-      setCustomers(cust);
+      const raw = await execPluginCommand(LIST_INVOICES_COMMAND, {});
+      const rawCust = await execPluginCommand(LIST_CUSTOMERS_COMMAND, {});
+      setInvoices(JSON.parse(raw) as InvoiceRow[]);
+      setCustomers(JSON.parse(rawCust) as CustomerOption[]);
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
       setInvoices([]);
@@ -66,21 +105,24 @@ export function InvoicesTab() {
 
   const handleCreate = async (values: Record<string, unknown>) => {
     try {
-      const lineItems = (values.line_items as Array<Record<string, unknown>>).map((item: Record<string, unknown>) => ({
-        description: item.description as string,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        tax_rate: Number(item.tax_rate || 0),
-        total: Number(item.quantity) * Number(item.unit_price) * (1 + Number(item.tax_rate || 0)),
-      }));
-      await invoke("opc_create_invoice", {
-        input: {
-          customer_id: values.customer_id,
-          line_items: lineItems,
-          currency: "CNY",
-          due_at: values.due_at ? Math.floor(new Date(values.due_at as string).getTime() / 1000) : null,
-          notes: values.notes || "",
-        },
+      // 出站 input 键 = 清单 `inputSchema` 的 camelCase（禁区 13）；行金额由宿主按
+      // quantity×unitPrice×(1+taxRate) 现算，前端不再组装 `total`；`currency` 缺省 CNY
+      // 由宿主补，不传。`line_items` / `due_at` 是表单内部字段名（不进线格式）。
+      const lineItems = (values.line_items as Array<Record<string, unknown>>).map(
+        (item: Record<string, unknown>) => ({
+          description: item.description as string,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unit_price),
+          taxRate: Number(item.tax_rate || 0),
+        }),
+      );
+      await execPluginCommand(CREATE_INVOICE_COMMAND, {
+        customerId: values.customer_id,
+        lineItems,
+        dueAt: values.due_at
+          ? Math.floor(new Date(values.due_at as string).getTime() / 1000)
+          : undefined,
+        notes: (values.notes as string) || undefined,
       });
       message.success(t("opc.invoice.created"));
       setModalOpen(false);
@@ -93,7 +135,7 @@ export function InvoicesTab() {
 
   const handleDelete = async (id: string) => {
     try {
-      await invoke("opc_delete_invoice", { id });
+      await execPluginCommand(DELETE_INVOICE_COMMAND, { id });
       message.success(t("opc.invoice.deleted"));
       load();
     } catch (e) {
@@ -103,7 +145,7 @@ export function InvoicesTab() {
 
   const handleTransition = async (id: string, status: string) => {
     try {
-      await invoke("opc_transition_invoice", { id, targetStatus: status });
+      await execPluginCommand(TRANSITION_INVOICE_COMMAND, { id, status });
       message.success(t("opc.invoice.statusUpdated"));
       setTransitionOpen(false);
       setTransitionInvoice(null);
@@ -139,7 +181,9 @@ export function InvoicesTab() {
 
   const handleBatchDelete = async () => {
     try {
-      await Promise.all(selectedRowKeys.map((id) => invoke("opc_delete_invoice", { id })));
+      await Promise.all(
+        selectedRowKeys.map((id) => execPluginCommand(DELETE_INVOICE_COMMAND, { id })),
+      );
       message.success(t("opc.common.batchDeleteSuccess"));
       setSelectedRowKeys([]);
       load();
@@ -154,17 +198,17 @@ export function InvoicesTab() {
   };
 
   const columns = [
-    { title: t("opc.invoice.columnNumber"), dataIndex: "invoice_number", key: "number", width: 180 },
+    { title: t("opc.invoice.columnNumber"), dataIndex: "invoiceNumber", key: "number", width: 180 },
     {
       title: t("opc.invoice.columnAmount"),
       key: "total",
-      render: (_: unknown, r: Invoice) => `¥${r.total.toFixed(2)}`,
-      sorter: (a: Invoice, b: Invoice) => a.total - b.total,
+      render: (_: unknown, r: InvoiceRow) => `¥${r.total.toFixed(2)}`,
+      sorter: (a: InvoiceRow, b: InvoiceRow) => a.total - b.total,
     },
     {
       title: t("opc.invoice.columnStatus"),
       key: "status",
-      render: (_: unknown, r: Invoice) => {
+      render: (_: unknown, r: InvoiceRow) => {
         const color = STATUS_COLOR_MAP[r.status] || "default";
         return <Tag color={color}>{t(getInvoiceStatusKey(r.status))}</Tag>;
       },
@@ -172,18 +216,18 @@ export function InvoicesTab() {
     {
       title: t("opc.invoice.columnDue"),
       key: "due",
-      render: (_: unknown, r: Invoice) => (r.due_at ? new Date(r.due_at * 1000).toLocaleDateString() : "-"),
+      render: (_: unknown, r: InvoiceRow) => (r.dueAt ? new Date(r.dueAt * 1000).toLocaleDateString() : "-"),
     },
     {
       title: t("opc.invoice.columnCreated"),
       key: "created",
-      render: (_: unknown, r: Invoice) => new Date(r.created_at * 1000).toLocaleString(),
+      render: (_: unknown, r: InvoiceRow) => new Date(r.createdAt * 1000).toLocaleString(),
     },
     {
       title: t("opc.common.actions"),
       key: "actions",
       width: 200,
-      render: (_: unknown, r: Invoice) => (
+      render: (_: unknown, r: InvoiceRow) => (
         <Space size="small">
           {nextStatuses(r.status).length > 0 && (
             <Button
@@ -401,7 +445,7 @@ export function InvoicesTab() {
           <div>
             <Descriptions size="small" column={1}>
               <Descriptions.Item label={t("opc.invoice.numberLabel")}>
-                {transitionInvoice.invoice_number}
+                {transitionInvoice.invoiceNumber}
               </Descriptions.Item>
               <Descriptions.Item label={t("opc.invoice.currentStatus")}>
                 <Tag color={STATUS_COLOR_MAP[transitionInvoice.status] || "default"}>

@@ -12,8 +12,6 @@ import { useTranslation } from "react-i18next";
 
 import { Empty, Segmented } from "antd";
 
-import type { Customer } from "../utils/constants";
-
 type Scope = "china" | "world";
 
 const GEO_URLS: Record<Scope, string> = {
@@ -21,8 +19,17 @@ const GEO_URLS: Record<Scope, string> = {
   world: "/customer-map/world.json",
 };
 
+// 消费子集（camelCase 接缝视图键），与调用方行类型鸭子兼容
+interface CustomerMapCustomer {
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  customerType: string | null;
+  totalRevenue: number;
+}
+
 interface CustomerMapProps {
-  customers: Customer[];
+  customers: CustomerMapCustomer[];
   height?: number;
 }
 
@@ -40,8 +47,8 @@ export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
         .filter((c) => c.latitude != null && c.longitude != null)
         .map((c) => ({
           name: c.name,
-          type: c.customer_type,
-          value: [c.longitude as number, c.latitude as number, c.total_revenue],
+          type: c.customerType,
+          value: [c.longitude as number, c.latitude as number, c.totalRevenue],
         })),
     [customers],
   );

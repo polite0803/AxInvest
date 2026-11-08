@@ -252,6 +252,13 @@ impl OpcStoreProvider for HostOpcStore {
 
     async fn list_customers(&self, query: CustomerListQuery) -> Result<Vec<CustomerSummaryView>> {
         let svc = DefaultCustomerService::new(self.db.clone());
+        // 存量回填：未分类（unknown）客户按 company 归类为 business / consumer，幂等。
+        // 宿主同名命令 `opc_list_customers` 退役后本入口是唯一触发点（迁移时保持行为等价）。
+        if let Err(e) = svc.backfill_customer_types().await {
+            tracing::warn!(
+                "[opc.store::list_customers] 存量客户类型回填失败（忽略，继续查询）: {e}"
+            );
+        }
         let rows = svc
             .list_customers(CustomerFilter {
                 status: query.status.as_deref().and_then(|s| s.parse::<CustomerStatus>().ok()),

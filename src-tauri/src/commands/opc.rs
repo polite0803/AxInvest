@@ -4,8 +4,6 @@
 //!
 //! 将 opc-dao 的 Service 暴露给前端 React 调用。
 
-use std::str::FromStr;
-
 use axagent_agent_macro::agent_command;
 
 use crate::AppState;
@@ -14,14 +12,13 @@ use tauri::State;
 
 use axagent_company_runtime::opc::{
     AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService,
-    CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput, CreateKpiInput,
-    CreateLandingPageInput, CreateProjectInput, CreatePublishScheduleInput, Customer,
-    CustomerFilter, CustomerService, DashboardSummary, DefaultAnalyticsService,
-    DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService, DefaultProjectService,
-    DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice, Invoice, InvoiceService,
-    InvoiceStatus, KpiRecord, LandingPage, Milestone, Project, ProjectFilter, ProjectService,
-    PublishSchedule, PublishScheduleService, RevenueRecord, SiteService, UpdateContentAssetInput,
-    UpdateCustomerInput, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
+    CreateContentAssetInput, CreateKpiInput, CreateLandingPageInput, CreateProjectInput,
+    CreatePublishScheduleInput, Customer, CustomerService, DashboardSummary,
+    DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService,
+    DefaultProjectService, DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice,
+    Invoice, InvoiceService, KpiRecord, LandingPage, Milestone, Project, ProjectFilter,
+    ProjectService, PublishSchedule, PublishScheduleService, RevenueRecord, SiteService,
+    UpdateContentAssetInput, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
 };
 
 use axagent_company_runtime::opc::capability_pack::{
@@ -83,43 +80,7 @@ async fn record_opc_success(
         .await;
 }
 
-/// 失败轨迹的简便封装
-async fn record_opc_failure(
-    storage: &axagent_trajectory::TrajectoryStorage,
-    op: &str,
-    id: &str,
-    err: &str,
-) {
-    record_opc_trajectory(storage, op, id, axagent_trajectory::TrajectoryOutcome::Failure, err)
-        .await;
-}
-
 // ── Invoice Commands ──────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建发票")]
-#[tauri::command]
-pub async fn opc_create_invoice(
-    state: State<'_, AppState>,
-    input: CreateInvoiceInput,
-) -> Result<Invoice, String> {
-    let svc = DefaultInvoiceService::new(state.harness.db().clone());
-    let result = svc.create_invoice(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    });
-    if let Ok(ref inv) = result {
-        record_opc_success(
-            &state.trajectory_storage,
-            "create_invoice",
-            &inv.id,
-            &format!("amount={}", inv.total),
-        )
-        .await;
-    }
-    result
-}
 
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取发票")]
 #[tauri::command]
@@ -149,116 +110,13 @@ pub async fn opc_update_invoice(
     })
 }
 
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "转换发票状态")]
-#[tauri::command]
-pub async fn opc_transition_invoice(
-    state: State<'_, AppState>,
-    id: String,
-    target_status: String,
-) -> Result<Invoice, String> {
-    let status = InvoiceStatus::from_str(&target_status)
-        .map_err(|_| format!("invalid invoice status: {target_status}"))?;
-    let svc = DefaultInvoiceService::new(state.harness.db().clone());
-    let result = svc.transition_status(&id, status).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    });
-    if let Ok(ref inv) = result {
-        record_opc_success(
-            &state.trajectory_storage,
-            "transition_invoice",
-            &inv.id,
-            &format!("status={}", inv.status.as_str()),
-        )
-        .await;
-    } else if let Err(ref e) = result {
-        // 失败轨迹记录：状态机非法跳转等失败用于复盘
-        record_opc_failure(&state.trajectory_storage, "transition_invoice", &id, e).await;
-    }
-    result
-}
-
 // ── Customer Commands ─────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建客户")]
-#[tauri::command]
-pub async fn opc_create_customer(
-    state: State<'_, AppState>,
-    input: CreateCustomerInput,
-) -> Result<Customer, String> {
-    let svc = DefaultCustomerService::new(state.harness.db().clone());
-    let result = svc.create_customer(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    });
-    if let Ok(ref c) = result {
-        record_opc_success(
-            &state.trajectory_storage,
-            "create_customer",
-            &c.id,
-            &format!("name={}", c.name),
-        )
-        .await;
-    }
-    result
-}
 
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取客户")]
 #[tauri::command]
 pub async fn opc_get_customer(state: State<'_, AppState>, id: String) -> Result<Customer, String> {
     let svc = DefaultCustomerService::new(state.harness.db().clone());
     svc.get_customer(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出客户")]
-#[tauri::command]
-pub async fn opc_list_customers(
-    state: State<'_, AppState>,
-    filter: CustomerFilter,
-) -> Result<Vec<Customer>, String> {
-    let svc = DefaultCustomerService::new(state.harness.db().clone());
-    // 存量回填：未分类（unknown）客户按 company 归类为 business / consumer，幂等
-    if let Err(e) = svc.backfill_customer_types().await {
-        tracing::warn!("[opc_list_customers] 存量客户类型回填失败（忽略，继续查询）: {e}");
-    }
-    svc.list_customers(filter).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "更新客户")]
-#[tauri::command]
-pub async fn opc_update_customer(
-    state: State<'_, AppState>,
-    id: String,
-    input: UpdateCustomerInput,
-) -> Result<Customer, String> {
-    let svc = DefaultCustomerService::new(state.harness.db().clone());
-    svc.update_customer(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除客户")]
-#[tauri::command]
-pub async fn opc_delete_customer(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let svc = DefaultCustomerService::new(state.harness.db().clone());
-    svc.delete_customer(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,

@@ -29,14 +29,14 @@
     {
       "id": "commandTotal",
       "label": "Tauri 命令总数（parseRegistry 逐行条目）",
-      "value": 1540,
+      "value": 1534,
       "check": "registryCommandCount",
       "hard": true,
-      "planNumber": "1540",
+      "planNumber": "1534",
       "planMustAppear": true,
-      "planPinned": [{ "line": 366, "mustContain": ["1540", "165", "`register_commands.rs` 共"] }],
-      "planOld": [{ "number": "1534", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）" }],
-      "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 1542→1541**。原本挂在 `planOld` 上的 1541 条目随本批**移除**：它不是「旧读数」了，若留着会与现值钉句自相矛盾；1542 转为历史读数，**不设 planOld** —— 它大量出现在 §0.12.4 漂移列举段与 §15 各节的历史陈述里，加 planOld 只会逼着到处补 alsoAt（同一事实的两种写法不该受两套监管）。**2026-11-05 B8-1b 新增宿主 `plugin_list_task_sources` ⇒ 1541→1542**（1541 随之转历史读数，同不设 planOld：它只出现在 §15 记账段的本批对照行里，是「上一批的现值」而非漂移旧值）。**2026-11-06 对账批（`3fe49c950`，#36 第 4 批）删宿主 `opc_list_blog_posts` ⇒ 1542→1541**；1542 同不设 planOld —— 它在 PLAN 里成批出现在 §15 / §108 / §115.6 的记账段（都是「当时多少」而非「现在多少」），加 planOld 只会逼出满屏 alsoAt。**2026-11-08 对账批实测 1541→1540**：`7cb13bde5`（#36 博客写面切插件通道）删宿主三命令 −3，`376b4d766`（#216 任务卡片投影）加 `plugin_list_task_cards` / `task_card_host_cards` +2 ⇒ 净 −1；同批 `--dump-readings` 的 defined 1540 / 已注册名 1540 / 未注册 0 三方一致，不是产物滞后。"
+      "planPinned": [{ "line": 366, "mustContain": ["1534", "165", "`register_commands.rs` 共"] }],
+      "planOld": [],
+      "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 1542→1541**。原本挂在 `planOld` 上的 1541 条目随本批**移除**：它不是「旧读数」了，若留着会与现值钉句自相矛盾；1542 转为历史读数，**不设 planOld** —— 它大量出现在 §0.12.4 漂移列举段与 §15 各节的历史陈述里，加 planOld 只会逼着到处补 alsoAt（同一事实的两种写法不该受两套监管）。**2026-11-05 B8-1b 新增宿主 `plugin_list_task_sources` ⇒ 1541→1542**（1541 随之转历史读数，同不设 planOld：它只出现在 §15 记账段的本批对照行里，是「上一批的现值」而非漂移旧值）。**2026-11-06 对账批（`3fe49c950`，#36 第 4 批）删宿主 `opc_list_blog_posts` ⇒ 1542→1541**；1542 同不设 planOld —— 它在 PLAN 里成批出现在 §15 / §108 / §115.6 的记账段（都是「当时多少」而非「现在多少」），加 planOld 只会逼出满屏 alsoAt。**2026-11-08 对账批实测 1541→1540**：`7cb13bde5`（#36 博客写面切插件通道）删宿主三命令 −3，`376b4d766`（#216 任务卡片投影）加 `plugin_list_task_cards` / `task_card_host_cards` +2 ⇒ 净 −1；同批 `--dump-readings` 的 defined 1540 / 已注册名 1540 / 未注册 0 三方一致，不是产物滞后。**2026-11-09 #32 批 C 删宿主六个已插件化 OPC 命令**（`opc_create_invoice` / `opc_transition_invoice` / `opc_create_customer` / `opc_update_customer` / `opc_delete_customer` / `opc_list_customers`）⇒ 1540→1534；同批把 `planOld` 上的 1534 条目**移除**（它重新成为现值，留着会与现钉句自相矛盾，先例 = 1541 同批移除）；1534 上一次作为旧读数的那组成对值在 §0.12.4 漂移段，本批把新的一对 1540/1534 追加进该段，不为其设新 planOld。"
     },
     {
       "id": "commandModules",
@@ -60,20 +60,20 @@
     {
       "id": "registryFileLines",
       "label": "register_commands.rs 行数（口径 = split(\"\\n\").length，含末行空元素）",
-      "value": 1607,
+      "value": 1601,
       "check": "registryFileLineCount",
       "hard": false,
       "planMustAppear": false,
-      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。**2026-11-06 第二轮对账**：主 crate `cargo check -p axagent --lib` 后从盘上量 = **1608**，且 `git status` 对 `src-tauri/src/register_commands.rs` 无输出（产物与 HEAD 逐字相同 ⇒ 不是本次构建改写了它）⇒ 1609 是上一批「B9-2 −1 与 B8-1b +1」两笔相互抵掉后没回灌的滞后值。本条 `hard:false`（只报告，不参与退出码），但对账批的原则是**软锚点也不留过期值**：漂移一旦无人回读，下一批就分不清「产物滞后」与「真漂移」。**2026-11-08 对账批：1608 → 1607（−1）** = `7cb13bde5` 删三条博客写面命令（−3 行）+ `376b4d766` 加两条任务卡片命令（+2 行），净 −1；与 `commandTotal` 1541→1540 精确配对。"
+      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。**2026-11-06 第二轮对账**：主 crate `cargo check -p axagent --lib` 后从盘上量 = **1608**，且 `git status` 对 `src-tauri/src/register_commands.rs` 无输出（产物与 HEAD 逐字相同 ⇒ 不是本次构建改写了它）⇒ 1609 是上一批「B9-2 −1 与 B8-1b +1」两笔相互抵掉后没回灌的滞后值。本条 `hard:false`（只报告，不参与退出码），但对账批的原则是**软锚点也不留过期值**：漂移一旦无人回读，下一批就分不清「产物滞后」与「真漂移」。**2026-11-08 对账批：1608 → 1607（−1）** = `7cb13bde5` 删三条博客写面命令（−3 行）+ `376b4d766` 加两条任务卡片命令（+2 行），净 −1；与 `commandTotal` 1541→1540 精确配对。**2026-11-09 #32 批 C：1607 → 1601（−6）** = 删六条 OPC 宿主命令各少 1 行注册，与 `commandTotal` 1540→1534 精确配对。"
     },
     {
       "id": "commandNameSetParity",
       "label": "不变量：契约 A 名集合数 == 产物条目数 == 登记值",
-      "value": 1540,
+      "value": 1534,
       "check": "commandNameSetCount",
       "hard": true,
       "planMustAppear": false,
-      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1，B8-1b 加 `plugin_list_task_sources` 回升 1；**2026-11-06 对账批 `3fe49c950` 删 `opc_list_blog_posts` ⇒ 三方 1541/1541/1541**）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。**2026-11-08 对账批：三方同时 1540/1540/1540**（−3 博客写面宿主命令 + 2 任务卡片宿主命令，归因见 `commandTotal`）。"
+      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1，B8-1b 加 `plugin_list_task_sources` 回升 1；**2026-11-06 对账批 `3fe49c950` 删 `opc_list_blog_posts` ⇒ 三方 1541/1541/1541**）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。**2026-11-08 对账批：三方同时 1540/1540/1540**（−3 博客写面宿主命令 + 2 任务卡片宿主命令，归因见 `commandTotal`）。**2026-11-09 #32 批 C：三方同时 1534/1534/1534**（−6 = 六个已插件化 OPC 宿主命令，归因见 `commandTotal`）。"
     },
     {
       "id": "stockBoundaryCommands",
@@ -119,32 +119,32 @@
     {
       "id": "opcBoundaryCommands",
       "label": "OPC 命令数（插件边界口径 cmdRe）",
-      "value": 134,
+      "value": 128,
       "value2": 13,
       "value2Label": "模块",
       "check": "registryBoundaryCount",
       "domainKey": "OPC",
       "hard": true,
-      "planNumber": "134",
+      "planNumber": "128",
       "planMustAppear": true,
       "planPinned": [
-        { "line": 514, "mustContain": ["134", "13 模块"] },
+        { "line": 514, "mustContain": ["128", "13 模块"] },
         { "line": 953, "mustContain": ["138 行 axagent-*", "依赖声明"] }
       ],
-      "note": "⚠ 撞车数字：PLAN:953 的「138 行 axagent-* 依赖声明」是 Cargo.toml 行数（盘上实测 2026-11-06 仍 138）、与 OPC 命令无关 ⇒ 本门用该行的**非纯数字整短语**钉住撞车句仍在那儿，防止将来有人把命令口径的数删掉后误读它。2026-11-06 对账批起，第二个钉句的 token 由裸「138」改为「138 行 axagent-*」——不是因为 138 不好命中（它照样整行必须含），而是因为本锚点登记值已是 137，裸数字 token 按自洽判据②必须等于本锚点或某个 hard:true 机器锚点的登记值；改成更长的短语反而**更严**（子串更长）。并行读数 116（审计口径）另立条目。**2026-11-06 对账批（`3fe49c950`）删宿主 `opc_list_blog_posts` ⇒ 138→137 / `opc` 模块 57→56**，13 模块不变。**2026-11-08 对账批 137→134 / `opc` 模块 56→53**：`7cb13bde5`（#36 博客写面切插件通道）删宿主 `opc_create_blog_post` / `opc_publish_blog_post` / `opc_delete_blog_post` 三条，全在 `opc` 模块内 ⇒ 模块数 13 不动。逐模块实测：`opc` 53 + `opc_capability_pack_actions` 20 + `opc_capability_pack_runtime` 14 + `opc_delivery` 5 + `opc_demand_discovery` 8 + `opc_demand_subscription` 5 + `opc_demand_implement` 3 + `opc_workflows` 3 + `opc_demand_capability` 1 + `opc_learning_hook` 1 + `agency_expert` 7 + `demand_discovery` 11 + `dojo_sdk` 3 = 134。"
+      "note": "⚠ 撞车数字：PLAN:953 的「138 行 axagent-* 依赖声明」是 Cargo.toml 行数（盘上实测 2026-11-06 仍 138）、与 OPC 命令无关 ⇒ 本门用该行的**非纯数字整短语**钉住撞车句仍在那儿，防止将来有人把命令口径的数删掉后误读它。2026-11-06 对账批起，第二个钉句的 token 由裸「138」改为「138 行 axagent-*」——不是因为 138 不好命中（它照样整行必须含），而是因为本锚点登记值已是 137，裸数字 token 按自洽判据②必须等于本锚点或某个 hard:true 机器锚点的登记值；改成更长的短语反而**更严**（子串更长）。并行读数 116（审计口径）另立条目。**2026-11-06 对账批（`3fe49c950`）删宿主 `opc_list_blog_posts` ⇒ 138→137 / `opc` 模块 57→56**，13 模块不变。**2026-11-08 对账批 137→134 / `opc` 模块 56→53**：`7cb13bde5`（#36 博客写面切插件通道）删宿主 `opc_create_blog_post` / `opc_publish_blog_post` / `opc_delete_blog_post` 三条，全在 `opc` 模块内 ⇒ 模块数 13 不动。逐模块实测：`opc` 53 + `opc_capability_pack_actions` 20 + `opc_capability_pack_runtime` 14 + `opc_delivery` 5 + `opc_demand_discovery` 8 + `opc_demand_subscription` 5 + `opc_demand_implement` 3 + `opc_workflows` 3 + `opc_demand_capability` 1 + `opc_learning_hook` 1 + `agency_expert` 7 + `demand_discovery` 11 + `dojo_sdk` 3 = 134。**2026-11-09 #32 批 C 再 −6（134→128）**：删宿主六个已插件化 OPC 命令（`opc_create_invoice` / `opc_transition_invoice` / `opc_create_customer` / `opc_update_customer` / `opc_delete_customer` / `opc_list_customers`），全在 `opc` 模块 ⇒ `opc` 53→47，13 模块不动；逐模块实测：`opc` 47 + 其余十二模块同上 = 128。"
     },
     {
       "id": "opcAuditDomainCommands",
       "label": "OPC 命令数（审计 19 域口径「OPC 公司运行时」）",
-      "value": 113,
+      "value": 107,
       "value2": 10,
       "value2Label": "模块",
       "check": "registryDomainCount",
       "domainName": "OPC 公司运行时（口径已废，盘上未收口）",
       "hard": true,
-      "planNumber": "113",
+      "planNumber": "107",
       "planMustAppear": true,
-      "note": "并行口径，合法（PLAN:501）。域名带「口径已废」后缀是 DOMAIN_RULES 里的实际字符串，改域名会让本条与 stockAudit 一起报「域不存在」⇒ 必须同批改本表。**2026-11-06 对账批（`3fe49c950`）删宿主 `opc_list_blog_posts` ⇒ 117→116**（同批 `opcBoundaryCommands` 138→137，两条口径同因一命令）。**2026-11-08 对账批 116→113**：`7cb13bde5` 删三条博客写面宿主命令（`opc_create_blog_post` / `opc_publish_blog_post` / `opc_delete_blog_post`），与边界口径 −3 精确配对；模块数 10 不动。"
+      "note": "并行口径，合法（PLAN:501）。域名带「口径已废」后缀是 DOMAIN_RULES 里的实际字符串，改域名会让本条与 stockAudit 一起报「域不存在」⇒ 必须同批改本表。**2026-11-06 对账批（`3fe49c950`）删宿主 `opc_list_blog_posts` ⇒ 117→116**（同批 `opcBoundaryCommands` 138→137，两条口径同因一命令）。**2026-11-08 对账批 116→113**：`7cb13bde5` 删三条博客写面宿主命令（`opc_create_blog_post` / `opc_publish_blog_post` / `opc_delete_blog_post`），与边界口径 −3 精确配对；模块数 10 不动。**2026-11-09 #32 批 C：113→107**（−6 = 六个已插件化 OPC 宿主命令，同因见 `opcBoundaryCommands`），模块数 10 不动。"
     },
     {
       "id": "frontendFileCaliber",

@@ -100,7 +100,10 @@ pub mod reflection_stats;
 pub mod reflection_tier;
 pub mod report;
 pub mod review;
-pub mod risk;
+// 2026-11-09：风险模型纯函数已上收 `axagent-harness`（宿主 `crates/tools` 的 calc_* 工具
+// 直连本 crate 会在股票域迁出为插件后断链）。此处 re-export 保持 `crate::risk::*` 与
+// `analysis_engine::risk::*` 两个旧路径零改动可用（同 `fundamentals_report` 先例）。
+pub use axagent_harness::risk;
 pub mod rules;
 pub mod schema_serde_regression;
 pub mod scoring;

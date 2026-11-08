@@ -39,7 +39,8 @@ use sea_orm::{
     ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
 };
 
-use axagent_astock_data::daily_snapshot::{self, DailySnapshotStore};
+use crate::init::stock_domain_state::stock_daily_snapshot as daily_snapshot;
+use crate::init::stock_domain_state::stock_daily_snapshot::DailySnapshotStore;
 use axagent_entities::astock_daily_snapshot;
 
 /// 表主键里全市场作用域的占位值 —— 端口侧与实体侧必须逐字一致。

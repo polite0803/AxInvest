@@ -12,12 +12,16 @@ import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 const { Title } = Typography;
 
 // 各业务子页面懒加载（复用现有页面入口）
-const LazyScreener = lazy(() => import("@/pages/ScreenerPage").then((m) => ({ default: m.ScreenerPage })));
+const LazyScreener = lazy(() =>
+  import("@/components/stock-analysis/ScreenerPage").then((m) => ({ default: m.ScreenerPage }))
+);
 const LazyStockWorkspace = lazy(() =>
   import("@/pages/StockWorkspacePage").then((m) => ({ default: m.StockWorkspacePage }))
 );
 const LazyScreenshotDiagnosis = lazy(() =>
-  import("@/pages/ScreenshotDiagnosisPage").then((m) => ({ default: m.ScreenshotDiagnosisPage }))
+  import("@/components/stock-analysis/ScreenshotDiagnosisDashboard").then((m) => ({
+    default: m.ScreenshotDiagnosisDashboard,
+  }))
 );
 const LazyPaperPortfolio = lazy(() =>
   import("@/pages/PaperPortfolioPage").then((m) => ({ default: m.PaperPortfolioPage }))

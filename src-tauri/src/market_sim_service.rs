@@ -26,8 +26,9 @@
 //! ① 补本文件头与 `use` 块；② 原文件里服务层不消费的 `use` 项未带过来；
 //! ③ 原文件对它们的 `pub(crate)` 可见性保持不变。
 
-use axagent_market_sim::{
-    BEST_PARAMS, ExchangeAgent, MarketMakerAgent, MomentumAgent, NoiseAgent, SimConfig, ValueAgent,
+use crate::init::stock_domain_state::stock_market_sim::{
+    self, BEST_PARAMS, ExchangeAgent, MarketMakerAgent, MomentumAgent, NoiseAgent, SimConfig,
+    ValueAgent,
     monte_carlo::{MonteCarloEngine, ScenarioConfig, ScenarioType},
 };
 use serde::{Deserialize, Serialize};
@@ -100,7 +101,7 @@ pub(crate) fn run_mc_core(request: &McSimRequest) -> Result<McSimResult, String>
     let seed = request.seed.unwrap_or(42);
     let scenarios = request.scenarios.clone();
 
-    let default_agents = move |_seed: u64| -> Vec<Box<dyn axagent_market_sim::SimAgent>> {
+    let default_agents = move |_seed: u64| -> Vec<Box<dyn stock_market_sim::SimAgent>> {
         vec![
             Box::new(ExchangeAgent::with_tick_size("exchange", 1)),
             Box::new(MarketMakerAgent::new(

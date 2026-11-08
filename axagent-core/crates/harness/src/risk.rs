@@ -1,13 +1,19 @@
 //! 风险模型与估值指标 — 独立纯函数，可注册为工作流 Tool handler。
 //!
 //! 包含：最大回撤、夏普比率、VaR、PE 分位数、PEG、凯利公式、风险平价。
+//!
+//! 2026-11-09：自 `axagent-analysis-engine` 上收本层（原 `analysis_engine::risk`）。
+//! 依据：全是**无状态纯函数 + serde 输出 DTO**，不碰 entities / dao / 数据库，与
+//! 同在此层的 `indicators` 同性质；而 `crates/tools` 的 `calc_*` 工具只用这批算式，
+//! 它若直连 analysis-engine，股票域迁出为插件后宿主工具就断链（L1 反向阻塞）。
+//! analysis-engine 侧保留 `pub use axagent_harness::risk;` 转发，旧路径零改动可用。
 
 use serde::Serialize;
 
 // P3-C8: 年化因子改用 harness 统一常量（A 股 244 天），消除 252/244 混用。
 // 保留 `ANNUALIZATION_FACTOR_DAILY` 名称作为对外 API 稳定性兼容（portfolio_monitor 等下游引用），
 // 但语义已从"美股 252"切换为"A 股 244"。
-pub use axagent_harness::indicators::A_SHARE_TRADING_DAYS_PER_YEAR as ANNUALIZATION_FACTOR_DAILY;
+pub use crate::indicators::A_SHARE_TRADING_DAYS_PER_YEAR as ANNUALIZATION_FACTOR_DAILY;
 /// 凯利公式默认重仓阈值
 pub const KELLY_HEAVY_THRESHOLD: f64 = 0.25;
 /// 凯利公式默认中仓阈值
@@ -20,13 +26,13 @@ pub const KELLY_MEDIUM_THRESHOLD: f64 = 0.1;
 /// 本模块内最大回撤的唯一核心实现；`portfolio_monitor::compute_max_drawdown_pct`
 /// 复用本函数（结果 ×100 得到百分比）。
 ///
-/// B1 收口（2026-10-05）：算法本体已上移到 `axagent_harness::indicators::max_drawdown_fraction`
+/// B1 收口（2026-10-05）：算法本体已上移到 `crate::indicators::max_drawdown_fraction`
 /// （逐档风险要按窗口循环算回撤，那份实现住在 astock-data 的内联循环里 ⇒ 同一算法两份）。
 /// 本函数保留 `f64` 返回：该处历史语义是「空序列 / 全非正 ⇒ 0.0（无数据即无回撤）」，
 /// 而 harness 返回 `None`（「算不出」不得伪装成 0 回撤）—— 两种语义都有下游，
 /// 映射只发生在这一层，不改任何调用方的数值。
-pub(crate) fn peak_trough_drawdown(prices: &[f64]) -> f64 {
-    axagent_harness::indicators::max_drawdown_fraction(prices).unwrap_or(0.0)
+pub fn peak_trough_drawdown(prices: &[f64]) -> f64 {
+    crate::indicators::max_drawdown_fraction(prices).unwrap_or(0.0)
 }
 
 /// 计算峰值到谷底的最大回撤比例 (0.0~1.0)，复用 `peak_trough_drawdown`。
@@ -44,18 +50,17 @@ pub fn sharpe_ratio(returns: &[f64], risk_free: f64) -> SharpeResult {
 
 /// 夏普比率核心计算：返回 (sharpe, annualized, mean_return, stddev)。
 ///
-/// P3-C8: 委托 `axagent_harness::indicators::sharpe_components` 统一实现，
+/// P3-C8: 委托 `crate::indicators::sharpe_components` 统一实现，
 /// 消除本 crate 与 astock-data/tools/quant 的算法分叉（252/244、n/n-1）。
 /// `portfolio_monitor::compute_sharpe` 复用本函数避免重复实现。
 ///
 /// 保留四舍五入到 3-4 位小数的历史行为，确保下游序列化输出稳定。
-pub(crate) fn sharpe_components(
+pub fn sharpe_components(
     returns: &[f64],
     risk_free: f64,
     annualization_factor: f64,
 ) -> (f64, f64, f64, f64) {
-    let c =
-        axagent_harness::indicators::sharpe_components(returns, risk_free, annualization_factor);
+    let c = crate::indicators::sharpe_components(returns, risk_free, annualization_factor);
     (
         (c.sharpe * 1000.0).round() / 1000.0,
         (c.annualized * 1000.0).round() / 1000.0,

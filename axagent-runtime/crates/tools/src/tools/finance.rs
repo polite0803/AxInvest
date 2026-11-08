@@ -6,11 +6,11 @@
 
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult};
 use async_trait::async_trait;
-use axagent_analysis_engine::risk::{
+use axagent_harness::indicators::sma;
+use axagent_harness::risk::{
     kelly_criterion_with_thresholds, pe_percentile, peg_ratio as engine_peg_ratio,
     value_at_risk as engine_value_at_risk,
 };
-use axagent_harness::indicators::sma;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -92,7 +92,7 @@ fn sharpe_ratio(returns: &[f64], rf: f64, annualization: f64) -> SharpeR {
 }
 
 // 2026-09-21 去重：`value_at_risk` **不再有本地实现** —— 统一复用
-// `axagent_analysis_engine::risk::value_at_risk`（权威源），照本文件
+// `axagent_harness::risk::value_at_risk`（权威源），照本文件
 // `pe_percentile` / `kelly` 先例。
 //
 // ⚠ 与前两个不同，这次是**先改权威源、再转发** —— 因为两份的算法**不等价**（不是等价副本）：
@@ -122,7 +122,7 @@ fn sharpe_ratio(returns: &[f64], rf: f64, annualization: f64) -> SharpeR {
 // 编译器与类型检查都不会报，见 `risk.rs` 同名函数的档位表）。
 //
 // 2026-09-21 去重：`pe_percentile` **不再有本地实现** —— 统一复用
-// `axagent_analysis_engine::risk::pe_percentile`（权威源），照本文件 `kelly` 先例。
+// `axagent_harness::risk::pe_percentile`（权威源），照本文件 `kelly` 先例。
 //
 // 逐行等价性已证（证据：本地原实现快照 `output/backup-2026-09-13/dup-fix/finance.rs.before-p0-3`
 // 第 114–142 行，与引擎实现逐项比对）：
@@ -148,7 +148,7 @@ struct PegR {
     level: String,
 }
 
-/// 转发到权威源 `axagent_analysis_engine::risk::peg_ratio`，仅取 `peg` / `level`。
+/// 转发到权威源 `axagent_harness::risk::peg_ratio`，仅取 `peg` / `level`。
 ///
 /// 逐行等价性已证（证据：同上快照第 144–167 行）：`g <= 0 ⇒ {INFINITY, "无意义"}` 守卫、
 /// `pe / g` 算式、四档阈值 `0.5/1.0/2.0` → 严重低估/低估/合理/高估、舍入 `*100.0/100.0`
@@ -165,7 +165,7 @@ fn peg_ratio(pe: f64, g: f64) -> PegR {
     PegR { peg: r.peg, level: r.level }
 }
 
-// 凯利公式不再本地实现：统一复用 `axagent_analysis_engine::risk::kelly_criterion_with_thresholds`
+// 凯利公式不再本地实现：统一复用 `axagent_harness::risk::kelly_criterion_with_thresholds`
 // （权威源）。
 // 历史两份实现逐行等价（证据：同上快照第 169–203 行）：守卫条件
 // `al<=0 || aw<=0 || wr<=0`、`odds = aw/al`、`k = ((wr*(odds+1)-1)/odds).max(0.0)`、
@@ -1336,7 +1336,7 @@ mod tests {
     }
 
     // ── 去重契约锁（2026-09-21）──────────────────────────────────────────────
-    // `pe_percentile` / `peg_ratio` 由本地副本收敛到 `axagent_analysis_engine::risk`
+    // `pe_percentile` / `peg_ratio` 由本地副本收敛到 `axagent_harness::risk`
     // 权威源，等价性已逐行证过（见文件上半部注释 + 快照证据）。但**将来**权威源
     // 加字段 / 改档位时会**静默**改到 `calc_pe_percentile` / `calc_peg` 的 LLM 可见
     // 输出 —— 类型检查抓不到。下面三个测试把「工具输出的精确 JSON 形态」钉死。

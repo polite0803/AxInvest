@@ -18,7 +18,9 @@
 //! 同样落库（不落就没有样本可供反思），实盘与回放靠这一列分代；只读实盘的下游必须显式
 //! 带 `as_of_date IS NULL`，漏加由 `scripts/check-reco-generation.mjs` 拦。
 
-use axagent_analysis_engine::recommender::{self, Period, RecoPick, TrimmedPick};
+use crate::init::stock_domain_state::stock_recommender::{
+    self as recommender, Period, RecoPick, TrimmedPick,
+};
 use axagent_dao::repo::reco_pool::{
     self as pool_dao, BatchKey, NewPoolBatch, NewRecoPick, NewScanAuditTrim,
 };

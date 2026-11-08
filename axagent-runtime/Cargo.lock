@@ -744,6 +744,7 @@ dependencies = [
  "axagent-dao",
  "axagent-entities",
  "axagent-harness",
+ "axagent-stock-core",
  "axagent-trajectory",
  "chrono",
  "csv",
@@ -1317,6 +1318,13 @@ dependencies = [
  "tracing",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "axagent-stock-core"
+version = "3.0.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

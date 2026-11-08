@@ -35,10 +35,12 @@
 //! 数字收敛；② 审批人以为接受计划就等于处置了本窗口的全部反思。
 //! 层级未标注（NULL，含本列引入前的存量）按既有行为继续参与，见 `may_enter_param_grid`。
 
-use axagent_analysis_engine::StockReflectionReport;
-use axagent_analysis_engine::evolution_drift::load_performance_window;
-use axagent_analysis_engine::evolution_optimizer::PARAM_EVOLUTION_LOOKBACK_DAYS;
-use axagent_analysis_engine::stock_self_evolution::{
+use crate::init::stock_domain_state::StockReflectionReport;
+use crate::init::stock_domain_state::stock_evolution_drift::load_performance_window;
+use crate::init::stock_domain_state::stock_evolution_optimizer::PARAM_EVOLUTION_LOOKBACK_DAYS;
+use crate::init::stock_domain_state::stock_mover_recall;
+use crate::init::stock_domain_state::stock_reflection_tier;
+use crate::init::stock_domain_state::stock_self_evolution::{
     EvolutionTrigger, EvolutionType, StockSelfEvolutionEngine,
 };
 use axagent_dao::DatabaseConnection;
@@ -241,10 +243,8 @@ pub async fn run_evolution_proposal_inner(
     for r in &reflection_rows {
         if reflection_data_blocked(r) {
             blocked_reflection_ids.push(r.id.clone());
-        } else if !axagent_analysis_engine::reflection_tier::may_enter_param_grid(
-            axagent_analysis_engine::reflection_tier::parse_reflection_tier(
-                r.implementation_tier.as_deref(),
-            ),
+        } else if !stock_reflection_tier::may_enter_param_grid(
+            stock_reflection_tier::parse_reflection_tier(r.implementation_tier.as_deref()),
         ) {
             // 阶段 3 / 决-3：结构层根因（L2 改公式 / L3 改提示词）**不驱动参数进化计划**。
             // 本聚合器产出的计划类型固定 `parameter`，而审批接受会真的执行
@@ -292,9 +292,7 @@ pub async fn run_evolution_proposal_inner(
     // 比口径不纯更坏。跳过条数走日志留痕，不悄悄消失。
     let mut serenity_runs_skipped = 0usize;
     for run in &mover_runs {
-        if run.chain.as_deref()
-            == Some(axagent_analysis_engine::mover_recall::RecoChain::Serenity.as_str())
-        {
+        if run.chain.as_deref() == Some(stock_mover_recall::RecoChain::Serenity.as_str()) {
             serenity_runs_skipped += 1;
             continue;
         }

@@ -25,16 +25,16 @@
 //! 7. 返回完整诊断记录给前端
 
 use crate::AppState;
+use crate::init::stock_domain_state::stock_paper_portfolio;
+use crate::init::stock_domain_state::stock_screenshot_diagnosis as screenshot_diagnosis;
 use axagent_agent_macro::agent_command;
-use axagent_analysis_engine::screenshot_diagnosis::{
-    self, CreateScreenshotDiagnosisInput, UpdateScreenshotDiagnosisInput,
-};
-#[cfg(not(mobile))]
-use axagent_analysis_engine::screenshot_diagnosis::{RiskDiagnosis, ScreenshotPosition};
 #[cfg(not(mobile))]
 use axagent_harness::LlmCallConfig;
 #[cfg(not(mobile))]
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, ContentPart, ImageUrl};
+use screenshot_diagnosis::{CreateScreenshotDiagnosisInput, UpdateScreenshotDiagnosisInput};
+#[cfg(not(mobile))]
+use screenshot_diagnosis::{RiskDiagnosis, ScreenshotPosition};
 use serde::{Deserialize, Serialize};
 #[cfg(not(mobile))]
 use sha2::{Digest, Sha256};
@@ -453,7 +453,7 @@ pub async fn screenshot_diagnosis_to_paper_portfolio(
     name: String,
     source_event: String,
 ) -> Result<axagent_entities::paper_portfolios::Model, String> {
-    axagent_analysis_engine::paper_portfolio::create_portfolio_from_screenshot_diagnosis(
+    stock_paper_portfolio::create_portfolio_from_screenshot_diagnosis(
         state.harness.db(),
         &diagnosis_id,
         &name,

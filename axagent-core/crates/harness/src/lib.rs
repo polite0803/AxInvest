@@ -138,6 +138,15 @@ pub use indicators::{
     sharpe_ratio_with_annualization, sma, stddev_sample,
 };
 
+// ── 风险模型 / 估值指标纯函数（VaR · PE 分位 · PEG · 凯利 · 风险平价）──
+// 2026-11-09 自 `axagent-analysis-engine` 的 `risk` 模块上收（analysis-engine 仍
+// `pub use axagent_harness::risk;` 转发，旧路径零改动）。依据：全是无状态纯函数 + serde DTO，
+// 而 `crates/tools` 的 `calc_*` 工具只用这批算式 —— 直连 analysis-engine 会在股票域
+// 迁出为插件后断链（L1 反向阻塞）。
+// ⚠ 本模块的 `sharpe_components` 与 `indicators::sharpe_components` 语义不同（前者额外
+// 做 3~4 位小数收敛）⇒ 刻意只在模块内提供，不在 crate 根 `pub use`，避免同名遮蔽。
+pub mod risk;
+
 // ── 时间旅行(As-Of) DTO 契约 ──
 pub mod as_of;
 pub use as_of::{

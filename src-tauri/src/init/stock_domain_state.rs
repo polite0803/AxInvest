@@ -22,19 +22,28 @@ use std::sync::{Arc, OnceLock};
 // 权威定义都在域 crate 内；宿主只保留**指向域模块的转发点**。
 // 落点必须是本模块（`ownedRe` 命中 `init/stock*`），不能写进 `lib.rs` —— 否则主壳
 // 又会因门面自己重新被钉在域 crate 上（`l1ForeignStock` 原地不降）。
+pub use axagent_analysis_engine::StockReflectionReport;
 pub use axagent_analysis_engine::alert_mapping as stock_alert_mapping;
 pub use axagent_analysis_engine::conditional_order_bridge as stock_conditional_order_bridge;
 pub use axagent_analysis_engine::cross_stock_aggregator as stock_cross_stock_aggregator;
+pub use axagent_analysis_engine::decision_gates as stock_decision_gates;
 pub use axagent_analysis_engine::evolution_drift as stock_evolution_drift;
+pub use axagent_analysis_engine::evolution_optimizer as stock_evolution_optimizer;
 pub use axagent_analysis_engine::market_close_store as stock_market_close_store;
 pub use axagent_analysis_engine::monitor as stock_monitor;
+pub use axagent_analysis_engine::mover_recall as stock_mover_recall;
+pub use axagent_analysis_engine::paper_portfolio as stock_paper_portfolio;
 pub use axagent_analysis_engine::recommender as stock_recommender;
+pub use axagent_analysis_engine::reflection_tier as stock_reflection_tier;
+pub use axagent_analysis_engine::screenshot_diagnosis as stock_screenshot_diagnosis;
 pub use axagent_analysis_engine::serenity_hit_rate_backtest as stock_serenity_hit_rate_backtest;
+pub use axagent_analysis_engine::stock_self_evolution;
 pub use axagent_astock_data::AStockClient;
 pub use axagent_astock_data::as_of as stock_as_of;
 pub use axagent_astock_data::daily_snapshot as stock_daily_snapshot;
 pub use axagent_astock_data::health_check as stock_health_check;
 pub use axagent_astock_data::realtime_quote as stock_realtime_quote;
+pub use axagent_market_sim as stock_market_sim;
 pub use axagent_stock_core::{
     costs as stock_costs, factors as stock_factors, hit_outcome as stock_hit_outcome,
 };

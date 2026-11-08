@@ -383,6 +383,7 @@ impl WorkflowRunService {
         execution_id: &str,
         workflow_id: &str,
         seq: Arc<AtomicU64>,
+        as_of_date: Option<String>,
     ) -> ProgressCallback {
         let dispatcher = Arc::clone(&self.dispatcher);
         let execution_id = execution_id.to_string();
@@ -392,6 +393,7 @@ impl WorkflowRunService {
             let execution_id = execution_id.clone();
             let workflow_id = workflow_id.clone();
             let seq = Arc::clone(&seq);
+            let as_of_date = as_of_date.clone();
             Box::pin(async move {
                 // 丢弃 streaming 增量（AgentExecutor 每 2s 一次）：过 seam 会放大
                 // 15s 预算与插件忙时背压，Serenity 自己也已经把它丢掉。
@@ -407,6 +409,7 @@ impl WorkflowRunService {
                         "workflowId": workflow_id,
                         "seq": n,
                         "event": event,
+                        "asOfDate": as_of_date,
                     }),
                 );
             })
@@ -531,11 +534,12 @@ impl WorkflowRunProvider for WorkflowRunService {
                 &execution_id,
                 &workflow_id,
                 Arc::clone(&seq),
+                as_of_ctx.map(|c| c.as_string()),
             )),
             // 节点级 as_of：引擎为每个节点单独 spawn，task_local 不跨 spawn ⇒ 必须逐节点罩
             // （与 `stock_workflow/serenity.rs:1267-1272` 同款）。缺它 = 节点取数丢 as_of。
             node_task_scope: Some(node_task_scope_hook(move |fut| {
-                axagent_astock_data::as_of::with_optional_asof(as_of_ctx, fut)
+                crate::init::stock_domain_state::stock_as_of::with_optional_asof(as_of_ctx, fut)
             })),
             model_id: request.model_id,
             provider_id: request.provider_id,
@@ -566,7 +570,7 @@ impl WorkflowRunProvider for WorkflowRunService {
             // as_of 外层包裹：进程级全局栈 + task_local（RAII 压栈/按 token 移除）。
             // 总超时（`clamp(1, 7200)` 后恒 > 0）再包一层：引擎自己**不实现**总超时
             // （`TaskContract.sla_max_seconds` 只在收尾事后盖章，`engine/mod.rs:5067-5068`）。
-            let fut = axagent_astock_data::as_of::with_optional_asof(
+            let fut = crate::init::stock_domain_state::stock_as_of::with_optional_asof(
                 as_of_ctx,
                 engine_run.run_workflow(&wf_id, opts),
             );
@@ -611,6 +615,7 @@ impl WorkflowRunProvider for WorkflowRunService {
                     "seq": n,
                     "status": status.to_string(),
                     "error": error,
+                    "asOfDate": as_of_ctx.map(|c| c.as_string()),
                 }),
             );
             tracing::info!(

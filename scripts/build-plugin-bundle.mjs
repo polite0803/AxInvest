@@ -550,7 +550,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36 第 5 批）：worker 通道 + 4 条命名命令（博客列表 = 只读接缝取数；发布 / 删除 / 新建 = opc.store 写面）",
+      "OPC 域功能包（#36）：worker 通道 + 13 条命名命令（4 条 blog 读写 + 9 条只读查询）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -624,6 +624,95 @@ function opcManifest({ version, binaryName, sha256 }) {
           },
           required: ["title", "slug", "excerpt", "content", "tags"],
         },
+      },
+      // ── #36 批 1：8 条只读查询 + 1 条看板（全部走 opc.store 只读 op，无必填字段）──
+      // 属性名一律 camelCase（与契约 `*ListQuery` 的 serde 键逐字一致）；不写 `required`：
+      // 缺键即「不过滤 / 宿主取缺省」，不是错误。
+      {
+        name: "opc_list_invoices",
+        description: "列出 OPC 发票（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_invoices",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "状态过滤（非法值按不过滤处理）" },
+            customerId: { type: "string", description: "所属客户 id" },
+            dateFrom: { type: "number", description: "开票时间下界（epoch 秒）" },
+            dateTo: { type: "number", description: "开票时间上界（epoch 秒）" },
+            limit: { type: "number", description: "返回条数上限" },
+          },
+        },
+      },
+      {
+        name: "opc_list_customers",
+        description: "列出 OPC 客户（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_customers",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "状态过滤" },
+            customerType: { type: "string", description: "客户类型过滤" },
+            search: { type: "string", description: "名称 / 邮箱等关键词" },
+            limit: { type: "number", description: "返回条数上限" },
+          },
+        },
+      },
+      {
+        name: "opc_list_projects",
+        description: "列出 OPC 项目（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_projects",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "状态过滤" },
+            customerId: { type: "string", description: "所属客户 id" },
+            search: { type: "string", description: "标题关键词" },
+            limit: { type: "number", description: "返回条数上限" },
+          },
+        },
+      },
+      {
+        name: "opc_list_landing_pages",
+        description: "列出 OPC 落地页（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_landing_pages",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_list_contacts",
+        description: "列出 OPC 联系表单提交（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_contacts",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_list_kpis",
+        description: "列出 OPC KPI 记录（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_kpis",
+        inputSchema: {
+          type: "object",
+          properties: {
+            period: { type: "string", description: "统计周期过滤（空 = 不过滤）" },
+            limit: { type: "number", description: "返回条数上限" },
+          },
+        },
+      },
+      {
+        name: "opc_list_content_assets",
+        description: "列出 OPC 内容资产（经宿主 opc.store 只读接缝取数，不含正文）",
+        command: "worker://opc_list_content_assets",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_list_publish_schedules",
+        description: "列出 OPC 发布计划（经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_publish_schedules",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // 看板：宿主没有聚合 op，由插件进程组合三次列表查询现算六项读数。
+        name: "opc_get_dashboard",
+        description: "获取 OPC 仪表盘汇总（收入 / 待处理发票 / 活跃项目与客户计数）",
+        command: "worker://opc_get_dashboard",
+        inputSchema: { type: "object", properties: {} },
       },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },

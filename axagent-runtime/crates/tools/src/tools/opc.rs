@@ -10,7 +10,7 @@
 
 use crate::{Tool, ToolCategory, ToolContext, ToolDomain, ToolError, ToolResult};
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -37,6 +37,56 @@ use std::sync::Arc;
 fn get_db() -> Result<Arc<sea_orm::DatabaseConnection>, ToolError> {
     crate::global_state::get_sea_db()
         .ok_or_else(|| ToolError::execution_failed("OPC 数据库未初始化".to_string()))
+}
+
+/// 调 `plugin-opc` 的命名命令（#36 批 1：只读工具不再直连 `company-runtime`）。
+///
+/// 入参是**平铺的 camelCase 键**（`customerId` / `dateFrom` …），与 `opc.store` 查询 DTO
+/// 的线格式同源；插件侧负责把它们包进接缝要求的 `request` 层。
+/// 缺键不补 `null`：provider 侧 `Option` 与「缺省」同一语义，补 `null` 只是多传一个值。
+async fn call_opc_command(ctx: &ToolContext, command: &str, input: Value) -> Result<Value, String> {
+    let bridge = ctx
+        .plugin_command_bridge
+        .as_ref()
+        .ok_or_else(|| format!("{command}: 插件命令桥未注入（fail-closed，不回落直连）"))?;
+    bridge.execute("opc", command, input).await
+}
+
+/// 把工具入参里**调用方真给了**的键改名后装进一个平铺对象（缺键 / `null` 都不出现）。
+fn filter_request(input: &Value, mapping: &[(&str, &str)]) -> Value {
+    let mut request = serde_json::Map::new();
+    for (from, to) in mapping {
+        if let Some(v) = input.get(*from).filter(|v| !v.is_null()) {
+            request.insert((*to).to_string(), v.clone());
+        }
+    }
+    Value::Object(request)
+}
+
+/// 接缝出参 → 行数组（空表是空数组，不是错误）。
+fn rows_of(value: Value) -> Vec<Value> {
+    value.as_array().cloned().unwrap_or_default()
+}
+
+fn json_str(row: &Value, key: &str) -> String {
+    row.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+}
+
+fn json_f64(row: &Value, key: &str) -> f64 {
+    row.get(key).and_then(Value::as_f64).unwrap_or_default()
+}
+
+fn json_u64(row: &Value, key: &str) -> u64 {
+    row.get(key).and_then(Value::as_u64).unwrap_or_default()
+}
+
+/// epoch 秒 → 本地展示串；缺失 / 非法时间戳落空串（与原格式化路径一致）。
+fn json_date(row: &Value, key: &str, fmt: &str) -> String {
+    row.get(key).and_then(Value::as_i64).map(|ts| format_ts(ts, fmt)).unwrap_or_default()
+}
+
+fn format_ts(ts: i64, fmt: &str) -> String {
+    chrono::DateTime::from_timestamp(ts, 0).map(|dt| dt.format(fmt).to_string()).unwrap_or_default()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -82,55 +132,46 @@ impl Tool for OpcListInvoicesTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultInvoiceService;
-        use axagent_company_runtime::opc::{InvoiceFilter, InvoiceService, InvoiceStatus};
-
-        let db = get_db()?;
-        let svc = DefaultInvoiceService::new((*db).clone());
-
-        let status = input
-            .get("status")
-            .and_then(|v| v.as_str())
-            .and_then(|s| InvoiceStatus::from_str(s).ok());
-        let filter = InvoiceFilter {
-            status,
-            customer_id: input.get("customer_id").and_then(|v| v.as_str()).map(String::from),
-            date_from: input.get("date_from").and_then(|v| v.as_i64()),
-            date_to: input.get("date_to").and_then(|v| v.as_i64()),
-            limit: input.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32),
-            offset: None,
-        };
-
-        match svc.list_invoices(filter).await {
-            Ok(invoices) => {
-                if invoices.is_empty() {
-                    return Ok(ToolResult::success("## 发票列表\n\n暂无发票记录。"));
-                }
-                let lines: Vec<String> = invoices
-                    .iter()
-                    .map(|inv| {
-                        format!(
-                            "- **{}** | {} | ¥{:.2} | {} | 客户: {}",
-                            inv.invoice_number,
-                            inv.status.as_str(),
-                            inv.total,
-                            chrono::DateTime::from_timestamp(inv.created_at, 0)
-                                .map(|dt| dt.format("%Y-%m-%d").to_string())
-                                .unwrap_or_default(),
-                            inv.customer_id,
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 发票列表 ({} 条)\n\n{}\n\n> 共 {} 条结果。使用 `OpcGetInvoice` 查看详情。",
-                    invoices.len(),
-                    lines.join("\n"),
-                    invoices.len(),
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询发票失败: {e}"))),
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 1：取数走宿主 → 插件命令（`opc_list_invoices`），出参是
+        // `InvoiceSummaryView` 行数组（camelCase，禁区 13）—— 本工具只负责排版。
+        const COMMAND: &str = "opc_list_invoices";
+        let request = filter_request(
+            &input,
+            &[
+                ("status", "status"),
+                ("customer_id", "customerId"),
+                ("date_from", "dateFrom"),
+                ("date_to", "dateTo"),
+                ("limit", "limit"),
+            ],
+        );
+        let invoices = call_opc_command(ctx, COMMAND, request)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询发票失败: {e}")))?;
+        let rows = invoices.as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 发票列表\n\n暂无发票记录。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|inv| {
+                format!(
+                    "- **{}** | {} | ¥{:.2} | {} | 客户: {}",
+                    json_str(inv, "invoiceNumber"),
+                    json_str(inv, "status"),
+                    inv.get("total").and_then(Value::as_f64).unwrap_or_default(),
+                    json_date(inv, "createdAt", "%Y-%m-%d"),
+                    json_str(inv, "customerId"),
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!(
+            "## 发票列表 ({} 条)\n\n{}\n\n> 共 {} 条结果。使用 `OpcGetInvoice` 查看详情。",
+            rows.len(),
+            lines.join("\n"),
+            rows.len(),
+        )))
     }
 }
 
@@ -339,58 +380,46 @@ impl Tool for OpcListCustomersTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultCustomerService;
-        use axagent_company_runtime::opc::{
-            CustomerFilter, CustomerService, CustomerStatus, CustomerType,
-        };
-
-        let db = get_db()?;
-        let svc = DefaultCustomerService::new((*db).clone());
-
-        let status = input
-            .get("status")
-            .and_then(|v| v.as_str())
-            .and_then(|s| CustomerStatus::from_str(s).ok());
-        let filter = CustomerFilter {
-            status,
-            customer_type: input
-                .get("customer_type")
-                .and_then(|v| v.as_str())
-                .and_then(|s| CustomerType::from_str(s).ok()),
-            search: input.get("search").and_then(|v| v.as_str()).map(String::from),
-            tags: None,
-            limit: input.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32),
-            offset: None,
-        };
-
-        match svc.list_customers(filter).await {
-            Ok(customers) => {
-                if customers.is_empty() {
-                    return Ok(ToolResult::success("## 客户列表\n\n暂无客户记录。"));
-                }
-                let lines: Vec<String> = customers
-                    .iter()
-                    .map(|c| {
-                        format!(
-                            "- **{}** | {} | {} | 消费: ¥{:.2} | {}",
-                            c.name,
-                            c.status.as_str(),
-                            c.email,
-                            c.total_revenue,
-                            c.company.as_deref().unwrap_or(""),
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 客户列表 ({} 条)\n\n{}\n\n> 共 {} 条结果。",
-                    customers.len(),
-                    lines.join("\n"),
-                    customers.len(),
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询客户失败: {e}"))),
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        const COMMAND: &str = "opc_list_customers";
+        // `tags` 刻意不转发：迁移前该工具恒传 `tags: None`（`CustomerFilter` 里没有对应的
+        // 工具入参），而域服务 `list_customers` 也没有 tags 分支 —— 转发只会造出「筛过了」
+        // 的假象。要保持能力的批次再一起动工具 schema 与域服务。
+        let request = filter_request(
+            &input,
+            &[
+                ("status", "status"),
+                ("customer_type", "customerType"),
+                ("search", "search"),
+                ("limit", "limit"),
+            ],
+        );
+        let customers = call_opc_command(ctx, COMMAND, request)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询客户失败: {e}")))?;
+        let rows = customers.as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 客户列表\n\n暂无客户记录。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|c| {
+                format!(
+                    "- **{}** | {} | {} | 消费: ¥{:.2} | {}",
+                    json_str(c, "name"),
+                    json_str(c, "status"),
+                    json_str(c, "email"),
+                    json_f64(c, "totalRevenue"),
+                    c.get("company").and_then(Value::as_str).unwrap_or(""),
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!(
+            "## 客户列表 ({} 条)\n\n{}\n\n> 共 {} 条结果。",
+            rows.len(),
+            lines.join("\n"),
+            rows.len(),
+        )))
     }
 }
 
@@ -538,64 +567,50 @@ impl Tool for OpcListProjectsTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultProjectService;
-        use axagent_company_runtime::opc::{
-            MilestoneStatus, ProjectFilter, ProjectService, ProjectStatus,
-        };
-
-        let db = get_db()?;
-        let svc = DefaultProjectService::new((*db).clone());
-
-        let status = input
-            .get("status")
-            .and_then(|v| v.as_str())
-            .and_then(|s| ProjectStatus::from_str(s).ok());
-        let filter = ProjectFilter {
-            status,
-            customer_id: input.get("customer_id").and_then(|v| v.as_str()).map(String::from),
-            search: input.get("search").and_then(|v| v.as_str()).map(String::from),
-            limit: input.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32),
-            offset: None,
-        };
-
-        match svc.list_projects(filter).await {
-            Ok(projects) => {
-                if projects.is_empty() {
-                    return Ok(ToolResult::success("## 项目列表\n\n暂无项目记录。"));
-                }
-                let lines: Vec<String> = projects
-                    .iter()
-                    .map(|p| {
-                        let milestone_info = if p.milestones.is_empty() {
-                            String::new()
-                        } else {
-                            let done = p
-                                .milestones
-                                .iter()
-                                .filter(|m| m.status == MilestoneStatus::Completed)
-                                .count();
-                            format!(" (里程碑: {}/{})", done, p.milestones.len())
-                        };
-                        let budget_str =
-                            p.budget.map(|b| format!(" | 预算: ¥{:.2}", b)).unwrap_or_default();
-                        format!(
-                            "- **{}** | {}{}{}",
-                            p.title,
-                            p.status.as_str(),
-                            milestone_info,
-                            budget_str,
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 项目列表 ({} 条)\n\n{}",
-                    projects.len(),
-                    lines.join("\n"),
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询项目失败: {e}"))),
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        const COMMAND: &str = "opc_list_projects";
+        let request = filter_request(
+            &input,
+            &[
+                ("status", "status"),
+                ("customer_id", "customerId"),
+                ("search", "search"),
+                ("limit", "limit"),
+            ],
+        );
+        let projects = call_opc_command(ctx, COMMAND, request)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询项目失败: {e}")))?;
+        let rows = projects.as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 项目列表\n\n暂无项目记录。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|p| {
+                // 里程碑明细不过线：接缝只回两个计数（`ProjectSummaryView`）。
+                let total = p.get("milestoneTotal").and_then(Value::as_u64).unwrap_or(0);
+                let done = p.get("milestoneCompleted").and_then(Value::as_u64).unwrap_or(0);
+                let milestone_info = if total == 0 {
+                    String::new()
+                } else {
+                    format!(" (里程碑: {done}/{total})")
+                };
+                let budget_str = p
+                    .get("budget")
+                    .and_then(Value::as_f64)
+                    .map(|b| format!(" | 预算: ¥{b:.2}"))
+                    .unwrap_or_default();
+                format!(
+                    "- **{}** | {}{}{}",
+                    json_str(p, "title"),
+                    json_str(p, "status"),
+                    milestone_info,
+                    budget_str,
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!("## 项目列表 ({} 条)\n\n{}", rows.len(), lines.join("\n"),)))
     }
 }
 
@@ -768,68 +783,19 @@ impl Tool for OpcGetDashboardTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{
-            CustomerFilter, CustomerService, CustomerStatus, InvoiceFilter, InvoiceService,
-            InvoiceStatus, ProjectFilter, ProjectService, ProjectStatus,
-        };
-        use axagent_company_runtime::opc::{
-            DefaultCustomerService, DefaultInvoiceService, DefaultProjectService,
-        };
-
-        let db = get_db()?;
-        let inv_svc = DefaultInvoiceService::new((*db).clone());
-        let cust_svc = DefaultCustomerService::new((*db).clone());
-        let proj_svc = DefaultProjectService::new((*db).clone());
-
-        // 并行查询各业务指标
-        let (invoices, customers, projects) = tokio::join!(
-            inv_svc.list_invoices(InvoiceFilter {
-                status: None,
-                customer_id: None,
-                date_from: None,
-                date_to: None,
-                limit: Some(100),
-                offset: None
-            }),
-            cust_svc.list_customers(CustomerFilter {
-                status: None,
-                customer_type: None,
-                search: None,
-                tags: None,
-                limit: Some(100),
-                offset: None
-            }),
-            proj_svc.list_projects(ProjectFilter {
-                status: None,
-                customer_id: None,
-                search: None,
-                limit: Some(100),
-                offset: None
-            }),
-        );
-
-        let invoices = invoices.unwrap_or_default();
-        let customers = customers.unwrap_or_default();
-        let projects = projects.unwrap_or_default();
-
-        let total_revenue: f64 =
-            invoices.iter().filter(|i| i.status == InvoiceStatus::Paid).map(|i| i.total).sum();
-        let pending_invoices = invoices
-            .iter()
-            .filter(|i| {
-                matches!(
-                    i.status,
-                    InvoiceStatus::Draft | InvoiceStatus::Sent | InvoiceStatus::Overdue
-                )
-            })
-            .count();
-        let active_projects = projects
-            .iter()
-            .filter(|p| matches!(p.status, ProjectStatus::Active | ProjectStatus::Planning))
-            .count();
-        let active_customers =
-            customers.iter().filter(|c| c.status == CustomerStatus::Active).count();
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // 聚合口径住在插件进程（`opc_get_dashboard` 内部串行调三个 list op，
+        // 判据同迁移前：Paid 求和 / Draft|Sent|Overdue 计数 / Active|Planning / Active）——
+        // #36 的判据是「业务逻辑随域迁出」，宿主工具只排版。
+        let summary = call_opc_command(ctx, "opc_get_dashboard", json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询运营概览失败: {e}")))?;
+        let total_revenue = json_f64(&summary, "totalRevenue");
+        let pending_invoices = json_u64(&summary, "pendingInvoices");
+        let active_projects = json_u64(&summary, "activeProjects");
+        let active_customers = json_u64(&summary, "activeCustomers");
+        let total_customers = json_u64(&summary, "totalCustomers");
+        let total_projects = json_u64(&summary, "totalProjects");
 
         Ok(ToolResult::success(format!(
             r#"## 📊 OPC 运营概览
@@ -848,8 +814,8 @@ impl Tool for OpcGetDashboardTool {
             pending_invoices = pending_invoices,
             active_projects = active_projects,
             active_customers = active_customers,
-            total_customers = customers.len(),
-            total_projects = projects.len(),
+            total_customers = total_customers,
+            total_projects = total_projects,
         )))
     }
 }
@@ -884,43 +850,31 @@ impl Tool for OpcListLandingPagesTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultSiteService;
-        use axagent_company_runtime::opc::SiteService;
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-        match svc.list_landing_pages().await {
-            Ok(pages) => {
-                if pages.is_empty() {
-                    return Ok(ToolResult::success("## 落地页\n\n暂无落地页。"));
-                }
-                let lines: Vec<String> = pages
-                    .iter()
-                    .map(|p| {
-                        format!(
-                            "- **{}** (`{}`) {} | 创建: {}",
-                            p.title,
-                            p.slug,
-                            if p.published {
-                                "✅ 已发布"
-                            } else {
-                                "📝 草稿"
-                            },
-                            chrono::DateTime::from_timestamp(p.created_at, 0)
-                                .map(|dt| dt.format("%Y-%m-%d").to_string())
-                                .unwrap_or_default(),
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 落地页 ({} 个)\n\n{}",
-                    pages.len(),
-                    lines.join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询落地页失败: {e}"))),
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let pages = call_opc_command(ctx, "opc_list_landing_pages", json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询落地页失败: {e}")))?;
+        let rows = rows_of(pages);
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 落地页\n\n暂无落地页。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|p| {
+                format!(
+                    "- **{}** (`{}`) {} | 创建: {}",
+                    json_str(p, "title"),
+                    json_str(p, "slug"),
+                    if p.get("published").and_then(Value::as_bool).unwrap_or(false) {
+                        "✅ 已发布"
+                    } else {
+                        "📝 草稿"
+                    },
+                    json_date(p, "createdAt", "%Y-%m-%d"),
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!("## 落地页 ({} 个)\n\n{}", rows.len(), lines.join("\n"))))
     }
 }
 
@@ -1020,37 +974,31 @@ impl Tool for OpcListContactsTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultSiteService;
-        use axagent_company_runtime::opc::SiteService;
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-        match svc.list_contacts().await {
-            Ok(contacts) => {
-                if contacts.is_empty() {
-                    return Ok(ToolResult::success("## 联系表单\n\n暂无提交。"));
-                }
-                let lines: Vec<String> = contacts
-                    .iter()
-                    .map(|c| {
-                        format!(
-                            "- **{}** <{}> | {} | {}",
-                            c.name,
-                            c.email,
-                            c.source,
-                            if c.read { "✅ 已读" } else { "🆕 未读" },
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 联系表单 ({} 条)\n\n{}",
-                    contacts.len(),
-                    lines.join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询联系表单失败: {e}"))),
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let contacts = call_opc_command(ctx, "opc_list_contacts", json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询联系表单失败: {e}")))?;
+        let rows = rows_of(contacts);
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 联系表单\n\n暂无提交。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|c| {
+                format!(
+                    "- **{}** <{}> | {} | {}",
+                    json_str(c, "name"),
+                    json_str(c, "email"),
+                    json_str(c, "source"),
+                    if c.get("read").and_then(Value::as_bool).unwrap_or(false) {
+                        "✅ 已读"
+                    } else {
+                        "🆕 未读"
+                    },
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!("## 联系表单 ({} 条)\n\n{}", rows.len(), lines.join("\n"))))
     }
 }
 
@@ -1302,41 +1250,39 @@ impl Tool for OpcListKpisTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::AnalyticsService;
-        use axagent_company_runtime::opc::DefaultAnalyticsService;
-        let db = get_db()?;
-        let svc = DefaultAnalyticsService::new((*db).clone());
-        let period = input.get("period").and_then(|v| v.as_str()).map(String::from);
-        let limit = input.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32);
-        // **显式跨域包**读：本工具的运行上下文不携带任何域包标识
-        // （`ToolContext` 只有 working_dir / conversation_id / agent_id / extra，
-        // 而 `extra` 里只有搜索配置与 vault_kb_id）⇒ 让它走 `list_kpis_all`
-        // 而不是猜一个域包 id 去查（猜错就是对别的域包的读，猜对也只是巧合）。
-        // 每行输出都带 `domain_pack_id`，消费方（含 LLM）必须自己按域包理解这些数字。
-        match svc.list_kpis_all(period, limit).await {
-            Ok(kpis) => {
-                if kpis.is_empty() {
-                    return Ok(ToolResult::success("## KPI 记录\n\n暂无记录。"));
-                }
-                Ok(ToolResult::success(format!(
-                    "## KPI 记录（跨域包，每条已标注所属域包）\n\n{}",
-                    kpis.iter()
-                        .map(|k| {
-                            // `''` 是存量行的「未标注」，不是某个域包 —— 如实显示，不臆造域包名
-                            let ind = if k.domain_pack_id.is_empty() {
-                                "(未标注)"
-                            } else {
-                                k.domain_pack_id.as_str()
-                            };
-                            format!("- [{ind}] {}: {} {} ({})", k.name, k.value, k.unit, k.period)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询 KPI 失败: {e}"))),
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let request = filter_request(&input, &[("period", "period"), ("limit", "limit")]);
+        // 跨域包语义由接缝的 `list_kpis` op 承载（provider 走 `list_kpis_all`，
+        // 判据同迁移前：调用方不携带域包标识，猜一个域包 id 是对别的域包的读）。
+        // 每行都带 `domainPackId`，`''` 表示「未标注」而非某个域包。
+        let kpis = call_opc_command(ctx, "opc_list_kpis", request)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询 KPI 失败: {e}")))?;
+        let rows = rows_of(kpis);
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## KPI 记录\n\n暂无记录。"));
         }
+        Ok(ToolResult::success(format!(
+            "## KPI 记录（跨域包，每条已标注所属域包）\n\n{}",
+            rows.iter()
+                .map(|k| {
+                    let pack = json_str(k, "domainPackId");
+                    let ind = if pack.is_empty() {
+                        "(未标注)".to_string()
+                    } else {
+                        pack
+                    };
+                    format!(
+                        "- [{ind}] {}: {} {} ({})",
+                        json_str(k, "name"),
+                        json_f64(k, "value"),
+                        json_str(k, "unit"),
+                        json_str(k, "period"),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        )))
     }
 }
 
@@ -1622,41 +1568,36 @@ impl Tool for OpcListContentAssetsTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{ContentAssetService, DefaultSiteService};
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-        match svc.list_content_assets().await {
-            Ok(assets) => {
-                if assets.is_empty() {
-                    return Ok(ToolResult::success("## 内容资产\n\n暂无内容资产。"));
-                }
-                let lines: Vec<String> = assets
-                    .iter()
-                    .map(|a| {
-                        let tags = a.tags.join(", ");
-                        format!(
-                            "- **{}** | {} | {} | 标签: {}",
-                            a.title,
-                            a.content_type,
-                            if a.status == "published" {
-                                "✅ 已发布"
-                            } else {
-                                "📝 草稿"
-                            },
-                            tags,
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 内容资产 ({} 个)\n\n{}",
-                    assets.len(),
-                    lines.join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询内容资产失败: {e}"))),
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let assets = call_opc_command(ctx, "opc_list_content_assets", json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询内容资产失败: {e}")))?;
+        let rows = rows_of(assets);
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 内容资产\n\n暂无内容资产。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|a| {
+                let tags = a
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|arr| arr.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+                    .unwrap_or_default();
+                format!(
+                    "- **{}** | {} | {} | 标签: {}",
+                    json_str(a, "title"),
+                    json_str(a, "contentType"),
+                    if json_str(a, "status") == "published" {
+                        "✅ 已发布"
+                    } else {
+                        "📝 草稿"
+                    },
+                    tags,
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!("## 内容资产 ({} 个)\n\n{}", rows.len(), lines.join("\n"))))
     }
 }
 
@@ -1885,54 +1826,39 @@ impl Tool for OpcListPublishSchedulesTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{DefaultSiteService, PublishScheduleService};
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-        match svc.list_publish_schedules().await {
-            Ok(schedules) => {
-                if schedules.is_empty() {
-                    return Ok(ToolResult::success("## 发布计划\n\n暂无发布计划。"));
-                }
-                let lines: Vec<String> = schedules
-                    .iter()
-                    .map(|s| {
-                        format!(
-                            "- **{}** | {} | {} | 计划: {}{}",
-                            s.content_ref_type,
-                            s.content_ref_id,
-                            if s.status == "published" {
-                                "✅ 已发布"
-                            } else if s.status == "failed" {
-                                "❌ 失败"
-                            } else {
-                                "📋 待发布"
-                            },
-                            chrono::DateTime::from_timestamp(s.scheduled_at, 0)
-                                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                                .unwrap_or_default(),
-                            if let Some(published_at) = s.published_at {
-                                format!(
-                                    " | 发布于: {}",
-                                    chrono::DateTime::from_timestamp(published_at, 0)
-                                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                                        .unwrap_or_default()
-                                )
-                            } else {
-                                String::new()
-                            },
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 发布计划 ({} 个)\n\n{}",
-                    schedules.len(),
-                    lines.join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询发布计划失败: {e}"))),
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let schedules = call_opc_command(ctx, "opc_list_publish_schedules", json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询发布计划失败: {e}")))?;
+        let rows = rows_of(schedules);
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 发布计划\n\n暂无发布计划。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|s| {
+                let status = json_str(s, "status");
+                let published = match s.get("publishedAt").and_then(Value::as_i64) {
+                    Some(ts) => format!(" | 发布于: {}", format_ts(ts, "%Y-%m-%d %H:%M")),
+                    None => String::new(),
+                };
+                format!(
+                    "- **{}** | {} | {} | 计划: {}{}",
+                    json_str(s, "contentRefType"),
+                    json_str(s, "contentRefId"),
+                    if status == "published" {
+                        "✅ 已发布"
+                    } else if status == "failed" {
+                        "❌ 失败"
+                    } else {
+                        "📋 待发布"
+                    },
+                    json_date(s, "scheduledAt", "%Y-%m-%d %H:%M"),
+                    published,
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!("## 发布计划 ({} 个)\n\n{}", rows.len(), lines.join("\n"))))
     }
 }
 

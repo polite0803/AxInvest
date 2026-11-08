@@ -2,8 +2,9 @@
 
 //! `opc.store` 接缝的**宿主侧实现**（wiring 层，只调 dao，不直连库）。
 //!
-//! 契约在 `axagent-core/crates/harness/src/opc_store.rs`，现下四个 op：读面
-//! `list_blog_posts`，写面 `publish_blog_post` / `delete_blog_post`（三态）/
+//! 契约在 `axagent-core/crates/harness/src/opc_store.rs`，现下十二个 op：读面
+//! `list_blog_posts` + 八条列表读 op（发票 / 客户 / 项目 / 落地页 / 联系提交 / KPI /
+//! 内容资产 / 发布计划），写面 `publish_blog_post` / `delete_blog_post`（三态）/
 //! `create_blog_post`（正文按字节设闸）。本文件只做两件事：入参闸（`limit` / `offset` /
 //! `id` / `content` / `slug`）与「dao 行 / 领域 DTO → 契约视图」的逐字段映射
 //! （publish / delete 没有视图，只有两态 / 三态枚举）。
@@ -20,9 +21,10 @@
 //!
 //! ## 视图裁剪点唯一
 //!
-//! [`blog_post_view`] 是唯一映射点：`content`（博客正文）在 **SQL 侧**就没被 SELECT，
-//! 到这里的行本来就没有该列 ⇒ 不存在「进了宿主内存但没进帧」的中间态。
-//! `published` 哨兵收敛与 `tags_json` 解码同样在 dao 做过，本层不再补第二次。
+//! 每张表一个映射函数（[`blog_post_view`] + 八个 `*_summary_view`），一个字段只在一处
+//! 决定「过不过线」：`content`（博客正文）在 **SQL 侧**就没被 SELECT，到这里的行本来就
+//! 没有该列；八条列表视图不带 `body` / `message` / `lineItems` / `milestones` 明细
+//! （只带两个计数）。`published` 哨兵收敛与 `tags_json` 解码在 dao 做过，本层不再补第二次。
 //!
 //! ## 闸（越界拒收，不静默夹取）
 //!
@@ -41,14 +43,24 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use axagent_company_runtime::opc::{DefaultSiteService, SiteService};
+use axagent_company_runtime::opc::{
+    AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService, Customer,
+    CustomerFilter, CustomerService, CustomerStatus, CustomerType, DefaultAnalyticsService,
+    DefaultCustomerService, DefaultInvoiceService, DefaultProjectService, DefaultSiteService,
+    Invoice, InvoiceFilter, InvoiceService, InvoiceStatus, KpiRecord, LandingPage, MilestoneStatus,
+    Project, ProjectFilter, ProjectService, ProjectStatus, PublishSchedule, PublishScheduleService,
+    SiteService,
+};
 use axagent_dao::repo::opc_blog_post::{BlogPostListRow, count_blog_posts, list_blog_posts};
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::opc_store::{
-    BlogPostListOutcome, BlogPostView, CreateBlogPostInput, OPC_BLOG_POST_CONTENT_MAX_BYTES,
-    OPC_BLOG_POST_LIST_DEFAULT_LIMIT, OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider,
-    PublishBlogPostOutcome, RemoveBlogPostOutcome,
+    BlogPostListOutcome, BlogPostView, ContactSummaryView, ContentAssetSummaryView,
+    CreateBlogPostInput, CustomerListQuery, CustomerSummaryView, InvoiceListQuery,
+    InvoiceSummaryView, KpiListQuery, KpiSummaryView, LandingPageSummaryView,
+    OPC_BLOG_POST_CONTENT_MAX_BYTES, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
+    OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, ProjectListQuery, ProjectSummaryView,
+    PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome,
 };
 use tokio::sync::RwLock;
 
@@ -211,6 +223,116 @@ impl OpcStoreProvider for HostOpcStore {
         // 本层不再列第二份字段名单（禁区 12）。
         Ok(BlogPostView::from(created))
     }
+
+    // ── 只读查询 op（#36 批 1）────────────────────────────────────────
+    //
+    // 判据三条，八个 op 一致：
+    // ① 过滤 / 排序钉在 `company-runtime` 的既有 service（本层不写 SQL、不重列字段名单）；
+    // ② 枚举位是**串**：非法值 `.parse().ok()` 后丢弃 = 「不过滤」，与迁移前宿主工具
+    //    `OpcList*` 的 `from_str(..).ok()` 逐字一致（迁移不顺手改判，见契约模块注释）；
+    // ③ 空表 ⇒ `Ok(vec![])`（不是错误），视图映射是唯一裁剪点。
+
+    async fn list_invoices(&self, query: InvoiceListQuery) -> Result<Vec<InvoiceSummaryView>> {
+        let svc = DefaultInvoiceService::new(self.db.clone());
+        let rows = svc
+            .list_invoices(InvoiceFilter {
+                status: query.status.as_deref().and_then(|s| s.parse::<InvoiceStatus>().ok()),
+                customer_id: query.customer_id,
+                date_from: query.date_from,
+                date_to: query.date_to,
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::list_invoices 取发票列表失败: {e}"))
+            })?;
+        Ok(rows.into_iter().map(invoice_summary_view).collect())
+    }
+
+    async fn list_customers(&self, query: CustomerListQuery) -> Result<Vec<CustomerSummaryView>> {
+        let svc = DefaultCustomerService::new(self.db.clone());
+        let rows = svc
+            .list_customers(CustomerFilter {
+                status: query.status.as_deref().and_then(|s| s.parse::<CustomerStatus>().ok()),
+                customer_type: query
+                    .customer_type
+                    .as_deref()
+                    .and_then(|s| s.parse::<CustomerType>().ok()),
+                search: query.search,
+                // `CustomerFilter.tags` 恒 `None`：域服务没有 tags 分支（同迁移前宿主工具），
+                // 契约 DTO 也因此不提供这个键 —— 见 `opc_store.rs` 里 `list_customers` 的说明。
+                tags: None,
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::list_customers 取客户列表失败: {e}"))
+            })?;
+        Ok(rows.into_iter().map(customer_summary_view).collect())
+    }
+
+    async fn list_projects(&self, query: ProjectListQuery) -> Result<Vec<ProjectSummaryView>> {
+        let svc = DefaultProjectService::new(self.db.clone());
+        let rows = svc
+            .list_projects(ProjectFilter {
+                status: query.status.as_deref().and_then(|s| s.parse::<ProjectStatus>().ok()),
+                customer_id: query.customer_id,
+                search: query.search,
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::list_projects 取项目列表失败: {e}"))
+            })?;
+        Ok(rows.into_iter().map(project_summary_view).collect())
+    }
+
+    async fn list_landing_pages(&self) -> Result<Vec<LandingPageSummaryView>> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let rows = SiteService::list_landing_pages(&svc).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_landing_pages 取落地页失败: {e}"))
+        })?;
+        Ok(rows.into_iter().map(landing_page_summary_view).collect())
+    }
+
+    async fn list_contacts(&self) -> Result<Vec<ContactSummaryView>> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let rows = SiteService::list_contacts(&svc).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_contacts 取联系表单失败: {e}"))
+        })?;
+        Ok(rows.into_iter().map(contact_summary_view).collect())
+    }
+
+    async fn list_kpis(&self, query: KpiListQuery) -> Result<Vec<KpiSummaryView>> {
+        let svc = DefaultAnalyticsService::new(self.db.clone());
+        // 跨域包读（`list_kpis_all`）：本接缝的调用方不携带域包标识，与迁移前
+        // `OpcListKpis` 同一条口径；每行都带 `domain_pack_id`（空串 = 未标注）。
+        let rows = svc.list_kpis_all(query.period, query.limit).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_kpis 取 KPI 记录失败: {e}"))
+        })?;
+        Ok(rows.into_iter().map(kpi_summary_view).collect())
+    }
+
+    async fn list_content_assets(&self) -> Result<Vec<ContentAssetSummaryView>> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        // 全限定调用：`DefaultSiteService` 同时实现 `SiteService` / `ContentAssetService` /
+        // `PublishScheduleService`，同名方法在导入多个 trait 时会有歧义。
+        let rows = ContentAssetService::list_content_assets(&svc).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_content_assets 取内容资产失败: {e}"))
+        })?;
+        Ok(rows.into_iter().map(content_asset_summary_view).collect())
+    }
+
+    async fn list_publish_schedules(&self) -> Result<Vec<PublishScheduleSummaryView>> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let rows = PublishScheduleService::list_publish_schedules(&svc).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_publish_schedules 取发布计划失败: {e}"))
+        })?;
+        Ok(rows.into_iter().map(publish_schedule_summary_view).collect())
+    }
 }
 
 /// 写 op 的 `id` 闸：空 / 全空白 ⇒ `Err(Validation)`（`op` 只用于文案定位）。
@@ -263,6 +385,110 @@ fn check_blog_post_slug(slug: &str) -> Result<()> {
 // **删除三态的真库端到端**（`Removed` / `NotFound` / `Protected`，以及「受保护的行一行不动」）
 // 在本层开一次真库 —— 那三档是 #180-①② 的核心判据，只验枚举串证不了「先判保护、再删」的落点；
 // 发布写面的命中 / 缺行 / 秒级量级仍归 `repo/opc_blog_post.rs`。
+
+// ── 只读视图映射（唯一裁剪点）──────────────────────────────────────────────
+//
+// 八个函数一一对应八个 `*SummaryView`：字段改名与裁剪只在这里发生，和 `blog_post_view`
+// 同一条分工。**不裁剪的字段**（`content` / `body` / `message` / `lineItems`）在此处
+// 不出现 —— 它们要么列表工具从不展示，要么会让一帧体积与整表行数相乘。
+
+fn invoice_summary_view(inv: Invoice) -> InvoiceSummaryView {
+    InvoiceSummaryView {
+        id: inv.id,
+        customer_id: inv.customer_id,
+        invoice_number: inv.invoice_number,
+        status: inv.status.as_str().to_string(),
+        total: inv.total,
+        currency: inv.currency,
+        created_at: inv.created_at,
+    }
+}
+
+fn customer_summary_view(c: Customer) -> CustomerSummaryView {
+    CustomerSummaryView {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        company: c.company,
+        status: c.status.as_str().to_string(),
+        total_revenue: c.total_revenue,
+        created_at: c.created_at,
+    }
+}
+
+/// 里程碑只带两个计数（完成数是现算的，判据同迁移前 `OpcListProjects`：
+/// `m.status == MilestoneStatus::Completed`）。
+fn project_summary_view(p: Project) -> ProjectSummaryView {
+    let milestone_total = p.milestones.len();
+    let milestone_completed =
+        p.milestones.iter().filter(|m| m.status == MilestoneStatus::Completed).count();
+    ProjectSummaryView {
+        id: p.id,
+        title: p.title,
+        status: p.status.as_str().to_string(),
+        budget: p.budget,
+        currency: p.currency,
+        milestone_total,
+        milestone_completed,
+        created_at: p.created_at,
+    }
+}
+
+fn landing_page_summary_view(p: LandingPage) -> LandingPageSummaryView {
+    LandingPageSummaryView {
+        id: p.id,
+        title: p.title,
+        slug: p.slug,
+        published: p.published,
+        created_at: p.created_at,
+    }
+}
+
+fn contact_summary_view(c: ContactSubmission) -> ContactSummaryView {
+    ContactSummaryView {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        source: c.source,
+        read: c.read,
+        created_at: c.created_at,
+    }
+}
+
+fn kpi_summary_view(k: KpiRecord) -> KpiSummaryView {
+    KpiSummaryView {
+        id: k.id,
+        domain_pack_id: k.domain_pack_id,
+        name: k.name,
+        value: k.value,
+        unit: k.unit,
+        period: k.period,
+        recorded_at: k.recorded_at,
+    }
+}
+
+fn content_asset_summary_view(a: ContentAsset) -> ContentAssetSummaryView {
+    ContentAssetSummaryView {
+        id: a.id,
+        title: a.title,
+        content_type: a.content_type,
+        status: a.status,
+        tags: a.tags,
+        created_at: a.created_at,
+    }
+}
+
+fn publish_schedule_summary_view(s: PublishSchedule) -> PublishScheduleSummaryView {
+    PublishScheduleSummaryView {
+        id: s.id,
+        content_ref_type: s.content_ref_type,
+        content_ref_id: s.content_ref_id,
+        status: s.status,
+        scheduled_at: s.scheduled_at,
+        published_at: s.published_at,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -465,6 +691,205 @@ mod tests {
         assert!(
             SiteService::get_blog_post(&svc, &kept.id).await.is_ok(),
             "受保护的行必须一行都没动（先判保护、再删）"
+        );
+    }
+
+    fn keys_of(value: &Value) -> Vec<String> {
+        let mut keys: Vec<String> =
+            value.as_object().expect("视图必须序列化成对象").keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    fn assert_keys(value: &Value, expected: &[&str]) {
+        let mut want: Vec<String> = expected.iter().map(|s| (*s).to_string()).collect();
+        want.sort();
+        assert_eq!(keys_of(value), want, "键集合漂移：{value:?}");
+    }
+
+    /// 八个只读视图的**键集合**与**裁剪**：camelCase 逐字钉死，大字段一个都不许出现。
+    ///
+    /// 键集合是接缝线格式，插件侧逐字透传（禁区 13）⇒ 这里多一个键就是线格式扩容，
+    /// 少一个键就是前端字段静默变 `undefined`。
+    #[test]
+    fn readonly_views_are_cropped_and_camel_case() {
+        use axagent_company_runtime::opc::Milestone;
+
+        let invoice = serde_json::to_value(invoice_summary_view(Invoice {
+            id: "inv-1".into(),
+            customer_id: "cus-1".into(),
+            invoice_number: "INV-001".into(),
+            status: InvoiceStatus::Paid,
+            line_items: Vec::new(),
+            subtotal: 100.0,
+            tax_total: 6.0,
+            total: 106.0,
+            currency: "CNY".into(),
+            issued_at: None,
+            due_at: None,
+            paid_at: None,
+            notes: String::new(),
+            created_at: 1,
+            updated_at: 2,
+        }))
+        .expect("发票视图可序列化");
+        assert_keys(
+            &invoice,
+            &["id", "customerId", "invoiceNumber", "status", "total", "currency", "createdAt"],
+        );
+        assert_eq!(invoice["status"], "paid", "枚举必须落 as_str 的小写串");
+        assert!(invoice.get("lineItems").is_none(), "行明细不过线");
+
+        let customer = serde_json::to_value(customer_summary_view(Customer {
+            id: "cus-1".into(),
+            name: "客户".into(),
+            email: "a@b.c".into(),
+            phone: None,
+            company: None,
+            customer_type: CustomerType::Consumer,
+            country: None,
+            region: None,
+            city: None,
+            address: None,
+            latitude: None,
+            longitude: None,
+            source: None,
+            tags: Vec::new(),
+            notes: String::new(),
+            total_revenue: 10.0,
+            invoice_count: 1,
+            status: CustomerStatus::Active,
+            created_at: 1,
+            updated_at: 2,
+        }))
+        .expect("客户视图可序列化");
+        assert_keys(
+            &customer,
+            &["id", "name", "email", "phone", "company", "status", "totalRevenue", "createdAt"],
+        );
+        assert!(customer.get("notes").is_none(), "备注不过线");
+
+        let project = serde_json::to_value(project_summary_view(Project {
+            id: "prj-1".into(),
+            customer_id: None,
+            title: "项目".into(),
+            description: String::new(),
+            status: ProjectStatus::Active,
+            milestones: vec![
+                Milestone {
+                    id: "m1".into(),
+                    title: "一".into(),
+                    description: String::new(),
+                    due_at: None,
+                    completed_at: Some(1),
+                    status: MilestoneStatus::Completed,
+                },
+                Milestone {
+                    id: "m2".into(),
+                    title: "二".into(),
+                    description: String::new(),
+                    due_at: None,
+                    completed_at: None,
+                    status: MilestoneStatus::Pending,
+                },
+            ],
+            budget: Some(1.0),
+            currency: "CNY".into(),
+            started_at: None,
+            deadline: None,
+            completed_at: None,
+            notes: String::new(),
+            created_at: 1,
+            updated_at: 2,
+        }))
+        .expect("项目视图可序列化");
+        assert_keys(
+            &project,
+            &[
+                "id",
+                "title",
+                "status",
+                "budget",
+                "currency",
+                "milestoneTotal",
+                "milestoneCompleted",
+                "createdAt",
+            ],
+        );
+        assert_eq!(project["milestoneTotal"], 2);
+        assert_eq!(project["milestoneCompleted"], 1, "只数 `Completed`，不数 in_progress");
+        assert!(project.get("milestones").is_none(), "里程碑明细不过线");
+
+        let landing = serde_json::to_value(landing_page_summary_view(LandingPage {
+            id: "lp-1".into(),
+            title: "落地页".into(),
+            slug: "lp".into(),
+            description: String::new(),
+            content: "正文".into(),
+            published: true,
+            published_at: Some(1),
+            created_at: 1,
+            updated_at: 2,
+        }))
+        .expect("落地页视图可序列化");
+        assert_keys(&landing, &["id", "title", "slug", "published", "createdAt"]);
+        assert!(landing.get("content").is_none(), "正文不过线");
+
+        let contact = serde_json::to_value(contact_summary_view(ContactSubmission {
+            id: "ct-1".into(),
+            name: "来访".into(),
+            email: "a@b.c".into(),
+            message: "留言".into(),
+            source: "site".into(),
+            read: false,
+            created_at: 1,
+        }))
+        .expect("联系表单视图可序列化");
+        assert_keys(&contact, &["id", "name", "email", "source", "read", "createdAt"]);
+        assert!(contact.get("message").is_none(), "留言不过线");
+
+        let kpi = serde_json::to_value(kpi_summary_view(KpiRecord {
+            id: "kpi-1".into(),
+            domain_pack_id: String::new(),
+            name: "营收".into(),
+            value: 1.5,
+            unit: "CNY".into(),
+            period: "2026-11".into(),
+            recorded_at: 1,
+            created_at: 1,
+        }))
+        .expect("KPI 视图可序列化");
+        assert_keys(&kpi, &["id", "domainPackId", "name", "value", "unit", "period", "recordedAt"]);
+        assert_eq!(kpi["domainPackId"], "", "空串 = 未标注，不许臆造域包");
+
+        let asset = serde_json::to_value(content_asset_summary_view(ContentAsset {
+            id: "ca-1".into(),
+            title: "资产".into(),
+            content_type: "article".into(),
+            body: "正文".into(),
+            tags: vec!["opc".into()],
+            status: "published".into(),
+            created_at: 1,
+            updated_at: 2,
+        }))
+        .expect("内容资产视图可序列化");
+        assert_keys(&asset, &["id", "title", "contentType", "status", "tags", "createdAt"]);
+        assert!(asset.get("body").is_none(), "正文不过线");
+
+        let schedule = serde_json::to_value(publish_schedule_summary_view(PublishSchedule {
+            id: "ps-1".into(),
+            content_ref_type: "blog".into(),
+            content_ref_id: "post-1".into(),
+            scheduled_at: 1,
+            status: "pending".into(),
+            published_at: None,
+            created_at: 1,
+            updated_at: 2,
+        }))
+        .expect("发布计划视图可序列化");
+        assert_keys(
+            &schedule,
+            &["id", "contentRefType", "contentRefId", "status", "scheduledAt", "publishedAt"],
         );
     }
 }

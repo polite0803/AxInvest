@@ -17,6 +17,10 @@
 //! 逐字透传接缝视图 / 枚举串的 camelCase 与 snake_case，**不再有任何键名适配层**
 //! （禁区 13 无例外，判据见该文「出参线格式」一节）。
 //!
+//! **本批（#36 批 1）**再加 9 条只读命令：8 条 `opc_list_*` 各对一条 `opc.store` 只读 op
+//! （出参 = 接缝回帧的裸数组逐字透传），`opc_get_dashboard` 由本进程组合三次列表查询现算
+//! （宿主不新增聚合 op）。
+//!
 //! 为什么用 `Peer` 而不是自写读循环：插件一旦能主动调宿主，同一条管道上就同时挂着
 //! 「我方请求的响应」与「对端发来的新请求」，朴素读一帧写一帧必然错配。`Peer` 把对端请求
 //! 进 `deferred` 队列，等响应期间不丢帧。
@@ -67,6 +71,17 @@ const OPC_STORE_DELETE_BLOG_POST: &str = "delete_blog_post";
 /// 本进程既不截断也不预算（`MAX_FRAME_LEN` 那 64 MiB 是帧层上限，不是本 op 的预算）。
 const OPC_STORE_CREATE_BLOG_POST: &str = "create_blog_post";
 
+/// 八个只读查询 op（#36 批 1，均为读面 ⇒ 宿主侧**无权限闸**）：入参是嵌一层的
+/// `request` DTO（契约 `*ListQuery`），出参是 `*SummaryView` 的**裸数组**。
+const OPC_STORE_LIST_INVOICES: &str = "list_invoices";
+const OPC_STORE_LIST_CUSTOMERS: &str = "list_customers";
+const OPC_STORE_LIST_PROJECTS: &str = "list_projects";
+const OPC_STORE_LIST_LANDING_PAGES: &str = "list_landing_pages";
+const OPC_STORE_LIST_CONTACTS: &str = "list_contacts";
+const OPC_STORE_LIST_KPIS: &str = "list_kpis";
+const OPC_STORE_LIST_CONTENT_ASSETS: &str = "list_content_assets";
+const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -82,6 +97,18 @@ const COMMAND_DELETE_BLOG_POST: &str = "opc_delete_blog_post";
 /// （Tauri 具名参数），本命令按清单 `inputSchema` 收**平铺**的五个字段（与 `opc_publish_blog_post`
 /// 的平铺 `id` 同风格）。
 const COMMAND_CREATE_BLOG_POST: &str = "opc_create_blog_post";
+
+/// #36 批 1 的 9 条只读命令：前 8 条各对一条只读接缝 op，第 9 条由本进程组合三次列表调用
+/// 现算看板读数（宿主**不**新增聚合 op）。
+const COMMAND_LIST_INVOICES: &str = "opc_list_invoices";
+const COMMAND_LIST_CUSTOMERS: &str = "opc_list_customers";
+const COMMAND_LIST_PROJECTS: &str = "opc_list_projects";
+const COMMAND_LIST_LANDING_PAGES: &str = "opc_list_landing_pages";
+const COMMAND_LIST_CONTACTS: &str = "opc_list_contacts";
+const COMMAND_LIST_KPIS: &str = "opc_list_kpis";
+const COMMAND_LIST_CONTENT_ASSETS: &str = "opc_list_content_assets";
+const COMMAND_LIST_PUBLISH_SCHEDULES: &str = "opc_list_publish_schedules";
+const COMMAND_GET_DASHBOARD: &str = "opc_get_dashboard";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -178,6 +205,113 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // ── #36 批 1：八条只读查询命令（出参 = 接缝回帧的裸数组，逐字透传）──
+        COMMAND_LIST_INVOICES => match list_rows(
+            &frame.input,
+            &request.call_chain,
+            peer,
+            OPC_STORE_LIST_INVOICES,
+            QUERY_KEYS_INVOICES,
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LIST_CUSTOMERS => match list_rows(
+            &frame.input,
+            &request.call_chain,
+            peer,
+            OPC_STORE_LIST_CUSTOMERS,
+            QUERY_KEYS_CUSTOMERS,
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LIST_PROJECTS => match list_rows(
+            &frame.input,
+            &request.call_chain,
+            peer,
+            OPC_STORE_LIST_PROJECTS,
+            QUERY_KEYS_PROJECTS,
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // 以下四条无入参（契约 op 也不收 query）。
+        COMMAND_LIST_LANDING_PAGES => {
+            match list_rows(
+                &frame.input,
+                &request.call_chain,
+                peer,
+                OPC_STORE_LIST_LANDING_PAGES,
+                &[],
+            ) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_CONTACTS => {
+            match list_rows(&frame.input, &request.call_chain, peer, OPC_STORE_LIST_CONTACTS, &[]) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_KPIS => match list_rows(
+            &frame.input,
+            &request.call_chain,
+            peer,
+            OPC_STORE_LIST_KPIS,
+            QUERY_KEYS_KPIS,
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LIST_CONTENT_ASSETS => {
+            match list_rows(
+                &frame.input,
+                &request.call_chain,
+                peer,
+                OPC_STORE_LIST_CONTENT_ASSETS,
+                &[],
+            ) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_PUBLISH_SCHEDULES => {
+            match list_rows(
+                &frame.input,
+                &request.call_chain,
+                peer,
+                OPC_STORE_LIST_PUBLISH_SCHEDULES,
+                &[],
+            ) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // 看板读数：宿主没有聚合 op，由本进程组合三次列表查询现算。
+        COMMAND_GET_DASHBOARD => match dashboard(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         other => CommandOutcome::Fault(CommandFault::for_frame(
             &frame,
@@ -447,6 +581,111 @@ fn blog_post_create_request(input: &Value) -> Result<Value, (String, String)> {
 /// 命令层形状错误（`PLUGIN_COMMAND_INVALID_ARGS`）：**不发帧**，也就不存在「注定失败的帧」。
 fn invalid_shape(message: String) -> (String, String) {
     (error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(), message)
+}
+
+// ── #36 批 1：只读查询命令 ──────────────────────────────────────────────
+
+/// 四条带过滤条件的命令各自认的入参键（camelCase，与契约 `*ListQuery` 的 serde 键逐字一致）。
+/// 只挑这些键转发：多余键不进门（同 [`blog_post_create_request`] 的口径）。`list_customers`
+/// 刻意不含 `tags` —— 域服务不消费该过滤位，契约也不收（见 `opc_store.rs` 的 `CustomerListQuery`）。
+const QUERY_KEYS_INVOICES: &[&str] = &["status", "customerId", "dateFrom", "dateTo", "limit"];
+const QUERY_KEYS_CUSTOMERS: &[&str] = &["status", "customerType", "search", "limit"];
+const QUERY_KEYS_PROJECTS: &[&str] = &["status", "customerId", "search", "limit"];
+const QUERY_KEYS_KPIS: &[&str] = &["period", "limit"];
+
+/// 只读列表命令的公共出口：把 agent 侧传来的 camelCase 键**原样**装进 `request`，出参逐字
+/// 透传接缝回帧（裸数组，camelCase 键，零键名改写 —— 同 [`blog_posts`] 的「出参线格式」）。
+///
+/// - `keys` 为空 ⇒ 该 op 无入参，直接发空入参（不塞 `request` 空壳）；
+/// - 缺失的键**不塞默认值、不塞 null**：契约 DTO 是 `default`，缺键即 `None`，塞 null 会
+///   多造一个「调用方显式传了 null」的假信号。
+fn list_rows(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+    op: &str,
+    keys: &[&str],
+) -> Result<Value, (String, String)> {
+    if keys.is_empty() {
+        return call_opc_store(peer, op, json!({}), call_chain);
+    }
+    let mut request = serde_json::Map::new();
+    for key in keys {
+        // 缺键与 null 都不转发（同宿主工具侧 `filter_request` 的口径）。
+        if let Some(value) = input.get(*key).filter(|value| !value.is_null()) {
+            request.insert((*key).to_string(), value.clone());
+        }
+    }
+    call_opc_store(peer, op, json!({ "request": request }), call_chain)
+}
+
+/// 回帧里的行数组（缺键 / 非数组 ⇒ 空数组，**不** panic）：空表 = 空数组不是错误。
+fn rows_of(value: &Value) -> &[Value] {
+    match value.as_array() {
+        Some(rows) => rows,
+        None => &[],
+    }
+}
+
+/// 行对象里某个字符串字段（缺键 / 非字符串 ⇒ `None`，调用方按「不匹配」处理）。
+fn row_str<'a>(row: &'a Value, key: &str) -> Option<&'a str> {
+    row.get(key).and_then(Value::as_str)
+}
+
+/// `opc_get_dashboard`：仪表盘六项读数，由本进程组合三次只读列表查询现算。
+///
+/// 宿主**不**新增聚合 op（同一条 `opc.store` 数据面只开列表读面）：三张表各取一页
+/// `limit: 100` 后按视图字段现算 —— **超出这一页的行不计入聚合**（这是本命令的取值边界，
+/// 不是宿主 provider 的缺省）。空表 ⇒ 各项为 0。
+fn dashboard(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (String, String)> {
+    let invoices = call_opc_store(
+        peer,
+        OPC_STORE_LIST_INVOICES,
+        json!({ "request": { "limit": 100 } }),
+        call_chain,
+    )?;
+    let customers = call_opc_store(
+        peer,
+        OPC_STORE_LIST_CUSTOMERS,
+        json!({ "request": { "limit": 100 } }),
+        call_chain,
+    )?;
+    let projects = call_opc_store(
+        peer,
+        OPC_STORE_LIST_PROJECTS,
+        json!({ "request": { "limit": 100 } }),
+        call_chain,
+    )?;
+
+    let invoice_rows = rows_of(&invoices);
+    let customer_rows = rows_of(&customers);
+    let project_rows = rows_of(&projects);
+
+    let total_revenue: f64 = invoice_rows
+        .iter()
+        .filter(|row| row_str(row, "status") == Some("paid"))
+        .filter_map(|row| row.get("total").and_then(Value::as_f64))
+        .sum();
+    let pending_invoices = invoice_rows
+        .iter()
+        .filter(|row| matches!(row_str(row, "status"), Some("draft" | "sent" | "overdue")))
+        .count();
+    let active_projects = project_rows
+        .iter()
+        .filter(|row| matches!(row_str(row, "status"), Some("active" | "planning")))
+        .count();
+    let active_customers =
+        customer_rows.iter().filter(|row| row_str(row, "status") == Some("active")).count();
+
+    // 键名 camelCase：宿主工具按这套键格式化，改一个字母就会静默读空。
+    Ok(json!({
+        "totalRevenue": total_revenue,
+        "pendingInvoices": pending_invoices,
+        "activeProjects": active_projects,
+        "activeCustomers": active_customers,
+        "totalCustomers": customer_rows.len(),
+        "totalProjects": project_rows.len(),
+    }))
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────

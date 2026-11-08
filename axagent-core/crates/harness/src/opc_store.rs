@@ -2,9 +2,9 @@
 
 //! OPC 站点内容接缝（`opc.store`）— DTO + Trait。
 //!
-//! 宿主把 `opc_blog_posts` 的数据面经本接缝暴露给插件：读面 `list_blog_posts`（分页 + 列裁剪）、
-//! 写面 `publish_blog_post`（只 `Set` 三列）/ `delete_blog_post`（三态）/ `create_blog_post`
-//! （正文按字节设闸）。**缺行不是错误**：回 `NotFound`（走 payload、不占错误码）。闸只加写 op，读 op 不加。
+//! 宿主把 OPC 的 `opc_*` 数据面经本接缝暴露给插件：读面九个 op（`list_blog_posts` 分页 + 列裁剪；
+//! #36 批 1 的八条列表 op：发票 / 客户 / 项目 / 落地页 / 联系提交 / KPI / 内容资产 / 发布计划），
+//! 写面 `publish_blog_post`（只 `Set` 三列）/ `delete_blog_post`（三态）/ `create_blog_post`（正文按字节设闸）。**缺行不是错误**：回 `NotFound`（走 payload、不占错误码）。闸只加写 op，读 op 不加。
 //!
 //! ## 为什么需要它
 //!
@@ -129,7 +129,7 @@ pub struct BlogPostListOutcome {
 
 // ── Trait ───────────────────────────────────────────────────────────────
 
-/// OPC 站点内容提供者（宿主独占 `opc_*` 表数据面：读 `list_blog_posts` + 写 `publish_blog_post`）。
+/// OPC 数据面提供者（宿主独占 `opc_*` 表：九个读 op + 三个写 op，清单见模块头）。
 ///
 /// 实现方：宿主 wiring 层（`src-tauri/src/init/opc_store_service.rs`，只调 dao，不直连库）。
 /// 默认实现返回「该提供者不支持此数据面」，便于外部实现只覆盖关心的 op
@@ -215,6 +215,78 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::create_blog_post 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 只读查询 op（#36 批 1）────────────────────────────────────────
+    //
+    // 八个列表 op 的判据一致：空表 ⇒ `Ok(vec![])`（**不是错误**，同 `list_blog_posts` 的
+    // 空页口径）；过滤 / 排序 / 列裁剪都钉在实现层查询里（provider 不做内存过滤）。
+    // 这些查询的 `limit` 是「宿主工具的历史缺省」，不参与插件侧分页算术 ⇒ 本批不另设
+    // 区间闸（与 `list_blog_posts` 的 `OPC_BLOG_POST_LIST_LIMIT_RANGE` 不同源，勿混）。
+    /// 发票列表（`list_invoices` op）。`status` 是枚举串，非法值按「不过滤」处理
+    /// （与迁移前宿主工具 `OpcListInvoices` 的 `from_str(...).ok()` 行为逐字一致）。
+    async fn list_invoices(&self, _query: InvoiceListQuery) -> Result<Vec<InvoiceSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_invoices 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 客户列表（`list_customers` op）。`status` 非法串按「不过滤」处理；`customerType`
+    /// 遵**域枚举**的既有语义（`CustomerType::from_str` 未知串落 `Unknown`），迁移前宿主
+    /// 工具就是 `from_str(...).ok()` ⇒ 无这一档的两侧语义差。
+    ///
+    /// 入参**没有** `tags`：域服务 `list_customers` 今天只认 status / customerType / search /
+    /// limit / offset（`CustomerFilter.tags` 虽在结构体里但没有任何分支消费它），迁移前宿主
+    /// 工具也恒传 `None`。把一个不生效的过滤键摆上契约 = 对调用方宣称「筛过了」——要开这个
+    /// 能力须同批补域服务分支，不在迁移里顺手加。
+    async fn list_customers(&self, _query: CustomerListQuery) -> Result<Vec<CustomerSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_customers 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 项目列表（`list_projects` op）。里程碑完成数由 provider 按明细现算
+    /// （视图只带两个计数，不带里程碑明细 —— 列表面不扩列）。
+    async fn list_projects(&self, _query: ProjectListQuery) -> Result<Vec<ProjectSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_projects 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 落地页列表（`list_landing_pages` op）。
+    async fn list_landing_pages(&self) -> Result<Vec<LandingPageSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_landing_pages 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 联系表单提交列表（`list_contacts` op）。
+    async fn list_contacts(&self) -> Result<Vec<ContactSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_contacts 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// KPI 记录列表（`list_kpis` op）。`period` 为空表示不过滤；跨域包语义沿用
+    /// 迁移前 `list_kpis_all` 的口径（`domainPackId` 为空串 = 未标注，**不是**某个域包）。
+    async fn list_kpis(&self, _query: KpiListQuery) -> Result<Vec<KpiSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_kpis 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 内容资产列表（`list_content_assets` op）。`body` 不过线（列裁剪同博客 `content`）。
+    async fn list_content_assets(&self) -> Result<Vec<ContentAssetSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_content_assets 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 发布计划列表（`list_publish_schedules` op）。
+    async fn list_publish_schedules(&self) -> Result<Vec<PublishScheduleSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_publish_schedules 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -297,6 +369,165 @@ pub struct CreateBlogPostInput {
     pub excerpt: String,
     pub content: String,
     pub tags: Vec<String>,
+}
+
+// ── 只读查询 op 的入参（#36 批 1）──────────────────────────────────────────
+//
+// 四个查询 DTO 的字段与实现层 `*Filter` 逐项对应，但枚举位一律收 **串**：接缝层不认识
+// 枚举（插件进程链接不到实现层），非法串由 provider 按「不过滤」丢弃 —— 这是迁移前宿主
+// 工具的原语义，不在迁移中顺手改判（改成拒收会让「传了个旧枚举值」从静默忽略变成硬错）。
+
+/// `list_invoices` 的过滤条件。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InvoiceListQuery {
+    /// 状态枚举串（`draft` / `sent` / `paid` / `overdue` / `cancelled` / `refunded`）。
+    pub status: Option<String>,
+    pub customer_id: Option<String>,
+    pub date_from: Option<i64>,
+    pub date_to: Option<i64>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+/// `list_customers` 的过滤条件。
+///
+/// 字段与 `CustomerFilter` 的**生效**分支逐项对应：`tags` 不在其中（域服务不消费它 ⇒ 摆上
+/// 契约只会静默不筛，见 trait 侧 `list_customers` 的说明）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomerListQuery {
+    pub status: Option<String>,
+    pub customer_type: Option<String>,
+    pub search: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+/// `list_projects` 的过滤条件。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProjectListQuery {
+    pub status: Option<String>,
+    pub customer_id: Option<String>,
+    pub search: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+/// `list_kpis` 的过滤条件。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KpiListQuery {
+    pub period: Option<String>,
+    pub limit: Option<u32>,
+}
+
+// ── 只读查询 op 的出参视图（列裁剪后的唯一线格式）─────────────────────────
+//
+// 全部 `rename_all = "camelCase"`（禁区 13）。**不带**大字段：博客/内容资产的正文
+// （`content` / `body`）、联系表单的留言（`message`）与发票行明细（`lineItems`）都不过线
+// —— 它们要么是列表工具从不展示的字段，要么会让一帧体积与整表行数相乘。
+
+/// 发票摘要视图。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvoiceSummaryView {
+    pub id: String,
+    pub customer_id: String,
+    pub invoice_number: String,
+    pub status: String,
+    pub total: f64,
+    pub currency: String,
+    pub created_at: i64,
+}
+
+/// 客户摘要视图。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerSummaryView {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub status: String,
+    pub total_revenue: f64,
+    pub created_at: i64,
+}
+
+/// 项目摘要视图（里程碑只带两个计数，不带明细）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSummaryView {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub budget: Option<f64>,
+    pub currency: String,
+    pub milestone_total: usize,
+    pub milestone_completed: usize,
+    pub created_at: i64,
+}
+
+/// 落地页摘要视图。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LandingPageSummaryView {
+    pub id: String,
+    pub title: String,
+    pub slug: String,
+    pub published: bool,
+    pub created_at: i64,
+}
+
+/// 联系表单摘要视图（`message` 不过线）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactSummaryView {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub source: String,
+    pub read: bool,
+    pub created_at: i64,
+}
+
+/// KPI 记录摘要视图。`domain_pack_id` 为空串表示「未标注」（存量行语义，见 `KpiRecord`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KpiSummaryView {
+    pub id: String,
+    pub domain_pack_id: String,
+    pub name: String,
+    pub value: f64,
+    pub unit: String,
+    pub period: String,
+    pub recorded_at: i64,
+}
+
+/// 内容资产摘要视图（`body` 不过线）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentAssetSummaryView {
+    pub id: String,
+    pub title: String,
+    pub content_type: String,
+    pub status: String,
+    pub tags: Vec<String>,
+    pub created_at: i64,
+}
+
+/// 发布计划摘要视图。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishScheduleSummaryView {
+    pub id: String,
+    pub content_ref_type: String,
+    pub content_ref_id: String,
+    pub status: String,
+    pub scheduled_at: i64,
+    pub published_at: Option<i64>,
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────
@@ -652,5 +883,159 @@ mod tests {
         assert_eq!(cjk.chars().count(), 1);
         // 预算下界必须是正数：0 会把所有正文都拒掉，等于把写面悄悄关死。
         // ⚠ 这一条由常量本身保证，不写成 `assert!(CONST > 0)`（会撞 clippy::assertions_on_constants）。
+    }
+
+    /// 八个只读视图的线格式键集合（camelCase，禁区 13）与「大字段不过线」一起钉死。
+    #[test]
+    fn readonly_view_key_sets_are_camel_case_and_cropped() {
+        let invoice = InvoiceSummaryView {
+            id: "inv-1".into(),
+            customer_id: "cus-1".into(),
+            invoice_number: "INV-001".into(),
+            status: "paid".into(),
+            total: 100.0,
+            currency: "CNY".into(),
+            created_at: 1,
+        };
+        expect_keys(
+            &serde_json::to_value(&invoice).expect("可序列化"),
+            &["id", "customerId", "invoiceNumber", "status", "total", "currency", "createdAt"],
+        );
+
+        let customer = CustomerSummaryView {
+            id: "cus-1".into(),
+            name: "张三".into(),
+            email: "a@b.c".into(),
+            phone: None,
+            company: Some("ACME".into()),
+            status: "active".into(),
+            total_revenue: 10.0,
+            created_at: 1,
+        };
+        expect_keys(
+            &serde_json::to_value(&customer).expect("可序列化"),
+            &["id", "name", "email", "phone", "company", "status", "totalRevenue", "createdAt"],
+        );
+
+        let project = ProjectSummaryView {
+            id: "prj-1".into(),
+            title: "项目".into(),
+            status: "active".into(),
+            budget: None,
+            currency: "CNY".into(),
+            milestone_total: 3,
+            milestone_completed: 1,
+            created_at: 1,
+        };
+        expect_keys(
+            &serde_json::to_value(&project).expect("可序列化"),
+            &[
+                "id",
+                "title",
+                "status",
+                "budget",
+                "currency",
+                "milestoneTotal",
+                "milestoneCompleted",
+                "createdAt",
+            ],
+        );
+
+        let landing = LandingPageSummaryView {
+            id: "lp-1".into(),
+            title: "页".into(),
+            slug: "page".into(),
+            published: false,
+            created_at: 1,
+        };
+        expect_keys(
+            &serde_json::to_value(&landing).expect("可序列化"),
+            &["id", "title", "slug", "published", "createdAt"],
+        );
+
+        let contact = ContactSummaryView {
+            id: "ct-1".into(),
+            name: "李四".into(),
+            email: "x@y.z".into(),
+            source: "website".into(),
+            read: false,
+            created_at: 1,
+        };
+        // `message` 不过线（列裁剪）。
+        expect_keys(
+            &serde_json::to_value(&contact).expect("可序列化"),
+            &["id", "name", "email", "source", "read", "createdAt"],
+        );
+
+        let kpi = KpiSummaryView {
+            id: "kpi-1".into(),
+            domain_pack_id: "sales_growth".into(),
+            name: "营收".into(),
+            value: 1.0,
+            unit: "CNY".into(),
+            period: "2026-11".into(),
+            recorded_at: 1,
+        };
+        expect_keys(
+            &serde_json::to_value(&kpi).expect("可序列化"),
+            &["id", "domainPackId", "name", "value", "unit", "period", "recordedAt"],
+        );
+
+        let asset = ContentAssetSummaryView {
+            id: "ca-1".into(),
+            title: "资产".into(),
+            content_type: "article".into(),
+            status: "draft".into(),
+            tags: vec!["opc".into()],
+            created_at: 1,
+        };
+        // `body` 不过线（列裁剪）。
+        expect_keys(
+            &serde_json::to_value(&asset).expect("可序列化"),
+            &["id", "title", "contentType", "status", "tags", "createdAt"],
+        );
+
+        let schedule = PublishScheduleSummaryView {
+            id: "ps-1".into(),
+            content_ref_type: "blog_post".into(),
+            content_ref_id: "post-1".into(),
+            status: "pending".into(),
+            scheduled_at: 1,
+            published_at: None,
+        };
+        expect_keys(
+            &serde_json::to_value(&schedule).expect("可序列化"),
+            &["id", "contentRefType", "contentRefId", "status", "scheduledAt", "publishedAt"],
+        );
+    }
+
+    /// 查询 DTO 的线格式：camelCase 键可解，缺键走 `Default`（`#[serde(default)]`）。
+    #[test]
+    fn list_query_dtos_are_camel_case_and_defaultable() {
+        let invoice: InvoiceListQuery = serde_json::from_value(json!({
+            "customerId": "cus-1",
+            "dateFrom": 10,
+            "limit": 5
+        }))
+        .expect("camelCase 键应可解");
+        assert_eq!(invoice.customer_id.as_deref(), Some("cus-1"));
+        assert_eq!(invoice.date_from, Some(10));
+        assert_eq!(invoice.limit, Some(5));
+        assert_eq!(invoice.offset, None);
+
+        let empty: CustomerListQuery = serde_json::from_str("{}").expect("空对象走 Default");
+        assert!(empty.status.is_none() && empty.customer_type.is_none());
+
+        let project: ProjectListQuery = serde_json::from_value(json!({
+            "customerId": "cus-2",
+            "search": "网站"
+        }))
+        .expect("camelCase 键应可解");
+        assert_eq!(project.customer_id.as_deref(), Some("cus-2"));
+
+        let kpi: KpiListQuery =
+            serde_json::from_value(json!({ "period": "2026-11", "limit": 20 })).expect("键应可解");
+        assert_eq!(kpi.period.as_deref(), Some("2026-11"));
+        assert_eq!(kpi.limit, Some(20));
     }
 }

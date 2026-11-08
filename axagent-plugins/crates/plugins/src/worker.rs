@@ -2656,6 +2656,127 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // `opc.store` 的八个只读查询 op（#36 批 1）：入参是**嵌一层**的 `{"request": {...}}`
+            // （契约 DTO `*ListQuery`，camelCase + `default` —— 缺键即 `None`），出参是
+            // **裸数组**（逐字透传 `*SummaryView`，出口不做任何包装）。
+            // 空表 = 空数组，**不是错误**（同 `list_blog_posts` 的空页口径）。
+            "opc.store" if op == "list_invoices" => {
+                let query: axagent_harness::InvoiceListQuery =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(query) => query,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_invoices(query)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<InvoiceSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_customers" => {
+                let query: axagent_harness::CustomerListQuery =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(query) => query,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_customers(query)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<CustomerSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_projects" => {
+                let query: axagent_harness::ProjectListQuery =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(query) => query,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_projects(query)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<ProjectSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_landing_pages" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_landing_pages()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 空表 = 空数组，不是错误。
+                    Ok(rows) => to_value("Vec<LandingPageSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_contacts" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_contacts()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<ContactSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_kpis" => {
+                let query: axagent_harness::KpiListQuery =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(query) => query,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_kpis(query)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<KpiSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_content_assets" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_content_assets()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<ContentAssetSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_publish_schedules" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_publish_schedules()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<PublishScheduleSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // `opc.store` 的写 op：入参只有 `id`（**不带正文**，也不接受正文），出参是契约的
             // 两态枚举。三处判据都跟着 `jobs.store` 的 `remove`：
             // ① `deserialize_arg` 只认 `id` 这一个键，缺键落 `SEAM_CALL_INVALID_ARGS`；
@@ -11013,9 +11134,10 @@ mod tests {
                     }),
                     &[],
                 );
-                // 首批只有 `list_blog_posts` 一个 op：表外 op 不许被兜底接住。
+                // 表外 op 不许被兜底接住（`list_landing_pages` 自 #36 批 1 起已是支持 op，
+                // 不能再当探针 —— 用永不可能注册的名字）。
                 let unknown_op = peer.handle_call_seam(
-                    &json!({ "seam": "opc.store", "op": "list_landing_pages", "args": {} }),
+                    &json!({ "seam": "opc.store", "op": "list_not_a_real_op", "args": {} }),
                     &[],
                 );
                 let calls = captured.calls.lock().clone();
@@ -11062,10 +11184,10 @@ mod tests {
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
     }
 
-    /// `opc.store` 的权限表**逐条枚举锁**（三个写 op + 两侧的反向锁）：
-    /// `publish_blog_post` / `delete_blog_post` / `create_blog_post` ⇒ `Write`；读 op
-    /// `list_blog_posts` ⇒ **必须仍是 `None`**；表外 op 与近似接缝名 ⇒ `None`
-    /// （不许被通配符或前缀匹配接住）。
+    /// `opc.store` 的权限表**逐条枚举锁**（三个写 op + 九个读 op + 两侧的反向锁）：
+    /// `publish_blog_post` / `delete_blog_post` / `create_blog_post` ⇒ `Write`；九条读 op
+    /// （`list_blog_posts` + #36 批 1 的八条列表 op）⇒ **必须仍是 `None`**；表外 op 与近似
+    /// 接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
     /// 这条承诺唯一的机械防线就是本用例 —— 多登记一条会把只读插件（今天
@@ -11079,11 +11201,23 @@ mod tests {
                 "写 op `{write_op}` 必须要求 write"
             );
         }
-        assert_eq!(
-            required_permission_for("opc.store", "list_blog_posts"),
-            None,
-            "读缝一条都不许加闸：加了一条 = 只读插件被拒"
-        );
+        for read_op in [
+            "list_blog_posts",
+            "list_invoices",
+            "list_customers",
+            "list_projects",
+            "list_landing_pages",
+            "list_contacts",
+            "list_kpis",
+            "list_content_assets",
+            "list_publish_schedules",
+        ] {
+            assert_eq!(
+                required_permission_for("opc.store", read_op),
+                None,
+                "读缝一条都不许加闸：加了一条 = 只读插件被拒（{read_op}）"
+            );
+        }
         // 未登记的 op 名（含将来才有的 op）一律落 `_ => None`，不许被通配接住。
         for unregistered in ["publish", "blog_publish", "delete", "create", "remove_blog_post", ""]
         {

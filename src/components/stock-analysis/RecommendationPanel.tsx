@@ -1,5 +1,5 @@
 import { List } from "@/components/common/AntdList";
-import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
+import { ReplayBadge, ReplayWatermark } from "@/components/shared/ReplayBadge";
 import { useStockJump } from "@/hooks/useStockJump";
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";

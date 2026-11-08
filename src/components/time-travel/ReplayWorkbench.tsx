@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/common/PageHeader";
+import { PageTimeAnchor } from "@/components/shared/PageTimeAnchor";
+import { ReplayBadge, ReplayWatermark } from "@/components/shared/ReplayBadge";
 import { AsOfDatePicker } from "@/components/time-travel/AsOfDatePicker";
-import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
-import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { ReplaySweep } from "@/components/time-travel/ReplaySweep";
 import { TimeTravelBatchCard } from "@/components/time-travel/TimeTravelBatchCard";
 import { investPath } from "@/lib/investRoutes";

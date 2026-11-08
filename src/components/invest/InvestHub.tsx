@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
+import { PageTimeAnchor } from "@/components/shared/PageTimeAnchor";
 import { Tabs, type TabsProps, Typography } from "antd";
 import { LineChart } from "lucide-react";
 import { lazy, Suspense, useMemo } from "react";

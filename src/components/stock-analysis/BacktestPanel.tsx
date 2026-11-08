@@ -1,4 +1,4 @@
-import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
+import { ReplayBadge, ReplayWatermark } from "@/components/shared/ReplayBadge";
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";

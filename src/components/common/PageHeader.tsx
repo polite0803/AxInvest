@@ -26,7 +26,7 @@ interface PageHeaderProps {
  *
  * 2026-11-05（B8-4a）由 `src/components/stock-analysis/_shared/PageHeader.tsx` 下沉至此。
  * 原 `showTimeAnchor?: boolean` 换成中性的 `anchor?: ReactNode` 插槽：组件不再反向
- * import `@/components/time-travel/PageTimeAnchor`（那会让中性目录依赖特性目录，触发
+ * import `@/components/shared/PageTimeAnchor`（那会让中性目录按特性归属耦合，触发
  * 组件中立性门禁）。
  *
  * 类名 `sa-header*` 刻意保留 —— 股票域 5 个单测按这些选择器断言（如

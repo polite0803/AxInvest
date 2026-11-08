@@ -575,6 +575,8 @@ pub struct UnifiedToolRegistry {
     pub skill_handlers: HashMap<String, SkillToolHandler>,
     /// 用户提问桥接器（AskUserQuestion 工具阻塞等待用户输入）
     pub ask_user_bridge: Option<Arc<dyn axagent_harness::AskUserBridge>>,
+    /// 插件命名命令桥接器（域工具经此执行插件命令，不直连域 crate）
+    pub plugin_command_bridge: Option<Arc<dyn axagent_harness::PluginCommandBridge>>,
     /// Agent 作用域标识 —— 透传进 `ToolContext.agent_id`，供会话状态的
     /// 多 Agent 隔离使用（能力加载状态按 agent 分键）。
     pub agent_id: Option<String>,
@@ -631,6 +633,7 @@ impl Clone for UnifiedToolRegistry {
             tool_extra: self.tool_extra.clone(),
             skill_handlers: HashMap::new(), // handlers 不可 Clone，clone 时重置为空
             ask_user_bridge: self.ask_user_bridge.clone(),
+            plugin_command_bridge: self.plugin_command_bridge.clone(),
             agent_id: self.agent_id.clone(),
             dynamic_tools: self.dynamic_tools.clone(),
             tool_ranker: self.tool_ranker.clone(),
@@ -753,6 +756,7 @@ impl UnifiedToolRegistry {
             tool_extra: HashMap::new(),
             skill_handlers: HashMap::new(),
             ask_user_bridge: None,
+            plugin_command_bridge: None,
             agent_id: None,
             dynamic_tools: None,
             tool_ranker: None,
@@ -1509,6 +1513,7 @@ impl UnifiedToolRegistry {
                 permissions: None,
                 output_sanitizer: None,
                 ask_user_bridge: self.ask_user_bridge.clone(),
+                plugin_command_bridge: self.plugin_command_bridge.clone(),
                 rollback_stack: None,
                 agent_id: self.agent_id.clone(),
                 dynamic_tools: self.dynamic_tools.clone(),

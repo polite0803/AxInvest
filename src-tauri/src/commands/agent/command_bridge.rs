@@ -570,6 +570,30 @@ async fn execute_plugin_agent_command(
     })?
 }
 
+/// 宿主实现：把 [`execute_plugin_agent_command`] 包成 harness 的
+/// `PluginCommandBridge` 契约（#225），供 wiring 层注入 `UnifiedToolRegistry`。
+/// 域工具（如 opc.rs 的 blog 工具）经 ToolContext 消费此桥执行插件命名命令，
+/// 不再直连域 crate —— 与 [`AppAskUserBridge`]（agent/mod.rs）同属 wiring 桥家族。
+#[derive(Debug)]
+pub struct AppPluginCommandBridge {
+    pub(crate) app_handle: AppHandle,
+}
+
+#[async_trait::async_trait]
+impl axagent_harness::PluginCommandBridge for AppPluginCommandBridge {
+    async fn execute(
+        &self,
+        plugin_id: &str,
+        command: &str,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let raw =
+            execute_plugin_agent_command(&self.app_handle, plugin_id, command, &input).await?;
+        // 回帧本身就是 JSON 文本；解析失败说明插件协议损坏，不得静默透传原文
+        serde_json::from_str(&raw).map_err(|e| format!("插件命令回帧解析失败: {e}"))
+    }
+}
+
 // ── Command Cache (Phase 3) ────────────────────────────────────────────
 
 /// 命令缓存 — 缓存常用命令索引，提高性能

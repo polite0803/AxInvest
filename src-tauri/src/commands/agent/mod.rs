@@ -62,9 +62,10 @@ use skill_execution::{
 mod capability_index;
 pub mod command_bridge;
 use command_bridge::{
-    CommandCache, CommandRegistry, build_chat_tools as build_tauri_command_chat_tools,
-    build_command_handlers, build_command_index_string, build_plugin_command_index,
-    preload_command_cache, resolve_command_domains,
+    AppPluginCommandBridge, CommandCache, CommandRegistry,
+    build_chat_tools as build_tauri_command_chat_tools, build_command_handlers,
+    build_command_index_string, build_plugin_command_index, preload_command_cache,
+    resolve_command_domains,
 };
 
 /// AskUser 桥接器的具体实现，由 wiring 层注入到 UnifiedToolRegistry。
@@ -2229,6 +2230,11 @@ pub async fn agent_query(
         conversation_id: conversation_id.clone(),
         assistant_message_id: streaming_message_id.clone(),
     }));
+
+    // #225：注入插件命名命令桥，blog 等 OPC 工具经此执行 plugin-opc 的命令，
+    // 不再直连域 crate（桥未注入时工具 fail-closed，不回落直连）。
+    tool_registry.plugin_command_bridge =
+        Some(Arc::new(AppPluginCommandBridge { app_handle: app.clone() }));
 
     // 屏幕感知（computer_use 工具）受 settings.screen_perception_enabled 门控。
     // 关闭时禁用该工具，用户无法触发桌面控制 / 截图能力。

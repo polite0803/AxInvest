@@ -950,43 +950,47 @@ impl Tool for OpcListBlogPostsTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultSiteService;
-        use axagent_company_runtime::opc::SiteService;
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-        match svc.list_blog_posts().await {
-            Ok(posts) => {
-                if posts.is_empty() {
-                    return Ok(ToolResult::success("## 博客文章\n\n暂无文章。"));
-                }
-                let lines: Vec<String> = posts
-                    .iter()
-                    .map(|p| {
-                        let tags = p.tags.join(", ");
-                        format!(
-                            "- **{}** (`{}`) {} | 阅读: {} | 标签: {}",
-                            p.title,
-                            p.slug,
-                            if p.published {
-                                "✅ 已发布"
-                            } else {
-                                "📝 草稿"
-                            },
-                            p.view_count,
-                            tags,
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 博客文章 ({} 篇)\n\n{}",
-                    posts.len(),
-                    lines.join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("查询博客失败: {e}"))),
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 blog 刀：取数走插件命名命令（plugin-opc 的 `opc_list_blog_posts`，整表
+        // 分页取尽），不再直连 `axagent_company_runtime::opc` 的 SiteService。
+        // 出参是 opc.store 接缝视图行数组（键名 camelCase，禁区 13）。
+        const COMMAND: &str = "opc_list_blog_posts";
+        let bridge = ctx
+            .plugin_command_bridge
+            .as_ref()
+            .ok_or_else(|| ToolError::execution_failed(format!("{COMMAND}: 插件命令桥未注入")))?;
+        let frame = bridge
+            .execute("opc", COMMAND, serde_json::json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询博客失败: {e}")))?;
+        let posts = frame.as_array().cloned().unwrap_or_default();
+        if posts.is_empty() {
+            return Ok(ToolResult::success("## 博客文章\n\n暂无文章。"));
         }
+        let lines: Vec<String> = posts
+            .iter()
+            .map(|p| {
+                let tags: Vec<String> = p
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let tags = tags.join(", ");
+                format!(
+                    "- **{}** (`{}`) {} | 阅读: {} | 标签: {}",
+                    p.get("title").and_then(Value::as_str).unwrap_or_default(),
+                    p.get("slug").and_then(Value::as_str).unwrap_or_default(),
+                    if p.get("published").and_then(Value::as_bool).unwrap_or(false) {
+                        "✅ 已发布"
+                    } else {
+                        "📝 草稿"
+                    },
+                    p.get("viewCount").and_then(Value::as_i64).unwrap_or(0),
+                    tags,
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!("## 博客文章 ({} 篇)\n\n{}", posts.len(), lines.join("\n"))))
     }
 }
 
@@ -1154,12 +1158,15 @@ impl Tool for OpcCreateBlogPostTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultSiteService;
-        use axagent_company_runtime::opc::{CreateBlogPostInput, SiteService};
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 blog 刀：写面走插件命名命令（plugin-opc 的 `opc_create_blog_post`，
+        // 平铺五字段），不再直连 `axagent_company_runtime::opc` 的 SiteService。
+        // 回帧是 opc.store 契约视图 BlogPostView（键名 camelCase，禁区 13）。
+        const COMMAND: &str = "opc_create_blog_post";
+        let bridge = ctx
+            .plugin_command_bridge
+            .as_ref()
+            .ok_or_else(|| ToolError::execution_failed(format!("{COMMAND}: 插件命令桥未注入")))?;
 
         let title = input
             .get("title")
@@ -1174,34 +1181,43 @@ impl Tool for OpcCreateBlogPostTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: content"))?;
 
-        let tags = input
+        let tags: Vec<String> = input
             .get("tags")
             .and_then(|v| v.as_array())
             .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default();
 
-        let inp = CreateBlogPostInput {
-            title: title.to_string(),
-            slug: slug.to_string(),
-            excerpt: input.get("excerpt").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            content: content.to_string(),
-            tags,
-        };
+        let frame = bridge
+            .execute(
+                "opc",
+                COMMAND,
+                serde_json::json!({
+                    "title": title,
+                    "slug": slug,
+                    "excerpt": input.get("excerpt").and_then(|v| v.as_str()).unwrap_or(""),
+                    "content": content,
+                    "tags": tags,
+                }),
+            )
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("创建博客文章失败: {e}")))?;
 
-        match svc.create_blog_post(inp).await {
-            Ok(p) => Ok(ToolResult::success(format!(
-                "## 博客文章创建成功\n\n- **标题**: {}\n- **Slug**: `{}`\n- **标签**: {}\n- **状态**: 📝 草稿\n- **ID**: `{}`",
-                p.title,
-                p.slug,
-                if p.tags.is_empty() {
-                    "无".to_string()
-                } else {
-                    p.tags.join(", ")
-                },
-                p.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建博客文章失败: {e}"))),
-        }
+        let p_tags: Vec<String> = frame
+            .get("tags")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        Ok(ToolResult::success(format!(
+            "## 博客文章创建成功\n\n- **标题**: {}\n- **Slug**: `{}`\n- **标签**: {}\n- **状态**: 📝 草稿\n- **ID**: `{}`",
+            frame.get("title").and_then(Value::as_str).unwrap_or_default(),
+            frame.get("slug").and_then(Value::as_str).unwrap_or_default(),
+            if p_tags.is_empty() {
+                "无".to_string()
+            } else {
+                p_tags.join(", ")
+            },
+            frame.get("id").and_then(Value::as_str).unwrap_or_default(),
+        )))
     }
 }
 
@@ -2018,5 +2034,136 @@ impl Tool for OpcProcessDueSchedulesTool {
             },
             Err(e) => Err(ToolError::execution_failed(format!("处理发布计划失败: {e}"))),
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 测试 — blog 工具的插件命令桥契约（#225）
+// ═══════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod blog_bridge_tests {
+    use super::*;
+    use axagent_harness::error::ToolErrorKind;
+
+    /// 测试替身：按命令名回固定帧，无锁无状态（避开 disallowed-types）。
+    #[derive(Debug)]
+    struct StubBridge;
+
+    #[async_trait::async_trait]
+    impl axagent_harness::PluginCommandBridge for StubBridge {
+        async fn execute(
+            &self,
+            plugin_id: &str,
+            command: &str,
+            _input: serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            assert_eq!(plugin_id, "opc");
+            match command {
+                "opc_list_blog_posts" => Ok(serde_json::json!([
+                    {
+                        "id": "p1",
+                        "title": "第一篇",
+                        "slug": "first",
+                        "excerpt": "",
+                        "tags": ["公告", "运营"],
+                        "published": true,
+                        "publishedAt": null,
+                        "viewCount": 7,
+                        "createdAt": "2026-01-01T00:00:00Z",
+                        "updatedAt": "2026-01-01T00:00:00Z"
+                    },
+                    {
+                        "id": "p2",
+                        "title": "第二篇",
+                        "slug": "second",
+                        "excerpt": "",
+                        "tags": [],
+                        "published": false,
+                        "publishedAt": null,
+                        "viewCount": 0,
+                        "createdAt": "2026-01-02T00:00:00Z",
+                        "updatedAt": "2026-01-02T00:00:00Z"
+                    }
+                ])),
+                "opc_create_blog_post" => Ok(serde_json::json!({
+                    "id": "p9",
+                    "title": "新建篇",
+                    "slug": "new",
+                    "excerpt": "",
+                    "tags": ["公告"],
+                    "published": false,
+                    "publishedAt": null,
+                    "viewCount": 0,
+                    "createdAt": "2026-01-03T00:00:00Z",
+                    "updatedAt": "2026-01-03T00:00:00Z"
+                })),
+                other => Err(format!("替身未实现命令 {other}")),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn list_fails_closed_without_bridge() {
+        let ctx = ToolContext::new("mock");
+        let err = OpcListBlogPostsTool
+            .call(serde_json::json!({}), &ctx)
+            .await
+            .expect_err("桥未注入时必须失败");
+        assert!(err.message.contains("插件命令桥未注入"), "actual: {}", err.message);
+    }
+
+    #[tokio::test]
+    async fn list_renders_bridge_rows() {
+        let ctx =
+            ToolContext::new("mock").with_plugin_command_bridge(std::sync::Arc::new(StubBridge));
+        let out = OpcListBlogPostsTool.call(serde_json::json!({}), &ctx).await.expect("应成功");
+        assert!(!out.is_error);
+        assert!(out.content.contains("## 博客文章 (2 篇)"), "actual: {}", out.content);
+        assert!(out.content.contains("**第一篇** (`first`) ✅ 已发布"), "actual: {}", out.content);
+        assert!(out.content.contains("阅读: 7"), "actual: {}", out.content);
+        assert!(out.content.contains("标签: 公告, 运营"), "actual: {}", out.content);
+        assert!(out.content.contains("**第二篇** (`second`) 📝 草稿"), "actual: {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn create_fails_closed_before_input_validation() {
+        // fail-closed 先于输入校验：桥缺失时连「参数不全」都不该告知（不可泄露面顺序）
+        let ctx = ToolContext::new("mock");
+        let err = OpcCreateBlogPostTool
+            .call(serde_json::json!({"slug": "s", "content": "c"}), &ctx)
+            .await
+            .expect_err("桥未注入时必须失败");
+        assert!(err.message.contains("插件命令桥未注入"), "actual: {}", err.message);
+    }
+
+    #[tokio::test]
+    async fn create_requires_title() {
+        let ctx =
+            ToolContext::new("mock").with_plugin_command_bridge(std::sync::Arc::new(StubBridge));
+        let err = OpcCreateBlogPostTool
+            .call(serde_json::json!({"slug": "s", "content": "c"}), &ctx)
+            .await
+            .expect_err("缺 title 必须失败");
+        assert_eq!(err.kind, ToolErrorKind::InvalidInput);
+        assert!(err.message.contains("title"), "actual: {}", err.message);
+    }
+
+    #[tokio::test]
+    async fn create_renders_bridge_frame() {
+        let ctx =
+            ToolContext::new("mock").with_plugin_command_bridge(std::sync::Arc::new(StubBridge));
+        let out = OpcCreateBlogPostTool
+            .call(
+                serde_json::json!({"title": "新建篇", "slug": "new", "content": "正文", "tags": ["公告"]}),
+                &ctx,
+            )
+            .await
+            .expect("应成功");
+        assert!(!out.is_error);
+        assert!(out.content.contains("**标题**: 新建篇"), "actual: {}", out.content);
+        assert!(out.content.contains("**Slug**: `new`"), "actual: {}", out.content);
+        assert!(out.content.contains("**状态**: 📝 草稿"), "actual: {}", out.content);
+        assert!(out.content.contains("**ID**: `p9`"), "actual: {}", out.content);
     }
 }

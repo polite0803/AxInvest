@@ -135,6 +135,23 @@ pub trait AskUserBridge: Send + Sync + std::fmt::Debug {
     ) -> Result<String, String>;
 }
 
+/// 插件命名命令桥接器 — 工具经此执行插件侧命名命令，不再直接依赖域 crate。
+///
+/// 与 [`AskUserBridge`] 同构的 wiring 注入口：trait 契约在 harness，宿主实现包
+/// `PluginManager::execute_plugin_command`（帧往返 + 超时 + 错误码映射都在那一层）。
+/// `None` 时工具必须 fail-closed（显式报「桥未注入」），不得回落直连域 crate。
+#[async_trait]
+pub trait PluginCommandBridge: Send + Sync + std::fmt::Debug {
+    /// 执行一条插件命名命令，返回插件回帧（JSON）。
+    /// 失败串走宿主的 `ErrorResponse` 映射（code + category + detail 三元组）。
+    async fn execute(
+        &self,
+        plugin_id: &str,
+        command: &str,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, String>;
+}
+
 /// 工具执行上下文
 #[derive(Debug, Clone)]
 // SAFETY: ToolContext 中的 Mutex 用于回滚栈的同步访问，该结构体在同步上下文中使用，
@@ -162,6 +179,11 @@ pub struct ToolContext {
     pub output_sanitizer: Option<Arc<dyn OutputSanitizer>>,
     /// 用户提问桥接器（可选，None 表示 AskUserQuestion 工具降级为纯文本输出）
     pub ask_user_bridge: Option<Arc<dyn AskUserBridge>>,
+    /// 插件命名命令桥接器（可选，None 表示域工具 fail-closed 拒执行）。
+    ///
+    /// 由 wiring 层注入（包 `PluginManager::execute_plugin_command`）；
+    /// 域工具（OPC / 股票等）消费此字段替代对域 crate 的直接依赖。
+    pub plugin_command_bridge: Option<Arc<dyn PluginCommandBridge>>,
     /// 回滚栈（可选）。设置后 `ToolRegistry::execute_tool` 会在 call 成功后自动创建回滚记录。
     pub rollback_stack: Option<Arc<Mutex<Vec<RollbackRecord>>>>,
     /// Agent 作用域标识（多 Agent 隔离的载体）。
@@ -211,6 +233,7 @@ impl ToolContext {
             permissions: None,
             output_sanitizer: None,
             ask_user_bridge: None,
+            plugin_command_bridge: None,
             rollback_stack: None,
             agent_id: None,
             dynamic_tools: None,
@@ -242,6 +265,12 @@ impl ToolContext {
     /// 设置沙箱策略（链式调用）
     pub fn with_sandbox(mut self, policy: crate::sandbox_policy::SandboxPolicy) -> Self {
         self.sandbox = Some(Arc::new(policy));
+        self
+    }
+
+    /// 设置插件命名命令桥接器（链式调用）
+    pub fn with_plugin_command_bridge(mut self, bridge: Arc<dyn PluginCommandBridge>) -> Self {
+        self.plugin_command_bridge = Some(bridge);
         self
     }
 }

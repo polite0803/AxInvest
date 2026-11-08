@@ -454,12 +454,13 @@ struct HostPeer {
 /// 全是读面（PLAN §56.1-Q4 裁定 `append` 不给 —— 写入口会污染进化门槛读的分母）⇒ 一律落
 /// 下面的 `_ => None`。将来若开写 op，必须**同批**在这里补登记，不许靠分派分支自查权限。
 ///
-/// 本批登记 **`opc.store` 的三个写 op**（`publish_blog_post` / `delete_blog_post` /
-/// `create_blog_post`）：发布把一行博客置为已发布（落库只 `Set` published / published_at /
-/// updated_at 三列）、删除是不可逆的数据面动作（受保护 id 走三态 `Protected` 兜底）、创建把
-/// 调用方给的正文写进库（正文按契约的字节上限设闸）—— 三者都改站点对外可见的内容 ⇒ 要
-/// `write`。同接缝的 `list_blog_posts` **必须仍是 `None`** —— 读缝加闸会把只读插件
-/// （`opc_list_blog_posts` 那条命令）无端拒掉，反向锁与正锁都在 `opc_store_*` 那几条用例里。
+/// 本批登记 **`opc.store` 的写 op**：blog 三件（`publish_blog_post` / `delete_blog_post` /
+/// `create_blog_post`）+ #36 批 2 的四条（`transition_invoice` / `update_content_asset` /
+/// `delete_content_asset` / `cancel_publish_schedule`）。发布把一行博客置为已发布、删除是
+/// 不可逆的数据面动作（受保护 id 走三态 `Protected` 兜底）、创建把调用方给的正文写进库
+/// （正文按契约的字节上限设闸）；批 2 的四条同样改库（发票状态 / 内容资产列 / 两处硬删）
+/// —— 全都要 `write`。同接缝的九个读 op **必须仍是 `None`** —— 读缝加闸会把只读插件
+/// （`opc_list_*` 那几条命令）无端拒掉，反向锁与正锁都在 `opc_store_*` 那几条用例里。
 ///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
@@ -473,12 +474,20 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ) => Some(PluginPermission::Write),
         ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
         ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
-        // `opc.store` 的三个写 op 一律要 `write`：发布改「对外可见的内容」，删除是**不可逆**
-        // 的数据面动作（受保护 id 另有三态 `Protected` 兜底），创建会把调用方给的正文写进库。
-        // 读 op `list_blog_posts` **必须仍是 `None`**（给读缝加闸会把只读插件无端拒掉）。
-        ("opc.store", "publish_blog_post" | "delete_blog_post" | "create_blog_post") => {
-            Some(PluginPermission::Write)
-        },
+        // `opc.store` 的写 op 一律要 `write`：blog 三件（发布 / 删除 / 创建）+ #36 批 2 的
+        // 四条 id·枚举写 op（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）——
+        // 全都改库，删除类还**不可逆**。读 op **必须仍是 `None`**（给读缝加闸会把只读插件
+        // 无端拒掉）。
+        (
+            "opc.store",
+            "publish_blog_post"
+            | "delete_blog_post"
+            | "create_blog_post"
+            | "transition_invoice"
+            | "update_content_asset"
+            | "delete_content_asset"
+            | "cancel_publish_schedule",
+        ) => Some(PluginPermission::Write),
         _ => None,
     }
 }
@@ -2844,6 +2853,92 @@ impl HostPeer {
                 match result {
                     // 出参是列裁剪视图（与列表行同一套 10 个 camelCase 键，正文不过线）。
                     Ok(view) => to_value("BlogPostView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #36 批 2：四条 id / 枚举写 op ──────────────────────────────────
+            //
+            // 出参一律是契约的**外部标记枚举**：带数据的写成 `{"transitioned": {…}}` /
+            // `{"updated": {…}}`，两态写 op 是 `"removed"` / `"not_found"`。「缺行」是正常
+            // 业务读数，**不借错误码**（判据同 blog 三件）。
+            //
+            // 发票状态变更：入参是**散标量** `{"id", "target"}`（`target` 是枚举串，语义
+            // 合法性由 provider 判 —— 非法串落 `SEAM_CALL_INVALID_ARGS`，非法转换落
+            // `PLUGIN_CALL_FAILED`，两层不混）。
+            "opc.store" if op == "transition_invoice" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let target: String = match deserialize_arg(&args, "target", seam) {
+                    Ok(target) => target,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.transition_invoice(id, target)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("TransitionInvoiceOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 内容资产更新：`id` 散标量 + **嵌一层**的 `request` DTO（五个可选字段，
+            // `None` = 该列不动）。DTO 必须嵌层 —— 与 `create_blog_post` 同一条判据。
+            "opc.store" if op == "update_content_asset" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let input: axagent_harness::UpdateContentAssetInput =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_content_asset(id, input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("UpdateContentAssetOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 内容资产删除：入参只有 `id`，出参两态（没有「受保护 id」这一档）。
+            "opc.store" if op == "delete_content_asset" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_content_asset(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("RemoveContentAssetOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 发布计划取消：**硬删**（不是状态位改写），出参两态。
+            "opc.store" if op == "cancel_publish_schedule" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.cancel_publish_schedule(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("RemovePublishScheduleOutcome", &outcome),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -10975,6 +11070,13 @@ mod tests {
         /// `Err(Validation)` —— 正文超预算在宿主侧就是这条链路（`SEAM_CALL_INVALID_ARGS`）。
         create_calls: Mutex<Vec<axagent_harness::CreateBlogPostInput>>,
         create_rejects: Option<String>,
+        /// #36 批 2 四条写 op 的入参逐字：`transition` 的 `(id, target)`、update 的
+        /// `(id, DTO)`、两条删除的 id。`batch2_not_found` ⇒ 四条都回缺行（payload）。
+        transition_calls: Mutex<Vec<(String, String)>>,
+        update_calls: Mutex<Vec<(String, axagent_harness::UpdateContentAssetInput)>>,
+        delete_asset_calls: Mutex<Vec<String>>,
+        cancel_schedule_calls: Mutex<Vec<String>>,
+        batch2_not_found: bool,
     }
 
     impl FixedOpcStore {
@@ -10987,7 +11089,17 @@ mod tests {
                 delete_outcome: axagent_harness::RemoveBlogPostOutcome::Removed,
                 create_calls: Mutex::new(Vec::new()),
                 create_rejects: None,
+                transition_calls: Mutex::new(Vec::new()),
+                update_calls: Mutex::new(Vec::new()),
+                delete_asset_calls: Mutex::new(Vec::new()),
+                cancel_schedule_calls: Mutex::new(Vec::new()),
+                batch2_not_found: false,
             }
+        }
+
+        /// 批 2 四条写 op 全部回缺行（取证「缺行是 payload，不占错误码」）。
+        fn batch2_missing() -> Self {
+            Self { batch2_not_found: true, ..Self::new() }
         }
 
         /// 让写面回 `NotFound` 的夹具形态（缺行是**正常结果**，用例要靠它区分 payload 与错误码）。
@@ -11059,6 +11171,79 @@ mod tests {
                 view_count: 0,
                 created_at: 1_700_000_000,
                 updated_at: 1_700_000_000,
+            })
+        }
+
+        // ── #36 批 2：四条写 op 的替身 ──
+
+        async fn transition_invoice(
+            &self,
+            id: String,
+            target: String,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TransitionInvoiceOutcome>
+        {
+            self.transition_calls.lock().push((id, target));
+            if self.batch2_not_found {
+                return Ok(axagent_harness::TransitionInvoiceOutcome::NotFound);
+            }
+            Ok(axagent_harness::TransitionInvoiceOutcome::Transitioned(
+                axagent_harness::InvoiceSummaryView {
+                    id: "inv-1".into(),
+                    customer_id: "cust-1".into(),
+                    invoice_number: "INV-001".into(),
+                    status: "sent".into(),
+                    total: 100.0,
+                    currency: "CNY".into(),
+                    created_at: 1_700_000_000,
+                },
+            ))
+        }
+
+        async fn update_content_asset(
+            &self,
+            id: String,
+            input: axagent_harness::UpdateContentAssetInput,
+        ) -> axagent_harness::core_error::Result<axagent_harness::UpdateContentAssetOutcome>
+        {
+            self.update_calls.lock().push((id, input));
+            if self.batch2_not_found {
+                return Ok(axagent_harness::UpdateContentAssetOutcome::NotFound);
+            }
+            Ok(axagent_harness::UpdateContentAssetOutcome::Updated(
+                axagent_harness::ContentAssetSummaryView {
+                    id: "asset-1".into(),
+                    title: "资产".into(),
+                    content_type: "article".into(),
+                    status: "draft".into(),
+                    tags: vec!["opc".into()],
+                    created_at: 1_700_000_000,
+                },
+            ))
+        }
+
+        async fn delete_content_asset(
+            &self,
+            id: String,
+        ) -> axagent_harness::core_error::Result<axagent_harness::RemoveContentAssetOutcome>
+        {
+            self.delete_asset_calls.lock().push(id);
+            Ok(if self.batch2_not_found {
+                axagent_harness::RemoveContentAssetOutcome::NotFound
+            } else {
+                axagent_harness::RemoveContentAssetOutcome::Removed
+            })
+        }
+
+        async fn cancel_publish_schedule(
+            &self,
+            id: String,
+        ) -> axagent_harness::core_error::Result<axagent_harness::RemovePublishScheduleOutcome>
+        {
+            self.cancel_schedule_calls.lock().push(id);
+            Ok(if self.batch2_not_found {
+                axagent_harness::RemovePublishScheduleOutcome::NotFound
+            } else {
+                axagent_harness::RemovePublishScheduleOutcome::Removed
             })
         }
     }
@@ -11184,17 +11369,26 @@ mod tests {
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
     }
 
-    /// `opc.store` 的权限表**逐条枚举锁**（三个写 op + 九个读 op + 两侧的反向锁）：
-    /// `publish_blog_post` / `delete_blog_post` / `create_blog_post` ⇒ `Write`；九条读 op
+    /// `opc.store` 的权限表**逐条枚举锁**（七个写 op + 九个读 op + 两侧的反向锁）：
+    /// blog 三件 + #36 批 2 的四条（`transition_invoice` / `update_content_asset` /
+    /// `delete_content_asset` / `cancel_publish_schedule`）⇒ `Write`；九条读 op
     /// （`list_blog_posts` + #36 批 1 的八条列表 op）⇒ **必须仍是 `None`**；表外 op 与近似
     /// 接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
     /// 这条承诺唯一的机械防线就是本用例 —— 多登记一条会把只读插件（今天
-    /// `opc_list_blog_posts` 那条命名命令）无端拒成 `PLUGIN_PERMISSION_DENIED`。
+    /// `opc_list_*` 那几条命名命令）无端拒成 `PLUGIN_PERMISSION_DENIED`。
     #[test]
-    fn opc_store_permission_table_gates_exactly_the_three_write_ops() {
-        for write_op in ["publish_blog_post", "delete_blog_post", "create_blog_post"] {
+    fn opc_store_permission_table_gates_exactly_the_seven_write_ops() {
+        for write_op in [
+            "publish_blog_post",
+            "delete_blog_post",
+            "create_blog_post",
+            "transition_invoice",
+            "update_content_asset",
+            "delete_content_asset",
+            "cancel_publish_schedule",
+        ] {
             assert_eq!(
                 required_permission_for("opc.store", write_op),
                 Some(PluginPermission::Write),
@@ -11228,9 +11422,199 @@ mod tests {
             );
         }
         // 接缝名逐字：`opc` 少一段、`opc.stores` 多一个字符都不算命中。
-        for write_op in ["publish_blog_post", "delete_blog_post", "create_blog_post"] {
+        for write_op in [
+            "publish_blog_post",
+            "delete_blog_post",
+            "create_blog_post",
+            "transition_invoice",
+            "update_content_asset",
+            "delete_content_asset",
+            "cancel_publish_schedule",
+        ] {
             assert_eq!(required_permission_for("opc", write_op), None);
             assert_eq!(required_permission_for("opc.stores", write_op), None);
+        }
+    }
+
+    /// #36 批 2 四条写 op 的跨层口径（一条用例串起来）：
+    /// ① 无 `write` ⇒ 四条全被拒且**零触达**；
+    /// ② `transition_invoice` 的两个散标量逐字进门，出参是 `{"transitioned": {…}}`；
+    /// ③ `update_content_asset` 的 `request` 嵌层 + camelCase 线格式能反序列化；
+    /// ④ 两条删除出参是 snake_case 枚举串 `"removed"`，缺行则 `"not_found"` 走 payload。
+    #[test]
+    fn opc_store_batch2_writes_gate_and_return_marked_outcomes() {
+        let requests = [
+            ("transition_invoice", json!({ "id": "inv-1", "target": "sent" })),
+            ("update_content_asset", json!({ "id": "asset-1", "request": {} })),
+            ("delete_content_asset", json!({ "id": "asset-1" })),
+            ("cancel_publish_schedule", json!({ "id": "sched-1" })),
+        ];
+
+        // ① 无 write：四条都被拒，替身一条都没收到。
+        let denied = Arc::new(FixedOpcStore::new());
+        let (peer, _runtime) = opc_store_peer_with_permissions(denied.clone(), Vec::new());
+        let denied_responses =
+            with_watchdog(Duration::from_secs(5), "opc.store 批2 无权限", move || {
+                requests
+                    .into_iter()
+                    .map(|(op, args)| {
+                        peer.handle_call_seam(
+                            &json!({ "seam": "opc.store", "op": op, "args": args }),
+                            &[],
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
+        for (index, response) in denied_responses.iter().enumerate() {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_PERMISSION_DENIED),
+                "第 {} 条写 op 无 write 必须被拒：{response:?}",
+                index
+            );
+        }
+        assert!(
+            denied.transition_calls.lock().is_empty()
+                && denied.update_calls.lock().is_empty()
+                && denied.delete_asset_calls.lock().is_empty()
+                && denied.cancel_schedule_calls.lock().is_empty(),
+            "被拒时不得触达 provider"
+        );
+
+        // ②③④ 有 write：入参逐字进门，出参是外部标记枚举。
+        let store = Arc::new(FixedOpcStore::new());
+        let (peer, _runtime) =
+            opc_store_peer_with_permissions(store.clone(), vec![PluginPermission::Write]);
+        let (transition, update, delete, cancel) =
+            with_watchdog(Duration::from_secs(5), "opc.store 批2 有权限", move || {
+                let transition = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "transition_invoice",
+                        "args": { "id": "inv-1", "target": "sent" },
+                    }),
+                    &[],
+                );
+                let update = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "update_content_asset",
+                        "args": {
+                            "id": "asset-1",
+                            "request": { "title": "新标题", "contentType": "video", "tags": ["a"] },
+                        },
+                    }),
+                    &[],
+                );
+                let delete = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "delete_content_asset",
+                        "args": { "id": "asset-1" },
+                    }),
+                    &[],
+                );
+                let cancel = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "cancel_publish_schedule",
+                        "args": { "id": "sched-1" },
+                    }),
+                    &[],
+                );
+                (transition, update, delete, cancel)
+            });
+
+        assert_eq!(transition.kind, ResponseKind::Success, "状态变更应成功：{transition:?}");
+        let transition_value = transition.value.expect("成功帧必须带 value");
+        assert_eq!(
+            transition_value["transitioned"]["invoiceNumber"],
+            json!("INV-001"),
+            "出参是带数据的外部标记枚举：{transition_value}"
+        );
+        assert_eq!(
+            store.transition_calls.lock().clone(),
+            vec![("inv-1".to_string(), "sent".to_string())],
+            "id / target 必须逐字进门"
+        );
+
+        assert_eq!(update.kind, ResponseKind::Success, "内容资产更新应成功：{update:?}");
+        let update_value = update.value.expect("成功帧必须带 value");
+        assert_eq!(
+            update_value["updated"]["contentType"],
+            json!("article"),
+            "出参是带数据的外部标记枚举：{update_value}"
+        );
+        let update_calls = store.update_calls.lock().clone();
+        assert_eq!(update_calls.len(), 1, "更新只应触达一次");
+        assert_eq!(update_calls[0].0, "asset-1", "id 必须逐字进门");
+        assert_eq!(update_calls[0].1.title.as_deref(), Some("新标题"));
+        // camelCase 线格式 → Rust 字段（禁区 13）：`contentType` 落进 `content_type`。
+        assert_eq!(update_calls[0].1.content_type.as_deref(), Some("video"));
+        assert_eq!(update_calls[0].1.tags.as_deref(), Some(&["a".to_string()][..]));
+
+        assert_eq!(delete.kind, ResponseKind::Success, "删除应成功：{delete:?}");
+        assert_eq!(delete.value, Some(json!("removed")), "两态出参是 snake_case 枚举串");
+        assert_eq!(store.delete_asset_calls.lock().clone(), vec!["asset-1".to_string()]);
+
+        assert_eq!(cancel.kind, ResponseKind::Success, "取消应成功：{cancel:?}");
+        assert_eq!(cancel.value, Some(json!("removed")), "两态出参是 snake_case 枚举串");
+        assert_eq!(store.cancel_schedule_calls.lock().clone(), vec!["sched-1".to_string()]);
+    }
+
+    /// 批 2 四条写 op 的缺行口径：`ResponseKind::Success` + payload `"not_found"`，
+    /// 四条一致 —— 缺行是正常业务读数，**不占错误码**。
+    #[test]
+    fn opc_store_batch2_missing_rows_are_payload_not_errors() {
+        let store = Arc::new(FixedOpcStore::batch2_missing());
+        let (peer, _runtime) =
+            opc_store_peer_with_permissions(store, vec![PluginPermission::Write]);
+        let (transition, update, delete, cancel) =
+            with_watchdog(Duration::from_secs(5), "opc.store 批2 缺行", move || {
+                let transition = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "transition_invoice",
+                        "args": { "id": "inv-x", "target": "sent" },
+                    }),
+                    &[],
+                );
+                let update = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "update_content_asset",
+                        "args": { "id": "asset-x", "request": {} },
+                    }),
+                    &[],
+                );
+                let delete = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "delete_content_asset",
+                        "args": { "id": "asset-x" },
+                    }),
+                    &[],
+                );
+                let cancel = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "cancel_publish_schedule",
+                        "args": { "id": "sched-x" },
+                    }),
+                    &[],
+                );
+                (transition, update, delete, cancel)
+            });
+
+        for (label, response) in [
+            ("transition_invoice", transition),
+            ("update_content_asset", update),
+            ("delete_content_asset", delete),
+            ("cancel_publish_schedule", cancel),
+        ] {
+            assert_eq!(response.kind, ResponseKind::Success, "`{label}` 缺行应成功：{response:?}");
+            assert_eq!(response.code, None, "`{label}` 缺行不得占错误码");
+            assert_eq!(response.value, Some(json!("not_found")), "`{label}` 应回 not_found");
         }
     }
 

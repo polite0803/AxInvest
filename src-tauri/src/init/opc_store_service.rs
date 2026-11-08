@@ -159,7 +159,7 @@ impl OpcStoreProvider for HostOpcStore {
     /// 不在这里再判一次「行在不在」。
     async fn publish_blog_post(&self, id: String) -> Result<PublishBlogPostOutcome> {
         // 闸在 IO 之前（空 id 不该换来一次主键查询）。
-        require_blog_post_id(&id, "publish_blog_post")?;
+        require_id(&id, "publish_blog_post")?;
         // dao 写函数**全限定调用**：本文件的 `impl` 那一行被登记表按行号钉住，
         // 往上方 `use axagent_dao::...` 那一条里加名字会让它换行、impl 行整体下移 ⇒
         // 行中性改法就是把新符号留在这里（`use` 列表只加了契约枚举，宽度够）。
@@ -185,7 +185,7 @@ impl OpcStoreProvider for HostOpcStore {
     ///    判据），`Protected` 与 `NotFound` 是两种读数，顺序颠倒会把「不许删」报成「没有这篇」。
     async fn delete_blog_post(&self, id: String) -> Result<RemoveBlogPostOutcome> {
         // 闸在 IO 之前（空 id 不该换来一次主键删除）。
-        require_blog_post_id(&id, "delete_blog_post")?;
+        require_id(&id, "delete_blog_post")?;
         // ① 先判保护：命中即返回，行数据原样（IO 零触达）。
         if self.is_protected(&id).await {
             return Ok(RemoveBlogPostOutcome::Protected);
@@ -333,16 +333,110 @@ impl OpcStoreProvider for HostOpcStore {
         })?;
         Ok(rows.into_iter().map(publish_schedule_summary_view).collect())
     }
+
+    // ── 写 op（#36 批 2：id / 枚举形状）────────────────────────────────
+    //
+    // 四条判据一致：空 id ⇒ `Err(Validation)`（IO **之前**）；行不存在 ⇒ payload
+    // （`NotFound` / `"not_found"`，**不占错误码**）；其余失败才是 `Err(Provider)`。
+    // 出参视图一律走既有 `*_summary_view` 映射 —— 列裁剪只有一个落点。
+
+    async fn transition_invoice(
+        &self,
+        id: String,
+        target: String,
+    ) -> Result<TransitionInvoiceOutcome> {
+        require_id(&id, "transition_invoice")?;
+        // 枚举串在 IO 之前解析：非法值不该换来一次主键查询。
+        let target = InvoiceStatus::from_str(&target).map_err(|_| {
+            AxAgentError::Validation(format!(
+                "opc.store::transition_invoice 的 target=`{target}` 不是合法发票状态"
+            ))
+        })?;
+        let svc = DefaultInvoiceService::new(self.db.clone());
+        match InvoiceService::transition_status(&svc, &id, target).await {
+            Ok(inv) => Ok(TransitionInvoiceOutcome::Transitioned(invoice_summary_view(inv))),
+            Err(axagent_company_runtime::opc::OpcError::NotFound(_)) => {
+                Ok(TransitionInvoiceOutcome::NotFound)
+            },
+            // 非法状态转换（`InvalidStateTransition`）与库错误都落 Provider：迁移前宿主工具
+            // 把它们包成 `execution_failed`，本批不改判。
+            Err(e) => {
+                Err(AxAgentError::Provider(format!("opc.store::transition_invoice 变更失败: {e}")))
+            },
+        }
+    }
+
+    async fn update_content_asset(
+        &self,
+        id: String,
+        input: UpdateContentAssetInput,
+    ) -> Result<UpdateContentAssetOutcome> {
+        require_id(&id, "update_content_asset")?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        // 全限定调用：`DefaultSiteService` 同时实现三个服务 trait，同名方法有歧义。
+        match ContentAssetService::update_content_asset(&svc, &id, input).await {
+            Ok(asset) => Ok(UpdateContentAssetOutcome::Updated(content_asset_summary_view(asset))),
+            Err(axagent_company_runtime::opc::OpcError::NotFound(_)) => {
+                Ok(UpdateContentAssetOutcome::NotFound)
+            },
+            Err(e) => Err(AxAgentError::Provider(format!(
+                "opc.store::update_content_asset 更新失败: {e}"
+            ))),
+        }
+    }
+
+    async fn delete_content_asset(&self, id: String) -> Result<RemoveContentAssetOutcome> {
+        require_id(&id, "delete_content_asset")?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        match ContentAssetService::delete_content_asset(&svc, &id).await {
+            Ok(()) => Ok(RemoveContentAssetOutcome::Removed),
+            Err(axagent_company_runtime::opc::OpcError::NotFound(_)) => {
+                Ok(RemoveContentAssetOutcome::NotFound)
+            },
+            Err(e) => Err(AxAgentError::Provider(format!(
+                "opc.store::delete_content_asset 删除失败: {e}"
+            ))),
+        }
+    }
+
+    async fn cancel_publish_schedule(&self, id: String) -> Result<RemovePublishScheduleOutcome> {
+        require_id(&id, "cancel_publish_schedule")?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        // 语义是**硬删**（域服务 `delete_publish_schedule` 走 `delete_by_id`），不是状态位改写。
+        match PublishScheduleService::delete_publish_schedule(&svc, &id).await {
+            Ok(()) => Ok(RemovePublishScheduleOutcome::Removed),
+            Err(axagent_company_runtime::opc::OpcError::NotFound(_)) => {
+                Ok(RemovePublishScheduleOutcome::NotFound)
+            },
+            Err(e) => Err(AxAgentError::Provider(format!(
+                "opc.store::cancel_publish_schedule 取消失败: {e}"
+            ))),
+        }
+    }
 }
+
+// ── #36 批 2 写 op 的依赖 ─────────────────────────────────────────────────
+//
+// 这两个 `use` **刻意放在 impl 之后**：本文件 `impl OpcStoreProvider for HostOpcStore` 那一行
+// 被登记表按行号钉住（见 `scripts/capability-register.json` 的 impl 溯源段），往上方的
+// `use axagent_harness::opc_store::{…}` 列表里加名字会让它换行、impl 行整体下移。
+// 模块级 `use` 在任意 item 位置都生效，故这里只是位置选择，不是作用域限制。
+use axagent_harness::opc_store::{
+    RemoveContentAssetOutcome, RemovePublishScheduleOutcome, TransitionInvoiceOutcome,
+    UpdateContentAssetInput, UpdateContentAssetOutcome,
+};
+use std::str::FromStr;
 
 /// 写 op 的 `id` 闸：空 / 全空白 ⇒ `Err(Validation)`（`op` 只用于文案定位）。
 ///
+/// 服务全部 id 形态的写 op：blog 三件 + #36 批 2 的四条（发票 / 内容资产 ×2 / 发布计划）。
+///
 /// 为什么在 provider 而不是分派层：读 op 的两个可选参数闸也在 provider（分派层
 /// 「只透传契约 DTO、一个数字都不写」的分工）。两处各判一半 ⇒ 迟早有一处漏。
-fn require_blog_post_id(id: &str, op: &str) -> Result<()> {
+fn require_id(id: &str, op: &str) -> Result<()> {
     if id.trim().is_empty() {
         return Err(AxAgentError::Validation(format!(
-            "opc.store::{op} 的 id 不能为空（缺 id 属入参非法，不是「没有这篇」）"
+            "opc.store::{op} 的 id 不能为空（缺 id 属入参非法，不是「这一行不存在」）"
         )));
     }
     Ok(())
@@ -566,7 +660,7 @@ mod tests {
     fn blog_post_id_gate_rejects_blank_but_does_not_trim() {
         for bad in ["", " ", "  ", "\t", "\n", "\u{00a0}"] {
             for op in ["publish_blog_post", "delete_blog_post"] {
-                let err = require_blog_post_id(bad, op).expect_err("空白 id 必须拒收");
+                let err = require_id(bad, op).expect_err("空白 id 必须拒收");
                 assert!(
                     matches!(err, AxAgentError::Validation(_)),
                     "应落 Validation（op={op}）：{err:?}"
@@ -577,11 +671,8 @@ mod tests {
             }
         }
         // 只判「有没有内容」，不替调用方 trim 出第二个值：带前后空格的 id 原样交给 dao。
-        assert!(
-            require_blog_post_id(" post-1 ", "delete_blog_post").is_ok(),
-            "非空白即放行，本层不改写 id"
-        );
-        assert!(require_blog_post_id("post-1", "delete_blog_post").is_ok());
+        assert!(require_id(" post-1 ", "delete_blog_post").is_ok(), "非空白即放行，本层不改写 id");
+        assert!(require_id("post-1", "delete_blog_post").is_ok());
     }
 
     /// 正文预算闸的**边界**：`±1` 字节逐档验，且按字节而不是字符计。

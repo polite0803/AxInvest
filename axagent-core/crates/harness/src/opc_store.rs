@@ -287,6 +287,69 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::list_publish_schedules 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 写 op（#36 批 2：id / 枚举形状）────────────────────────────────
+    //
+    // 四条写 op 判定一致（与 blog 三件同族）：
+    // ① 空 id ⇒ `Err(Validation)`（provider 侧闸，在 IO **之前**）；
+    // ② 行不存在 ⇒ 走 **payload**（`NotFound` / `"not_found"`），不占错误码；
+    // ③ 其余失败才是 `Err(Provider)`（分派层落 `SEAM_CALL_FAILED`）。
+
+    /// 变更发票状态（`transition_invoice` op）—— 写 op，要 `write` 权限。
+    ///
+    /// - `target` 是枚举串（`draft` / `sent` / `paid` / `overdue` / `cancelled` / `refunded`）：
+    ///   非法串 ⇒ `Err(Validation)`（迁移前宿主工具落的就是 `invalid_input`）；
+    /// - 行不存在 ⇒ `Ok(TransitionInvoiceOutcome::NotFound)`；
+    /// - **非法状态转换**（域服务 `InvalidStateTransition`）⇒ `Err(Provider)`：迁移前宿主
+    ///   工具把它包成 `execution_failed`，本批不改判；
+    /// - 成功 ⇒ `Transitioned(视图)`（列裁剪同读面，`line_items` 不过线）。
+    async fn transition_invoice(
+        &self,
+        _id: String,
+        _target: String,
+    ) -> Result<TransitionInvoiceOutcome> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::transition_invoice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新内容资产（`update_content_asset` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参是 [`UpdateContentAssetInput`]（本批从实现层上收：它要跨进程过帧）：五个字段
+    /// 全 `Option`，`None` = 该列**不动**（不是清空 —— 清空要显式传空串，与迁移前
+    /// `SiteService::update_content_asset` 的 `if let Some(..)` 分支逐字同义）。
+    ///
+    /// - 行不存在 ⇒ `Ok(UpdateContentAssetOutcome::NotFound)`；
+    /// - 成功 ⇒ `Updated(视图)`（`body` 不过线，同 `list_content_assets` 的列裁剪）。
+    async fn update_content_asset(
+        &self,
+        _id: String,
+        _input: UpdateContentAssetInput,
+    ) -> Result<UpdateContentAssetOutcome> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_content_asset 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除内容资产（`delete_content_asset` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 两态出参见 [`RemoveContentAssetOutcome`]：缺行 ⇒ `NotFound`（**不是错误**，
+    /// 判据同 [`RemoveBlogPostOutcome`]）。本表无「受保护 id」概念（域服务没有该分支）。
+    async fn delete_content_asset(&self, _id: String) -> Result<RemoveContentAssetOutcome> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_content_asset 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取消发布计划（`cancel_publish_schedule` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 语义是**硬删**（域服务 `delete_publish_schedule` 走 `delete_by_id`），不是把状态
+    /// 改成 `cancelled` —— 与迁移前宿主工具 `OpcCancelPublishSchedule` 逐字一致。
+    async fn cancel_publish_schedule(&self, _id: String) -> Result<RemovePublishScheduleOutcome> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::cancel_publish_schedule 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -528,6 +591,72 @@ pub struct PublishScheduleSummaryView {
     pub status: String,
     pub scheduled_at: i64,
     pub published_at: Option<i64>,
+}
+
+// ── 写 op（#36 批 2：id / 枚举形状）──────────────────────────────────────
+//
+// 出参一律是「业务读数 + 数据」的外部标记枚举（`{"transitioned": {…}}` / `"not_found"`），
+// 与 [`PublishBlogPostOutcome`] / [`RemoveBlogPostOutcome`] 同一套判据：缺行不是错误。
+// 带数据的两个变体**不** derive `Copy`（视图不是标量），插件侧逐字透传，不做包装。
+
+/// `transition_invoice` 的结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionInvoiceOutcome {
+    /// 已转换，回转换后的发票视图（与 `list_invoices` 的行同形）。
+    Transitioned(InvoiceSummaryView),
+    /// `id` 不在表里：**未发起任何 UPDATE**。
+    NotFound,
+}
+
+/// `update_content_asset` 的结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateContentAssetOutcome {
+    /// 已更新，回更新后的视图（`body` 不过线，同列表口径）。
+    Updated(ContentAssetSummaryView),
+    /// `id` 不在表里：**未发起任何 UPDATE**。
+    NotFound,
+}
+
+/// `delete_content_asset` 的结果（两态 —— 内容资产没有「受保护 id」这一档）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoveContentAssetOutcome {
+    /// 命中并已删除（`rows_affected == 1`）。
+    Removed,
+    /// `id` 不在表里：**未发起任何 DELETE**。
+    NotFound,
+}
+
+/// `cancel_publish_schedule` 的结果（两态：本 op 是**硬删**，不是状态位改写）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemovePublishScheduleOutcome {
+    /// 命中并已删除（`rows_affected == 1`）。
+    Removed,
+    /// `id` 不在表里：**未发起任何 DELETE**。
+    NotFound,
+}
+
+/// `update_content_asset` 的入参：五个字段全 `Option`，`None` = 该列不动。
+///
+/// 权威定义在本模块（**不是**实现层）：它要跨进程过帧，而插件进程按依赖规则链接不到
+/// `company-runtime` 的实现层。实现层
+/// （`axagent-quant/crates/company-runtime/src/opc/content_asset.rs`）保留 `pub use` 垫片，
+/// 既有 `ContentAssetService::update_content_asset` 的签名与所有调用方**零改动**（禁区 12）。
+///
+/// ⚠ `rename_all = "camelCase"` 是禁区 13 的硬要求 ⇒ `contentType` 是本 DTO 唯一被改名的
+/// 键；宿主 Tauri 命令 `opc_update_content_asset` 的前端调用方同批改为 `contentType`
+/// （迁移前后两条通道的线格式就此统一）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpdateContentAssetInput {
+    pub title: Option<String>,
+    pub content_type: Option<String>,
+    pub body: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub status: Option<String>,
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────

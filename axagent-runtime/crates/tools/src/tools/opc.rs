@@ -11,7 +11,6 @@
 use crate::{Tool, ToolCategory, ToolContext, ToolDomain, ToolError, ToolResult};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::str::FromStr;
 use std::sync::Arc;
 
 // ⚠ 已退役（缺陷 #184）：原先这里有
@@ -310,32 +309,35 @@ impl Tool for OpcTransitionInvoiceTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultInvoiceService;
-        use axagent_company_runtime::opc::{InvoiceService, InvoiceStatus};
-
-        let db = get_db()?;
-        let svc = DefaultInvoiceService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 2：写面走插件命名命令（`opc_transition_invoice`），不再直连
+        // `axagent_company_runtime::opc` 的 InvoiceService。命令面入参 `status` 由插件
+        // 翻成契约 op 的 `target`；出参是外部标记枚举（`{"transitioned": …}` / `"not_found"`）。
+        const COMMAND: &str = "opc_transition_invoice";
         let id = input
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: id"))?;
-        let target = input
+        let status = input
             .get("status")
             .and_then(|v| v.as_str())
-            .and_then(|s| InvoiceStatus::from_str(s).ok())
-            .ok_or_else(|| ToolError::invalid_input("无效的状态值"))?;
+            .ok_or_else(|| ToolError::invalid_input("缺少必需参数: status"))?;
 
-        match svc.transition_status(id, target).await {
-            Ok(inv) => Ok(ToolResult::success(format!(
-                "## 发票状态已更新\n\n- **编号**: {}\n- **新状态**: **{}**\n- **金额**: ¥{:.2}",
-                inv.invoice_number,
-                inv.status.as_str(),
-                inv.total,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("状态变更失败: {e}"))),
-        }
+        let outcome = call_opc_command(ctx, COMMAND, json!({ "id": id, "status": status }))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("状态变更失败: {e}")))?;
+        // 缺行是**业务读数**（不是故障）：明确告诉调用方未做任何变更。
+        let Some(inv) = outcome.get("transitioned") else {
+            return Ok(ToolResult::success(format!(
+                "## 发票不存在\n\n`{id}` 不在发票表里，未做任何变更。"
+            )));
+        };
+        Ok(ToolResult::success(format!(
+            "## 发票状态已更新\n\n- **编号**: {}\n- **新状态**: **{}**\n- **金额**: ¥{:.2}",
+            json_str(inv, "invoiceNumber"),
+            json_str(inv, "status"),
+            json_f64(inv, "total"),
+        )))
     }
 }
 
@@ -1644,37 +1646,46 @@ impl Tool for OpcUpdateContentAssetTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{
-            ContentAssetService, DefaultSiteService, UpdateContentAssetInput,
-        };
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 2：写面走插件命名命令（`opc_update_content_asset`）。工具入参沿用
+        // `content_type`（智能体侧历史口径），命令面线格式是 camelCase ⇒ 这一处改名由
+        // `filter_request` 承担（禁区 13：跨进程 DTO 用 `contentType`）。缺键 = 该列不动。
+        const COMMAND: &str = "opc_update_content_asset";
         let id = input
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: id"))?;
 
-        let inp = UpdateContentAssetInput {
-            title: input.get("title").and_then(|v| v.as_str()).map(String::from),
-            content_type: input.get("content_type").and_then(|v| v.as_str()).map(String::from),
-            body: input.get("body").and_then(|v| v.as_str()).map(String::from),
-            tags: input
-                .get("tags")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()),
-            status: input.get("status").and_then(|v| v.as_str()).map(String::from),
-        };
-
-        match svc.update_content_asset(id, inp).await {
-            Ok(asset) => Ok(ToolResult::success(format!(
-                "## 内容资产已更新\n\n- **标题**: {}\n- **类型**: {}\n- **状态**: {}\n- **ID**: `{}`",
-                asset.title, asset.content_type, asset.status, asset.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("更新内容资产失败: {e}"))),
+        let mut payload = filter_request(
+            &input,
+            &[
+                ("title", "title"),
+                ("content_type", "contentType"),
+                ("body", "body"),
+                ("tags", "tags"),
+                ("status", "status"),
+            ],
+        );
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("id".to_string(), json!(id));
         }
+
+        let outcome = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("更新内容资产失败: {e}")))?;
+        // 缺行是**业务读数**（不是故障）：明确告诉调用方未做任何更新。
+        let Some(asset) = outcome.get("updated") else {
+            return Ok(ToolResult::success(format!(
+                "## 内容资产不存在\n\n`{id}` 不在内容资产表里，未做任何更新。"
+            )));
+        };
+        Ok(ToolResult::success(format!(
+            "## 内容资产已更新\n\n- **标题**: {}\n- **类型**: {}\n- **状态**: {}\n- **ID**: `{}`",
+            json_str(asset, "title"),
+            json_str(asset, "contentType"),
+            json_str(asset, "status"),
+            json_str(asset, "id"),
+        )))
     }
 }
 
@@ -1704,22 +1715,24 @@ impl Tool for OpcDeleteContentAssetTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::ContentAssetService;
-        use axagent_company_runtime::opc::DefaultSiteService;
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 2：写面走插件命名命令（`opc_delete_content_asset`），出参两态。
+        const COMMAND: &str = "opc_delete_content_asset";
         let id = input
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: id"))?;
 
-        match svc.delete_content_asset(id).await {
-            Ok(_) => Ok(ToolResult::success(format!("## 内容资产已删除\n\n- **ID**: `{id}`"))),
-            Err(e) => Err(ToolError::execution_failed(format!("删除内容资产失败: {e}"))),
+        let outcome = call_opc_command(ctx, COMMAND, json!({ "id": id }))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("删除内容资产失败: {e}")))?;
+        // 缺行是**业务读数**（不是故障）：没有删掉任何行这件事要如实回报。
+        if outcome.as_str() == Some("not_found") {
+            return Ok(ToolResult::success(format!(
+                "## 内容资产不存在\n\n`{id}` 不在内容资产表里，未做任何删除。"
+            )));
         }
+        Ok(ToolResult::success(format!("## 内容资产已删除\n\n- **ID**: `{id}`")))
     }
 }
 
@@ -1888,21 +1901,25 @@ impl Tool for OpcCancelPublishScheduleTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{DefaultSiteService, PublishScheduleService};
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 2：写面走插件命名命令（`opc_cancel_publish_schedule`）。语义是**硬删**
+        // （域服务 `delete_publish_schedule` 走 `delete_by_id`），出参两态。
+        const COMMAND: &str = "opc_cancel_publish_schedule";
         let id = input
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: id"))?;
 
-        match svc.delete_publish_schedule(id).await {
-            Ok(_) => Ok(ToolResult::success(format!("## 发布计划已取消\n\n- **ID**: `{id}`"))),
-            Err(e) => Err(ToolError::execution_failed(format!("取消发布计划失败: {e}"))),
+        let outcome = call_opc_command(ctx, COMMAND, json!({ "id": id }))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("取消发布计划失败: {e}")))?;
+        // 缺行是**业务读数**（不是故障）：没有删掉任何行这件事要如实回报。
+        if outcome.as_str() == Some("not_found") {
+            return Ok(ToolResult::success(format!(
+                "## 发布计划不存在\n\n`{id}` 不在发布计划表里，未做任何取消。"
+            )));
         }
+        Ok(ToolResult::success(format!("## 发布计划已取消\n\n- **ID**: `{id}`")))
     }
 }
 

@@ -265,8 +265,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4561` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4653`–`:4701` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4656` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4748`–`:4796` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -513,7 +513,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 |---|---|---|
 | Tauri 命令条数 / 命令模块数（**插件边界口径**） | **302 条 / 20 模块**（`stock_analysis` 171、`stock_workflow` 24、`paper` 20） | **134 条 / 13 模块**（`opc` 53、`opc_capability_pack_actions` 20、`_runtime` 14；2026-11-06 对账批 −1 = `3fe49c950` 删宿主 `opc_list_blog_posts`，`opc` 模块 57→56）**2026-11-08 #226 批 1 再 −3（137→134）** = `7cb13bde5` 删 `opc_create_blog_post` / `opc_delete_blog_post` / `opc_publish_blog_post` 三命令（博客写面切插件通道）⇒ `opc` 模块 56→53；同批 `376b4d766` 补 2 条任务卡片命令，故全局净 −1（两数不矛盾）；模块数 13 不动。 |
 | — 同一注册表在**审计 19 域口径**下的读数 | 304 条 / 19 模块（域「股票分析与管线」） | 116 条 / 10 模块（域「OPC 公司运行时」；2026-11-06 对账批 −1 = `3fe49c950` 删宿主 `opc_list_blog_posts`） |
-| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **54 处 / 16 文件**（2026-11-06 对账批：`84d8c357b` 把 48 处股票 crate 直连改指 `axagent_company_runtime::` ⇒ 这 48 处的账整体从股票侧迁到 OPC 侧，股票剩 54） | **48 处 / 3 文件**（`tools/src/tools/opc.rs` 41 + `commands/fleet/mod.rs` 4 + `init/state.rs` 3；原记 0 处是因为它们当时记在股票名下。**2026-11-08 `#36` 批 1 实测 24 处 / 4 文件**：待改写 21 处 / 1 文件（`tools/src/tools/opc.rs`；9 个只读工具改走插件命令桥 ⇒ 41→21）+ H 桶 3 处 / 3 文件（`init/state.rs` + `commands/conversations/{mod,compress}.rs` 的 `LocalCapabilityPackRegistry` 装配位，`#221` 起入白名单）；`commands/fleet/mod.rs` 那 4 处已随 `#221` trait 化清零 ⇒ 48→24 = 本批 −20 + `#221` −4） |
+| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **54 处 / 16 文件**（2026-11-06 对账批：`84d8c357b` 把 48 处股票 crate 直连改指 `axagent_company_runtime::` ⇒ 这 48 处的账整体从股票侧迁到 OPC 侧，股票剩 54） | **48 处 / 3 文件**（`tools/src/tools/opc.rs` 41 + `commands/fleet/mod.rs` 4 + `init/state.rs` 3；原记 0 处是因为它们当时记在股票名下。**2026-11-08 `#36` 批 1 实测 24 处 / 4 文件**：待改写 21 处 / 1 文件（`tools/src/tools/opc.rs`；9 个只读工具改走插件命令桥 ⇒ 41→21）+ H 桶 3 处 / 3 文件（`init/state.rs` + `commands/conversations/{mod,compress}.rs` 的 `LocalCapabilityPackRegistry` 装配位，`#221` 起入白名单）；`commands/fleet/mod.rs` 那 4 处已随 `#221` trait 化清零 ⇒ 48→24 = 本批 −20 + `#221` −4）。**2026-11-08 `#36` 批 2 实测 18 处 / 4 文件**：四条 id/枚举形态写工具（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）改走插件命令桥 ⇒ 待改写 21→15 处（`tools/src/tools/opc.rs` 的命中行 21→18，其中 3 行是退役注释、审计不计 ⇒ 计入 15 处）+ H 桶 3 处 / 3 文件不动 ⇒ 24→18 = 本批 −6） |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
@@ -977,7 +977,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P6.0-⑤ 引擎去域化** | `agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 ⇒ 改节点配置/接缝贡献；生产区股票词 32 行 | **5–8** | ③④ 之后（要有贡献通道才能把知识挪出去） |
 | **P6.0-⑥ 执行器与接缝单轨化** | 32 个执行器 0 个走注册表；`document_parser_executor.rs`(59 行空壳) 接真接缝、`notification_executor.rs`(165 行自带四平台 webhook) 并入 `notify.channel` | **10–15** | ⑤ 同批（都是引擎侧） |
 | **P6.1 股票迁出** | 改写 133 处 / 26 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 85 009 行前端出包 + 3 527 key（**这一行整体是 2026-11-04 立项时的规模读数**；现值 = Rust 待改写 51 处 / 13 文件 + H 桶 3 处 / 3 文件、前端反向 56 处 / 43 文件 ⇒ §0.10.1 + §125.7） | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
-| **P6.2 OPC 迁出** | 0 处主壳改写（**现况已变 48 处 / 3 文件**：`84d8c357b` 起 `tools/opc.rs` 41 + `commands/fleet/mod.rs` 4 + `init/state.rs` 3 指 `axagent_company_runtime::`，见 §0.10.1 与 §116；**2026-11-08 `#36` 批 1 再变 24 处 / 4 文件** = 待改写 21 + H 桶 3，见 §0.10.1；估工随之上浮，另批核）+ 28 处前端 + 137 条命令 + **29 处跨包口改 `call_seam`** + 28 表 + 12 797 行前端 | **20–28** | P6.1（跨包口指向股票 crate）+ D1 超时先修 |
+| **P6.2 OPC 迁出** | 0 处主壳改写（**现况已变 48 处 / 3 文件**：`84d8c357b` 起 `tools/opc.rs` 41 + `commands/fleet/mod.rs` 4 + `init/state.rs` 3 指 `axagent_company_runtime::`，见 §0.10.1 与 §116；**2026-11-08 `#36` 批 1 再变 24 处 / 4 文件** = 待改写 21 + H 桶 3；**同日 `#36` 批 2 再变 18 处 / 4 文件** = 待改写 15 + H 桶 3，见 §0.10.1；估工随之上浮，另批核）+ 28 处前端 + 137 条命令 + **29 处跨包口改 `call_seam`** + 28 表 + 12 797 行前端 | **20–28** | P6.1（跨包口指向股票 crate）+ D1 超时先修 |
 
 **合计：P6.0 ≈ 39–59 人日，P6.1 ≈ 45–60，P6.2 ≈ 20–28 ⇒ 全段 ≈ 105–147 人日**（单人 5–7 个月，3 人并行受限于关键路径约 2.5–3.5 个月）。
 误差来源先说清：① 这些是**改动点数 × 单点成本**的外推，不是实测 —— 仓内唯一的实测锚点是 §3 的「新增一条接缝 6 处固定成本 ⇒ 13 条约 78–90 处改动点」；

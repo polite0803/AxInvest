@@ -29,14 +29,10 @@ pub struct CreateContentAssetInput {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateContentAssetInput {
-    pub title: Option<String>,
-    pub content_type: Option<String>,
-    pub body: Option<String>,
-    pub tags: Option<Vec<String>>,
-    pub status: Option<String>,
-}
+/// 内容资产更新入参（禁区 12：权威定义在 `axagent_harness::opc_store` —— 它要跨进程过帧，
+/// 插件进程链接不到本实现层）。本层保留 re-export 垫片 ⇒ `ContentAssetService` 的签名与
+/// 所有既有调用方**零改动**；新增 `Option` 字段时只改 harness 一处。
+pub use axagent_harness::opc_store::UpdateContentAssetInput;
 
 // ── Entity ↔ DTO 转换 ──────────────────────────────────────────
 

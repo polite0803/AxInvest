@@ -762,3 +762,290 @@ fn command_frame_creates_a_blog_post_via_host_seam() {
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
 }
+
+/// #36 批 2：四条 id / 枚举形态写命令的帧级实证。
+///
+/// 锁五件只有真管道能钉住的跨层口径：
+/// 1. 出站 seam / op 逐字 = `opc.store` / 四条 op 名（写错落 `SEAM_CALL_UNSUPPORTED`，
+///    而前端只看得见「操作失败」）；
+/// 2. `opc_transition_invoice` 的命令面 `status` 在出站帧上**改名**为 `target` —— 契约 op
+///    的第二键与域服务 `transition_status(id, target)` 同名；改名只发生在插件这一层，
+///    且不许「新旧两个键都带」；
+/// 3. `opc_update_content_asset` 出站是 `{"id", "request"}` **两层**（DTO 必须嵌层），
+///    线格式用 camelCase `contentType`（禁区 13），缺键不补 `null`（`None` = 该列不动）；
+/// 4. 出参三档全部走 payload：`{"transitioned": {…}}` / `{"updated": {…}}` / `"removed"` /
+///    `"not_found"` 都是 `ResponseKind::Success`，值原样成为命令出参；
+/// 5. 缺 `id` / 缺 `status` / 字段类型不符 ⇒ 命令层就拒，**不发接缝帧**。
+#[test]
+fn command_frame_batch2_writes_go_through_host_seam() {
+    let mut worker = Worker::spawn();
+
+    // ① 发票状态变更：`status` → `target` 改名，出站键集合恰好两个。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_transition_invoice",
+            serde_json::json!({ "id": "inv-1", "status": "paid" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-transition"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM, "写面同样经 call_seam 出站");
+    assert_eq!(call.args["seam"], "opc.store");
+    assert_eq!(call.args["op"], "transition_invoice", "op 名必须逐字");
+    let args = call.args["args"].as_object().expect("出站 args 应是对象");
+    let mut keys: Vec<String> = args.keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["id".to_string(), "target".to_string()],
+        "命令面 status 在出站帧上改名为 target，且只带这两个键：{args:?}"
+    );
+    assert_eq!(args["id"], "inv-1");
+    assert_eq!(args["target"], "paid");
+    assert!(args.get("status").is_none(), "改名必须彻底，不许新旧两个键都带");
+    let invoice = serde_json::json!({
+        "id": "inv-1",
+        "customerId": "cust-1",
+        "invoiceNumber": "INV-001",
+        "status": "paid",
+        "total": 1200.0,
+        "currency": "CNY",
+        "createdAt": 1_700_000_000_i64,
+    });
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "transitioned": invoice }))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "变更应回成功：{response:?}");
+    assert_eq!(response.request_id.as_deref(), Some("req-transition"));
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    assert_eq!(
+        reply["value"],
+        serde_json::json!({ "transitioned": invoice }),
+        "带数据的出参是外部标记枚举，逐字透传、不拆包"
+    );
+
+    // ① 缺行态：仍然 Success，值 `"not_found"` —— 业务读数不占错误码。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_transition_invoice",
+            serde_json::json!({ "id": "gone", "status": "paid" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-transition-absent"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "transition_invoice");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!("not_found"))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(
+        response.kind,
+        ResponseKind::Success,
+        "「这张发票不在表里」是正常结果，借错误码表达会让前端把两件事读成一件：{response:?}"
+    );
+    assert_eq!(response.code, None, "成功帧不该带错误码：{response:?}");
+    assert_eq!(response.value.expect("命令回执必须带 value")["value"], "not_found");
+
+    // ② 内容资产更新：`{"id", "request"}` 嵌层 + camelCase 线格式。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_update_content_asset",
+            serde_json::json!({
+                "id": "asset-1",
+                "title": "新标题",
+                "contentType": "video",
+                "body": "正文",
+                "tags": ["a", "b"],
+                "status": "draft",
+            }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-update"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "opc.store");
+    assert_eq!(call.args["op"], "update_content_asset", "op 名必须逐字");
+    let args = call.args["args"].as_object().expect("出站 args 应是对象");
+    let mut keys: Vec<String> = args.keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["id".to_string(), "request".to_string()],
+        "更新入参是 DTO，必须嵌 request 一层：{args:?}"
+    );
+    assert_eq!(args["id"], "asset-1");
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut req_keys: Vec<String> = request.keys().cloned().collect();
+    req_keys.sort();
+    assert_eq!(
+        req_keys,
+        ["body", "contentType", "status", "tags", "title"].map(str::to_string).to_vec(),
+        "五个可选字段原样转发，线格式是 camelCase（禁区 13）：{request:?}"
+    );
+    assert_eq!(request["contentType"], "video", "snake_case 不得出现在线格式里");
+    assert_eq!(request["tags"], serde_json::json!(["a", "b"]), "tags 逐字转发");
+    let asset = serde_json::json!({
+        "id": "asset-1",
+        "title": "新标题",
+        "contentType": "video",
+        "status": "draft",
+        "tags": ["a", "b"],
+        "createdAt": 1_700_000_000_i64,
+    });
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "updated": asset }))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "更新应回成功：{response:?}");
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    assert_eq!(
+        reply["value"],
+        serde_json::json!({ "updated": asset }),
+        "带数据的出参是外部标记枚举，逐字透传、不拆包"
+    );
+
+    // ② 只给一个字段：缺键不补 `null`（`None` 的语义是「该列不动」）。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_update_content_asset",
+            serde_json::json!({ "id": "asset-2", "title": "仅标题" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求"),
+    );
+    let call = worker.recv_request();
+    let request = call.args["args"]["request"].as_object().expect("request 应是对象");
+    assert_eq!(
+        request.keys().cloned().collect::<Vec<String>>(),
+        vec!["title".to_string()],
+        "缺键不补 null，只转发真正给出的列：{request:?}"
+    );
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!("not_found"))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "缺行仍是成功 + payload：{response:?}");
+    assert_eq!(response.code, None);
+    assert_eq!(response.value.expect("命令回执必须带 value")["value"], "not_found");
+
+    // ③ 内容资产删除：两态逐字透传。
+    for (id, want, tag) in
+        [("asset-3", "removed", "req-asset-remove"), ("gone", "not_found", "req-asset-absent")]
+    {
+        worker.send(
+            &CommandFrame::new(
+                PLUGIN_ID,
+                "opc_delete_content_asset",
+                serde_json::json!({ "id": id }),
+                5_000,
+            )
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id(tag),
+        );
+        let call = worker.recv_request();
+        assert_eq!(call.args["seam"], "opc.store");
+        assert_eq!(call.args["op"], "delete_content_asset", "op 名必须逐字");
+        let args = call.args["args"].as_object().expect("出站 args 应是对象");
+        assert_eq!(
+            args.keys().cloned().collect::<Vec<String>>(),
+            vec!["id".to_string()],
+            "删除入参只有 id 一个键：{args:?}"
+        );
+        assert_eq!(args["id"], id);
+        worker.send_response(
+            &FrameResponse::success(serde_json::json!(want))
+                .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+        );
+        let response = worker.recv_response();
+        assert_eq!(response.kind, ResponseKind::Success, "两态都走 payload：{response:?}");
+        assert_eq!(response.code, None);
+        assert_eq!(
+            response.value.expect("命令回执必须带 value")["value"],
+            serde_json::json!(want),
+            "两态串逐字透出，不建包装对象"
+        );
+    }
+
+    // ④ 发布计划取消（硬删）：两态逐字透传。
+    for (id, want) in [("sched-1", "removed"), ("gone", "not_found")] {
+        worker.send(
+            &CommandFrame::new(
+                PLUGIN_ID,
+                "opc_cancel_publish_schedule",
+                serde_json::json!({ "id": id }),
+                5_000,
+            )
+            .to_frame_request()
+            .expect("命令帧应能编成请求"),
+        );
+        let call = worker.recv_request();
+        assert_eq!(call.args["seam"], "opc.store");
+        assert_eq!(call.args["op"], "cancel_publish_schedule", "op 名必须逐字");
+        let args = call.args["args"].as_object().expect("出站 args 应是对象");
+        assert_eq!(
+            args.keys().cloned().collect::<Vec<String>>(),
+            vec!["id".to_string()],
+            "取消入参只有 id 一个键：{args:?}"
+        );
+        assert_eq!(args["id"], id);
+        worker.send_response(
+            &FrameResponse::success(serde_json::json!(want))
+                .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+        );
+        let response = worker.recv_response();
+        assert_eq!(response.kind, ResponseKind::Success, "两态都走 payload：{response:?}");
+        assert_eq!(response.code, None);
+        assert_eq!(response.value.expect("命令回执必须带 value")["value"], serde_json::json!(want));
+    }
+
+    // ⑤ 形状闸：缺 id / 缺 status / 字段类型不符 ⇒ 命令层直接拒，**不发接缝帧**
+    //    （下一条从 stdout 读到的必须是本命令的错误回执）。
+    for (command, input) in [
+        ("opc_transition_invoice", serde_json::json!({ "status": "paid" })),
+        ("opc_transition_invoice", serde_json::json!({ "id": "inv-1" })),
+        ("opc_transition_invoice", serde_json::json!({ "id": "inv-1", "status": 7 })),
+        ("opc_update_content_asset", serde_json::json!({ "title": "t" })),
+        ("opc_update_content_asset", serde_json::json!({ "id": "a", "title": 1 })),
+        ("opc_update_content_asset", serde_json::json!({ "id": "a", "tags": "opc" })),
+        ("opc_delete_content_asset", serde_json::json!({})),
+        ("opc_cancel_publish_schedule", serde_json::json!({})),
+    ] {
+        worker.send(
+            &CommandFrame::new(PLUGIN_ID, command, input.clone(), 5_000)
+                .to_frame_request()
+                .expect("命令帧应能编成请求"),
+        );
+        let response = worker.recv_response();
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+            "{command} 的形状不符必须在命令层拒（{input}）：{response:?}"
+        );
+    }
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}

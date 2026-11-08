@@ -82,6 +82,14 @@ const OPC_STORE_LIST_KPIS: &str = "list_kpis";
 const OPC_STORE_LIST_CONTENT_ASSETS: &str = "list_content_assets";
 const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
 
+/// #36 批 2 的四条写 op（同样要 `write`）：发票状态变更 / 内容资产更新 / 内容资产删除 /
+/// 发布计划取消。出参一律是契约的外部标记枚举（`{"transitioned": …}` / `{"updated": …}` /
+/// `"removed"` / `"not_found"`），本进程逐字透传。
+const OPC_STORE_TRANSITION_INVOICE: &str = "transition_invoice";
+const OPC_STORE_UPDATE_CONTENT_ASSET: &str = "update_content_asset";
+const OPC_STORE_DELETE_CONTENT_ASSET: &str = "delete_content_asset";
+const OPC_STORE_CANCEL_PUBLISH_SCHEDULE: &str = "cancel_publish_schedule";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -109,6 +117,12 @@ const COMMAND_LIST_KPIS: &str = "opc_list_kpis";
 const COMMAND_LIST_CONTENT_ASSETS: &str = "opc_list_content_assets";
 const COMMAND_LIST_PUBLISH_SCHEDULES: &str = "opc_list_publish_schedules";
 const COMMAND_GET_DASHBOARD: &str = "opc_get_dashboard";
+
+/// #36 批 2 的四条写命令（清单 `commands[].name` 必须逐字一致）。
+const COMMAND_TRANSITION_INVOICE: &str = "opc_transition_invoice";
+const COMMAND_UPDATE_CONTENT_ASSET: &str = "opc_update_content_asset";
+const COMMAND_DELETE_CONTENT_ASSET: &str = "opc_delete_content_asset";
+const COMMAND_CANCEL_PUBLISH_SCHEDULE: &str = "opc_cancel_publish_schedule";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -300,6 +314,39 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 OPC_STORE_LIST_PUBLISH_SCHEDULES,
                 &[],
             ) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── #36 批 2：四条写命令（出参 = 接缝外部标记枚举，逐字透传）──
+        COMMAND_TRANSITION_INVOICE => {
+            match transition_invoice(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_UPDATE_CONTENT_ASSET => {
+            match update_content_asset(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_DELETE_CONTENT_ASSET => {
+            match delete_content_asset(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CANCEL_PUBLISH_SCHEDULE => {
+            match cancel_publish_schedule(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -686,6 +733,130 @@ fn dashboard(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (Str
         "totalCustomers": customer_rows.len(),
         "totalProjects": project_rows.len(),
     }))
+}
+
+// ── #36 批 2：四条写命令 ────────────────────────────────────────────────
+
+/// `opc_transition_invoice`：变更发票状态（写 op）。
+///
+/// ## 入参只判形状
+///
+/// `id` / `status` 都必须在且是字符串（不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）。
+/// 语义闸全在宿主 provider：`status` 的枚举合法性（非法串 ⇒ `SEAM_CALL_INVALID_ARGS`）与
+/// 状态转换合法性（非法转换 ⇒ `PLUGIN_CALL_FAILED`）。
+///
+/// ## 出站形状：`{"id", "target"}`
+///
+/// 契约 op 的第二个键叫 `target`（与域服务 `transition_status(id, target)` 同名）；命令面
+/// 对外用 `status`（与清单 inputSchema / 智能体工具入参一致）⇒ 改名只发生在**本函数**。
+///
+/// ## 出参 = `{"transitioned": {…}}` / `"not_found"`，逐字透传
+fn transition_invoice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    let Some(id) = input.get("id").and_then(Value::as_str) else {
+        return Err(invalid_shape(
+            "opc_transition_invoice 需要字符串 id（形状判在命令层）".to_string(),
+        ));
+    };
+    let Some(status) = input.get("status").and_then(Value::as_str) else {
+        return Err(invalid_shape(
+            "opc_transition_invoice 需要字符串 status（合法性判在宿主 provider）".to_string(),
+        ));
+    };
+    call_opc_store(
+        peer,
+        OPC_STORE_TRANSITION_INVOICE,
+        json!({ "id": id, "target": status }),
+        call_chain,
+    )
+}
+
+/// `opc_update_content_asset`：更新内容资产（写 op）。
+///
+/// 入参是平铺的 `id` + 五个可选字段；出站是 `{"id", "request": {…}}`（`request` 是一个
+/// DTO，必须嵌层 —— 与 `create_blog_post` 同一条判据）。缺键 = 该列不动。
+fn update_content_asset(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    let Some(id) = input.get("id").and_then(Value::as_str) else {
+        return Err(invalid_shape(
+            "opc_update_content_asset 需要字符串 id（形状判在命令层）".to_string(),
+        ));
+    };
+    let request = content_asset_update_request(input)?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_CONTENT_ASSET,
+        json!({ "id": id, "request": request }),
+        call_chain,
+    )
+}
+
+/// 命令层形状闸：从平铺入参里挑出 `UpdateContentAssetInput` 的五个字段。
+///
+/// 判据同 [`blog_post_create_request`]：只判「键在不在、类型对不对」，不判语义（空串 /
+/// 非法状态串都放行到宿主 —— 域服务与契约各自收口）。`contentType` 是 camelCase 线格式
+/// （禁区 13），本层不做 snake_case 兼容翻译。
+fn content_asset_update_request(input: &Value) -> Result<Value, (String, String)> {
+    let mut request = serde_json::Map::new();
+    for key in ["title", "contentType", "body", "status"] {
+        match input.get(key) {
+            None | Some(Value::Null) => {},
+            Some(Value::String(value)) => {
+                request.insert(key.to_string(), Value::String(value.clone()));
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!(
+                    "opc_update_content_asset 的 `{key}` 必须是字符串（形状判在命令层）"
+                )));
+            },
+        }
+    }
+    match input.get("tags") {
+        None | Some(Value::Null) => {},
+        Some(Value::Array(items)) if items.iter().all(Value::is_string) => {
+            request.insert("tags".to_string(), Value::Array(items.clone()));
+        },
+        _ => {
+            return Err(invalid_shape(
+                "opc_update_content_asset 的 `tags` 必须是字符串数组（形状判在命令层）".to_string(),
+            ));
+        },
+    }
+    Ok(Value::Object(request))
+}
+
+/// `opc_delete_content_asset`：删除内容资产（写 op，两态出参逐字透传）。
+fn delete_content_asset(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    let Some(id) = input.get("id").and_then(Value::as_str) else {
+        return Err(invalid_shape(
+            "opc_delete_content_asset 需要字符串 id（形状判在命令层）".to_string(),
+        ));
+    };
+    call_opc_store(peer, OPC_STORE_DELETE_CONTENT_ASSET, json!({ "id": id }), call_chain)
+}
+
+/// `opc_cancel_publish_schedule`：取消发布计划（写 op，**硬删**；两态出参逐字透传）。
+fn cancel_publish_schedule(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    let Some(id) = input.get("id").and_then(Value::as_str) else {
+        return Err(invalid_shape(
+            "opc_cancel_publish_schedule 需要字符串 id（形状判在命令层）".to_string(),
+        ));
+    };
+    call_opc_store(peer, OPC_STORE_CANCEL_PUBLISH_SCHEDULE, json!({ "id": id }), call_chain)
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────

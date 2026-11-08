@@ -550,7 +550,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 13 条命名命令（4 条 blog 读写 + 9 条只读查询）",
+      "OPC 域功能包（#36）：worker 通道 + 17 条命名命令（4 条 blog 读写 + 9 条只读查询 + 4 条写操作）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -623,6 +623,67 @@ function opcManifest({ version, binaryName, sha256 }) {
             tags: { type: "array", items: { type: "string" }, description: "标签" },
           },
           required: ["title", "slug", "excerpt", "content", "tags"],
+        },
+      },
+      // ── #36 批 2：4 条写命令（全部走 opc.store 写面 ⇒ 宿主 requireWrite 闸）──
+      // 出参一律是契约的外部标记枚举（`{"transitioned"…}` / `{"updated"…}` / `"removed"` /
+      // `"not_found"`）；「缺行」是正常读数，前端按取值翻提示，不按错误码分派。
+      {
+        name: "opc_transition_invoice",
+        description: "变更 OPC 发票状态（经宿主 opc.store 写面；回 transitioned / not_found 两态）",
+        command: "worker://opc_transition_invoice",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "发票 id（接缝主键；空值由宿主 provider 拒收）" },
+            status: {
+              type: "string",
+              enum: ["draft", "sent", "paid", "overdue", "cancelled", "refunded"],
+              description: "目标状态（合法性由宿主 provider 判）"
+            },
+          },
+          required: ["id", "status"],
+        },
+      },
+      {
+        name: "opc_update_content_asset",
+        description: "更新 OPC 内容资产（经宿主 opc.store 写面；回 updated / not_found 两态）",
+        command: "worker://opc_update_content_asset",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "内容资产 id（接缝主键；空值由宿主 provider 拒收）" },
+            title: { type: "string", description: "新标题（缺省 = 该列不动）" },
+            contentType: { type: "string", description: "新内容类型（缺省 = 该列不动）" },
+            body: { type: "string", description: "新正文（缺省 = 该列不动）" },
+            tags: { type: "array", items: { type: "string" }, description: "新标签（缺省 = 该列不动）" },
+            status: { type: "string", description: "新状态（缺省 = 该列不动）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_delete_content_asset",
+        description: "删除 OPC 内容资产（经宿主 opc.store 写面；回 removed / not_found 两态）",
+        command: "worker://opc_delete_content_asset",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "内容资产 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_cancel_publish_schedule",
+        description: "取消/删除 OPC 发布计划（硬删；经宿主 opc.store 写面，回 removed / not_found 两态）",
+        command: "worker://opc_cancel_publish_schedule",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "发布计划 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
         },
       },
       // ── #36 批 1：8 条只读查询 + 1 条看板（全部走 opc.store 只读 op，无必填字段）──

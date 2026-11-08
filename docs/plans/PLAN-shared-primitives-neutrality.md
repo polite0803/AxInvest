@@ -72,8 +72,8 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| C1 | `src/components/office/panels/TrajectoryPanel.tsx:22` | `TimelineNode` / `TimelinePhase` | 域特定（**死代码**） | 文件头 `:4`「agent 协作轨迹 + **股票业务**时间线合并面板」，数据源 `stockAnalysisStore.timeline` 的四阶段 `scan/diagnose/debate/decide`；`git grep -n "TrajectoryPanel" -- src` 只命中自身 → **全仓零消费** | 低（判死后删除） | B8-4a |
-| C2 | `src/components/office/panels/StrategyRoomMiniBar.tsx:14` | `investPath` | 域特定（**死代码**） | 文件头 `:6-11`「仅在投研办公室场景…数据源 strategyStore（quant）…跳转到 quant 页面」；`git grep` 只命中自身 → 零消费 | 低（判死后删除） | B8-4a |
+| C1 | 原 `src/components/office/panels/` 轨迹面板（**2026-11-08 已删**，刀 A） | `TimelineNode` / `TimelinePhase` | 域特定（**死代码**） | 文件头「agent 协作轨迹 + **股票业务**时间线合并面板」，数据源 `stockAnalysisStore.timeline` 的四阶段 `scan/diagnose/debate/decide`；`git grep -n "TrajectoryPanel" -- src` 只命中自身 → **全仓零消费**（删前 2026-11-08 复验仍只命中注释） | 低（判死后删除） | B8-4a |
+| C2 | 原 `src/components/office/panels/` 策略迷你条（**2026-11-08 已删**，刀 A） | `investPath` | 域特定（**死代码**） | 文件头「仅在投研办公室场景…数据源 strategyStore（quant）…跳转到 quant 页面」；`git grep` 只命中自身 → 零消费 | 低（判死后删除） | B8-4a |
 | C3 | `src/components/time-travel/batchTables.tsx:3` | `horizonLabelKey` | 域特定（导入方亦域） | 列定义含 `stockCode/stockName/confidence`（同文件 `:20-41`）；`horizonLabelKey` 返回 **`stockAnalysis.timeHorizon*`**（`src/lib/stock-analysis-utils.ts:1930-1934`） | 低（随包） | B8-2 |
 | C4 | `src/components/time-travel/TimeTravelBatchCard.tsx:4` | `horizonLabelKey` | 域特定（导入方亦域） | 同文件 `:224` `t(horizonLabelKey(p) ?? p)`；类型 `TimeTravelBatchAnalysis`（`src/types/timeTravel.ts:26`）逐股一行 | 低（随包） | B8-2 |
 | C5 | `src/components/time-travel/ReplayWorkbench.tsx:6` | `investPath` | 域特定（导入方亦域） | `investPath` 值域 = `InvestTab` 联合类型（`src/lib/investRoutes.ts:26-32`：`screener / workspace / cross-market / screenshot-diagnosis / paper-portfolio / quant`） | 低（随包） | B8-2 |

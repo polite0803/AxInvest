@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "वर्तमान डेटा के आधार पर {{stockName}} ({{stockCode}}) का संक्षेप में विश्लेषण करें और अपना निर्णय दें",
       "analyzeStockPromptCodeOnly": "वर्तमान डेटा के आधार पर {{stockCode}} का संक्षेप में विश्लेषण करें और अपना निर्णय दें"
     },
-    "trajectory": {
-      "empty": "कोई प्रक्षेपण घटनाएं नहीं।",
-      "tagRouting": "रूटिंग",
-      "routing": "→ {{slug}}: {{summary}}",
-      "tagProcess": "प्रोसेस",
-      "tagStatus": "स्थिति",
-      "tagToken": "टोकन",
-      "businessCount": "व्यवसाय {{count}}",
-      "dispatchCount": "डिस्पैच {{count}}",
-      "analysisRunning": "विश्लेषण चल रहा है",
-      "showDispatch": "डिस्पैच घटनाएं दिखाएं",
-      "hideDispatch": "डिस्पैच घटनाएं छुपाएं",
-      "jumpToEvidence": "साक्ष्य पैनल पर जाएं"
-    },
     "token": {
       "empty": "कोई टोकन उपयोग डेटा नहीं।",
       "todayTotal": "आज का कुल",
@@ -4217,18 +4203,6 @@
         "collapse": "संक्षिप्त करें",
         "expand": "विस्तार करें",
         "empty": "मुख्य विषय डेटा नहीं। «बाज़ार मुख्य विषय निष्कर्ष» वर्कफ़्लो चलाएँ।"
-      },
-      "strategy": {
-        "title": "रणनीति सूची",
-        "total": "कुल {{count}}",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "Quant पृष्ठ पर जाएँ",
-        "refresh": "रणनीतियाँ रिफ्रेश करें",
-        "collapse": "सूची संक्षिप्त करें",
-        "expand": "सूची विस्तार करें",
-        "empty": "रणनीति डेटा नहीं। Quant पृष्ठ पर रणनीतियाँ पंजीकृत करें।",
-        "wfEnabled": "WF",
-        "moreCount": "{{count}} और रणनीतियाँ नहीं दिखाई गईं"
       },
       "risk": {
         "title": "जोखिम तनाव परीक्षण",

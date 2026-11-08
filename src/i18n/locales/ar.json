@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "بناءً على البيانات الحالية، حلل بإيجاز {{stockName}} ({{stockCode}}) وقدم حكمك",
       "analyzeStockPromptCodeOnly": "بناءً على البيانات الحالية، حلل بإيجاز {{stockCode}} وقدم حكمك"
     },
-    "trajectory": {
-      "empty": "لا توجد أحداث مسار.",
-      "tagRouting": "التوجيه",
-      "routing": "→ {{slug}}: {{summary}}",
-      "tagProcess": "المعالجة",
-      "tagStatus": "الحالة",
-      "tagToken": "الرمز",
-      "businessCount": "أعمال {{count}}",
-      "dispatchCount": "إرسال {{count}}",
-      "analysisRunning": "التحليل قيد التشغيل",
-      "showDispatch": "إظهار أحداث الإرسال",
-      "hideDispatch": "إخفاء أحداث الإرسال",
-      "jumpToEvidence": "الانتقال إلى لوحة الأدلة"
-    },
     "token": {
       "empty": "لا توجد بيانات استخدام الرموز.",
       "todayTotal": "إجمالي اليوم",
@@ -4217,18 +4203,6 @@
         "collapse": "طي",
         "expand": "توسيع",
         "empty": "لا توجد بيانات محاور. شغّل سير عمل «استخراج محاور السوق»."
-      },
-      "strategy": {
-        "title": "قائمة الاستراتيجيات",
-        "total": "الإجمالي {{count}}",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "الانتقال إلى صفحة Quant",
-        "refresh": "تحديث الاستراتيجيات",
-        "collapse": "طي القائمة",
-        "expand": "توسيع القائمة",
-        "empty": "لا توجد بيانات استراتيجية. سجّل الاستراتيجيات في صفحة Quant.",
-        "wfEnabled": "WF",
-        "moreCount": "{{count}} استراتيجيات إضافية غير معروضة"
       },
       "risk": {
         "title": "اختبارات الضغط",

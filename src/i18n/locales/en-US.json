@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "Based on current data, briefly analyze {{stockName}} ({{stockCode}}) and give your judgment",
       "analyzeStockPromptCodeOnly": "Based on current data, briefly analyze {{stockCode}} and give your judgment"
     },
-    "trajectory": {
-      "empty": "No trajectory events yet.",
-      "tagRouting": "Routing",
-      "routing": "→ {{slug}}: {{summary}}",
-      "tagProcess": "Process",
-      "tagStatus": "Status",
-      "tagToken": "Token",
-      "businessCount": "Business {{count}}",
-      "dispatchCount": "Dispatch {{count}}",
-      "analysisRunning": "Analysis running",
-      "showDispatch": "Show dispatch events",
-      "hideDispatch": "Hide dispatch events",
-      "jumpToEvidence": "Jump to evidence"
-    },
     "token": {
       "empty": "No token usage data yet.",
       "todayTotal": "Today Total",
@@ -4217,18 +4203,6 @@
         "collapse": "Collapse",
         "expand": "Expand",
         "empty": "No mainline data. Run the \"Daily Market Mainline Extraction\" workflow to generate."
-      },
-      "strategy": {
-        "title": "Strategy List",
-        "total": "Total {{count}}",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "Go to Quant page",
-        "refresh": "Refresh strategies",
-        "collapse": "Collapse list",
-        "expand": "Expand list",
-        "empty": "No strategy data. Register strategies on the Quant page.",
-        "wfEnabled": "WF",
-        "moreCount": "{{count}} more strategies not shown"
       },
       "risk": {
         "title": "Risk Stress Test",

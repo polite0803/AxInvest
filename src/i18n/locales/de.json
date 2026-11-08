@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "Analysieren Sie basierend auf aktuellen Daten kurz {{stockName}} ({{stockCode}}) und geben Sie Ihr Urteil ab",
       "analyzeStockPromptCodeOnly": "Analysieren Sie basierend auf aktuellen Daten kurz {{stockCode}} und geben Sie Ihr Urteil ab"
     },
-    "trajectory": {
-      "empty": "Noch keine Trajektorie-Ereignisse.",
-      "tagRouting": "Routing",
-      "routing": "→ {{slug}}: {{summary}}",
-      "tagProcess": "Verarbeitung",
-      "tagStatus": "Status",
-      "tagToken": "Token",
-      "businessCount": "Geschäft {{count}}",
-      "dispatchCount": "Dispatch {{count}}",
-      "analysisRunning": "Analyse läuft",
-      "showDispatch": "Dispatch-Ereignisse anzeigen",
-      "hideDispatch": "Dispatch-Ereignisse ausblenden",
-      "jumpToEvidence": "Zum Beweis-Panel springen"
-    },
     "token": {
       "empty": "Noch keine Token-Nutzungsdaten.",
       "todayTotal": "Heutige Gesamtanzahl",
@@ -4217,18 +4203,6 @@
         "collapse": "Einklappen",
         "expand": "Ausklappen",
         "empty": "Keine Themendaten. Führen Sie den Workflow „Markt-Themenextraktion“ aus."
-      },
-      "strategy": {
-        "title": "Strategien-Liste",
-        "total": "Gesamt {{count}}",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "Zur Quant-Seite",
-        "refresh": "Strategien aktualisieren",
-        "collapse": "Liste einklappen",
-        "expand": "Liste ausklappen",
-        "empty": "Keine Strategiedaten. Registrieren Sie Strategien auf der Quant-Seite.",
-        "wfEnabled": "WF",
-        "moreCount": "{{count}} weitere Strategien nicht angezeigt"
       },
       "risk": {
         "title": "Risiko-Stresstest",

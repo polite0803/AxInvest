@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "現在のデータに基づいて{{stockName}}（{{stockCode}}）を簡潔に分析し、あなたの判断を述べてください",
       "analyzeStockPromptCodeOnly": "現在のデータに基づいて{{stockCode}}を簡潔に分析し、あなたの判断を述べてください"
     },
-    "trajectory": {
-      "empty": "軌跡イベントはありません。",
-      "tagRouting": "ルーティング",
-      "routing": "→ {{slug}}：{{summary}}",
-      "tagProcess": "処理",
-      "tagStatus": "ステータス",
-      "tagToken": "Token",
-      "businessCount": "ビジネス {{count}}",
-      "dispatchCount": "ディスパッチ {{count}}",
-      "analysisRunning": "分析実行中",
-      "showDispatch": "ディスパッチイベントを表示",
-      "hideDispatch": "ディスパッチイベントを非表示",
-      "jumpToEvidence": "証拠パネルへジャンプ"
-    },
     "token": {
       "empty": "Token 使用量データはありません。",
       "todayTotal": "今日の合計",
@@ -4217,18 +4203,6 @@
         "collapse": "折りたたむ",
         "expand": "展開",
         "empty": "メインテーマなし。「市場メインテーマ抽出」ワークフローを実行してください。"
-      },
-      "strategy": {
-        "title": "戦略リスト",
-        "total": "合計 {{count}}",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "Quant ページへ",
-        "refresh": "戦略を更新",
-        "collapse": "リストを折りたたむ",
-        "expand": "リストを展開",
-        "empty": "戦略データなし。Quant ページで戦略を登録してください。",
-        "wfEnabled": "WF",
-        "moreCount": "さらに {{count}} 件の戦略が非表示"
       },
       "risk": {
         "title": "リスクストレステスト",

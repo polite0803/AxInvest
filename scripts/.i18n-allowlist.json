@@ -1,8 +1,8 @@
 {
   "version": "2",
-  "generated": "2026-11-06",
-  "total_entries": 418,
-  "total_files": 418,
+  "generated": "2026-11-08",
+  "total_entries": 414,
+  "total_files": 414,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -605,12 +605,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/office/panels/TrajectoryPanel.tsx",
-      "lines": "4,6,7,9,10",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/office/phaser/OfficeGame.tsx",
       "lines": "4,6,7,8,9,10,12,13,14,22,24,26,28,30,43,46,50,54,60,65,82,85,105,112,124,125,126",
       "reason": "硬编码中文字符串",
@@ -905,12 +899,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/skill/SkillToolbar.tsx",
-      "lines": "23",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/stock-analysis/ExperimentSidebar.tsx",
       "lines": "262,263,264,265,273,274,275,276,284,285,286,287",
       "reason": "后端数据契约值（Select 选项 value 为后端枚举值）",
@@ -997,18 +985,6 @@
     {
       "file": "src/components/workflow/AIPanel/EvolutionTab.tsx",
       "lines": "121,146,281",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/workflow/AIPanel/NL2SkillResultView.tsx",
-      "lines": "27,41,60,87,113,127",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/workflow/AIPanel/NL2UIResultView.tsx",
-      "lines": "35,52,59,90,116,130,145",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

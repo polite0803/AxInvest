@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "На основе текущих данных кратко проанализируйте {{stockName}} ({{stockCode}}) и дайте ваше заключение",
       "analyzeStockPromptCodeOnly": "На основе текущих данных кратко проанализируйте {{stockCode}} и дайте ваше заключение"
     },
-    "trajectory": {
-      "empty": "Пока нет событий траектории.",
-      "tagRouting": "Маршрут",
-      "routing": "→ {{slug}}: {{summary}}",
-      "tagProcess": "Обработка",
-      "tagStatus": "Статус",
-      "tagToken": "Токен",
-      "businessCount": "Бизнес {{count}}",
-      "dispatchCount": "Dispatch {{count}}",
-      "analysisRunning": "Анализ выполняется",
-      "showDispatch": "Показать события dispatch",
-      "hideDispatch": "Скрыть события dispatch",
-      "jumpToEvidence": "Перейти к панели доказательств"
-    },
     "token": {
       "empty": "Нет данных об использовании токенов.",
       "todayTotal": "Сегодня",
@@ -4217,18 +4203,6 @@
         "collapse": "Свернуть",
         "expand": "Развернуть",
         "empty": "Нет данных о темах. Запустите воркфлоу «Извлечение тем рынка»."
-      },
-      "strategy": {
-        "title": "Список стратегий",
-        "total": "Всего {{count}}",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "Перейти на страницу Quant",
-        "refresh": "Обновить стратегии",
-        "collapse": "Свернуть список",
-        "expand": "Развернуть список",
-        "empty": "Нет данных о стратегиях. Зарегистрируйте стратегии на странице Quant.",
-        "wfEnabled": "WF",
-        "moreCount": "{{count}} стратегий не показано"
       },
       "risk": {
         "title": "Стресс-тесты",

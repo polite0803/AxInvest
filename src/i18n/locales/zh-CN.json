@@ -4028,20 +4028,6 @@
       "analyzeStockPrompt": "请基于现有数据简要分析 {{stockName}}（{{stockCode}}）的最新情况，给出你的判断",
       "analyzeStockPromptCodeOnly": "请基于现有数据简要分析 {{stockCode}} 的最新情况，给出你的判断"
     },
-    "trajectory": {
-      "empty": "暂无轨迹事件。",
-      "tagRouting": "路由",
-      "routing": "→ {{slug}}：{{summary}}",
-      "tagProcess": "处理",
-      "tagStatus": "状态",
-      "tagToken": "Token",
-      "businessCount": "业务节点 {{count}}",
-      "dispatchCount": "协作事件 {{count}}",
-      "analysisRunning": "分析进行中",
-      "showDispatch": "显示协作事件",
-      "hideDispatch": "隐藏协作事件",
-      "jumpToEvidence": "跳转到证据面板"
-    },
     "token": {
       "empty": "暂无 token 用量数据。",
       "todayTotal": "今日总用量",
@@ -4217,18 +4203,6 @@
         "collapse": "收起议题",
         "expand": "展开议题",
         "empty": "暂无主线数据。可运行「每日市场主线提炼」工作流生成。"
-      },
-      "strategy": {
-        "title": "策略列表",
-        "total": "共 {{count}} 个",
-        "wfCount": "WF {{count}}",
-        "jumpQuant": "前往量化页面",
-        "refresh": "刷新策略",
-        "collapse": "收起列表",
-        "expand": "展开列表",
-        "empty": "暂无策略数据。可在量化页面注册策略。",
-        "wfEnabled": "WF",
-        "moreCount": "还有 {{count}} 个策略未显示"
       },
       "risk": {
         "title": "风控压测",

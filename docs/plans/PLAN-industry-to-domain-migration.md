@@ -1060,8 +1060,8 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 | 项 | 处数 | 位置 | 说明 |
 |---|---|---|---|
 | `list_industries` | 8（**5 个定义**） | `analysis-engine/opc/capability_pack_config.rs:1078`、`opc/learning.rs:287`、`harness/domain_pack_orchestration/mod.rs:102`、`orchestrator/task_context.rs:263`、`commands/opc_capability_pack_runtime.rs:401` | 同名**四种返回类型**（`Vec<(String,String)>` / `Vec<&String>` / `Vec<&str>` / `Vec<String>`）⇒ 典型「一名多义」 |
-| `opc_list_industries` | 4 | `register_commands.rs:823`、`opc_capability_pack_bridge.rs:33/393`、`opc_capability_pack_actions.rs:2052` | **跨前后端契约**（Tauri 命令名 + LLM 工具名）⇒ 改名须同步前端 |
-| `opc_list_runtime_industries` | 2 | `register_commands.rs:841`、`opc_capability_pack_runtime.rs:510` | 同上 |
+| `opc_list_industries` | 4 | `register_commands.rs:821`、`opc_capability_pack_bridge.rs:33/393`、`opc_capability_pack_actions.rs:2052` | **跨前后端契约**（Tauri 命令名 + LLM 工具名）⇒ 改名须同步前端 |
+| `opc_list_runtime_industries` | 2 | `register_commands.rs:839`、`opc_capability_pack_runtime.rs:510` | 同上 |
 | `LegacyIndustryPathRedirect` | 2 | `src/components/layout/ContentArea.tsx:114/304` | 前端「旧路径重定向」组件（批次②清了 `opc-industries` 路由 key，组件名未改） |
 | `opc_industries` / `opc_industries_pkey` / `idx_opc_industries_enabled` / `create_industries` | 4+2+2+2 | `dao/migrations/v211_opc_domain_packs.rs`、`v232_opc_domain_pack_rename.rs` | **历史迁移里的旧表名/约束名**（叙述改名本身）⇒ **保护名单**，不动 |
 | `domain_pack_pack_seed_registers_industries` | 1 | `opc_workflows/mod.rs:790` | 测试函数名 |
@@ -1190,8 +1190,8 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 `rhai_pm.rs` 命中 **0**；`stock_workflow/kpi_hook.rs` **文件已不存在**（对应分支的实际落点在 `stock_workflow/hooks.rs`）。
 
 **⑤ 英文 `industr*` B 类命名债（实测全在，未动）**
-- `opc_list_industries` — `opc_capability_pack_actions.rs:2052`（Tauri 命令）+ `opc_capability_pack_bridge.rs:35 / 395`（LLM 工具名）+ `register_commands.rs:823`（**build.rs 生成物**）⇒ **跨前后端契约，改名须三处同步 + 前端 i18n**
-- `opc_list_runtime_industries` — `runtime.rs:510` + `register_commands.rs:841`
+- `opc_list_industries` — `opc_capability_pack_actions.rs:2052`（Tauri 命令）+ `opc_capability_pack_bridge.rs:35 / 395`（LLM 工具名）+ `register_commands.rs:821`（**build.rs 生成物**）⇒ **跨前后端契约，改名须三处同步 + 前端 i18n**
+- `opc_list_runtime_industries` — `runtime.rs:510` + `register_commands.rs:839`
 - `list_industries` **5 个定义 / 4 种返回类型**：`capability_pack_config.rs:1078` `Vec<(String,String)>` · `src-tauri/crates/analysis-engine/src/opc/learning.rs:287` `Vec<&String>` · `domain_pack_orchestration/mod.rs:102` `Vec<&str>` · `task_context.rs:263` `Vec<String>` · `runtime.rs:401`（纯转发）
 - `LegacyIndustryPathRedirect` — `ContentArea.tsx:114` / `:304`（路由 `/opc/industry/:packId` 的兼容重定向）
 

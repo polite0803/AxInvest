@@ -376,7 +376,7 @@ App.tsx:388  <GlobalTabBar />           ← 仅 /chat **且 activeTab==="chat"**
 
 **纪律**：同文件 `Edit` 必须**串行**；每组改动收尾时对**全部改动文件**做一次 grep 复核实际内容（本次若只跑 `tsc` + 测试，形态 B 会带着「Ctrl+F 不聚焦」上线）。
 
-> **形态 B 已补修**：`ref={searchInputRef}` 已挂到 `<Input>`（`ChatSidebar.tsx:2130`），
+> **形态 B 已补修**：`ref={searchInputRef}` 已挂到 `<Input>`（`ChatSidebar.tsx:2122`），
 > 补修后重跑了全套门禁 —— 见 §9.5「补 `ref` 前后各跑一次」。
 
 ### 9.5 验证记录（全部实跑）

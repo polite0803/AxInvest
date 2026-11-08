@@ -7196,7 +7196,7 @@ Rhai 常数 / 节点映射里被硬编码的字面值）**必须逐条实测后�
 
 - **现场读数（为什么这不是「没做」而是「做在另一条链上」）**：
   `crates/harness/src/workflow_types.rs:2712` 的 `WorkflowTemplateResponse` **一直带** `pub version: i32`，
-  `src/components/workflow/types/workflow.types.ts:752` 的 TS 侧也**一直声明** `version: number`
+  `src/components/workflow/types/workflow.types.ts:856` 的 TS 侧也**一直声明** `version: number`
   ⇒ 数据从后端一路送到前端，**唯独两个列表控件从不渲染它**（`TemplateList.tsx` 标题行只渲染
   icon/名称/预设标签/只读标签，`SystemTemplateList.tsx` 同形）。所以这不是取数缺口，是纯呈现缺口。
 - **落地**：两个列表的标题行各加一枚 `v<代>` 标签（`{`v${template.version}`}`）。

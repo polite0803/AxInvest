@@ -49,8 +49,8 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| A1 | `src/components/chat/ChatViewMessages.tsx:87` | `QuoteBlock` | 误报 | `src/components/chat/QuoteBlock.tsx:3`「引用回复：消息气泡内显示被引用消息的预览块」——`quote` 是**消息引用**，与行情无关 | — | 不改 |
-| A2 | `src/components/chat/InputArea.tsx:73` | `QuotePreviewBar` | 误报 | `src/components/chat/QuotePreviewBar.tsx:17`「引用回复预览条：显示当前被引用的消息内容，可一键取消引用」 | — | 不改 |
+| A1 | `src/components/chat/ChatViewMessages.tsx:86` | `QuoteBlock` | 误报 | `src/components/chat/QuoteBlock.tsx:3`「引用回复：消息气泡内显示被引用消息的预览块」——`quote` 是**消息引用**，与行情无关 | — | 不改 |
+| A2 | `src/components/chat/InputArea.tsx:69` | `QuotePreviewBar` | 误报 | `src/components/chat/QuotePreviewBar.tsx:17`「引用回复预览条：显示当前被引用的消息内容，可一键取消引用」 | — | 不改 |
 | A3 | `src/components/settings/index.ts:30` | `../chat/PluginMarketplace` | 误报 | `src/components/chat/PluginMarketplace.tsx:112` 取键 `chat.plugins.marketplace.title`——`market` = **插件市场** | — | 不改 |
 | A4 | `src/pages/SettingsPage.tsx:71` | `@/components/chat/PluginMarketplace`（动态 `import()`） | 误报 | 同上（同一组件，另一处装载） | — | 不改 |
 | A5 | `src/components/settings/WorkflowSettings.tsx:5` | `@/pages/WorkflowMarketplace` | 误报 | `src/pages/WorkflowMarketplace.tsx:18`「目录条目类型，与后端 `axagent_harness::marketplace::CatalogItem` 对齐」= 工作流模板市场 | — | 不改 |
@@ -74,7 +74,7 @@
 |---|---|---|---|---|---|---|
 | C1 | `src/components/office/panels/TrajectoryPanel.tsx:22` | `TimelineNode` / `TimelinePhase` | 域特定（**死代码**） | 文件头 `:4`「agent 协作轨迹 + **股票业务**时间线合并面板」，数据源 `stockAnalysisStore.timeline` 的四阶段 `scan/diagnose/debate/decide`；`git grep -n "TrajectoryPanel" -- src` 只命中自身 → **全仓零消费** | 低（判死后删除） | B8-4a |
 | C2 | `src/components/office/panels/StrategyRoomMiniBar.tsx:14` | `investPath` | 域特定（**死代码**） | 文件头 `:6-11`「仅在投研办公室场景…数据源 strategyStore（quant）…跳转到 quant 页面」；`git grep` 只命中自身 → 零消费 | 低（判死后删除） | B8-4a |
-| C3 | `src/components/time-travel/batchTables.tsx:3` | `horizonLabelKey` | 域特定（导入方亦域） | 列定义含 `stockCode/stockName/confidence`（同文件 `:20-41`）；`horizonLabelKey` 返回 **`stockAnalysis.timeHorizon*`**（`src/lib/stock-analysis-utils.ts:1887-1890`） | 低（随包） | B8-2 |
+| C3 | `src/components/time-travel/batchTables.tsx:3` | `horizonLabelKey` | 域特定（导入方亦域） | 列定义含 `stockCode/stockName/confidence`（同文件 `:20-41`）；`horizonLabelKey` 返回 **`stockAnalysis.timeHorizon*`**（`src/lib/stock-analysis-utils.ts:1930-1934`） | 低（随包） | B8-2 |
 | C4 | `src/components/time-travel/TimeTravelBatchCard.tsx:4` | `horizonLabelKey` | 域特定（导入方亦域） | 同文件 `:224` `t(horizonLabelKey(p) ?? p)`；类型 `TimeTravelBatchAnalysis`（`src/types/timeTravel.ts:26`）逐股一行 | 低（随包） | B8-2 |
 | C5 | `src/components/time-travel/ReplayWorkbench.tsx:6` | `investPath` | 域特定（导入方亦域） | `investPath` 值域 = `InvestTab` 联合类型（`src/lib/investRoutes.ts:26-32`：`screener / workspace / cross-market / screenshot-diagnosis / paper-portfolio / quant`） | 低（随包） | B8-2 |
 | C6 | `src/lib/agentOutput.ts:20` | `alignReasoningDecisionLabel`、`analystBaseOf`、`HORIZON_CAMEL_TO_SNAKE`、`parseAction`、`parsePositionState`、`parseRiskLevel`、`resolveDisplayAction` | 域特定（**整文件域**） | `git grep -n "agentOutput" -- src` 的消费方全部是域文件：`src/components/stock-analysis/**`、`src/components/stock-workspace/DecisionHeroBar.tsx`、`src/stores/feature/stockAnalysisStore.ts`、`src/stores/feature/stockWorkflowChatBridge.ts`、`src/lib/{decision-agreement,risk-assessment,stock-analysis-utils}.ts`、本文件测试。文件内通用名函数（`:61 cleanToolCallTags`、`:115 tryBeautifyJson`、`:208 extractContent`、`:648 parseJsonLoose`）**也没有任何非域消费方** | 中（随包 + 拆通用半区可选） | B8-2 |
@@ -88,7 +88,7 @@
 | C14 | `src/lib/__tests__/analystSentiment.test.ts:11` | `classifyAnalystReport`、`computeStockConsensus`、`deriveAnalystConsensus`、`extractBullBearScores`、`groupAnalystReportsByTier`、`scopeAnalystReports`、`tallyAnalystSentiment` | 域特定（域测试） | 计票口径单测（`:1` i18n-exempt 头注释） | 低 | B8-2 |
 | C15 | `src/lib/__tests__/analystTallyRealFixtures.test.ts:12` | `classifyAnalystReport`、`classifySentiment`、`extractBullBearScores`、`normalizeVerdictScore`、`tallyAnalystSentiment` | 域特定（域测试） | 夹具是 2026-10-10 立讯精密（002475）真实分析产物（`:3-4`） | 低 | B8-2 |
 | C16 | `src/lib/__tests__/evidenceWeights.pluginRoute.test.ts:11` | `computeEvidenceWeights`、`EvidenceWeightRequest` | 域特定（域测试） | 断言走**股票插件命令**（`:4-9`「`computeEvidenceWeights` 走插件命令…」） | 低 | B8-2 |
-| C17 | `src/theme/__tests__/tokenSingleSource.test.ts:14` | `RECO_STYLE_HUE`、`RECO_STYLE_ALIASES` | 域特定（**可夹具化**） | 值域 = 后端 `Style` 的 11 个变体（`src/lib/stock-analysis-utils.ts:818-846`）。测试只拿它当「不得出现第二张风格色表」的**样本**（`:211`、`:231`、`:250-257`），换合成常量同样能保住负控 | 低 | B8-4a（−1，非下沉） |
+| C17 | `src/theme/__tests__/tokenSingleSource.test.ts:14` | `RECO_STYLE_HUE`、`RECO_STYLE_ALIASES` | 域特定（**可夹具化**） | 值域 = 后端 `Style` 的 11 个变体（`src/lib/stock-analysis-utils.ts:867-882`）。测试只拿它当「不得出现第二张风格色表」的**样本**（`:211`、`:231`、`:250-257`），换合成常量同样能保住负控 | 低 | B8-4a（−1，非下沉） |
 | C18 | `src/utils/__tests__/workflowNodeLabel.test.ts:1` | `HORIZON_T_SUFFIX` | 域特定 | 被测文件 `src/utils/workflowNodeLabel.ts:32-35` **自带第二张档位表**并硬编码 `stockAnalysis.*` 键；该 util 除本测试外**零消费**（`git grep -n "getWorkflowNodeLabel" -- src` 只命中本测试） | 低-中（判死或随包） | B8-4a（判死）或 B8-2 |
 | C19 | `src/stores/feature/screenshotDiagnosisStore.ts:19` | `PaperPortfolio`（类型） | 域特定 | store 唯一消费方是 `src/components/stock-analysis/ScreenshotDiagnosisDashboard.tsx:15`；`PaperPortfolio` 对齐 `axagent_entities::paper_portfolios::Model`（`src/types/paper-portfolio.ts:5-7`） | 中（若要留壳须走 schema-gen） | B8-2 |
 | C20 | `src/components/office/phaser/__tests__/sceneTemplates.labelKey.test.ts:4` | `INVESTMENT_OFFICE_TEMPLATE` | 域特定（**内容型**） | 模板 6 房间 = research / data_room / meeting / strategy / trading / risk（`src/components/office/phaser/investSceneTemplates.ts:33-95`）；注册口 `registerSceneTemplate` 本身中性（`:103`） | 低-中 | B8-0/未定（见 §7 第 4 条） |
@@ -128,7 +128,7 @@
 
 | 符号（定义处） | 值域证据 | 判定 |
 |---|---|---|
-| `horizonLabelKey`（`src/lib/stock-analysis-utils.ts:1887`） | 返回字面量 `stockAnalysis.timeHorizon${suffix}`（`:1888-1889`），该 i18n 键族属股票插件 | 域特定 |
+| `horizonLabelKey`（`src/lib/stock-analysis-utils.ts:1932`） | 返回字面量 `stockAnalysis.timeHorizon${suffix}`（`:1934`），该 i18n 键族属股票插件 | 域特定 |
 | `HORIZON_T_SUFFIX`（`:1713`） | 四档 `ultra_short/short/mid/long`（`:1714-1717`），与 Rust `holding_period` / `analyst_node_id` 同源 | 域特定 |
 | `analystBaseOf`（`:1735`）/ `analystNodeId`（`:1724`） | 分析师节点 id `base--tier`、分隔符 `ANALYST_TIER_SEP`（`:1721`）来自 `harness::holding_period` | 域特定 |
 | `parseActionStrict`（`:397`）/ `StockAction`（`:305`）/ `StockRiskLevel`（`:362`） | 值域是「买入/增持/持有/减持/卖出/观望」与「低/中/高/极高/无法评级」（`:330-359`、`:379-387`） | 域特定 |

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { invoke } from "@/lib/invoke";
 import { useProviderStore, useSettingsStore } from "@/stores";
 import type { ApprovalRule, SmartRouterTierMapping } from "@/types";
@@ -7,7 +8,6 @@ import { Button, Divider, InputNumber, message, Radio, Select, Slider, Switch } 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CacheConfigPanel } from "./CacheConfigPanel";
-import { SettingsGroup } from "./SettingsGroup";
 
 /** 类型安全地获取/设置扩展配置项（尚未加入 AppSettings 类型） */
 function useExtSetting<T>(key: string, defaultVal: T): [T, (v: T) => void] {

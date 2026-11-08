@@ -1,10 +1,10 @@
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
 import type { Variable, WorkflowTemplateResponse } from "@/types";
 import { App, Button, Input, InputNumber, Select, Switch, Tag, theme, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 /** 重构工作流 ID 映射 */
 const REFACTOR_WORKFLOW_MAP: Record<string, { templateId: string; fields: string[] }> = {

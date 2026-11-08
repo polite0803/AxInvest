@@ -815,7 +815,7 @@
       "phase": 3
     },
     {
-      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
+      "file": "src/components/stock-analysis/StockAnalysisConfigPanel.tsx",
       "lines": "765",
       "reason": "后端数据契约值（Select 选项 value 为后端枚举值）",
       "phase": 3

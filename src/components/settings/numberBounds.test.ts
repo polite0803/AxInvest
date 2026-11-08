@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { inferNumberBounds } from "@/components/settings/numberBounds";
+import { inferNumberBounds } from "@/components/common/numberBounds";
 import type { Variable } from "@/types";
 import { describe, expect, it } from "vitest";
 

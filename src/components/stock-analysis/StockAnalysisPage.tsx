@@ -1,7 +1,7 @@
-import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageTimeAnchor } from "@/components/shared/PageTimeAnchor";
 import { useShowAdvancedPanels } from "@/components/stock-analysis/_workspace/_shared/useSimpleMode";
+import { StockAnalysisSettings } from "@/components/stock-analysis/StockAnalysisSettings";
 import { extractLlmField } from "@/lib/agentOutput";
 import { parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
 import { investPath } from "@/lib/investRoutes";

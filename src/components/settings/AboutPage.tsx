@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import logoUrl from "@/assets/image/logo.png";
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { useUpdateChecker } from "@/hooks/useUpdateChecker";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { useOnboardingStore, useSettingsStore } from "@/stores";
@@ -9,7 +10,6 @@ import { Activity, GraduationCap, RefreshCw, Terminal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Text } = Typography;
 

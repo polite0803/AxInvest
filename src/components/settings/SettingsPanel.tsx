@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import { useAppConfigStore } from "@/stores/feature/appConfigStore";
@@ -47,7 +48,6 @@ import { useTranslation } from "react-i18next";
 import { AgentProfileManager } from "./AgentProfileManager";
 import type { AgentProfileStoreActions } from "./AgentProfileManager";
 import { HookExecutionLog } from "./HookExecutionLog";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Text } = Typography;
 

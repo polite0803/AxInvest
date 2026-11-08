@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { formatThemeName, SHIKI_DARK_THEMES, SHIKI_LIGHT_THEMES } from "@/constants/codeThemes";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
@@ -9,7 +10,6 @@ import { ColorPicker, Divider, Segmented, Slider } from "antd";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 import { SettingsSelect } from "./SettingsSelect";
 
 export function DisplaySettings() {

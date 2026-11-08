@@ -4,13 +4,13 @@
 // 对接 useKnowledgeGraphStore，提供实体查询与上下文复制能力
 
 import { List } from "@/components/common/AntdList";
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { message } from "@/lib/toast";
 import { useKnowledgeGraphStore, useKnowledgeStore } from "@/stores";
 import type { GraphEnhancedContextChunk } from "@/types";
 import { Button, Empty, InputNumber, Select, Space, Spin, Switch, Tag, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Paragraph, Text } = Typography;
 

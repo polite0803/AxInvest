@@ -4,6 +4,7 @@
 // 对接 usePaperStore，提供概览列表查看、详情展示与删除、Prompt 生成能力
 
 import { List } from "@/components/common/AntdList";
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useKnowledgeStore, usePaperStore } from "@/stores";
@@ -11,7 +12,6 @@ import type { PaperOverview } from "@/types";
 import { App as AntdApp, Button, Card, Empty, Popconfirm, Select, Space, Spin, Tag, Timeline, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Paragraph, Text } = Typography;
 

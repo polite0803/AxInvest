@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 // 股票分析模板参数默认值 —— 前端单一权威源。
-// 组件中立性 A 档：由 components/settings/StockAnalysisConfigPanel 下沉至此。
+// 组件中立性 A 档：由 components/stock-analysis/StockAnalysisConfigPanel 下沉至此。
 // WhatIfBacktest（stock-analysis 域）与设置面板（settings 域）共用这份清单，
 // 任何一方都不该为取默认值反向 import 另一方的组件模块。
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { useSettingsStore } from "@/stores";
 import { Button, Divider, InputNumber, Space, Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Text } = Typography;
 

@@ -1,3 +1,5 @@
+import { SettingsGroup } from "@/components/common/SettingsGroup";
+import { VariableControl } from "@/components/common/VariableControls";
 import { invoke } from "@/lib/invoke";
 import { getDefaultVariables } from "@/lib/stock-analysis-defaults";
 import { toDbVariable } from "@/lib/workflowVariables";
@@ -5,8 +7,6 @@ import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "
 import { App, Button, InputNumber, Slider, Space, Tag, theme } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
-import { VariableControl } from "./VariableControls";
 
 const TEMPLATE_ID = "stock-analysis";
 

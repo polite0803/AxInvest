@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { ModelParamSliders } from "@/components/common/ModelParamSliders";
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { ModelSelect, parseModelValue } from "@/components/shared/ModelSelect";
 import { getModelSelection } from "@/lib/settingsAdaptor";
@@ -11,7 +12,6 @@ import { Button, Divider, Input, InputNumber, Modal, Slider, theme } from "antd"
 import { Info, Settings, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 // 默认 prompt 已移至 i18n locale keys:
 // settings.titleSummaryPromptDefault / settings.compressionPromptDefault

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { Tooltip } from "@/components/layout/Tooltip";
 import {
   DEFAULT_SHORTCUT_BINDINGS,
@@ -20,7 +21,6 @@ import { Button, Divider, Input, Space, Switch, theme } from "antd";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 type ShortcutSettingsUpdate = Partial<
   Record<ShortcutSettingKey | "globalShortcut", string>

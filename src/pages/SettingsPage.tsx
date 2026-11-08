@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { SettingsSidebar } from "@/components/settings";
-import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SkillPageRenderer } from "@/components/skill/SkillPageRenderer";
 import { useAgentContext } from "@/hooks/useAgentContext";

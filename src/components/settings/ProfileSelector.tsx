@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { invoke } from "@/lib/invoke";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 export interface ProfileData {
   name: string;

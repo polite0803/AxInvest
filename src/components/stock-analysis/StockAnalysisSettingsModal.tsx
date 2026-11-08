@@ -1,4 +1,4 @@
-import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
+import { StockAnalysisSettings } from "@/components/stock-analysis/StockAnalysisSettings";
 import { Drawer } from "antd";
 import { useTranslation } from "react-i18next";
 

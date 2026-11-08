@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { StylePreviewPanel } from "@/components/common/StylePreviewPanel";
 import { useUserStyleProfile } from "@/hooks/useUserStyleProfile";
 import {
@@ -13,7 +14,6 @@ import {
 import { Divider, Input, Slider, theme, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 import { SettingsSelect } from "./SettingsSelect";
 
 const { Text } = Typography;

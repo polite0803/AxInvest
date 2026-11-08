@@ -1,14 +1,14 @@
 // i18n-exempt: 配置映射表/业务数据字符串，非用户可见 UI 文案
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
+import { VariableControl } from "@/components/common/VariableControls";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/types";
 import { App, Button, Space, Tag, theme } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
-import { VariableControl } from "./VariableControls";
 
 const TEMPLATE_ID = "demand-discovery";
 

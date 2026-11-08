@@ -1,3 +1,5 @@
+import { SettingsGroup } from "@/components/common/SettingsGroup";
+import { VariableControl } from "@/components/common/VariableControls";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/types";
@@ -5,8 +7,6 @@ import { App, Button, theme } from "antd";
 import i18next from "i18next";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
-import { VariableControl } from "./VariableControls";
 
 const TEMPLATE_ID = "workflow-cm-literary-creation";
 

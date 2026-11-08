@@ -31,7 +31,7 @@ describe("LLM 采样参数默认值单一权威", () => {
 
   it("Agent 节点不再提供 temperature / maxTokens 入口", () => {
     const profileList = readSource(
-      "src/components/settings/AgentProfileList.tsx",
+      "src/components/stock-analysis/AgentProfileList.tsx",
     );
     const propertyPanel = readSource(
       "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",

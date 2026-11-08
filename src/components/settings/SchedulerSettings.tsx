@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { showBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { useBackupStore, useSchedulerStore, useSettingsStore } from "@/stores";
@@ -24,7 +25,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CronScheduleBuilder, parseCronFields, validateCronSyntax } from "./CronScheduleBuilder";
 import type { FieldState } from "./CronScheduleBuilder";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Text } = Typography;
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+export { SettingsGroup } from "@/components/common/SettingsGroup";
 export { AboutPage } from "./AboutPage";
 export { AcpSettings } from "./AcpSettings";
 export { AdvancedSettings } from "./AdvancedSettings";
@@ -18,7 +19,6 @@ export { ProviderList } from "./ProviderList";
 export { ProviderSettings } from "./ProviderSettings";
 export { ProxySettings } from "./ProxySettings";
 export { SearchProviderSettings } from "./SearchProviderSettings";
-export { SettingsGroup } from "./SettingsGroup";
 export { SettingsPanel } from "./SettingsPanel";
 export { SettingsSelect } from "./SettingsSelect";
 export { SettingsSidebar } from "./SettingsSidebar";

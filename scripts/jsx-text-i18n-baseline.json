@@ -115,7 +115,7 @@
       "reason": "存量裸文本（待翻译或技术串）"
     },
     {
-      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
+      "file": "src/components/stock-analysis/StockAnalysisConfigPanel.tsx",
       "text": "📈 compute_valuation",
       "reason": "存量裸文本（待翻译或技术串）"
     },

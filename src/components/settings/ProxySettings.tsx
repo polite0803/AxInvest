@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { invoke } from "@/lib/invoke";
 import { useSettingsStore } from "@/stores";
 import { App, Button, Input, InputNumber } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 import { SettingsSelect } from "./SettingsSelect";
 
 export function ProxySettings() {

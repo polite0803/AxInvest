@@ -4,6 +4,7 @@
 // 对接 useReadingListStore，提供列表管理与条目管理（CRUD + 状态切换 + 重排）
 
 import { List } from "@/components/common/AntdList";
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useReadingListStore } from "@/stores";
@@ -26,7 +27,6 @@ import {
 } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Paragraph, Text } = Typography;
 

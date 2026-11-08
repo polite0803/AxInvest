@@ -5,7 +5,7 @@
  *
  * 背景（B8-4a / `PLAN-shared-primitives-neutrality.md` §4.2）：设置页保存 vendor 配置后，
  * 需要让股票域 `vendorCheck` 的「已启用 vendor 集合」缓存失效。原先由中性宿主
- * `src/components/settings/DataVendorsTab.tsx` 直接动态 import 股票域的 `vendorCheck`
+ * `src/components/stock-analysis/DataVendorsTab.tsx` 直接动态 import 股票域的 `vendorCheck`
  * 并调其 `clearVendorCheckCache()` —— 调用方语义（保存配置 → 失效缓存）与股票无关，
  * 却让宿主反向依赖股票域文件。
  *

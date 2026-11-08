@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { LANG_OPTIONS } from "@/lib/constants";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { useCurrencyStore, useSettingsStore } from "@/stores";
@@ -10,7 +11,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Divider, InputNumber, Switch, Tooltip, Typography } from "antd";
 import { FolderOpen, HelpCircle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { SettingsGroup } from "./SettingsGroup";
 import { SettingsSelect } from "./SettingsSelect";
 
 const { Text } = Typography;

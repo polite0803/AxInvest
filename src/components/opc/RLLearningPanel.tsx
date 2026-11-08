@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useRLLearningPanel } from "@/hooks/useRLLearningPanel";
+import { useRLLearningPanel } from "@/hooks/opc/useRLLearningPanel";
 import type { ExperiencePoolStats, RLPolicyUpdate } from "@/types";
 import {
   BarChartOutlined,

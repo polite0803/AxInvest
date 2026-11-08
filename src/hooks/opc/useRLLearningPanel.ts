@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useDomainLearningStore } from "@/stores/feature/domainLearningStore";
+import { useDomainLearningStore } from "@/stores/feature/opc/domainLearningStore";
 
 /**
  * RL 学习面板读面（经验池统计 + 策略优化 + 自动学习历史 + 配置读写）。

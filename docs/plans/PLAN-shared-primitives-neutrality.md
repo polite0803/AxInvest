@@ -112,10 +112,10 @@
 | D13 | `src/hooks/useRightPanel.ts:1` | `useStockAnalysisStore` | 域特定（**真跨域：chat → stock store**） | 消费方 `src/components/chat/ChatBubbleExpandButton.tsx:1`；hook 的 `tabKey` 值域 = `"market" \| "analyze" \| "execute"`（`src/hooks/useRightPanel.ts:8`），并写 `timelineJump` query（`:27`）给 `StockAnalysisPage` 消费 | 中（改为事件/注入或渲染器注册表） | B8-1 |
 | D14 | `src/main.tsx:44` | `investSceneTemplates`（动态 `import()`） | 域特定（内容型注册） | 启动期 `queueMicrotask` 注入场景模板（`src/components/office/phaser/investSceneTemplates.ts:12` 注释） | 中 | B8-0/未定 |
 | D15 | `src/stores/index.ts:102` | `useCrossMarketStore`（re-export） | 域特定（barrel） | 同文件 `:101` 分节注释「── AxInvest 投资域 ──」 | 高（须先改道消费方） | B8-5 |
-| D16 | `src/stores/index.ts:104` | `usePaperPortfolioStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
-| D17 | `src/stores/index.ts:106` | `useBacktestStore`、`useStrategyStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
-| D18 | `src/stores/index.ts:107` | `useStockAnalysisStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
-| D19 | `src/stores/index.ts:108` | `PortfolioStressResult`、`SimulationScenarioRow`、`SimulationSnapshot`（类型 re-export） | 域特定（barrel） | 同上 | 高 | B8-5 |
+| D16 | `src/stores/index.ts:103` | `usePaperPortfolioStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
+| D17 | `src/stores/index.ts:105` | `useBacktestStore`、`useStrategyStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
+| D18 | `src/stores/index.ts:106` | `useStockAnalysisStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
+| D19 | `src/stores/index.ts:107` | `PortfolioStressResult`、`SimulationScenarioRow`、`SimulationSnapshot`（类型 re-export） | 域特定（barrel） | 同上 | 高 | B8-5 |
 | D20 | `src/types/index.ts:2420` | `export * from "./quant"` | 域特定（barrel） | 同文件 `:2419` 分节注释「=== AxInvest 投资域（stock/quant/pipeline）===」 | 高 | B8-5 |
 | D21 | `src/types/index.ts:2425` | `BacktestResult`（类型 re-export） | 域特定（barrel） | 同文件 `:2421-2424` 注释：`BacktestResult` 与 `stock-analysis` 同名不同义，barrel 权威取 quant 版 | 高 | B8-5 |
 | D22 | `src/types/index.ts:2426` | `export * from "./stock-analysis"` | 域特定（barrel） | 同上 | 高 | B8-5 |

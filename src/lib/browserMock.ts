@@ -6765,7 +6765,7 @@ async function executeCommand<T>(
       } as unknown as T;
     }
 
-    case "opc_list_invoices": {
+    case "opc_list_delivery_invoices": {
       const { status } = (args ?? {}) as { status?: string };
       return (status ? MOCK_INVOICES.filter((i) => i.status === status) : [...MOCK_INVOICES]) as unknown as T;
     }
@@ -6824,7 +6824,7 @@ async function executeCommand<T>(
       return inv as unknown as T;
     }
 
-    case "opc_delete_invoice": {
+    case "opc_delete_delivery_invoice": {
       const invoiceId = readMockReqField<string>(args, "invoiceId");
       const idx = MOCK_INVOICES.findIndex((i) => i.id === invoiceId);
       if (idx >= 0) { MOCK_INVOICES.splice(idx, 1); }

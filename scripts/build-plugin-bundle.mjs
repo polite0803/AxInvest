@@ -545,6 +545,46 @@ function stockManifest({ version, binaryName, sha256 }) {
  * 该功能静默失效（`resolvePluginForCommand` 解析不到插件）。
  * 仍**不写** `pages` / `taskSources` / `uiSchema`：OPC 的页面贡献属后续批。
  */
+
+// 清单命令的智能体面授权档位（`requiredPermission`，见 `PluginCommandManifest`）：
+// **未声明 = 只读档** ⇒ 写命令在智能体面按 `Safe` 暴露（`plugin_command_safety(None)`
+// 的测试锁定），用户确认弹窗形同虚设。写命令名单以宿主
+// `axagent-plugins/crates/plugins/src/worker.rs` 的
+// `required_permission_for(("opc.store", …)) => Write` 为准 —— **两处必须同批改**
+// （那边加一条写 op，这里就要加一条命令）。
+// ⚠ 删除类（delete_blog_post / delete_content_asset / delete_customer / delete_invoice）
+// 的宿主等价命令是 `Dangerous`，但清单标 `danger-full-access` 会被
+// `PluginManager::check_command_gate` 拒（该档要求插件声明 `execute`）；为不扩张插件
+// 权限面，本表一律 `workspace-write`（= Caution）。升 Dangerous 需先裁定 execute 面
+// （插件整体获得该声明），属安全面变更，另立评审。
+const OPC_WRITE_COMMANDS = new Set([
+  "opc_add_milestone",
+  "opc_cancel_publish_schedule",
+  "opc_create_blog_post",
+  "opc_create_content_asset",
+  "opc_create_customer",
+  "opc_create_invoice",
+  "opc_create_landing_page",
+  "opc_create_project",
+  "opc_create_publish_schedule",
+  "opc_delete_blog_post",
+  "opc_delete_content_asset",
+  "opc_delete_customer",
+  "opc_delete_invoice",
+  "opc_process_due_schedules",
+  "opc_publish_blog_post",
+  "opc_transition_invoice",
+  "opc_update_content_asset",
+  "opc_update_customer",
+]);
+
+function withRequiredPermission(commands) {
+  return commands.map((command) => ({
+    ...command,
+    requiredPermission: OPC_WRITE_COMMANDS.has(command.name) ? "workspace-write" : "read-only",
+  }));
+}
+
 function opcManifest({ version, binaryName, sha256 }) {
   return {
     name: "opc",
@@ -566,7 +606,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     worker: { program: path.posix.join("bin", binaryName) },
     // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
     // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` / `COMMAND_PUBLISH_BLOG_POST` 逐字一致。
-    commands: [
+    commands: withRequiredPermission([
       {
         name: "opc_list_blog_posts",
         description: "列出 OPC 博客文章（经宿主 opc.store 接缝取数，不含正文；不传分页则取尽整表）",
@@ -988,7 +1028,7 @@ function opcManifest({ version, binaryName, sha256 }) {
         command: "worker://opc_get_dashboard",
         inputSchema: { type: "object", properties: {} },
       },
-    ],
+    ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

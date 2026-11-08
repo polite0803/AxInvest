@@ -83,10 +83,14 @@ pub async fn opc_create_invoice_from_lead(
         .map_err(err)
 }
 
-/// 发票列表（可按状态过滤）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出发票")]
+/// 交付发票列表（可按状态过滤）
+///
+/// 与插件通道的 `opc_list_invoices`（域包发票，`customer_id` 投影）**同名不同义**，
+/// 故宿主侧改名带 `delivery` 前缀：智能体面重名时宿主优先，不改名会把交付投影
+/// 顶替域包列表的位置；账本只列 `lead_id IS NOT NULL` 的交付来源行。
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出交付发票")]
 #[tauri::command]
-pub async fn opc_list_invoices(
+pub async fn opc_list_delivery_invoices(
     state: State<'_, AppState>,
     status: Option<String>,
 ) -> Result<Vec<DeliveryInvoiceDto>, String> {
@@ -111,10 +115,12 @@ pub async fn opc_update_invoice_status(
         .map_err(err)
 }
 
-/// 删除发票（作废用删除代替 —— 简单账本，不造第二种终态）
-#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除发票")]
+/// 删除交付发票（作废用删除代替 —— 简单账本，不造第二种终态）
+///
+/// 与插件通道 `opc_delete_invoice`（域包发票）同名不同义，宿主侧带 `delivery` 前缀。
+#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除交付发票")]
 #[tauri::command]
-pub async fn opc_delete_invoice(
+pub async fn opc_delete_delivery_invoice(
     state: State<'_, AppState>,
     invoice_id: String,
 ) -> Result<(), String> {

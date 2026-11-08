@@ -331,7 +331,7 @@ export function DemandDiscoveryPage() {
   const loadInvoices = useCallback(async () => {
     try {
       const [rows, summary] = await Promise.all([
-        invoke<DeliveryInvoice[]>("opc_list_invoices"),
+        invoke<DeliveryInvoice[]>("opc_list_delivery_invoices"),
         invoke<DeliverySummary>("opc_get_delivery_summary"),
       ]);
       setInvoices(rows ?? []);
@@ -375,7 +375,7 @@ export function DemandDiscoveryPage() {
   const removeInvoice = useCallback(
     async (inv: DeliveryInvoice) => {
       try {
-        await invoke("opc_delete_invoice", { invoiceId: inv.id });
+        await invoke("opc_delete_delivery_invoice", { invoiceId: inv.id });
         void loadInvoices();
       } catch (e) {
         message.error(t("opc.demand.invoiceFailed", { error: String(e) }));

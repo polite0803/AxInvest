@@ -83,7 +83,13 @@ pub async fn list_invoices(
     db: &DatabaseConnection,
     status: Option<String>,
 ) -> Result<Vec<DeliveryInvoiceDto>> {
-    let mut sel = opc_invoices::Entity::find().order_by_asc(opc_invoices::Column::Id);
+    // 交付账本只列「交付来源」发票：`opc_invoices` 与域包发票（company-runtime
+    // `InvoiceService`）共用同一张表，两套投影字段互斥 —— 交付投影写 `lead_id`/`amount`，
+    // 域包投影写 `customer_id`/`total`。不加这条过滤，交付账本会把域包发票一并列出
+    // （title/lead_id 落空串），`delivery_summary` 的 paid_count 也会虚增。
+    let mut sel = opc_invoices::Entity::find()
+        .filter(opc_invoices::Column::LeadId.is_not_null())
+        .order_by_asc(opc_invoices::Column::Id);
     if let Some(s) = status {
         sel = sel.filter(opc_invoices::Column::Status.eq(s));
     }

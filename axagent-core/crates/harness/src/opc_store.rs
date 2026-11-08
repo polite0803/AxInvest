@@ -1347,11 +1347,21 @@ mod tests {
             status: "paid".into(),
             total: 100.0,
             currency: "CNY".into(),
+            due_at: Some(1_700_000_000),
             created_at: 1,
         };
         expect_keys(
             &serde_json::to_value(&invoice).expect("可序列化"),
-            &["id", "customerId", "invoiceNumber", "status", "total", "currency", "createdAt"],
+            &[
+                "id",
+                "customerId",
+                "invoiceNumber",
+                "status",
+                "total",
+                "currency",
+                "dueAt",
+                "createdAt",
+            ],
         );
 
         let customer = CustomerSummaryView {
@@ -1360,13 +1370,42 @@ mod tests {
             email: "a@b.c".into(),
             phone: None,
             company: Some("ACME".into()),
+            customer_type: "business".into(),
+            country: Some("CN".into()),
+            region: Some("上海".into()),
+            city: Some("上海".into()),
+            address: None,
+            latitude: Some(31.23),
+            longitude: Some(121.47),
+            source: Some("referral".into()),
+            notes: "备注".into(),
             status: "active".into(),
             total_revenue: 10.0,
+            invoice_count: 2,
             created_at: 1,
         };
         expect_keys(
             &serde_json::to_value(&customer).expect("可序列化"),
-            &["id", "name", "email", "phone", "company", "status", "totalRevenue", "createdAt"],
+            &[
+                "id",
+                "name",
+                "email",
+                "phone",
+                "company",
+                "customerType",
+                "country",
+                "region",
+                "city",
+                "address",
+                "latitude",
+                "longitude",
+                "source",
+                "notes",
+                "status",
+                "totalRevenue",
+                "invoiceCount",
+                "createdAt",
+            ],
         );
 
         let project = ProjectSummaryView {

@@ -686,7 +686,7 @@ async fn backfill_performance_mode(
 }
 
 async fn fill_factors_mode(db: &sea_orm::DatabaseConnection, apply: bool) -> Result<(), String> {
-    use axagent_analysis_engine::factors::{FACTOR_VERSION, FactorBar, compute_factors};
+    use axagent_stock_core::factors::{FACTOR_VERSION, FactorBar, compute_factors};
     use sea_orm::{ConnectionTrait, Statement, Value};
     use std::collections::BTreeMap;
 
@@ -886,10 +886,8 @@ async fn fill_replay_outcomes_mode(
     db: &sea_orm::DatabaseConnection,
     apply: bool,
 ) -> Result<(), String> {
-    use axagent_analysis_engine::costs::DEFAULT_ROUND_TRIP_COST_PCT;
-    use axagent_analysis_engine::hit_rate_backtest::{
-        compute_hit_outcome, hit_outcome_to_binary_outcome,
-    };
+    use axagent_stock_core::costs::DEFAULT_ROUND_TRIP_COST_PCT;
+    use axagent_stock_core::hit_outcome::{compute_hit_outcome, hit_outcome_to_binary_outcome};
     use sea_orm::{ConnectionTrait, Statement, Value};
     use std::collections::BTreeMap;
 

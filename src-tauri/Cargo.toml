@@ -158,6 +158,7 @@ axagent-rt-workflow = { version = "3.0.0", path = "../axagent-runtime/crates/rt-
 axagent-runtime = { version = "3.0.0", path = "../axagent-runtime/crates/runtime" }
 axagent-runtime-core = { version = "3.0.0", path = "../axagent-runtime/crates/runtime-core" }
 axagent-search = { version = "3.0.0", path = "../axagent-infra/crates/search" }
+axagent-stock-core = { version = "3.0.0", path = "../axagent-plugins/crates/stock-core" }
 axagent-storage = { version = "3.0.0", path = "../axagent-infra/crates/storage" }
 axagent-telemetry = { version = "3.0.0", path = "../axagent-infra/crates/telemetry" }
 axagent-tools = { version = "3.0.0", path = "../axagent-runtime/crates/tools" }

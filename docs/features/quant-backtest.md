@@ -114,12 +114,12 @@ Agent 模块清单见 `axagent-quant/crates/market-sim/src/agent/mod.rs:3-12`，
 
 ### 因子信号契约
 
-权威定义在 `axagent-quant/crates/analysis-engine/src/factors.rs`：
+权威定义在 `axagent-plugins/crates/stock-core/src/factors.rs`（2026-11-08 随 #35 首刀整文件迁入 foundation 层 `axagent-stock-core`；`analysis-engine` 保留路径级 re-export，旧路径 `axagent_analysis_engine::factors::…` 不变）：
 
-- 版本号：`FACTOR_VERSION = 1.0`，见 `axagent-quant/crates/analysis-engine/src/factors.rs:36`。
+- 版本号：`FACTOR_VERSION = 1.0`，见 `axagent-plugins/crates/stock-core/src/factors.rs:36`。
 - 窗口：`WINDOW = 20`，见 `:39`；最少 bar 数：`MIN_BARS = 21`（`rev20` 需要 n 与 n-21 两根，见 `:41-46`）。
 - 四个因子字段：`chg1`（`:63`）、`dist_lo20`（`:65`）、`rev20`（`:67`）、`posshare20`（`:69`）。
-- 序列化输出：四个因子 + `factor_version` 共 5 个键，见 `axagent-quant/crates/analysis-engine/src/factors.rs:79-83`。
+- 序列化输出：四个因子 + `factor_version` 共 5 个键，见 `axagent-plugins/crates/stock-core/src/factors.rs:79-83`。
 
 （对应版本：v2.9.9，`AUDIT-f-factor-signal-contract-2026-09-23.md`）
 
@@ -139,7 +139,7 @@ Agent 模块清单见 `axagent-quant/crates/market-sim/src/agent/mod.rs:3-12`，
 - 仿真配置：`axagent-quant/crates/market-sim/src/config.rs`
 - Agent 集合：`axagent-quant/crates/market-sim/src/agent/mod.rs`
 - Oracle：`axagent-quant/crates/market-sim/src/oracle.rs`
-- 因子契约：`axagent-quant/crates/analysis-engine/src/factors.rs`
+- 因子契约：`axagent-plugins/crates/stock-core/src/factors.rs`
 
 **前端**
 
@@ -154,7 +154,7 @@ Agent 模块清单见 `axagent-quant/crates/market-sim/src/agent/mod.rs:3-12`，
 - **仿真配置**：`SimConfig` 全字段与默认值见 `axagent-quant/crates/market-sim/src/config.rs:11-42`；`LatencyMatrix` 支持「精确 Agent 对 → 类型对 → 默认延迟」三级回退（同文件 `:44-97`）。
 - **回测参数**：由命令 DTO 传入（`src-tauri/src/commands/quant_backtest.rs:1-80`），包含策略脚本、区间、初始资金等。
 - **策略注册**：`quant_strategy_register_rhai`（`src-tauri/src/commands/quant_backtest.rs:491`）在运行时注册 Rhai 策略。
-- **因子版本开关**：`factor_version` 随因子快照落库，用于区分不同版本的 IC 统计（`axagent-quant/crates/analysis-engine/src/factors.rs:83`）。
+- **因子版本开关**：`factor_version` 随因子快照落库，用于区分不同版本的 IC 统计（`axagent-plugins/crates/stock-core/src/factors.rs:83`）。
 - 无独立 feature flag：模块按 crate 编译期存在。
 
 ## 已知限制与坑

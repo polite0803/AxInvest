@@ -36,7 +36,7 @@
 //
 // 强制复用：`scripts/lib/command-domains.mjs` 的 REG_PATH / parseRegistry / domainOf / unassigned
 //   （AGENTS.md 禁区 12 —— 注册表解析规则全仓唯一，禁止另写第二套正则）。
-//   边界口径的 DOMAINS（cmdRe/feRe/useRe/ownedRe）**逐字抄自** `scripts/audit-l1-blockers.mjs:48-63`
+//   边界口径的 DOMAINS（cmdRe/feRe/useRe/ownedRe）**逐字抄自** `scripts/audit-l1-blockers.mjs:64-79`
 //   —— 该审计脚本不导出符号且禁改，抄录是本门与其唯一合法的同步点；改那边正则必须同改这里。
 //
 // 扫描面（按 sources.scanSurface 显式选边；**一次目录遍历 + 内容按需缓存**，否则共享目录上不可用）：
@@ -250,13 +250,15 @@ const ANCHOR_CHECK_KINDS_DECLARED = [
   "k1DeclaredExternalImplTraitCount", // #61：K1 + **有声明面**的外部实现者 trait 数（两趟法，与 audit 脚本 scanK1Traits 同源）
 ];
 
-// DOMAINS 逐字抄自 scripts/audit-l1-blockers.mjs:48-63（152/28 与 293/84 873 的基线出处）
+// DOMAINS 逐字抄自 scripts/audit-l1-blockers.mjs:64-79（152/28 与 293/84 873 的基线出处）
 // ⚠ B9-1 起 STOCK.ownedRe 增加插件侧路径（`plugin-stock` / `stock-core` = 迁出目的地，
 //   不是主壳）；两份必须同改，否则本门与审计脚本的 foreign 读数会分叉。
+// ⚠ 2026-11-08：`stock-core` 同时进 `crates` / `useRe` —— 它是插件内 foundation，不是宿主
+//   共享契约层；宿主直连它仍是「编译期链接股票业务代码」的阻塞。漏登记会让搬家凭空降数。
 const DOMAINS = {
   STOCK: {
-    crates: ["axagent-astock-data", "axagent-analysis-engine", "axagent-quant", "axagent-market-sim"],
-    useRe: /axagent_(astock_data|analysis_engine|quant|market_sim)::/,
+    crates: ["axagent-astock-data", "axagent-analysis-engine", "axagent-quant", "axagent-market-sim", "axagent-stock-core"],
+    useRe: /axagent_(astock_data|analysis_engine|quant|market_sim|stock_core)::/,
     ownedRe: /^src-tauri\/src\/(commands|init|bin)\/(stock|market_|backtest|quant|pool_scan|universe_scan|time_travel|paper|trade|conditional_order|price_alert|analyst|recommendation_cron|mover_recall|limit_up|signal|reco|wf_des)|^axagent-plugins\/crates\/(plugin-stock|stock-core)\//,
     feRe: /stock|quote|kline|technical|portfolio|trading|advis|invest|quant|market/i,
     cmdRe: /^(stock|quote|kline|quant|backtest|portfolio|market_|pool|universe|reco|signal|north|margin|dragon|limit_up|time_travel|advis|paper|trade|conditional_order|price_alert|analyst|fundamental|techn|wf_des)/,

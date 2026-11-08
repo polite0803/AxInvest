@@ -10,7 +10,7 @@
 
 | 项 | 值 |
 |---|---|
-| 判据来源 | `scripts/audit-l1-blockers.mjs:56` 的 `feRe = /stock\|quote\|kline\|technical\|portfolio\|trading\|advis\|invest\|quant\|market/i`，按**文件路径名**判域归属，「非域文件 import 域文件」计 1 处 |
+| 判据来源 | `scripts/audit-l1-blockers.mjs:69` 的 `feRe = /stock\|quote\|kline\|technical\|portfolio\|trading\|advis\|invest\|quant\|market/i`，按**文件路径名**判域归属，「非域文件 import 域文件」计 1 处 |
 | 本次命令 | `node scripts/audit-l1-blockers.mjs` |
 | 快照落点（脚本正常副作用，未删未提交） | `docs/audits/AUDIT-l1-blockers-2026-11-05-1126.md` |
 | 前端股票反向阻塞 | **51 处 / 37 文件**（与任务给的数一致） |

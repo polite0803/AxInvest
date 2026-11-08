@@ -56,10 +56,15 @@ const sum = (a) => a.reduce((x, r) => x + r.n, 0);
 // ⚠ 插件侧是**迁出目的地**，不是主壳：`plugin-stock` / `stock-core` 随插件产物整体发布，
 //   它们引用域 crate 是预期方向（B9-1 起 worker 直接链接 analysis-engine 跑权威实现）。
 //   宿主侧运行时 `axagent-plugins/crates/plugins` 仍是主壳，照旧计入 foreign。
+// ⚠ `stock-core` **也是域 crate**（迁出目的地 = 插件内 foundation，不是宿主共享契约层）：
+//   宿主文件直连它，等于宿主仍在编译期链接股票业务代码 ⇒ 与直连 analysis-engine 同等计入。
+//   漏登记它会让「把代码从 analysis-engine 挪进 stock-core」凭空降数（2026-11-08 实测：
+//   `bin/axagent-validate-backfill.rs` 3 处会静默消失）⇒ 改 `crates`/`useRe` 必须与
+//   `check-capability-register.mjs` 的 DOMAINS 同批（那里逐字抄本表）。
 const DOMAINS = {
   STOCK: {
-    crates: ['axagent-astock-data', 'axagent-analysis-engine', 'axagent-quant', 'axagent-market-sim'],
-    useRe: /axagent_(astock_data|analysis_engine|quant|market_sim)::/,
+    crates: ['axagent-astock-data', 'axagent-analysis-engine', 'axagent-quant', 'axagent-market-sim', 'axagent-stock-core'],
+    useRe: /axagent_(astock_data|analysis_engine|quant|market_sim|stock_core)::/,
     ownedRe: /^src-tauri\/src\/(commands|init|bin)\/(stock|market_|backtest|quant|pool_scan|universe_scan|time_travel|paper|trade|conditional_order|price_alert|analyst|recommendation_cron|mover_recall|limit_up|signal|reco|wf_des)|^axagent-plugins\/crates\/(plugin-stock|stock-core)\//,
     feRe: /stock|quote|kline|technical|portfolio|trading|advis|invest|quant|market/i,
     cmdRe: /^(stock|quote|kline|quant|backtest|portfolio|market_|pool|universe|reco|signal|north|margin|dragon|limit_up|time_travel|advis|paper|trade|conditional_order|price_alert|analyst|fundamental|techn|wf_des)/,

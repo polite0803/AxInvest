@@ -57,13 +57,16 @@ pub use theme_resolver::{
 };
 pub mod conditional_order;
 pub mod conditional_order_bridge;
-// 交易成本口径的**唯一来源**（佣金/印花税/滑点）—— 命中率链与回测链共用，
-// 禁止在别处再手抄成本常数（2026-10-25 G4 修复，见 `costs` 模块文档）。
-pub mod costs;
-// 决策时刻因子计算的**唯一来源**（`chg1` / `dist_lo20` / `rev20` / `posshare20`）。
-// 纯函数、不做截断 —— 调用方必须传入已截止到决策日的序列（见模块文档的「前视偏差防线」）。
-// 2026-10-25 B-3/F-1：此前 `factor_snapshot` 恒为 None，1,149 行判定样本零因子。
-pub mod factors;
+// 交易成本口径（佣金/印花税/滑点）与决策时刻因子计算（`chg1` / `dist_lo20` / `rev20` /
+// `posshare20`）的**唯一权威**已下沉到 foundation 层 `axagent-stock-core`（纯函数、零 IO、
+// 零 `axagent-*` 依赖），2026-11-08 整文件迁出。此处**路径级 re-export** 保留
+// `crate::costs::…` / `crate::factors::…` 与 `axagent_analysis_engine::costs::…` /
+// `::factors::…` 全部旧路径，消费端零改动；任何地方都不得再立第二份定义（禁区 12）。
+// ⚠ 与上方 `intent_parser` 的处置不同：本 crate 的回测链（`backtest.rs`）与命中率链
+// （`net_return_pct(_default)`）**自己就在用**这两个模块 ⇒ 这是真实依赖，
+// 不是给宿主保留的「借道」后门；宿主本轮已改为直连 `axagent-stock-core`。
+pub use axagent_stock_core::costs;
+pub use axagent_stock_core::factors;
 // P3-1: 跨股票信号聚合器 — 在 signals.rs（单股）和 portfolio_monitor.rs（持仓指标）之间填补信号聚合层
 pub mod cross_stock_aggregator;
 // P3-2: 板块联动分析 — 基于 ConceptIndex 识别同板块龙头-从属传导模式

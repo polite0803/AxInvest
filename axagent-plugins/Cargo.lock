@@ -573,6 +573,7 @@ dependencies = [
  "axagent-dao",
  "axagent-entities",
  "axagent-harness",
+ "axagent-stock-core",
  "axagent-trajectory",
  "chrono",
  "csv",

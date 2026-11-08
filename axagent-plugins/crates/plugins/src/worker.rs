@@ -475,8 +475,9 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
         ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
         // `opc.store` 的写 op 一律要 `write`：blog 三件（发布 / 删除 / 创建）+ #36 批 2 的
-        // 四条 id·枚举写 op（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）——
-        // 全都改库，删除类还**不可逆**。读 op **必须仍是 `None`**（给读缝加闸会把只读插件
+        // 四条 id·枚举写 op（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）+
+        // #36 批 3 的八条创建 / 流程写 op —— 全都改库，删除类还**不可逆**。读 op
+        // （八个列表 + `get_financial_report`）**必须仍是 `None`**（给读缝加闸会把只读插件
         // 无端拒掉）。
         (
             "opc.store",
@@ -486,7 +487,15 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "transition_invoice"
             | "update_content_asset"
             | "delete_content_asset"
-            | "cancel_publish_schedule",
+            | "cancel_publish_schedule"
+            | "create_invoice"
+            | "create_customer"
+            | "create_project"
+            | "add_milestone"
+            | "create_landing_page"
+            | "create_content_asset"
+            | "create_publish_schedule"
+            | "process_due_schedules",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -2939,6 +2948,160 @@ impl HostPeer {
                 };
                 match result {
                     Ok(outcome) => to_value("RemovePublishScheduleOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #36 批 3：创建 / 流程动作（八个写 op + 一条读 op）──
+            //
+            // 入参一律是**嵌一层**的 `{"request": {…}}`（契约写 DTO，camelCase +
+            // `default`）；出参是创建后的列裁剪视图 / 视图数组，逐字透传。
+            // 缺省值与语义闸都在 provider（本层只反序列化契约 DTO）。
+            "opc.store" if op == "create_invoice" => {
+                let request: axagent_harness::CreateInvoiceRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_invoice(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("InvoiceSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_customer" => {
+                let request: axagent_harness::CreateCustomerRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_customer(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("CustomerSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_project" => {
+                let request: axagent_harness::CreateProjectRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_project(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("ProjectSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "add_milestone" => {
+                let request: axagent_harness::AddMilestoneRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.add_milestone(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("ProjectSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_landing_page" => {
+                let request: axagent_harness::CreateLandingPageRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_landing_page(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("LandingPageSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 报表是**读** op：标量入参 `period`（不套 `request` 壳，同 `list_blog_posts`
+            // 的 `limit` / `offset`），不设权限闸。
+            "opc.store" if op == "get_financial_report" => {
+                let period: String = match deserialize_arg(&args, "period", seam) {
+                    Ok(period) => period,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_financial_report(period)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("FinancialReportView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_content_asset" => {
+                let request: axagent_harness::CreateContentAssetRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_content_asset(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("ContentAssetSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_publish_schedule" => {
+                let request: axagent_harness::CreatePublishScheduleRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_publish_schedule(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("PublishScheduleSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "process_due_schedules" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.process_due_schedules()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<PublishScheduleSummaryView>", &rows),
                     Err(e) => seam_provider_error(e),
                 }
             },

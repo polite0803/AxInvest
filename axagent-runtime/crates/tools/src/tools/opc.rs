@@ -220,61 +220,51 @@ impl Tool for OpcCreateInvoiceTool {
         false
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultInvoiceService;
-        use axagent_company_runtime::opc::{CreateInvoiceInput, InvoiceLineItem, InvoiceService};
-
-        let db = get_db()?;
-        let svc = DefaultInvoiceService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_create_invoice`）。行项目的缺省值（数量 1 /
+        // 单价 0 / 税率 0）与行金额现算 `quantity × unitPrice × (1 + taxRate)` 全在宿主
+        // provider —— 本进程不再链接 `axagent_company_runtime`，也不再抄一遍算式。
+        const COMMAND: &str = "opc_create_invoice";
         let customer_id = input
             .get("customer_id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_input("缺少必需参数: customer_id"))?
-            .to_string();
-
+            .ok_or_else(|| ToolError::invalid_input("缺少必需参数: customer_id"))?;
         let line_items = input
             .get("line_items")
             .and_then(|v| v.as_array())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: line_items"))?
             .iter()
             .map(|item| {
-                let qty = item.get("quantity").and_then(|v| v.as_f64()).unwrap_or(1.0);
-                let price = item.get("unit_price").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let tax = item.get("tax_rate").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let total = qty * price * (1.0 + tax);
-                InvoiceLineItem {
-                    description: item
-                        .get("description")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    quantity: qty,
-                    unit_price: price,
-                    tax_rate: tax,
-                    total,
-                }
+                filter_request(
+                    item,
+                    &[
+                        ("description", "description"),
+                        ("quantity", "quantity"),
+                        ("unit_price", "unitPrice"),
+                        ("tax_rate", "taxRate"),
+                    ],
+                )
             })
             .collect::<Vec<_>>();
-
-        let input = CreateInvoiceInput {
-            customer_id,
-            line_items,
-            currency: input.get("currency").and_then(|v| v.as_str()).unwrap_or("CNY").to_string(),
-            due_at: input.get("due_at").and_then(|v| v.as_i64()),
-            notes: input.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        };
-
-        match svc.create_invoice(input).await {
-            Ok(inv) => Ok(ToolResult::success(format!(
-                "## 发票创建成功\n\n- **编号**: {}\n- **金额**: ¥{:.2}\n- **状态**: {}\n- **ID**: `{}`\n\n可使用 `OpcTransitionInvoice` 更改状态。",
-                inv.invoice_number,
-                inv.total,
-                inv.status.as_str(),
-                inv.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建发票失败: {e}"))),
+        let mut payload = filter_request(
+            &input,
+            &[("currency", "currency"), ("due_at", "dueAt"), ("notes", "notes")],
+        );
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("customerId".to_string(), json!(customer_id));
+            map.insert("lineItems".to_string(), Value::Array(line_items));
         }
+
+        let invoice = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("创建发票失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 发票创建成功\n\n- **编号**: {}\n- **金额**: ¥{:.2}\n- **状态**: {}\n- **ID**: `{}`\n\n可使用 `OpcTransitionInvoice` 更改状态。",
+            json_str(&invoice, "invoiceNumber"),
+            json_f64(&invoice, "total"),
+            json_str(&invoice, "status"),
+            json_str(&invoice, "id"),
+        )))
     }
 }
 
@@ -460,15 +450,11 @@ impl Tool for OpcCreateCustomerTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultCustomerService;
-        use axagent_company_runtime::opc::{
-            CreateCustomerInput, CustomerService, CustomerSource, CustomerType,
-        };
-
-        let db = get_db()?;
-        let svc = DefaultCustomerService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_create_customer`）。`source` / `customer_type`
+        // 的枚举映射（未知值落 `Other(原串)` / `Unknown`）在宿主 provider —— 本进程只做
+        // 键名适配（工具入参沿用 snake_case，命令面线格式是 camelCase）。
+        const COMMAND: &str = "opc_create_customer";
         let name = input
             .get("name")
             .and_then(|v| v.as_str())
@@ -478,52 +464,37 @@ impl Tool for OpcCreateCustomerTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: email"))?;
 
-        let source = input.get("source").and_then(|v| v.as_str()).map(|s| match s {
-            "Referral" => CustomerSource::Referral,
-            "Website" => CustomerSource::Website,
-            "SocialMedia" => CustomerSource::SocialMedia,
-            "Marketplace" => CustomerSource::Marketplace,
-            "Direct" => CustomerSource::Direct,
-            other => CustomerSource::Other(other.to_string()),
-        });
-        let customer_type = input
-            .get("customer_type")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_lowercase())
-            .map(|s| match s.as_str() {
-                "consumer" => CustomerType::Consumer,
-                "business" => CustomerType::Business,
-                _ => CustomerType::Unknown,
-            })
-            .unwrap_or(CustomerType::Unknown);
-
-        let inp = CreateCustomerInput {
-            name: name.to_string(),
-            email: email.to_string(),
-            phone: input.get("phone").and_then(|v| v.as_str()).map(String::from),
-            company: input.get("company").and_then(|v| v.as_str()).map(String::from),
-            customer_type,
-            country: input.get("country").and_then(|v| v.as_str()).map(String::from),
-            region: input.get("region").and_then(|v| v.as_str()).map(String::from),
-            city: input.get("city").and_then(|v| v.as_str()).map(String::from),
-            address: input.get("address").and_then(|v| v.as_str()).map(String::from),
-            latitude: input.get("latitude").and_then(|v| v.as_f64()),
-            longitude: input.get("longitude").and_then(|v| v.as_f64()),
-            source,
-            tags: Vec::new(),
-            notes: input.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        };
-
-        match svc.create_customer(inp).await {
-            Ok(c) => Ok(ToolResult::success(format!(
-                "## 客户创建成功\n\n- **姓名**: {}\n- **邮箱**: {}\n- **状态**: {}\n- **ID**: `{}`",
-                c.name,
-                c.email,
-                c.status.as_str(),
-                c.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建客户失败: {e}"))),
+        let mut payload = filter_request(
+            &input,
+            &[
+                ("phone", "phone"),
+                ("company", "company"),
+                ("customer_type", "customerType"),
+                ("country", "country"),
+                ("region", "region"),
+                ("city", "city"),
+                ("address", "address"),
+                ("latitude", "latitude"),
+                ("longitude", "longitude"),
+                ("source", "source"),
+                ("notes", "notes"),
+            ],
+        );
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("name".to_string(), json!(name));
+            map.insert("email".to_string(), json!(email));
         }
+
+        let customer = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("创建客户失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 客户创建成功\n\n- **姓名**: {}\n- **邮箱**: {}\n- **状态**: {}\n- **ID**: `{}`",
+            json_str(&customer, "name"),
+            json_str(&customer, "email"),
+            json_str(&customer, "status"),
+            json_str(&customer, "id"),
+        )))
     }
 }
 
@@ -648,41 +619,38 @@ impl Tool for OpcCreateProjectTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultProjectService;
-        use axagent_company_runtime::opc::{CreateProjectInput, ProjectService};
-
-        let db = get_db()?;
-        let svc = DefaultProjectService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_create_project`）。缺省补值（描述空串 /
+        // 货币 CNY / 备注空串）在宿主 provider —— 本进程只做键名适配。
+        const COMMAND: &str = "opc_create_project";
         let title = input
             .get("title")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: title"))?;
-
-        let inp = CreateProjectInput {
-            customer_id: input.get("customer_id").and_then(|v| v.as_str()).map(String::from),
-            title: title.to_string(),
-            description: input
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            budget: input.get("budget").and_then(|v| v.as_f64()),
-            currency: input.get("currency").and_then(|v| v.as_str()).unwrap_or("CNY").to_string(),
-            deadline: input.get("deadline").and_then(|v| v.as_i64()),
-            notes: input.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        };
-
-        match svc.create_project(inp).await {
-            Ok(p) => Ok(ToolResult::success(format!(
-                "## 项目创建成功\n\n- **标题**: {}\n- **状态**: {}\n- **ID**: `{}`\n\n可使用 `OpcAddMilestone` 添加里程碑。",
-                p.title,
-                p.status.as_str(),
-                p.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建项目失败: {e}"))),
+        let mut payload = filter_request(
+            &input,
+            &[
+                ("customer_id", "customerId"),
+                ("description", "description"),
+                ("budget", "budget"),
+                ("currency", "currency"),
+                ("deadline", "deadline"),
+                ("notes", "notes"),
+            ],
+        );
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("title".to_string(), json!(title));
         }
+
+        let project = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("创建项目失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 项目创建成功\n\n- **标题**: {}\n- **状态**: {}\n- **ID**: `{}`\n\n可使用 `OpcAddMilestone` 添加里程碑。",
+            json_str(&project, "title"),
+            json_str(&project, "status"),
+            json_str(&project, "id"),
+        )))
     }
 }
 
@@ -715,13 +683,10 @@ impl Tool for OpcAddMilestoneTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultProjectService;
-        use axagent_company_runtime::opc::{Milestone, MilestoneStatus, ProjectService};
-
-        let db = get_db()?;
-        let svc = DefaultProjectService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_add_milestone`）。里程碑 id 生成与初始状态
+        // （`Pending`）在宿主 provider —— 本进程只传用户给的四个字段。
+        const COMMAND: &str = "opc_add_milestone";
         let project_id = input
             .get("project_id")
             .and_then(|v| v.as_str())
@@ -730,28 +695,21 @@ impl Tool for OpcAddMilestoneTool {
             .get("title")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: title"))?;
-
-        let milestone = Milestone {
-            id: axagent_harness::util_fns::gen_id(),
-            title: title.to_string(),
-            description: input
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            due_at: input.get("due_at").and_then(|v| v.as_i64()),
-            completed_at: None,
-            status: MilestoneStatus::Pending,
-        };
-
-        match svc.add_milestone(project_id, milestone).await {
-            Ok(p) => Ok(ToolResult::success(format!(
-                "## 里程碑已添加\n\n- **项目**: {}\n- **里程碑数**: {}\n\n可使用 `OpcCompleteMilestone` 标记完成。",
-                p.title,
-                p.milestones.len(),
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("添加里程碑失败: {e}"))),
+        let mut payload =
+            filter_request(&input, &[("description", "description"), ("due_at", "dueAt")]);
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("projectId".to_string(), json!(project_id));
+            map.insert("title".to_string(), json!(title));
         }
+
+        let project = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("添加里程碑失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 里程碑已添加\n\n- **项目**: {}\n- **里程碑数**: {}\n\n可使用 `OpcCompleteMilestone` 标记完成。",
+            json_str(&project, "title"),
+            json_u64(&project, "milestoneTotal"),
+        )))
     }
 }
 
@@ -1033,13 +991,9 @@ impl Tool for OpcCreateLandingPageTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultSiteService;
-        use axagent_company_runtime::opc::{CreateLandingPageInput, SiteService};
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_create_landing_page`）。
+        const COMMAND: &str = "opc_create_landing_page";
         let title = input
             .get("title")
             .and_then(|v| v.as_str())
@@ -1052,25 +1006,22 @@ impl Tool for OpcCreateLandingPageTool {
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: content"))?;
-
-        let inp = CreateLandingPageInput {
-            title: title.to_string(),
-            slug: slug.to_string(),
-            description: input
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            content: content.to_string(),
-        };
-
-        match svc.create_landing_page(inp).await {
-            Ok(lp) => Ok(ToolResult::success(format!(
-                "## 落地页创建成功\n\n- **标题**: {}\n- **Slug**: `{}`\n- **状态**: 📝 草稿\n- **ID**: `{}`",
-                lp.title, lp.slug, lp.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建落地页失败: {e}"))),
+        let mut payload = filter_request(&input, &[("description", "description")]);
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("title".to_string(), json!(title));
+            map.insert("slug".to_string(), json!(slug));
+            map.insert("content".to_string(), json!(content));
         }
+
+        let page = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("创建落地页失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 落地页创建成功\n\n- **标题**: {}\n- **Slug**: `{}`\n- **状态**: 📝 草稿\n- **ID**: `{}`",
+            json_str(&page, "title"),
+            json_str(&page, "slug"),
+            json_str(&page, "id"),
+        )))
     }
 }
 
@@ -1405,22 +1356,20 @@ impl Tool for OpcGetFinancialReportTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::DefaultFinanceService;
-        use axagent_company_runtime::opc::FinanceService;
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：报表与投资建议由宿主 `get_financial_report` op 成对取数并拼成一份视图
+        //（分两个 op 只会多一次帧往返）—— 本进程只排版，不再链接 `DefaultFinanceService`。
+        const COMMAND: &str = "opc_get_financial_report";
         let period = input
             .get("period")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少 period"))?;
 
-        let db = get_db()?;
-        let svc = DefaultFinanceService::new((*db).clone());
-        match svc.get_financial_report(period).await {
-            Ok(rpt) => {
-                let advice = svc.get_investment_advice(&rpt).await;
-                Ok(ToolResult::success(format!(
-                    r#"## 📊 OPC 财务报表: {}
+        let report = call_opc_command(ctx, COMMAND, json!({ "period": period }))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("生成财务报表失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            r#"## 📊 OPC 财务报表: {}
 
 | 指标 | 数值 |
 |------|------|
@@ -1439,23 +1388,20 @@ impl Tool for OpcGetFinancialReportTool {
 - **风险等级**: {}
 - **建议金额**: ¥{:.2}
 - **建议**: {}"#,
-                    rpt.period,
-                    rpt.total_revenue,
-                    rpt.pending_revenue,
-                    rpt.refunded_amount,
-                    rpt.net_profit,
-                    rpt.investable_amount,
-                    rpt.pretax_revenue,
-                    rpt.active_projects,
-                    rpt.new_customers,
-                    rpt.churned_customers,
-                    advice.risk_level,
-                    advice.recommended_amount,
-                    advice.advice,
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("生成财务报表失败: {e}"))),
-        }
+            json_str(&report, "period"),
+            json_f64(&report, "totalRevenue"),
+            json_f64(&report, "pendingRevenue"),
+            json_f64(&report, "refundedAmount"),
+            json_f64(&report, "netProfit"),
+            json_f64(&report, "investableAmount"),
+            json_f64(&report, "pretaxRevenue"),
+            json_u64(&report, "activeProjects"),
+            json_u64(&report, "newCustomers"),
+            json_u64(&report, "churnedCustomers"),
+            json_str(&report, "riskLevel"),
+            json_f64(&report, "recommendedAmount"),
+            json_str(&report, "advice"),
+        )))
     }
 }
 
@@ -1500,14 +1446,10 @@ impl Tool for OpcCreateContentAssetTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{
-            ContentAssetService, CreateContentAssetInput, DefaultSiteService,
-        };
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_create_content_asset`）。工具入参沿用
+        // `content_type`，命令面线格式是 `contentType`（禁区 13）。
+        const COMMAND: &str = "opc_create_content_asset";
         let title = input
             .get("title")
             .and_then(|v| v.as_str())
@@ -1520,27 +1462,22 @@ impl Tool for OpcCreateContentAssetTool {
             .get("body")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: body"))?;
-
-        let tags = input
-            .get("tags")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            .unwrap_or_default();
-
-        let inp = CreateContentAssetInput {
-            title: title.to_string(),
-            content_type: content_type.to_string(),
-            body: body.to_string(),
-            tags,
-        };
-
-        match svc.create_content_asset(inp).await {
-            Ok(asset) => Ok(ToolResult::success(format!(
-                "## 内容资产创建成功\n\n- **标题**: {}\n- **类型**: {}\n- **状态**: 📝 草稿\n- **ID**: `{}`",
-                asset.title, asset.content_type, asset.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建内容资产失败: {e}"))),
+        let mut payload = filter_request(&input, &[("tags", "tags")]);
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("title".to_string(), json!(title));
+            map.insert("contentType".to_string(), json!(content_type));
+            map.insert("body".to_string(), json!(body));
         }
+
+        let asset = call_opc_command(ctx, COMMAND, payload)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("创建内容资产失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 内容资产创建成功\n\n- **标题**: {}\n- **类型**: {}\n- **状态**: 📝 草稿\n- **ID**: `{}`",
+            json_str(&asset, "title"),
+            json_str(&asset, "contentType"),
+            json_str(&asset, "id"),
+        )))
     }
 }
 
@@ -1772,14 +1709,10 @@ impl Tool for OpcCreatePublishScheduleTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{
-            CreatePublishScheduleInput, DefaultSiteService, PublishScheduleService,
-        };
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_create_publish_schedule`）。`content_ref_id`
+        // 是**被发布内容**的主键（博客 / 内容资产 id），不是发布计划自己的 id（#180 的教训）。
+        const COMMAND: &str = "opc_create_publish_schedule";
         let content_ref_type = input
             .get("content_ref_type")
             .and_then(|v| v.as_str())
@@ -1793,23 +1726,23 @@ impl Tool for OpcCreatePublishScheduleTool {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| ToolError::invalid_input("缺少必需参数: scheduled_at"))?;
 
-        let inp = CreatePublishScheduleInput {
-            content_ref_type: content_ref_type.to_string(),
-            content_ref_id: content_ref_id.to_string(),
-            scheduled_at,
-        };
-
-        match svc.create_publish_schedule(inp).await {
-            Ok(schedule) => Ok(ToolResult::success(format!(
-                "## 发布计划创建成功\n\n- **类型**: {}\n- **计划时间**: {}\n- **状态**: 📋 待发布\n- **ID**: `{}`",
-                schedule.content_ref_type,
-                chrono::DateTime::from_timestamp(schedule.scheduled_at, 0)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                    .unwrap_or_default(),
-                schedule.id,
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("创建发布计划失败: {e}"))),
-        }
+        let schedule = call_opc_command(
+            ctx,
+            COMMAND,
+            json!({
+                "contentRefType": content_ref_type,
+                "contentRefId": content_ref_id,
+                "scheduledAt": scheduled_at,
+            }),
+        )
+        .await
+        .map_err(|e| ToolError::execution_failed(format!("创建发布计划失败: {e}")))?;
+        Ok(ToolResult::success(format!(
+            "## 发布计划创建成功\n\n- **类型**: {}\n- **计划时间**: {}\n- **状态**: 📋 待发布\n- **ID**: `{}`",
+            json_str(&schedule, "contentRefType"),
+            json_date(&schedule, "scheduledAt", "%Y-%m-%d %H:%M"),
+            json_str(&schedule, "id"),
+        )))
     }
 }
 
@@ -1943,40 +1876,37 @@ impl Tool for OpcProcessDueSchedulesTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_company_runtime::opc::{DefaultSiteService, PublishScheduleService};
-
-        let db = get_db()?;
-        let svc = DefaultSiteService::new((*db).clone());
-
-        match svc.process_due_schedules().await {
-            Ok(results) => {
-                if results.is_empty() {
-                    return Ok(ToolResult::success("## 处理发布计划\n\n暂无到期的发布计划。"));
-                }
-                let lines: Vec<String> = results
-                    .iter()
-                    .map(|s| {
-                        format!(
-                            "- **{}** | {} | {}",
-                            s.content_ref_type,
-                            s.content_ref_id,
-                            if s.status == "published" {
-                                "✅ 发布成功"
-                            } else {
-                                "❌ 发布失败"
-                            },
-                        )
-                    })
-                    .collect();
-                Ok(ToolResult::success(format!(
-                    "## 处理发布计划 ({} 个)\n\n{}",
-                    results.len(),
-                    lines.join("\n")
-                )))
-            },
-            Err(e) => Err(ToolError::execution_failed(format!("处理发布计划失败: {e}"))),
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // #36 批 3：写面走插件命名命令（`opc_process_due_schedules`），出参是本次处理过的
+        // 行视图数组；空数组 = 「没有到期计划」，不是错误。
+        const COMMAND: &str = "opc_process_due_schedules";
+        let results = call_opc_command(ctx, COMMAND, json!({}))
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("处理发布计划失败: {e}")))?;
+        let rows = rows_of(results);
+        if rows.is_empty() {
+            return Ok(ToolResult::success("## 处理发布计划\n\n暂无到期的发布计划。"));
         }
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|s| {
+                format!(
+                    "- **{}** | {} | {}",
+                    json_str(s, "contentRefType"),
+                    json_str(s, "contentRefId"),
+                    if json_str(s, "status") == "published" {
+                        "✅ 发布成功"
+                    } else {
+                        "❌ 发布失败"
+                    },
+                )
+            })
+            .collect();
+        Ok(ToolResult::success(format!(
+            "## 处理发布计划 ({} 个)\n\n{}",
+            rows.len(),
+            lines.join("\n")
+        )))
     }
 }
 

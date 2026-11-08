@@ -397,10 +397,12 @@ pub use analysis_record::{
 // 后续 op（落地页 / 联系提交 / 排期）留的同一条接缝，不再一表一条。
 pub mod opc_store;
 pub use opc_store::{
-    BlogPostListOutcome, BlogPostView, ContactSummaryView, ContentAssetSummaryView,
-    CreateBlogPostInput, CustomerListQuery, CustomerSummaryView, InvoiceListQuery,
-    InvoiceSummaryView, KpiListQuery, KpiSummaryView, LandingPageSummaryView,
-    OPC_BLOG_POST_CONTENT_MAX_BYTES, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
+    AddMilestoneRequest, BlogPostListOutcome, BlogPostView, ContactSummaryView,
+    ContentAssetSummaryView, CreateBlogPostInput, CreateContentAssetRequest, CreateCustomerRequest,
+    CreateInvoiceRequest, CreateLandingPageRequest, CreateProjectRequest,
+    CreatePublishScheduleRequest, CustomerListQuery, CustomerSummaryView, FinancialReportView,
+    InvoiceLineItemInput, InvoiceListQuery, InvoiceSummaryView, KpiListQuery, KpiSummaryView,
+    LandingPageSummaryView, OPC_BLOG_POST_CONTENT_MAX_BYTES, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
     OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, ProjectListQuery, ProjectSummaryView,
     PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome,
     RemoveContentAssetOutcome, RemovePublishScheduleOutcome, TransitionInvoiceOutcome,

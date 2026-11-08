@@ -1049,3 +1049,336 @@ fn command_frame_batch2_writes_go_through_host_seam() {
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
 }
+
+/// #36 批 3 的单次往返：发命令 → 取出站帧 → 校验 seam / op → 回固定 payload → 校验逐字透传。
+///
+/// 返回出站 `args`（已断言是对象），供各处再钉键集合 —— 出站形状是这一批的主要判据
+/// （嵌层 / camelCase / 缺键不补 null），入参键名写错不会在插件里报错，只会让宿主 serde
+/// 落 `SEAM_CALL_INVALID_ARGS`，只有帧级断言能在本地暴露。
+fn batch3_roundtrip(
+    worker: &mut Worker,
+    command: &str,
+    input: serde_json::Value,
+    expected_op: &str,
+    reply: serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, command, input, 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM, "{command} 必须经 call_seam 出站");
+    assert_eq!(call.args["seam"], "opc.store");
+    assert_eq!(call.args["op"], expected_op, "{command} 的 op 名必须逐字");
+    let args = call.args["args"].as_object().cloned().expect("出站 args 应是对象");
+    worker.send_response(
+        &FrameResponse::success(reply.clone())
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "{command} 应回成功：{response:?}");
+    assert_eq!(response.code, None, "成功帧不该带错误码：{response:?}");
+    let value = response.value.expect("命令回执必须带 value");
+    assert_eq!(value["plugin_id"], PLUGIN_ID);
+    assert_eq!(value["value"], reply, "{command} 的出参必须逐字透传");
+    args
+}
+
+/// #36 批 3：八条写命令 + 一条只读报表的帧级实证。
+///
+/// 锁四件只有真管道能钉住的跨层口径：
+/// 1. 出站 seam / op 逐字 = `opc.store` / 九条 op 名（写错时宿主回 `SEAM_CALL_UNSUPPORTED`，
+///    而调用方只看得见「操作失败」）；
+/// 2. 八条写命令的出站是 `{"request": {…}}` **两层**、camelCase 线格式（禁区 13）；
+///    `get_financial_report` 是**散标量** `{"period": …}`，不套壳（套错会被
+///    `deserialize_arg` 判 `SEAM_CALL_INVALID_ARGS`）；
+/// 3. 出参是契约的列裁剪视图 / 视图数组，逐字透传、不拆包不改名；
+/// 4. 形状闸：必需键缺失 / 类型不符 ⇒ 命令层直接拒，**不发接缝帧**。
+#[test]
+fn command_frame_batch3_creates_go_through_host_seam() {
+    let mut worker = Worker::spawn();
+
+    // ① 创建发票：行项目随 request 一起嵌层，行金额 `total` 由宿主现算（出站不带）。
+    let invoice = serde_json::json!({
+        "id": "inv-1",
+        "customerId": "cust-1",
+        "invoiceNumber": "INV-001",
+        "status": "draft",
+        "total": 226.0,
+        "currency": "CNY",
+        "createdAt": 1_700_000_000_i64,
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_invoice",
+        serde_json::json!({
+            "customerId": "cust-1",
+            "lineItems": [
+                { "description": "咨询", "quantity": 2, "unitPrice": 100.0, "taxRate": 0.13 }
+            ],
+            "currency": "CNY",
+            "dueAt": 1_700_400_000_i64,
+            "notes": "首单",
+        }),
+        "create_invoice",
+        invoice,
+    );
+    assert_eq!(
+        args.keys().cloned().collect::<Vec<String>>(),
+        vec!["request".to_string()],
+        "创建入参是 DTO，必须嵌 request 一层：{args:?}"
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut keys = request.keys().cloned().collect::<Vec<String>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["currency", "customerId", "dueAt", "lineItems", "notes"].map(str::to_string).to_vec(),
+        "五个字段原样转发（camelCase）：{request:?}"
+    );
+    assert_eq!(request["customerId"], "cust-1");
+    let items = request["lineItems"].as_array().expect("lineItems 应是数组");
+    assert_eq!(items.len(), 1);
+    let item = items[0].as_object().expect("行项目应是对象");
+    let mut item_keys = item.keys().cloned().collect::<Vec<String>>();
+    item_keys.sort();
+    assert_eq!(
+        item_keys,
+        ["description", "quantity", "taxRate", "unitPrice"].map(str::to_string).to_vec(),
+        "行项目键名必须是 camelCase（禁区 13）：{item:?}"
+    );
+    assert!(item.get("total").is_none(), "行金额由宿主现算，命令面不许自带");
+
+    // ② 创建客户：`customer_type` → `customerType`；未给出的键不补 null。
+    let customer = serde_json::json!({
+        "id": "cust-1",
+        "name": "张三",
+        "email": "z@example.com",
+        "phone": null,
+        "company": null,
+        "status": "lead",
+        "totalRevenue": 0.0,
+        "createdAt": 1_700_000_000_i64,
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_customer",
+        serde_json::json!({ "name": "张三", "email": "z@example.com", "customerType": "Business" }),
+        "create_customer",
+        customer,
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut keys = request.keys().cloned().collect::<Vec<String>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["customerType", "email", "name"].map(str::to_string).to_vec(),
+        "只转发真正给出的键，缺键不补 null：{request:?}"
+    );
+    assert_eq!(request["customerType"], "Business");
+
+    // ③ 项目与里程碑：`project_id` → `projectId`；里程碑 id / 状态由宿主设。
+    let project = serde_json::json!({
+        "id": "proj-1",
+        "title": "官网改版",
+        "status": "planning",
+        "budget": 50000.0,
+        "currency": "CNY",
+        "milestoneTotal": 1,
+        "milestoneCompleted": 0,
+        "createdAt": 1_700_000_000_i64,
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_project",
+        serde_json::json!({ "title": "官网改版", "customerId": "cust-1", "budget": 50000.0 }),
+        "create_project",
+        project.clone(),
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    assert_eq!(request["customerId"], "cust-1");
+    assert_eq!(request["budget"], 50000.0);
+
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_add_milestone",
+        serde_json::json!({ "projectId": "proj-1", "title": "上线", "dueAt": 1_700_400_000_i64 }),
+        "add_milestone",
+        project,
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut keys = request.keys().cloned().collect::<Vec<String>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["dueAt", "projectId", "title"].map(str::to_string).to_vec(),
+        "里程碑入参只有这三个键（id / status 由宿主生成）：{request:?}"
+    );
+
+    // ④ 落地页：缺省 description 不补键。
+    let page = serde_json::json!({
+        "id": "page-1",
+        "title": "落地页",
+        "slug": "lp",
+        "published": false,
+        "createdAt": 1_700_000_000_i64,
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_landing_page",
+        serde_json::json!({ "title": "落地页", "slug": "lp", "content": "# 正文" }),
+        "create_landing_page",
+        page,
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut keys = request.keys().cloned().collect::<Vec<String>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["content", "slug", "title"].map(str::to_string).to_vec(),
+        "缺省 description 不补键：{request:?}"
+    );
+
+    // ⑤ 财务报表：**散标量**，不套 request 壳。
+    let report = serde_json::json!({
+        "period": "2026-07",
+        "totalRevenue": 1000.0,
+        "pendingRevenue": 0.0,
+        "refundedAmount": 0.0,
+        "activeProjects": 2,
+        "newCustomers": 3,
+        "netProfit": 900.0,
+        "investableAmount": 600.0,
+        "churnedCustomers": 0,
+        "pretaxRevenue": 950.0,
+        "riskLevel": "低",
+        "recommendedAmount": 300.0,
+        "advice": "可追加投资",
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_get_financial_report",
+        serde_json::json!({ "period": "2026-07" }),
+        "get_financial_report",
+        report,
+    );
+    assert_eq!(
+        args.keys().cloned().collect::<Vec<String>>(),
+        vec!["period".to_string()],
+        "报表入参是散标量，不套 request：{args:?}"
+    );
+    assert_eq!(args["period"], "2026-07");
+
+    // ⑥ 内容资产：`content_type` → `contentType` 线格式；tags 逐字转发。
+    let asset = serde_json::json!({
+        "id": "asset-1",
+        "title": "文章",
+        "contentType": "article",
+        "status": "draft",
+        "tags": ["opc"],
+        "createdAt": 1_700_000_000_i64,
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_content_asset",
+        serde_json::json!({
+            "title": "文章",
+            "contentType": "article",
+            "body": "正文",
+            "tags": ["opc"],
+        }),
+        "create_content_asset",
+        asset,
+    );
+    assert_eq!(args["request"]["contentType"], "article", "snake_case 不得出现在线格式里");
+    assert_eq!(args["request"]["tags"], serde_json::json!(["opc"]));
+
+    // ⑦ 发布计划：`contentRefId` 是**被发布内容**的主键（不是本行 id）。
+    let schedule = serde_json::json!({
+        "id": "sched-1",
+        "contentRefType": "blog_post",
+        "contentRefId": "post-1",
+        "status": "pending",
+        "scheduledAt": 1_700_400_000_i64,
+        "publishedAt": null,
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_publish_schedule",
+        serde_json::json!({
+            "contentRefType": "blog_post",
+            "contentRefId": "post-1",
+            "scheduledAt": 1_700_400_000_i64,
+        }),
+        "create_publish_schedule",
+        schedule,
+    );
+    let request = args["request"].as_object().expect("request 应是对象");
+    let mut keys = request.keys().cloned().collect::<Vec<String>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        ["contentRefId", "contentRefType", "scheduledAt"].map(str::to_string).to_vec(),
+        "{request:?}"
+    );
+
+    // ⑧ 处理到期计划：无入参 ⇒ 出站 args 是空对象；空数组出参仍是成功（不是错误）。
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_process_due_schedules",
+        serde_json::json!({}),
+        "process_due_schedules",
+        serde_json::json!([]),
+    );
+    assert!(args.is_empty(), "无入参 op 的出站 args 必须是空对象：{args:?}");
+
+    // ⑨ 形状闸：必需键缺失 / 类型不符 ⇒ 命令层直接拒，**不发接缝帧**。
+    for (command, input) in [
+        ("opc_create_invoice", serde_json::json!({ "lineItems": [] })),
+        ("opc_create_invoice", serde_json::json!({ "customerId": "c", "lineItems": "x" })),
+        ("opc_create_customer", serde_json::json!({ "name": "张三" })),
+        (
+            "opc_create_customer",
+            serde_json::json!({ "name": "张三", "email": "z", "latitude": "北纬30" }),
+        ),
+        ("opc_create_project", serde_json::json!({ "budget": 1 })),
+        ("opc_add_milestone", serde_json::json!({ "title": "上线", "projectId": 3 })),
+        ("opc_create_landing_page", serde_json::json!({ "title": "t", "slug": "s" })),
+        ("opc_get_financial_report", serde_json::json!({})),
+        ("opc_create_content_asset", serde_json::json!({ "title": "t", "contentType": "article" })),
+        (
+            "opc_create_content_asset",
+            serde_json::json!({ "title": "t", "contentType": "article", "body": "b", "tags": "opc" }),
+        ),
+        (
+            "opc_create_publish_schedule",
+            serde_json::json!({ "contentRefType": "blog_post", "contentRefId": "p" }),
+        ),
+        (
+            "opc_create_publish_schedule",
+            serde_json::json!({
+                "contentRefType": "blog_post",
+                "contentRefId": "p",
+                "scheduledAt": 1.5,
+            }),
+        ),
+    ] {
+        worker.send(
+            &CommandFrame::new(PLUGIN_ID, command, input.clone(), 5_000)
+                .to_frame_request()
+                .expect("命令帧应能编成请求"),
+        );
+        let response = worker.recv_response();
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+            "{command} 的形状不符必须在命令层拒（{input}）：{response:?}"
+        );
+    }
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}

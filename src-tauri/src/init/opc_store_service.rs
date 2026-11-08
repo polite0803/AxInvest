@@ -413,6 +413,207 @@ impl OpcStoreProvider for HostOpcStore {
             ))),
         }
     }
+
+    // ── 写 op（#36 批 3：创建 / 流程动作）────────────────────────────
+    //
+    // 判据三条，八个写 op 一致：
+    // ① 缺省值（货币 `CNY` / 空串 / 行项目数量 1）在这里补 —— 契约 DTO 用 `Option`
+    //    表达「调用方没给」，到域服务入参才落成具体值（与迁移前宿主工具逐字一致）；
+    // ② 枚举串翻译也在本层（接缝不认识实现层枚举），未知值按域服务的既有兜底语义；
+    // ③ 出参一律走既有 `*_summary_view` 映射 —— 列裁剪只有一个落点。
+
+    async fn create_invoice(&self, request: CreateInvoiceRequest) -> Result<InvoiceSummaryView> {
+        let svc = DefaultInvoiceService::new(self.db.clone());
+        let line_items = request
+            .line_items
+            .into_iter()
+            .map(|item| {
+                let quantity = item.quantity.unwrap_or(1.0);
+                let unit_price = item.unit_price.unwrap_or(0.0);
+                let tax_rate = item.tax_rate.unwrap_or(0.0);
+                InvoiceLineItem {
+                    description: item.description.unwrap_or_default(),
+                    quantity,
+                    unit_price,
+                    tax_rate,
+                    // 合计由宿主现算：与迁移前宿主工具同一公式，调用方不自报 total。
+                    total: quantity * unit_price * (1.0 + tax_rate),
+                }
+            })
+            .collect();
+        let input = CreateInvoiceInput {
+            customer_id: request.customer_id,
+            line_items,
+            currency: request.currency.unwrap_or_else(|| "CNY".to_string()),
+            due_at: request.due_at,
+            notes: request.notes.unwrap_or_default(),
+        };
+        let inv = InvoiceService::create_invoice(&svc, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_invoice 创建失败: {e}"))
+        })?;
+        Ok(invoice_summary_view(inv))
+    }
+
+    async fn create_customer(&self, request: CreateCustomerRequest) -> Result<CustomerSummaryView> {
+        let svc = DefaultCustomerService::new(self.db.clone());
+        // 来源与类型的解码语义逐字抄迁移前宿主工具：五个已知来源原样映射，其余落
+        // `Other(原串)`；类型只看小写后的 `consumer` / `business`，其余落 `Unknown`。
+        let source = request.source.map(|s| match s.as_str() {
+            "Referral" => CustomerSource::Referral,
+            "Website" => CustomerSource::Website,
+            "SocialMedia" => CustomerSource::SocialMedia,
+            "Marketplace" => CustomerSource::Marketplace,
+            "Direct" => CustomerSource::Direct,
+            other => CustomerSource::Other(other.to_string()),
+        });
+        let customer_type = request
+            .customer_type
+            .map(|s| s.to_lowercase())
+            .map(|s| match s.as_str() {
+                "consumer" => CustomerType::Consumer,
+                "business" => CustomerType::Business,
+                _ => CustomerType::Unknown,
+            })
+            .unwrap_or(CustomerType::Unknown);
+        let input = CreateCustomerInput {
+            name: request.name,
+            email: request.email,
+            phone: request.phone,
+            company: request.company,
+            customer_type,
+            country: request.country,
+            region: request.region,
+            city: request.city,
+            address: request.address,
+            latitude: request.latitude,
+            longitude: request.longitude,
+            source,
+            // 新建不带标签：域服务的入参位存在，但迁移前工具恒传空数组。
+            tags: Vec::new(),
+            notes: request.notes.unwrap_or_default(),
+        };
+        let c = CustomerService::create_customer(&svc, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_customer 创建失败: {e}"))
+        })?;
+        Ok(customer_summary_view(c))
+    }
+
+    async fn create_project(&self, request: CreateProjectRequest) -> Result<ProjectSummaryView> {
+        let svc = DefaultProjectService::new(self.db.clone());
+        let input = CreateProjectInput {
+            customer_id: request.customer_id,
+            title: request.title,
+            description: request.description.unwrap_or_default(),
+            budget: request.budget,
+            currency: request.currency.unwrap_or_else(|| "CNY".to_string()),
+            deadline: request.deadline,
+            notes: request.notes.unwrap_or_default(),
+        };
+        let p = ProjectService::create_project(&svc, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_project 创建失败: {e}"))
+        })?;
+        Ok(project_summary_view(p))
+    }
+
+    async fn add_milestone(&self, request: AddMilestoneRequest) -> Result<ProjectSummaryView> {
+        require_id(&request.project_id, "add_milestone")?;
+        let svc = DefaultProjectService::new(self.db.clone());
+        let milestone = Milestone {
+            id: axagent_harness::util_fns::gen_id(),
+            title: request.title,
+            description: request.description.unwrap_or_default(),
+            due_at: request.due_at,
+            completed_at: None,
+            status: MilestoneStatus::Pending,
+        };
+        let p = ProjectService::add_milestone(&svc, &request.project_id, milestone).await.map_err(
+            |e| AxAgentError::Provider(format!("opc.store::add_milestone 添加失败: {e}")),
+        )?;
+        Ok(project_summary_view(p))
+    }
+
+    async fn create_landing_page(
+        &self,
+        request: CreateLandingPageRequest,
+    ) -> Result<LandingPageSummaryView> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let input = CreateLandingPageInput {
+            title: request.title,
+            slug: request.slug,
+            description: request.description.unwrap_or_default(),
+            content: request.content,
+        };
+        let lp = SiteService::create_landing_page(&svc, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_landing_page 创建失败: {e}"))
+        })?;
+        Ok(landing_page_summary_view(lp))
+    }
+
+    async fn get_financial_report(&self, period: String) -> Result<FinancialReportView> {
+        let svc = DefaultFinanceService::new(self.db.clone());
+        let report = FinanceService::get_financial_report(&svc, &period).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_financial_report 生成报表失败: {e}"))
+        })?;
+        // 建议由报告派生，读数成对返回 —— 分两个 op 只会多一次帧往返。
+        let advice = FinanceService::get_investment_advice(&svc, &report).await;
+        Ok(FinancialReportView {
+            period: report.period,
+            total_revenue: report.total_revenue,
+            pending_revenue: report.pending_revenue,
+            refunded_amount: report.refunded_amount,
+            active_projects: report.active_projects,
+            new_customers: report.new_customers,
+            net_profit: report.net_profit,
+            investable_amount: report.investable_amount,
+            churned_customers: report.churned_customers,
+            pretax_revenue: report.pretax_revenue,
+            risk_level: advice.risk_level,
+            recommended_amount: advice.recommended_amount,
+            advice: advice.advice,
+        })
+    }
+
+    async fn create_content_asset(
+        &self,
+        request: CreateContentAssetRequest,
+    ) -> Result<ContentAssetSummaryView> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let input = CreateContentAssetInput {
+            title: request.title,
+            content_type: request.content_type,
+            body: request.body,
+            tags: request.tags.unwrap_or_default(),
+        };
+        let asset = ContentAssetService::create_content_asset(&svc, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_content_asset 创建失败: {e}"))
+        })?;
+        Ok(content_asset_summary_view(asset))
+    }
+
+    async fn create_publish_schedule(
+        &self,
+        request: CreatePublishScheduleRequest,
+    ) -> Result<PublishScheduleSummaryView> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let input = CreatePublishScheduleInput {
+            content_ref_type: request.content_ref_type,
+            content_ref_id: request.content_ref_id,
+            scheduled_at: request.scheduled_at,
+        };
+        let schedule =
+            PublishScheduleService::create_publish_schedule(&svc, input).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::create_publish_schedule 创建失败: {e}"))
+            })?;
+        Ok(publish_schedule_summary_view(schedule))
+    }
+
+    async fn process_due_schedules(&self) -> Result<Vec<PublishScheduleSummaryView>> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        let rows = PublishScheduleService::process_due_schedules(&svc).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::process_due_schedules 处理失败: {e}"))
+        })?;
+        Ok(rows.into_iter().map(publish_schedule_summary_view).collect())
+    }
 }
 
 // ── #36 批 2 写 op 的依赖 ─────────────────────────────────────────────────
@@ -422,8 +623,16 @@ impl OpcStoreProvider for HostOpcStore {
 // `use axagent_harness::opc_store::{…}` 列表里加名字会让它换行、impl 行整体下移。
 // 模块级 `use` 在任意 item 位置都生效，故这里只是位置选择，不是作用域限制。
 use axagent_harness::opc_store::{
-    RemoveContentAssetOutcome, RemovePublishScheduleOutcome, TransitionInvoiceOutcome,
-    UpdateContentAssetInput, UpdateContentAssetOutcome,
+    AddMilestoneRequest, CreateContentAssetRequest, CreateCustomerRequest, CreateInvoiceRequest,
+    CreateLandingPageRequest, CreateProjectRequest, CreatePublishScheduleRequest,
+    FinancialReportView, RemoveContentAssetOutcome, RemovePublishScheduleOutcome,
+    TransitionInvoiceOutcome, UpdateContentAssetInput, UpdateContentAssetOutcome,
+};
+// #36 批 3 的域入参 / 枚举 / 服务：同样放在 impl 之后（理由同上 —— impl 行被登记表钉住）。
+use axagent_company_runtime::opc::{
+    CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput, CreateLandingPageInput,
+    CreateProjectInput, CreatePublishScheduleInput, CustomerSource, DefaultFinanceService,
+    FinanceService, InvoiceLineItem, Milestone,
 };
 use std::str::FromStr;
 

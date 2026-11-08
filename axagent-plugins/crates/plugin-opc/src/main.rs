@@ -90,6 +90,18 @@ const OPC_STORE_UPDATE_CONTENT_ASSET: &str = "update_content_asset";
 const OPC_STORE_DELETE_CONTENT_ASSET: &str = "delete_content_asset";
 const OPC_STORE_CANCEL_PUBLISH_SCHEDULE: &str = "cancel_publish_schedule";
 
+/// #36 批 3 的九条 op：八个写 op（要 `write`）+ 一条读 op（财务报表，宿主侧无权限闸）。
+/// 出参一律是契约的列裁剪视图 / 视图数组，逐字透传（同 `create_blog_post` 的判据）。
+const OPC_STORE_CREATE_INVOICE: &str = "create_invoice";
+const OPC_STORE_CREATE_CUSTOMER: &str = "create_customer";
+const OPC_STORE_CREATE_PROJECT: &str = "create_project";
+const OPC_STORE_ADD_MILESTONE: &str = "add_milestone";
+const OPC_STORE_CREATE_LANDING_PAGE: &str = "create_landing_page";
+const OPC_STORE_GET_FINANCIAL_REPORT: &str = "get_financial_report";
+const OPC_STORE_CREATE_CONTENT_ASSET: &str = "create_content_asset";
+const OPC_STORE_CREATE_PUBLISH_SCHEDULE: &str = "create_publish_schedule";
+const OPC_STORE_PROCESS_DUE_SCHEDULES: &str = "process_due_schedules";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -123,6 +135,18 @@ const COMMAND_TRANSITION_INVOICE: &str = "opc_transition_invoice";
 const COMMAND_UPDATE_CONTENT_ASSET: &str = "opc_update_content_asset";
 const COMMAND_DELETE_CONTENT_ASSET: &str = "opc_delete_content_asset";
 const COMMAND_CANCEL_PUBLISH_SCHEDULE: &str = "opc_cancel_publish_schedule";
+
+/// #36 批 3 的九条命令（清单 `commands[].name` 必须逐字一致）：八条写命令 + 一条只读的
+/// 财务报表（宿主侧无权限闸，与八个 list op 同一档）。
+const COMMAND_CREATE_INVOICE: &str = "opc_create_invoice";
+const COMMAND_CREATE_CUSTOMER: &str = "opc_create_customer";
+const COMMAND_CREATE_PROJECT: &str = "opc_create_project";
+const COMMAND_ADD_MILESTONE: &str = "opc_add_milestone";
+const COMMAND_CREATE_LANDING_PAGE: &str = "opc_create_landing_page";
+const COMMAND_GET_FINANCIAL_REPORT: &str = "opc_get_financial_report";
+const COMMAND_CREATE_CONTENT_ASSET: &str = "opc_create_content_asset";
+const COMMAND_CREATE_PUBLISH_SCHEDULE: &str = "opc_create_publish_schedule";
+const COMMAND_PROCESS_DUE_SCHEDULES: &str = "opc_process_due_schedules";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -352,6 +376,69 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // ── #36 批 3：八条写命令 + 一条只读报表（出参 = 契约列裁剪视图，逐字透传）──
+        COMMAND_CREATE_INVOICE => match create_invoice(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_CREATE_CUSTOMER => match create_customer(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_CREATE_PROJECT => match create_project(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_ADD_MILESTONE => match add_milestone(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_CREATE_LANDING_PAGE => {
+            match create_landing_page(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_FINANCIAL_REPORT => {
+            match get_financial_report(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CREATE_CONTENT_ASSET => {
+            match create_content_asset(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CREATE_PUBLISH_SCHEDULE => {
+            match create_publish_schedule(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_PROCESS_DUE_SCHEDULES => match process_due_schedules(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // 看板读数：宿主没有聚合 op，由本进程组合三次列表查询现算。
         COMMAND_GET_DASHBOARD => match dashboard(&request.call_chain, peer) {
@@ -857,6 +944,320 @@ fn cancel_publish_schedule(
         ));
     };
     call_opc_store(peer, OPC_STORE_CANCEL_PUBLISH_SCHEDULE, json!({ "id": id }), call_chain)
+}
+
+// ── #36 批 3：八条写命令 + 一条只读报表 ────────────────────────────────
+//
+// 判据与批 2 同一条：**命令层只判形状**（缺必需键 / 类型不对 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，
+// **不发帧**），语义与闸全在宿主 provider（空串 / 非法枚举 / 缺行由它各自收口）。出参是契约
+// 的列裁剪视图（或视图数组），**逐字透传** —— 本层不做任何键名改写或业务判断。
+//
+// 入参键一律 camelCase（禁区 13，与契约 DTO 的 serde 线格式同源）。数组字段（`lineItems` /
+// `tags`）只判「是不是对象数组 / 字符串数组」，元素内部字段类型的错由宿主 serde 拒收
+// （`SEAM_CALL_INVALID_ARGS`）—— 逐元素逐字段再判一遍只会把同一件事判两次。
+
+/// `opc_create_invoice`：创建发票（写 op）。
+///
+/// 行项目的 `total` **不在这里算**：由宿主 provider 按 `quantity × unitPrice × (1 + taxRate)`
+/// 现算（迁移前工具在本进程算，上收后单价/税率的缺省口径只有一个落点）。
+fn create_invoice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_invoice";
+    let customer_id = require_str(input, OP, "customerId")?;
+    let line_items = object_array(input, OP, "lineItems")?;
+    let mut request = serde_json::Map::new();
+    request.insert("customerId".to_string(), Value::String(customer_id.to_string()));
+    request.insert("lineItems".to_string(), line_items);
+    copy_optional_strings(input, OP, &mut request, &["currency", "notes"])?;
+    copy_optional_i64(input, OP, &mut request, &["dueAt"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_INVOICE,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_create_customer`：创建客户（写 op）。
+///
+/// `customerType` / `source` 收**串**：未知值分别由宿主落 `Unknown` / `Other(原串)`，
+/// 不在此处把枚举抄第二遍（迁移前工具的映射原样下沉到 provider）。
+fn create_customer(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_customer";
+    let name = require_str(input, OP, "name")?;
+    let email = require_str(input, OP, "email")?;
+    let mut request = serde_json::Map::new();
+    request.insert("name".to_string(), Value::String(name.to_string()));
+    request.insert("email".to_string(), Value::String(email.to_string()));
+    copy_optional_strings(
+        input,
+        OP,
+        &mut request,
+        &[
+            "phone",
+            "company",
+            "customerType",
+            "country",
+            "region",
+            "city",
+            "address",
+            "source",
+            "notes",
+        ],
+    )?;
+    copy_optional_f64(input, OP, &mut request, &["latitude", "longitude"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_CUSTOMER,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_create_project`：创建项目（写 op）。
+fn create_project(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_project";
+    let title = require_str(input, OP, "title")?;
+    let mut request = serde_json::Map::new();
+    request.insert("title".to_string(), Value::String(title.to_string()));
+    copy_optional_strings(
+        input,
+        OP,
+        &mut request,
+        &["customerId", "description", "currency", "notes"],
+    )?;
+    copy_optional_f64(input, OP, &mut request, &["budget"])?;
+    copy_optional_i64(input, OP, &mut request, &["deadline"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_PROJECT,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_add_milestone`：给项目加里程碑（写 op）。
+///
+/// 里程碑 id 与初始状态由宿主 provider 生成（`Pending`）—— 命令面不收 `id` / `status`。
+fn add_milestone(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_add_milestone";
+    let project_id = require_str(input, OP, "projectId")?;
+    let title = require_str(input, OP, "title")?;
+    let mut request = serde_json::Map::new();
+    request.insert("projectId".to_string(), Value::String(project_id.to_string()));
+    request.insert("title".to_string(), Value::String(title.to_string()));
+    copy_optional_strings(input, OP, &mut request, &["description"])?;
+    copy_optional_i64(input, OP, &mut request, &["dueAt"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_ADD_MILESTONE,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_create_landing_page`：创建落地页（写 op，创建后为草稿态）。
+fn create_landing_page(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_landing_page";
+    let title = require_str(input, OP, "title")?;
+    let slug = require_str(input, OP, "slug")?;
+    let content = require_str(input, OP, "content")?;
+    let mut request = serde_json::Map::new();
+    request.insert("title".to_string(), Value::String(title.to_string()));
+    request.insert("slug".to_string(), Value::String(slug.to_string()));
+    request.insert("content".to_string(), Value::String(content.to_string()));
+    copy_optional_strings(input, OP, &mut request, &["description"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_LANDING_PAGE,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_get_financial_report`：取财务报表（只读 op，宿主侧无写权限闸）。
+///
+/// 入参是**散标量** `{"period": …}`（不是 DTO，不套 `request` 壳）；出参是
+/// [`FinancialReportView`] 的扁平对象 —— 报表与投资建议成对返回，只多一次帧往返。
+fn get_financial_report(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_financial_report";
+    let period = require_str(input, OP, "period")?;
+    call_opc_store(peer, OPC_STORE_GET_FINANCIAL_REPORT, json!({ "period": period }), call_chain)
+}
+
+/// `opc_create_content_asset`：创建内容资产（写 op，创建后为草稿态）。
+fn create_content_asset(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_content_asset";
+    let title = require_str(input, OP, "title")?;
+    let content_type = require_str(input, OP, "contentType")?;
+    let body = require_str(input, OP, "body")?;
+    let mut request = serde_json::Map::new();
+    request.insert("title".to_string(), Value::String(title.to_string()));
+    request.insert("contentType".to_string(), Value::String(content_type.to_string()));
+    request.insert("body".to_string(), Value::String(body.to_string()));
+    if let Some(tags) = input.get("tags").filter(|value| !value.is_null()) {
+        let items = tags.as_array().filter(|items| items.iter().all(Value::is_string)).ok_or_else(
+            || invalid_shape(format!("{OP} 的 `tags` 必须是字符串数组（形状判在命令层）")),
+        )?;
+        request.insert("tags".to_string(), Value::Array(items.clone()));
+    }
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_CONTENT_ASSET,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_create_publish_schedule`：创建发布计划（写 op）。
+///
+/// `contentRefId` 是**内容实体的主键**（博客 id / 内容资产 id），不是发布计划自己的 id。
+fn create_publish_schedule(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_publish_schedule";
+    let content_ref_type = require_str(input, OP, "contentRefType")?;
+    let content_ref_id = require_str(input, OP, "contentRefId")?;
+    let scheduled_at = input
+        .get("scheduledAt")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| invalid_shape(format!("{OP} 需要整数时间戳字段 `scheduledAt`")))?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_PUBLISH_SCHEDULE,
+        json!({
+            "request": {
+                "contentRefType": content_ref_type,
+                "contentRefId": content_ref_id,
+                "scheduledAt": scheduled_at,
+            }
+        }),
+        call_chain,
+    )
+}
+
+/// `opc_process_due_schedules`：处理全部到期的发布计划（写 op，无入参）。
+///
+/// 出参是**本次处理过的行**（视图数组）：空数组 = 「没有到期计划」，不是错误。
+fn process_due_schedules(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_PROCESS_DUE_SCHEDULES, json!({}), call_chain)
+}
+
+/// 必需字符串字段。
+fn require_str<'a>(input: &'a Value, op: &str, key: &str) -> Result<&'a str, (String, String)> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_shape(format!("{op} 需要字符串字段 `{key}`（形状判在命令层）")))
+}
+
+/// 可选字符串字段：缺键 / `null` 不转发；给了非字符串 ⇒ 拒收。
+fn copy_optional_strings(
+    input: &Value,
+    op: &str,
+    request: &mut serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<(), (String, String)> {
+    for key in keys {
+        match input.get(*key) {
+            None | Some(Value::Null) => {},
+            Some(Value::String(value)) => {
+                request.insert((*key).to_string(), Value::String(value.clone()));
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!(
+                    "{op} 的 `{key}` 必须是字符串（形状判在命令层）"
+                )));
+            },
+        }
+    }
+    Ok(())
+}
+
+/// 可选浮点字段（JSON 只有一种 number 类型，整数也算命中）。
+fn copy_optional_f64(
+    input: &Value,
+    op: &str,
+    request: &mut serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<(), (String, String)> {
+    for key in keys {
+        match input.get(*key) {
+            None | Some(Value::Null) => {},
+            Some(value) if value.as_f64().is_some() => {
+                request.insert((*key).to_string(), value.clone());
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!("{op} 的 `{key}` 必须是数值（形状判在命令层）")));
+            },
+        }
+    }
+    Ok(())
+}
+
+/// 可选时间戳字段（整数；秒级 epoch，与库里的时间列同量纲）。
+fn copy_optional_i64(
+    input: &Value,
+    op: &str,
+    request: &mut serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<(), (String, String)> {
+    for key in keys {
+        match input.get(*key) {
+            None | Some(Value::Null) => {},
+            Some(value) if value.as_i64().is_some() => {
+                request.insert((*key).to_string(), value.clone());
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!(
+                    "{op} 的 `{key}` 必须是整数时间戳（形状判在命令层）"
+                )));
+            },
+        }
+    }
+    Ok(())
+}
+
+/// 必需的对象数组字段（元素内部字段类型由宿主 serde 判）。
+fn object_array(input: &Value, op: &str, key: &str) -> Result<Value, (String, String)> {
+    let items = input
+        .get(key)
+        .and_then(Value::as_array)
+        .filter(|items| items.iter().all(Value::is_object))
+        .ok_or_else(|| invalid_shape(format!("{op} 需要对象数组字段 `{key}`（形状判在命令层）")))?;
+    Ok(Value::Array(items.clone()))
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────

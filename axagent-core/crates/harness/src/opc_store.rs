@@ -350,6 +350,102 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::cancel_publish_schedule 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 写 op（#36 批 3：创建 / 流程动作）────────────────────────────
+    //
+    // 八个写 op 的判据一致：出参是创建后的**列裁剪视图**（先例 `create_blog_post` ——
+    // 让调用方直接拿到 id 句柄，不另造「裸 id」形态）；失败才 `Err(Provider)`。
+    // 入参缺省值（货币 / 备注 / 描述 / 行项目数量）由 provider 补，DTO 用 `Option`
+    // 表达「调用方没给」—— 不把「没给」与「显式传空串」读成同一件事。
+
+    /// 新建发票（`create_invoice` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 行项目的 `total` 由 provider 按 `quantity × unitPrice × (1 + taxRate)` 现算
+    /// （与迁移前宿主工具 `OpcCreateInvoice` 同一公式，搬到这里是为了让两条通道只有一处算法）。
+    async fn create_invoice(&self, _input: CreateInvoiceRequest) -> Result<InvoiceSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_invoice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新建客户（`create_customer` op）—— 写 op，要 `write` 权限。
+    ///
+    /// `customerType` / `source` 是**串**：provider 按域枚举的既有语义翻译
+    /// （`consumer` / `business` 以外的输入落 `Unknown`，五个已知来源以外的落 `Other`），
+    /// 与迁移前宿主工具的解码逐字一致。
+    async fn create_customer(&self, _input: CreateCustomerRequest) -> Result<CustomerSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_customer 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新建项目（`create_project` op）—— 写 op，要 `write` 权限。
+    async fn create_project(&self, _input: CreateProjectRequest) -> Result<ProjectSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_project 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 给项目加里程碑（`add_milestone` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 里程碑 id 由 provider 生成（`util_fns::gen_id()`），状态恒为 `Pending` ——
+    /// 与迁移前宿主工具一致；调用方不提供 id（前端历史上有自己造 id 的写法，
+    /// 那会让「谁生成的 id」出现两个答案）。
+    async fn add_milestone(&self, _input: AddMilestoneRequest) -> Result<ProjectSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::add_milestone 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新建落地页（`create_landing_page` op）—— 写 op，要 `write` 权限。
+    async fn create_landing_page(
+        &self,
+        _input: CreateLandingPageRequest,
+    ) -> Result<LandingPageSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_landing_page 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 财务报表（`get_financial_report` op）—— **读 op**，不设权限闸。
+    ///
+    /// 报告与投资建议是同一份读数的两半（建议由报告派生），故在一次调用里一并返回：
+    /// 分成两个 op 会让插件侧多一次帧往返，且中间态毫无独立意义。
+    async fn get_financial_report(&self, _period: String) -> Result<FinancialReportView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_financial_report 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新建内容资产（`create_content_asset` op）—— 写 op，要 `write` 权限。
+    async fn create_content_asset(
+        &self,
+        _input: CreateContentAssetRequest,
+    ) -> Result<ContentAssetSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_content_asset 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新建发布计划（`create_publish_schedule` op）—— 写 op，要 `write` 权限。
+    async fn create_publish_schedule(
+        &self,
+        _input: CreatePublishScheduleRequest,
+    ) -> Result<PublishScheduleSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_publish_schedule 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 处理所有到期发布计划（`process_due_schedules` op）—— 写 op，要 `write` 权限
+    /// （它会把状态改成 `published` 并回写时刻）。
+    ///
+    /// 空集 ⇒ `Ok(vec![])`（「没有到期的」是正常读数，不是错误）。
+    async fn process_due_schedules(&self) -> Result<Vec<PublishScheduleSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::process_due_schedules 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -657,6 +753,147 @@ pub struct UpdateContentAssetInput {
     pub body: Option<String>,
     pub tags: Option<Vec<String>>,
     pub status: Option<String>,
+}
+
+// ── 写 op 的入参（#36 批 3：创建 / 流程动作）────────────────────────────────
+//
+// 九个 DTO 全部是本模块自有定义（不在实现层）：它们要跨进程过帧，而插件进程按依赖
+// 规则链接不到 `company-runtime`。与实现层入参的**两处刻意差异**：
+// ① 枚举位收**串**（`customerType` / `source`）—— 接缝层不认识实现层的枚举类型，
+//    翻译（含「未知值兜底」语义）由 provider 做；
+// ② 可缺省字段用 `Option` 表达「调用方没给」，缺省值（`CNY` / 空串 / 数量 1）由
+//    provider 补 —— 不把「没给」与「显式传空串」读成同一件事。
+
+/// `create_invoice` 的一行明细（线格式 camelCase）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InvoiceLineItemInput {
+    pub description: Option<String>,
+    pub quantity: Option<f64>,
+    pub unit_price: Option<f64>,
+    pub tax_rate: Option<f64>,
+}
+
+/// `create_invoice` 的入参。
+///
+/// 行项目的 `total` **不在本 DTO 上**：它由 provider 按
+/// `quantity × unitPrice × (1 + taxRate)` 现算 —— 与迁移前宿主工具同一公式，且不让
+/// 调用方自己报一个可能与三列对不上的合计。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateInvoiceRequest {
+    pub customer_id: String,
+    pub line_items: Vec<InvoiceLineItemInput>,
+    /// 缺省 `CNY`（provider 补）。
+    pub currency: Option<String>,
+    pub due_at: Option<i64>,
+    /// 缺省空串（provider 补）。
+    pub notes: Option<String>,
+}
+
+/// `create_customer` 的入参。
+///
+/// `customer_type` / `source` 是串：provider 按域枚举的既有解码语义翻译（未知值分别落
+/// `Unknown` / `Other`），保持迁移前宿主工具的行为。`tags` 刻意不在其中 —— 迁移前工具
+/// 恒传空数组，域服务也没有「新建时带标签」的入参位。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateCustomerRequest {
+    pub name: String,
+    pub email: String,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub customer_type: Option<String>,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub source: Option<String>,
+    /// 缺省空串（provider 补）。
+    pub notes: Option<String>,
+}
+
+/// `create_project` 的入参。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateProjectRequest {
+    pub customer_id: Option<String>,
+    pub title: String,
+    /// 缺省空串（provider 补）。
+    pub description: Option<String>,
+    pub budget: Option<f64>,
+    /// 缺省 `CNY`（provider 补）。
+    pub currency: Option<String>,
+    pub deadline: Option<i64>,
+    /// 缺省空串（provider 补）。
+    pub notes: Option<String>,
+}
+
+/// `add_milestone` 的入参（里程碑 id 与初始状态由 provider 补）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AddMilestoneRequest {
+    pub project_id: String,
+    pub title: String,
+    /// 缺省空串（provider 补）。
+    pub description: Option<String>,
+    pub due_at: Option<i64>,
+}
+
+/// `create_landing_page` 的入参。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateLandingPageRequest {
+    pub title: String,
+    pub slug: String,
+    /// 缺省空串（provider 补）。
+    pub description: Option<String>,
+    pub content: String,
+}
+
+/// `create_content_asset` 的入参（`contentType` 是 camelCase 线格式，禁区 13）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateContentAssetRequest {
+    pub title: String,
+    pub content_type: String,
+    pub body: String,
+    /// 缺省空数组（provider 补）。
+    pub tags: Option<Vec<String>>,
+}
+
+/// `create_publish_schedule` 的入参。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreatePublishScheduleRequest {
+    pub content_ref_type: String,
+    pub content_ref_id: String,
+    pub scheduled_at: i64,
+}
+
+/// `get_financial_report` 的出参：报告 + 派生建议（一次调用内成对返回）。
+///
+/// 字段与实现层 `FinancialReport` + `InvestmentAdvice` 逐项对应（`rename_all =
+/// "camelCase"`）。它是**读**的结果，不带 `[u8]` 之类的大字段，也不裁剪
+/// —— 报表的全部指标正是调用方要渲染的东西。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FinancialReportView {
+    pub period: String,
+    pub total_revenue: f64,
+    pub pending_revenue: f64,
+    pub refunded_amount: f64,
+    pub active_projects: u32,
+    pub new_customers: u32,
+    pub net_profit: f64,
+    pub investable_amount: f64,
+    pub churned_customers: u32,
+    pub pretax_revenue: f64,
+    pub risk_level: String,
+    pub recommended_amount: f64,
+    pub advice: String,
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────

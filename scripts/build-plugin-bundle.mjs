@@ -550,7 +550,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 17 条命名命令（4 条 blog 读写 + 9 条只读查询 + 4 条写操作）",
+      "OPC 域功能包（#36）：worker 通道 + 26 条命名命令（4 条 blog 读写 + 9 条只读查询 + 4 条写操作 + 8 条写命令 + 1 条财务报表）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -685,6 +685,163 @@ function opcManifest({ version, binaryName, sha256 }) {
           },
           required: ["id"],
         },
+      },
+      // ── #36 批 3：8 条写命令 + 1 条财务报表查询（前 8 条走 opc.store 写面 ⇒ 宿主
+      //    requireWrite 闸；`opc_get_financial_report` 是读 op，与八个 list op 同档无闸）──
+      // 入参一律 camelCase（与契约 `*Request` DTO 的 serde 键逐字一致，禁区 13）；
+      // 数组元素内部字段类型的错由宿主 serde 拒收，命令层只判「是不是对象数组」。
+      {
+        name: "opc_create_invoice",
+        description: "创建 OPC 发票（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
+        command: "worker://opc_create_invoice",
+        inputSchema: {
+          type: "object",
+          properties: {
+            customerId: { type: "string", description: "客户 id" },
+            lineItems: {
+              type: "array",
+              description: "行项目；行金额由宿主按 quantity×unitPrice×(1+taxRate) 现算",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string", description: "项目描述" },
+                  quantity: { type: "number", description: "数量（缺省 1）" },
+                  unitPrice: { type: "number", description: "单价（缺省 0）" },
+                  taxRate: { type: "number", description: "税率，如 0.13（缺省 0）" },
+                },
+              },
+            },
+            currency: { type: "string", description: "货币代码（缺省 CNY）" },
+            dueAt: { type: "number", description: "到期时间戳（epoch 秒）" },
+            notes: { type: "string", description: "备注" },
+          },
+          required: ["customerId", "lineItems"],
+        },
+      },
+      {
+        name: "opc_create_customer",
+        description: "创建 OPC 客户（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
+        command: "worker://opc_create_customer",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "客户姓名" },
+            email: { type: "string", description: "客户邮箱" },
+            phone: { type: "string", description: "电话（可选）" },
+            company: { type: "string", description: "公司（可选）" },
+            customerType: {
+              type: "string",
+              description: "客户类型（consumer / business；其余值由宿主落 Unknown）",
+            },
+            country: { type: "string", description: "国家（可选）" },
+            region: { type: "string", description: "地区（可选）" },
+            city: { type: "string", description: "城市（可选）" },
+            address: { type: "string", description: "地址（可选）" },
+            latitude: { type: "number", description: "纬度（可选）" },
+            longitude: { type: "number", description: "经度（可选）" },
+            source: {
+              type: "string",
+              description: "来源（Referral / Website / SocialMedia / Marketplace / Direct；其余值由宿主落 Other）",
+            },
+            notes: { type: "string", description: "备注（可选）" },
+          },
+          required: ["name", "email"],
+        },
+      },
+      {
+        name: "opc_create_project",
+        description: "创建 OPC 项目（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
+        command: "worker://opc_create_project",
+        inputSchema: {
+          type: "object",
+          properties: {
+            customerId: { type: "string", description: "关联客户 id（可选）" },
+            title: { type: "string", description: "项目标题" },
+            description: { type: "string", description: "项目描述（可选）" },
+            budget: { type: "number", description: "预算（可选）" },
+            currency: { type: "string", description: "货币代码（缺省 CNY）" },
+            deadline: { type: "number", description: "截止时间戳（epoch 秒，可选）" },
+            notes: { type: "string", description: "备注（可选）" },
+          },
+          required: ["title"],
+        },
+      },
+      {
+        name: "opc_add_milestone",
+        description: "给 OPC 项目添加里程碑（经宿主 opc.store 写面；回项目视图，含里程碑计数）",
+        command: "worker://opc_add_milestone",
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectId: { type: "string", description: "项目 id" },
+            title: { type: "string", description: "里程碑标题" },
+            description: { type: "string", description: "描述（可选）" },
+            dueAt: { type: "number", description: "到期时间戳（epoch 秒，可选）" },
+          },
+          required: ["projectId", "title"],
+        },
+      },
+      {
+        name: "opc_create_landing_page",
+        description: "创建 OPC 落地页（经宿主 opc.store 写面；创建后为草稿态，回列裁剪视图）",
+        command: "worker://opc_create_landing_page",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "标题" },
+            slug: { type: "string", description: "URL 标识" },
+            description: { type: "string", description: "页面描述（可选）" },
+            content: { type: "string", description: "正文（Markdown）" },
+          },
+          required: ["title", "slug", "content"],
+        },
+      },
+      {
+        name: "opc_get_financial_report",
+        description: "生成 OPC 财务报表并附投资建议（只读 op：按期间统计收入 / 利润 / 可投资金额）",
+        command: "worker://opc_get_financial_report",
+        inputSchema: {
+          type: "object",
+          properties: {
+            period: { type: "string", description: "期间，如 '2026-07'（月度）或 '2026-Q2'（季度）" },
+          },
+          required: ["period"],
+        },
+      },
+      {
+        name: "opc_create_content_asset",
+        description: "创建 OPC 内容资产（经宿主 opc.store 写面；创建后为草稿态，回列裁剪视图）",
+        command: "worker://opc_create_content_asset",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "标题" },
+            contentType: { type: "string", description: "内容类型（article / video / image）" },
+            body: { type: "string", description: "正文（Markdown）" },
+            tags: { type: "array", items: { type: "string" }, description: "标签（可选）" },
+          },
+          required: ["title", "contentType", "body"],
+        },
+      },
+      {
+        name: "opc_create_publish_schedule",
+        description: "创建 OPC 发布计划（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
+        command: "worker://opc_create_publish_schedule",
+        inputSchema: {
+          type: "object",
+          properties: {
+            contentRefType: { type: "string", description: "内容类型（blog_post / content_asset）" },
+            contentRefId: { type: "string", description: "被发布内容的主键（不是本行 id）" },
+            scheduledAt: { type: "number", description: "计划发布时间戳（epoch 秒）" },
+          },
+          required: ["contentRefType", "contentRefId", "scheduledAt"],
+        },
+      },
+      {
+        name: "opc_process_due_schedules",
+        description: "处理全部到期的 OPC 发布计划（写 op；回本次处理过的行视图数组，空数组 = 无到期计划）",
+        command: "worker://opc_process_due_schedules",
+        inputSchema: { type: "object", properties: {} },
       },
       // ── #36 批 1：8 条只读查询 + 1 条看板（全部走 opc.store 只读 op，无必填字段）──
       // 属性名一律 camelCase（与契约 `*ListQuery` 的 serde 键逐字一致）；不写 `required`：

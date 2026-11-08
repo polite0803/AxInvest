@@ -41,13 +41,13 @@
 
 use std::sync::Arc;
 
-use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
 use axagent_entities::strategy_performance;
 use axagent_entities::workflow_template;
 use axagent_entities::workflow_template_version;
 use axagent_lib::TEMPLATE_VERSION;
+use axagent_lib::stock_as_of::{self, AsOfContext};
 use axagent_lib::{
     AppState, axagent_home, create_app_state, init_database_with_dir, run_stock_workflow_inner,
 };
@@ -987,7 +987,7 @@ async fn run() -> Result<(), String> {
     // 为什么要量化：降级 = 该 vendor 无历史语义（`NoHistoricalSemantic`），在 as-of 下会
     // **静默跳过**。降级率高 ⇒ 回放建立在残缺数据上 ⇒ 由此产出的反思会污染样本集。
     // 判据：若某条的降级增量显著高于同批其它，说明该标的的回放数据基础不可信，需单独复核。
-    as_of::reset_global_degradation_log();
+    stock_as_of::reset_global_degradation_log();
     let mut ok = 0usize;
     // 重跑**动作**成功、但**分析状态非 completed**（DAG 失败/超时/取消）的条数。
     // 必须单列：`run_stock_workflow_inner` 失败时也返回 Ok（`stock_workflow/core.rs:1838-1849`），
@@ -997,7 +997,7 @@ async fn run() -> Result<(), String> {
     let mut failed: Vec<(String, String, String)> = Vec::new();
     let mut degradations: Vec<(String, String, u64)> = Vec::new();
     for (i, r) in rows.iter().enumerate() {
-        let deg_before = as_of::global_degradation_count();
+        let deg_before = stock_as_of::global_degradation_count();
         let seq = i + 1;
         let total = rows.len();
         let as_of = r.analysis_date.clone();
@@ -1026,7 +1026,7 @@ async fn run() -> Result<(), String> {
         // 该坑的权威记载见 `astock-data/src/as_of.rs:258-270`（2026-08-01 实锤修复：
         // 原实现要求调用方显式清理全局，实际 90% 调用方没清 ⇒ 全局永久残留）。
         // `with_optional_asof` 同时设 task_local + 全局，并以 RAII 恢复进入前的全局值。
-        let res = as_of::with_optional_asof(Some(ctx), async move {
+        let res = stock_as_of::with_optional_asof(Some(ctx), async move {
             run_stock_workflow_inner(
                 None, // 无前端监听 ⇒ 不发射 workflow-step-* 事件
                 state_ref.as_ref(),
@@ -1042,7 +1042,7 @@ async fn run() -> Result<(), String> {
         })
         .await;
 
-        let deg_delta = as_of::global_degradation_count().saturating_sub(deg_before);
+        let deg_delta = stock_as_of::global_degradation_count().saturating_sub(deg_before);
         degradations.push((r.stock_code.clone(), as_of.clone(), deg_delta));
 
         match res {
@@ -1142,7 +1142,7 @@ async fn run() -> Result<(), String> {
         // 2026-09-23 实测：残留 2026-07-21 ⇒ 4/4 反思降级为「无行情」。
         println!(
             "[batch-rerun] 反思前生效的 as-of = {:?}（期望 None ⇒ live）",
-            as_of::current_as_of().map(|c| c.as_string())
+            stock_as_of::current_as_of().map(|c| c.as_string())
         );
         let count_pending = || async {
             stock_reflections::Entity::find()

@@ -531,7 +531,7 @@ async fn run_reflection_mode(state: &AppState, per_round: u32) -> Result<(), Str
     // 被 as-of 截断就什么都看不到（2026-09-23 实测：残留 as-of ⇒ 反思全降级「无行情」）。
     println!(
         "[run-reflection] 生效的 as-of = {:?}（期望 None ⇒ live）",
-        axagent_astock_data::as_of::current_as_of().map(|c| c.as_string())
+        axagent_lib::stock_as_of::current_as_of().map(|c| c.as_string())
     );
 
     let pending_before = count_pending().await;
@@ -661,8 +661,7 @@ async fn backfill_performance_mode(
 
     // ── 2. 执行回填（幂等）──
     let (scanned, materialized) =
-        axagent_analysis_engine::evolution_drift::backfill_reflection_horizon_performance(db)
-            .await?;
+        axagent_lib::stock_evolution_drift::backfill_reflection_horizon_performance(db).await?;
     println!("扫描反思行 {scanned} 条，物化档位样本 {materialized} 条");
 
     // ── 3. 验收：逐档样本量（校准门槛 = 30）──
@@ -686,7 +685,7 @@ async fn backfill_performance_mode(
 }
 
 async fn fill_factors_mode(db: &sea_orm::DatabaseConnection, apply: bool) -> Result<(), String> {
-    use axagent_stock_core::factors::{FACTOR_VERSION, FactorBar, compute_factors};
+    use axagent_lib::stock_factors::{FACTOR_VERSION, FactorBar, compute_factors};
     use sea_orm::{ConnectionTrait, Statement, Value};
     use std::collections::BTreeMap;
 
@@ -886,8 +885,8 @@ async fn fill_replay_outcomes_mode(
     db: &sea_orm::DatabaseConnection,
     apply: bool,
 ) -> Result<(), String> {
-    use axagent_stock_core::costs::DEFAULT_ROUND_TRIP_COST_PCT;
-    use axagent_stock_core::hit_outcome::{compute_hit_outcome, hit_outcome_to_binary_outcome};
+    use axagent_lib::stock_costs::DEFAULT_ROUND_TRIP_COST_PCT;
+    use axagent_lib::stock_hit_outcome::{compute_hit_outcome, hit_outcome_to_binary_outcome};
     use sea_orm::{ConnectionTrait, Statement, Value};
     use std::collections::BTreeMap;
 
@@ -1143,12 +1142,12 @@ async fn fill_replay_outcomes_mode(
 /// - 不写 `change_pct = 0` 伪值（模块头硬约束：0 会把「拿不到」伪装成「没涨」）
 async fn backfill_history_mode(
     db: &sea_orm::DatabaseConnection,
-    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
+    client: &std::sync::Arc<axagent_lib::AStockClient>,
     target_days: u32,
     limit: usize,
     apply: bool,
 ) -> Result<(), String> {
-    use axagent_analysis_engine::market_close_store::{
+    use axagent_lib::stock_market_close_store::{
         backfill_close_history_for_codes, codes_needing_history,
     };
 

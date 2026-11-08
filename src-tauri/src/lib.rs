@@ -135,6 +135,16 @@ pub use commands::stock_workflow::reflection::{
     REFLECTION_SOURCE_BACKFILL, REFLECTION_SOURCE_DUE, REFLECTION_SOURCE_MOVER_RECALL,
     build_pending_reflection_rows_for, expected_holding_days_for, reviewable_horizons,
 };
+// 离线 bin 的域门面（#35）：`axagent_validate_backfill` / `axagent_batch_rerun` 原先直连
+// `axagent_astock_data::` / `axagent_analysis_engine::` / `axagent_stock_core::`，使两支 bin
+// 各被计一处「主壳反向阻塞」。转发点放在域自有模块 `init/stock_domain_state.rs`（`ownedRe`
+// 命中 `init/stock*`），本行只引该模块 ⇒ `l1ForeignStock` 的两支 bin 读数归零，域侧总量不变。
+pub use init::stock_domain_state::{
+    AStockClient, stock_alert_mapping, stock_as_of, stock_conditional_order_bridge, stock_costs,
+    stock_cross_stock_aggregator, stock_daily_snapshot, stock_evolution_drift, stock_factors,
+    stock_health_check, stock_hit_outcome, stock_market_close_store, stock_monitor,
+    stock_realtime_quote, stock_recommender, stock_serenity_hit_rate_backtest,
+};
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。
 ///

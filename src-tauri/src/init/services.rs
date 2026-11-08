@@ -2301,7 +2301,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
         // 那条路得靠调用方给 `RunOptions.node_task_scope` 把模式带进节点任务（主分析链与
         // 趋势智选链已接，见 `check-asof-node-scope.mjs` R1）。本包裹保证的是「捕获点落在本任务内」
         // 的那批调用一定拿到 live，不是整棵任务树免疫。
-        axagent_astock_data::as_of::AS_OF.scope(None, fut)
+        crate::init::stock_domain_state::stock_as_of::AS_OF.scope(None, fut)
     }
 
     let mut executor = CronExecutor::new();
@@ -2570,7 +2570,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 //    两条入口一套权重两种分。
                 //    读不到不算失败（走代码内硬编码默认值），但要留痕，
                 //    否则「面板上调了阈值却毫无效果」会变成无从下手的现象。
-                let vars = match axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(
+                let vars = match crate::init::stock_domain_state::stock_recommender::reco_loop::load_reco_served_vars_db(
                     &db,
                 )
                 .await {
@@ -2616,7 +2616,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 );
                 let prior =
                     crate::commands::stock_analysis::reco_horizon_prior(&db, &vars).await;
-                let scan = axagent_analysis_engine::recommender::run_recommendation_scan(
+                let scan = crate::init::stock_domain_state::stock_recommender::run_recommendation_scan(
                     client,
                     &config.periods,
                     &vars,
@@ -2706,7 +2706,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 .await;
 
                 // 4. 无 pick 时静默（不推空通知），但有 pick 必须推 —— 这是本任务的存在意义
-                let (title, body) = axagent_analysis_engine::recommender::build_notification(
+                let (title, body) = crate::init::stock_domain_state::stock_recommender::build_notification(
                     &picks,
                 );
                 if !picks.is_empty() {
@@ -3405,7 +3405,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                                     .iter()
                                     .find(|b| {
                                         b.bucket
-                                            == axagent_analysis_engine::serenity_hit_rate_backtest::SERENITY_METRIC_NOT_PERSISTED
+                                            == crate::init::stock_domain_state::stock_serenity_hit_rate_backtest::SERENITY_METRIC_NOT_PERSISTED
                                     })
                                     .map_or(0, |b| b.total);
                                 format!(
@@ -5064,8 +5064,10 @@ fn start_retrieval_feedback_tick(state: &AppState) {
 /// 此前这里是三行的 `AppMonitorEmitter`（只 `app.emit`，不回写也不外推），
 /// 而完整实现住在 `init/monitor_emitter.rs` 且全仓零构造点 —— 两份实现并存，正是「写了但没人装配」。
 fn start_realtime_monitor(app: &tauri::AppHandle) {
-    use axagent_analysis_engine::alert_mapping::{alert_types, db_model_to_config_field};
-    use axagent_analysis_engine::monitor::{RealtimeMonitor, TZeroCallback};
+    use crate::init::stock_domain_state::stock_alert_mapping::{
+        alert_types, db_model_to_config_field,
+    };
+    use crate::init::stock_domain_state::stock_monitor::{RealtimeMonitor, TZeroCallback};
     use axagent_harness::market_data::MarketDataProvider;
     use axagent_harness::stock_monitor::MonitorConfig;
 
@@ -5077,7 +5079,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
 
         // P3-3: 跨股票聚合器（OnceLock 注入，组合级告警）——同步段完成
         let aggregator = std::sync::Arc::new(
-            axagent_analysis_engine::cross_stock_aggregator::CrossStockSignalAggregator::new(
+            crate::init::stock_domain_state::stock_cross_stock_aggregator::CrossStockSignalAggregator::new(
                 axagent_harness::stock_monitor::AggregatorConfig::default(),
             ),
         );
@@ -5201,7 +5203,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
 
             // 条件单定义读进内存引擎（与行情回调共用桥接层那一份「行 → 规则」映射）。
             // 装载失败不阻断价格监控启动，但必须点名 —— 那意味着风控这一轮在盯空列表。
-            match axagent_analysis_engine::conditional_order_bridge::ConditionalOrderBridge::refresh(
+            match crate::init::stock_domain_state::stock_conditional_order_bridge::ConditionalOrderBridge::refresh(
                 &db,
             )
             .await
@@ -5272,7 +5274,9 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
 /// → 触发则把计数写回 `conditional_orders` 并发的 `conditional-order-triggered`。
 /// 事件名一律走 `IpcEventName` 权威枚举，评估失败不能让行情推送一起丢，故单独分支。
 fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
-    use axagent_astock_data::realtime_quote::{QuoteCallback, RealTimeQuoteWatcher};
+    use crate::init::stock_domain_state::stock_realtime_quote::{
+        QuoteCallback, RealTimeQuoteWatcher,
+    };
 
     let callback: QuoteCallback = {
         let app = app.clone();
@@ -5286,7 +5290,7 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
                 "[startup] event.dispatch 总线不可用 ⇒ 插件侧收不到 stock/quote_change（前端事件与条件单评估不受影响）"
             );
         }
-        std::sync::Arc::new(move |event: axagent_astock_data::realtime_quote::QuoteChangeEvent| {
+        std::sync::Arc::new(move |event: crate::init::stock_domain_state::stock_realtime_quote::QuoteChangeEvent| {
             let app = app.clone();
             let db = db.clone();
             let plugin_event_bus = plugin_event_bus.clone();
@@ -5300,7 +5304,7 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
                         &bus, &event,
                     );
                 }
-                use axagent_analysis_engine::conditional_order_bridge::ConditionalOrderBridge;
+                use crate::init::stock_domain_state::stock_conditional_order_bridge::ConditionalOrderBridge;
                 match ConditionalOrderBridge::handle_quote_event(&db, &event).await {
                     Ok(triggers) => {
                         for trigger in triggers {
@@ -5517,7 +5521,8 @@ fn start_daily_snapshot_sweep(state: &AppState) {
             // `!is_trading_day(今天)` 直接让中秋/周末的会话整轮 skip ⇒
             // 09-24（最后交易日）的快照永远没人补，回放行业排名只能去打被本机
             // 阻断的 push2\* 合成链（面板「真故障·1」即此）。
-            let Some(target) = axagent_astock_data::daily_snapshot::snapshot_target_date(&now)
+            let Some(target) =
+                crate::init::stock_domain_state::stock_daily_snapshot::snapshot_target_date(&now)
             else {
                 // 交易日盘中：今天只有半日数据，等收盘
                 continue;
@@ -5543,7 +5548,11 @@ fn start_daily_snapshot_sweep(state: &AppState) {
                 last_health_date.as_deref() != Some(date.as_str())
             };
             if need_health {
-                match axagent_astock_data::health_check::run_and_store(&client, &date).await {
+                match crate::init::stock_domain_state::stock_health_check::run_and_store(
+                    &client, &date,
+                )
+                .await
+                {
                     Ok(report) => {
                         tracing::info!(
                             "[interface-health] {date} 日检完成：{}（探针 {}）",
@@ -5609,7 +5618,7 @@ fn start_market_close_sweep(state: &AppState) {
 
     tauri::async_runtime::spawn(async move {
         // bootstrap：先把本地已有代码补进清单，保证首轮就有可用的枚举域
-        match axagent_analysis_engine::market_close_store::bootstrap_universe_from_local(&db).await
+        match crate::init::stock_domain_state::stock_market_close_store::bootstrap_universe_from_local(&db).await
         {
             Ok(n) => {
                 tracing::info!("[market-close] 清单 bootstrap 补录 {n} 只（本地来源，非全市场）")
@@ -5626,7 +5635,9 @@ fn start_market_close_sweep(state: &AppState) {
                 _ = interval.tick() => {},
             }
             let Some(target) =
-                axagent_astock_data::daily_snapshot::snapshot_target_date(&chrono::Local::now())
+                crate::init::stock_domain_state::stock_daily_snapshot::snapshot_target_date(
+                    &chrono::Local::now(),
+                )
             else {
                 // 交易日盘中：今天只有半日数据，等收盘
                 continue;
@@ -5640,7 +5651,7 @@ fn start_market_close_sweep(state: &AppState) {
             if last_clist_day.swap(day_index, Ordering::Relaxed) != day_index {
                 let base = (round * 6 + 1) as u32;
                 let pages: Vec<u32> = (base..base + 6).collect();
-                match axagent_analysis_engine::market_close_store::refresh_universe_pages(
+                match crate::init::stock_domain_state::stock_market_close_store::refresh_universe_pages(
                     &db, &client, &pages,
                 )
                 .await
@@ -5659,19 +5670,23 @@ fn start_market_close_sweep(state: &AppState) {
 
             // 2) 收盘快照
             let size =
-                axagent_analysis_engine::market_close_store::universe_size(&db).await.unwrap_or(0);
-            let have = axagent_analysis_engine::market_close_store::rows_for_date(&db, &date)
-                .await
-                .unwrap_or(0);
+                crate::init::stock_domain_state::stock_market_close_store::universe_size(&db)
+                    .await
+                    .unwrap_or(0);
+            let have = crate::init::stock_domain_state::stock_market_close_store::rows_for_date(
+                &db, &date,
+            )
+            .await
+            .unwrap_or(0);
             // 97% 覆盖率即视为「本轮已采齐」：严格 <size 会被停牌/无值票卡成每小时重跑。
             // 旧判据「不足一半才重跑」会让缺 49% 也静默通过。
             if size > 0 && have * 100 < size * 97 {
-                match axagent_analysis_engine::market_close_store::run_close_sweep(
+                match crate::init::stock_domain_state::stock_market_close_store::run_close_sweep(
                     &db,
                     &client,
                     &date,
-                    axagent_analysis_engine::market_close_store::DEFAULT_BATCH_SIZE,
-                    axagent_analysis_engine::market_close_store::DEFAULT_BATCH_INTERVAL_MS,
+                    crate::init::stock_domain_state::stock_market_close_store::DEFAULT_BATCH_SIZE,
+                    crate::init::stock_domain_state::stock_market_close_store::DEFAULT_BATCH_INTERVAL_MS,
                 )
                 .await
                 {
@@ -5782,10 +5797,10 @@ pub(crate) const BUILTIN_VAR_KEYS: [&str; 4] =
 /// live 时 `as_of_date` 给**空串**而不是今天 —— 把「没有锚点」伪装成「锚在当天」正是
 /// 回放/实盘读不出差别的那类缺陷。
 pub(crate) fn asof_builtin_vars() -> std::collections::HashMap<String, String> {
-    use axagent_astock_data::as_of::{self, AsOfDataScope};
-    let ctx = as_of::current_as_of();
+    use crate::init::stock_domain_state::stock_as_of::{self, AsOfDataScope};
+    let ctx = stock_as_of::current_as_of();
     let mut vars = std::collections::HashMap::new();
-    vars.insert("data_freshness".to_string(), as_of::data_freshness_description());
+    vars.insert("data_freshness".to_string(), stock_as_of::data_freshness_description());
     vars.insert("as_of_date".to_string(), ctx.map(|c| c.as_string()).unwrap_or_default());
     vars.insert("is_replay".to_string(), if ctx.is_some() { "true" } else { "false" }.to_string());
     vars.insert(
@@ -5805,7 +5820,9 @@ pub(crate) fn asof_builtin_vars() -> std::collections::HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::asof_builtin_vars;
-    use axagent_astock_data::as_of::{AS_OF, AsOfContext, AsOfDataScope, AsOfSource};
+    use crate::init::stock_domain_state::stock_as_of::{
+        AS_OF, AsOfContext, AsOfDataScope, AsOfSource,
+    };
     use chrono::NaiveDate;
 
     /// 兜底轮必须只消费已到期行：未到期行被提前反思后行就 completed，

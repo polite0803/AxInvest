@@ -406,7 +406,7 @@ pub use opc_store::{
     OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, ProjectListQuery, ProjectSummaryView,
     PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome,
     RemoveContentAssetOutcome, RemovePublishScheduleOutcome, TransitionInvoiceOutcome,
-    UpdateContentAssetInput, UpdateContentAssetOutcome,
+    UpdateContentAssetInput, UpdateContentAssetOutcome, UpdateCustomerRequest,
 };
 // ── 轨迹库只读接缝（`trajectory.store`，首批无写 op；视图裁剪与 limit 闸见模块头）──
 pub mod trajectory_store;

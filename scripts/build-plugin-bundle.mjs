@@ -748,6 +748,62 @@ function opcManifest({ version, binaryName, sha256 }) {
           required: ["name", "email"],
         },
       },
+      // ── #32 批 A：三条写命令（客户更新/客户删除/发票删除，均走 opc.store 写面 ⇒
+      //    宿主 requireWrite 闸）。update 出参 = 更新后的列裁剪视图；删除出参 = 无载荷。
+      //    可选字段「缺省 = 该列不动」；⚠ 清空在本命令线格式上不可表达（与宿主同名
+      //    Tauri 命令行为一致）。opc_delete_invoice 删的是域包发票 —— 宿主同名 Tauri
+      //    命令删的是交付域发票，两套体系同名不同义。
+      {
+        name: "opc_update_customer",
+        description: "更新 OPC 客户（经宿主 opc.store 写面；回更新后的列裁剪视图）",
+        command: "worker://opc_update_customer",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "客户 id（接缝主键；空值由宿主 provider 拒收）" },
+            name: { type: "string", description: "新姓名（缺省 = 该列不动）" },
+            email: { type: "string", description: "新邮箱（缺省 = 该列不动）" },
+            phone: { type: "string", description: "新电话（缺省 = 该列不动）" },
+            company: { type: "string", description: "新公司（缺省 = 该列不动）" },
+            customerType: {
+              type: "string",
+              description: "新客户类型（consumer / business；其余值由宿主落 Unknown）",
+            },
+            country: { type: "string", description: "新国家（缺省 = 该列不动）" },
+            region: { type: "string", description: "新地区（缺省 = 该列不动）" },
+            city: { type: "string", description: "新城市（缺省 = 该列不动）" },
+            address: { type: "string", description: "新地址（缺省 = 该列不动）" },
+            latitude: { type: "number", description: "新纬度（缺省 = 该列不动）" },
+            longitude: { type: "number", description: "新经度（缺省 = 该列不动）" },
+            notes: { type: "string", description: "新备注（缺省 = 该列不动）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_delete_customer",
+        description: "删除 OPC 客户（经宿主 opc.store 写面；成功无载荷）",
+        command: "worker://opc_delete_customer",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "客户 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_delete_invoice",
+        description: "删除 OPC 发票（域包发票；经宿主 opc.store 写面，成功无载荷）",
+        command: "worker://opc_delete_invoice",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "发票 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
       {
         name: "opc_create_project",
         description: "创建 OPC 项目（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",

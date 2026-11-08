@@ -614,6 +614,67 @@ impl OpcStoreProvider for HostOpcStore {
         })?;
         Ok(rows.into_iter().map(publish_schedule_summary_view).collect())
     }
+
+    // ── #32 前端刀：客户编辑 / 客户删除 / 发票删除 ─────────────────────────
+    //
+    // 前端 OPC 页面（InvoicesTab / CustomersTab）迁插件通道的缺口补齐：域服务 trait
+    // 本就有这三个方法（`CustomerService::{update,delete}_customer`、
+    // `InvoiceService::delete_invoice`），接缝此前没透。缺行 = `Err(Provider)`（域服务
+    // `NotFound` 透传；不造「两态 Outcome」，域服务没有那个分支）。
+
+    async fn update_customer(
+        &self,
+        id: String,
+        request: UpdateCustomerRequest,
+    ) -> Result<CustomerSummaryView> {
+        require_id(&id, "update_customer")?;
+        let svc = DefaultCustomerService::new(self.db.clone());
+        // `customerType` 串解码同 `create_customer`（小写后 consumer/business 之外落 Unknown）。
+        let customer_type =
+            request.customer_type.map(|s| s.to_lowercase()).map(|s| match s.as_str() {
+                "consumer" => CustomerType::Consumer,
+                "business" => CustomerType::Business,
+                _ => CustomerType::Unknown,
+            });
+        // `name` / `email` 在域包是单层 `Option<String>`（其余可空列是 `Option<Option<T>>`
+        // 双层），而接缝 DTO 统一双层承载「缺席=不动 / null=清空」语义。线上 `Some(None)`
+        // 不可达（JSON null 落外层），故 `flatten()` 后 `None` = 不动，语义等价。
+        let input = UpdateCustomerInput {
+            name: request.name.flatten(),
+            email: request.email.flatten(),
+            phone: request.phone,
+            company: request.company,
+            customer_type,
+            country: request.country,
+            region: request.region,
+            city: request.city,
+            address: request.address,
+            latitude: request.latitude,
+            longitude: request.longitude,
+            tags: None,
+            notes: request.notes,
+        };
+        let c = CustomerService::update_customer(&svc, &id, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::update_customer 更新失败: {e}"))
+        })?;
+        Ok(customer_summary_view(c))
+    }
+
+    async fn delete_customer(&self, id: String) -> Result<()> {
+        require_id(&id, "delete_customer")?;
+        let svc = DefaultCustomerService::new(self.db.clone());
+        CustomerService::delete_customer(&svc, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::delete_customer 删除失败: {e}"))
+        })
+    }
+
+    async fn delete_invoice(&self, id: String) -> Result<()> {
+        require_id(&id, "delete_invoice")?;
+        let svc = DefaultInvoiceService::new(self.db.clone());
+        InvoiceService::delete_invoice(&svc, &id)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::delete_invoice 删除失败: {e}")))
+    }
 }
 
 // ── #36 批 2 写 op 的依赖 ─────────────────────────────────────────────────
@@ -627,12 +688,13 @@ use axagent_harness::opc_store::{
     CreateLandingPageRequest, CreateProjectRequest, CreatePublishScheduleRequest,
     FinancialReportView, RemoveContentAssetOutcome, RemovePublishScheduleOutcome,
     TransitionInvoiceOutcome, UpdateContentAssetInput, UpdateContentAssetOutcome,
+    UpdateCustomerRequest,
 };
 // #36 批 3 的域入参 / 枚举 / 服务：同样放在 impl 之后（理由同上 —— impl 行被登记表钉住）。
 use axagent_company_runtime::opc::{
     CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput, CreateLandingPageInput,
     CreateProjectInput, CreatePublishScheduleInput, CustomerSource, DefaultFinanceService,
-    FinanceService, InvoiceLineItem, Milestone,
+    FinanceService, InvoiceLineItem, Milestone, UpdateCustomerInput,
 };
 use std::str::FromStr;
 
@@ -703,6 +765,7 @@ fn invoice_summary_view(inv: Invoice) -> InvoiceSummaryView {
         status: inv.status.as_str().to_string(),
         total: inv.total,
         currency: inv.currency,
+        due_at: inv.due_at,
         created_at: inv.created_at,
     }
 }
@@ -714,9 +777,33 @@ fn customer_summary_view(c: Customer) -> CustomerSummaryView {
         email: c.email,
         phone: c.phone,
         company: c.company,
+        customer_type: c.customer_type.as_str().to_string(),
+        country: c.country,
+        region: c.region,
+        city: c.city,
+        address: c.address,
+        latitude: c.latitude,
+        longitude: c.longitude,
+        source: c.source.map(|s| opc_source_to_str(&s)),
+        notes: c.notes,
         status: c.status.as_str().to_string(),
         total_revenue: c.total_revenue,
+        invoice_count: c.invoice_count,
         created_at: c.created_at,
+    }
+}
+
+/// `CustomerSource` → 线格式串（小蛇形；`Other` 原串透传）。域包 `source_to_str` 是
+/// 私有 fn（`customer.rs` 内部用），这里按同一判据本地写一份 —— 两处形状由前端筛选器
+/// 的字面值（`referral` / `website` / …）钉住。
+fn opc_source_to_str(s: &CustomerSource) -> String {
+    match s {
+        CustomerSource::Referral => "referral".into(),
+        CustomerSource::Website => "website".into(),
+        CustomerSource::SocialMedia => "social_media".into(),
+        CustomerSource::Marketplace => "marketplace".into(),
+        CustomerSource::Direct => "direct".into(),
+        CustomerSource::Other(v) => v.clone(),
     }
 }
 

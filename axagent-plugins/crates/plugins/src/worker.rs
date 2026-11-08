@@ -489,7 +489,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "delete_content_asset"
             | "cancel_publish_schedule"
             | "create_invoice"
+            | "delete_invoice"
             | "create_customer"
+            | "update_customer"
+            | "delete_customer"
             | "create_project"
             | "add_milestone"
             | "create_landing_page"
@@ -3038,6 +3041,69 @@ impl HostPeer {
                 };
                 match result {
                     Ok(view) => to_value("LandingPageSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // `update_customer` 是**散标量 + 嵌一层**混合：`id` 单独收（同
+            // `transition_invoice`），正文收 `{"request": {…}}`。契约
+            // `UpdateCustomerRequest` 的可空列是双层 `Option<Option<T>>`
+            // （外层 None=不动、Some(None)=清空、Some(Some(v))=写入），与域包
+            // `UpdateCustomerInput` 逐字段同构；`source`/`tags` 域包无更新位，
+            // 契约刻意不摆。
+            "opc.store" if op == "update_customer" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let request: axagent_harness::UpdateCustomerRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_customer(id, request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("CustomerSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 删除 op：纯 `id` 入参（同 `delete_blog_post`）；成功无载荷 ⇒
+            // `Value::Null`（先例 platform.adapter 的 start/stop）。⚠
+            // `delete_invoice` 删的是**域包发票**（opc_invoices 表）——宿主同名
+            // 命令 `opc_delete_invoice` 删的是交付域发票，两套体系同名不同义。
+            "opc.store" if op == "delete_customer" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_customer(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "delete_invoice" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_invoice(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
                     Err(e) => seam_provider_error(e),
                 }
             },

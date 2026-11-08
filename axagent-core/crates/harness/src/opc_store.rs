@@ -446,6 +446,45 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::process_due_schedules 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 写 op（#32 前端刀：客户编辑 / 客户删除 / 发票删除）─────────────────
+    //
+    // 三个 op 是前端 OPC 页面（InvoicesTab / CustomersTab）迁插件通道的缺口补齐：
+    // 域包服务 trait（`company-runtime` 的 `CustomerService` / `InvoiceService`）本就
+    // 有这三个方法，接缝此前没透。出参判据与 `transition_invoice` 同型：缺行 =
+    // `Err(Provider)`（域服务 `NotFound` 透传）—— 不借「两态 Outcome」表达缺行，
+    // 因为域服务没有 `RemoveContentAssetOutcome` 那种「缺行不算错」的分支。
+
+    /// 更新客户（`update_customer` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参 [`UpdateCustomerRequest`]（`None` = 该列不动）；成功 ⇒ 更新后的列裁剪视图。
+    async fn update_customer(
+        &self,
+        _id: String,
+        _request: UpdateCustomerRequest,
+    ) -> Result<CustomerSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_customer 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除客户（`delete_customer` op）—— 写 op，要 `write` 权限。
+    async fn delete_customer(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_customer 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除发票（`delete_invoice` op）—— 写 op，要 `write` 权限。
+    ///
+    /// ⚠ 删的是**域包发票**。宿主 Tauri 命令 `opc_delete_invoice` 是**交付域**发票的
+    /// 删除（另一张表），同名不同义 —— 插件命令与宿主命令同名并存是 #36 批 1–3 的
+    /// 既有形态（宿主命令活着时名字双占，前端靠通道区分）。
+    async fn delete_invoice(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_invoice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -598,6 +637,8 @@ pub struct InvoiceSummaryView {
     pub status: String,
     pub total: f64,
     pub currency: String,
+    /// 到期时刻（epoch 秒）；`None` = 未设到期。前端发票表格要展示到期列。
+    pub due_at: Option<i64>,
     pub created_at: i64,
 }
 
@@ -610,8 +651,21 @@ pub struct CustomerSummaryView {
     pub email: String,
     pub phone: Option<String>,
     pub company: Option<String>,
+    /// 客户类型枚举串（`consumer` / `business` / `unknown`）。
+    pub customer_type: String,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    /// 来源枚举串；`None` = 未设来源（前端按 `-` 渲染）。
+    pub source: Option<String>,
+    pub notes: String,
     pub status: String,
     pub total_revenue: f64,
+    /// 名下发票数（域包 `Customer.invoice_count` 直透；前端表格「发票数」列）。
+    pub invoice_count: u32,
     pub created_at: i64,
 }
 
@@ -812,6 +866,38 @@ pub struct CreateCustomerRequest {
     pub longitude: Option<f64>,
     pub source: Option<String>,
     /// 缺省空串（provider 补）。
+    pub notes: Option<String>,
+}
+
+/// `update_customer` 的入参：**逐字段对齐域包 `UpdateCustomerInput` 的能力面**（翻译零损失）。
+///
+/// 三种形态并存（照域包原样，不在 provider 里造第二套语义）：
+/// - **双层列**（`name` / `email` / `phone` / `company` / `country` / `region` / `city` /
+///   `address` / `latitude` / `longitude`）：JSON 字段**缺席** = 外层 `None` = 不动；字段为
+///   值 = `Some(Some(v))` = 写入。⚠ serde_json 对双层 `Option` 的显式 `null` 同样落**外层**
+///   `None` —— `Some(None)`（清空）在跨进程 JSON 路径不可表达，与既存宿主 Tauri 命令（同为
+///   JSON 反序列化）行为完全一致；域包在 Rust 直构造时才可达清空（`Set(None)` = 写 NULL），
+///   域包将来若给「清空」开线格式，本契约同构照抄自动跟上；
+/// - **单层列**（`customerType` / `notes`）：域包入参就是单层 ⇒ 接缝同。`customerType`
+///   收**串**（`consumer` / `business` 以外落 `Unknown`，同 [`CreateCustomerRequest`]）；
+/// - **能力面外**：`source` 刻意不摆 —— 域包 `UpdateCustomerInput` 没有 source 的更新位；
+///   `tags` 域包虽有更新位（`Option<Vec<String>>`，`Some(vec![])` = 清空），但
+///   [`CustomerSummaryView`] 与前端表单整条链路都不见 tags、且既存宿主链路每次更新都把它
+///   清成空数组（前端硬编码 `tags: []`）⇒ 插件通道取「不动」语义（provider 构造 `tags: None`）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpdateCustomerRequest {
+    pub name: Option<Option<String>>,
+    pub email: Option<Option<String>>,
+    pub phone: Option<Option<String>>,
+    pub company: Option<Option<String>>,
+    pub customer_type: Option<String>,
+    pub country: Option<Option<String>>,
+    pub region: Option<Option<String>>,
+    pub city: Option<Option<String>>,
+    pub address: Option<Option<String>>,
+    pub latitude: Option<Option<f64>>,
+    pub longitude: Option<Option<f64>>,
     pub notes: Option<String>,
 }
 

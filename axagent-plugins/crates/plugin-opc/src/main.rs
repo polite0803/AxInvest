@@ -102,6 +102,14 @@ const OPC_STORE_CREATE_CONTENT_ASSET: &str = "create_content_asset";
 const OPC_STORE_CREATE_PUBLISH_SCHEDULE: &str = "create_publish_schedule";
 const OPC_STORE_PROCESS_DUE_SCHEDULES: &str = "process_due_schedules";
 
+/// #32 批 A 的三条 op（都要 `write`）：客户更新 / 客户删除 / 发票删除。前两者同属
+/// 客户面，`delete_invoice` 删的是**域包发票**——宿主同名 Tauri 命令删的是交付域发票
+/// （两套体系同名不同义，见 `worker.rs` 分派臂的警示）。`update_customer` 出参是
+/// [`CustomerSummaryView`] 逐字透传；两条删除 op 成功无载荷（接缝出 `Value::Null`）。
+const OPC_STORE_UPDATE_CUSTOMER: &str = "update_customer";
+const OPC_STORE_DELETE_CUSTOMER: &str = "delete_customer";
+const OPC_STORE_DELETE_INVOICE: &str = "delete_invoice";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -147,6 +155,13 @@ const COMMAND_GET_FINANCIAL_REPORT: &str = "opc_get_financial_report";
 const COMMAND_CREATE_CONTENT_ASSET: &str = "opc_create_content_asset";
 const COMMAND_CREATE_PUBLISH_SCHEDULE: &str = "opc_create_publish_schedule";
 const COMMAND_PROCESS_DUE_SCHEDULES: &str = "opc_process_due_schedules";
+
+/// #32 批 A 的三条写命令（清单 `commands[].name` 必须逐字一致）。`opc_update_customer` /
+/// `opc_delete_customer` 与宿主同名 Tauri 命令同义（批 C 删宿主侧后本条是唯一通道）；
+/// `opc_delete_invoice` 与宿主同名 Tauri 命令**同名不同义**（域包发票 vs 交付域发票）。
+const COMMAND_UPDATE_CUSTOMER: &str = "opc_update_customer";
+const COMMAND_DELETE_CUSTOMER: &str = "opc_delete_customer";
+const COMMAND_DELETE_INVOICE: &str = "opc_delete_invoice";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -385,6 +400,25 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             },
         },
         COMMAND_CREATE_CUSTOMER => match create_customer(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // ── #32 批 A：三条写命令（更新出参 = 列裁剪视图，删除出参 = 无载荷）──
+        COMMAND_UPDATE_CUSTOMER => match update_customer(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_DELETE_CUSTOMER => match delete_customer(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_DELETE_INVOICE => match delete_invoice(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -1019,6 +1053,75 @@ fn create_customer(
         json!({ "request": Value::Object(request) }),
         call_chain,
     )
+}
+
+/// `opc_update_customer`：更新客户（#32 批 A 的写 op）。
+///
+/// `id` 必填（散标量）；正文平铺可选字段组装 `{"request": {…}}`。可选字段缺键 /
+/// `null` 都不转发（helper 口径）⇒ 接缝 DTO 外层 `None` = 不动；给了值 = 写入。与
+/// 接缝注释一致：**清空（域包 `Some(None)`）在本命令的 JSON 线格式上不可表达**，与
+/// 既存宿主 Tauri 命令行为完全一致。出参 = 更新后的 [`CustomerSummaryView`]。
+fn update_customer(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_customer";
+    let id = require_str(input, OP, "id")?;
+    let mut request = serde_json::Map::new();
+    copy_optional_strings(
+        input,
+        OP,
+        &mut request,
+        &[
+            "name",
+            "email",
+            "phone",
+            "company",
+            "customerType",
+            "country",
+            "region",
+            "city",
+            "address",
+            "notes",
+        ],
+    )?;
+    copy_optional_f64(input, OP, &mut request, &["latitude", "longitude"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_CUSTOMER,
+        json!({ "id": id, "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_delete_customer`：删除一个客户（#32 批 A 的写 op）。
+///
+/// 入参只有 `id`，且只判形状（非空判在宿主 provider，同 [`publish_blog_post`] 的分工）。
+/// 成功无载荷（接缝出 `Value::Null`，逐字透传）。
+fn delete_customer(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_customer";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_DELETE_CUSTOMER, json!({ "id": id }), call_chain)
+}
+
+/// `opc_delete_invoice`：删除一张**域包发票**（#32 批 A 的写 op）。
+///
+/// ⚠ 与宿主同名 Tauri 命令**同名不同义**：宿主命令删的是交付域发票
+/// （`opc_delivery` repo），本命令删的是 `opc_invoices` 表的域包发票 ——
+/// 前端发票页两套体系并存时靠命令通道区分。入参只有 `id`（只判形状）。
+fn delete_invoice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_invoice";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_DELETE_INVOICE, json!({ "id": id }), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

@@ -7458,3 +7458,34 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 | 「bin 的 3 处装配引用按宿主持有豁免同 H 桶，读数仍 3/3」 | `l1ForeignStock=3` = 待改写 0 + **STOCK 域 H 桶 3 条**（gateway.rs / monitor_emitter.rs / browser_fetcher.rs），与股票 bin 无关；conversations ×2 + state.rs 属 **OPC** 域 H 桶（计入 `l1ForeignOpc`）；bin 引 harness / axagent_lib 不落检测面 |
 
 根因：首稿在**单根 8 成员 workspace** 的旧认知下闭卷编写，未逐条实测（违反任务书「现状前提逐条自行核实」）；本批按 8 根布局逐一重测后整节重写。
+
+## 137. T2 试点批 Rust 半收口：四条宿主命令接入 `stock.analysis` 接缝（#249，2026-11-10）
+
+### 137.1 落笔面（六文件，批 G/leader 自做合计）
+
+试点批（任务 `#248`）选的四条命令：`stock_get_pipeline_history` / `stock_get_pipeline_run_detail` / `stock_list_pending_evolution_plans` / `stock_wf_des_integration`。全部只读或纯计算 ⇒ **一条都不进权限面**（与 E 批只读三条同判据）。五段改动：
+
+| 段 | 文件 | 内容 |
+|---|---|---|
+| ① 契约层 | `axagent-core/crates/harness/src/stock_analysis.rs:105,112,119,131` | trait 扩 4 op（`pipeline_history` / `pipeline_run_detail` / `pending_evolution_plans` / `des_integration`），带 default「未实现」兜底；模块头「三条→七条」；末尾内联测试表补 4 项（default 兜底拒绝路径） |
+| ② 宿主 provider | `src-tauri/src/init/stock_analysis_service.rs:182,201,221,241` | 四方法：三个查询 op 直连既有无 State 核心（`pipeline_history_rows` / `pipeline_run_detail_row` / `evo_hist::list_pending_asc`）；`des_integration` **必须 `spawn_blocking`** —— `commands/wf_des.rs` 的 `wf_des_integration` 是同步形态且内部自建 tokio runtime，在 async executor 直调构成嵌套 runtime（禁区 9） |
+| ③ 宿主命令注释 | `src-tauri/src/commands/stock_pipeline/core.rs` | 两条无 State 核心函数的注释补「IPC 命令与 `stock.analysis` 接缝共用同一份构造」（功能包层引用主壳的 T2 合规记号） |
+| ④ worker 分派（插件侧命令面） | `axagent-plugins/crates/plugin-stock/src/main.rs:69,75,229,262` | 四个 `COMMAND_*` 常量 + 四条分派臂（全走既有 `call_analysis_seam` 透传，与 E 批三条同构） |
+| ⑤ worker 分派（HostPeer 接缝面） | `axagent-plugins/crates/plugins/src/worker.rs:2714-2753`（`stock.analysis` 四臂） | `HostPeer` 的 seam 分派补 `stock.analysis` × `{pipeline_history, pipeline_run_detail, pending_evolution_plans, des_integration}` 四臂：`registry.get_stock_analysis()` 缺失 ⇒ `unavailable`；`request` 透传 + `block_on` + `FrameResponse::success`，与 E 批三条同构。全只读 ⇒ `required_permission_for` 一条不登记 |
+| ⑥ 清单声明 | `scripts/build-plugin-bundle.mjs` | commands[] 四条：前两条 + `stock_list_pending_evolution_plans` 用 `additionalProperties:false` 逐参声明（`limit?` / `runId` required / 无参 `properties:{}`）；`stock_wf_des_integration` 用宽形态 + 指向形状权威 `commands/wf_des.rs` 的 `WfDesRequest`（camelCase 四字段全必填）——清单不复刻 DTO（同 `stock_market_mainline_batch_upsert` 先例） |
+
+### 137.2 本批修正（Lane G 落笔缺陷）
+
+- **模块头标题重复两遍**：`stock_analysis.rs` 文档头「股票分析数据面接缝（`stock.analysis`）— Trait（DTO 留在域包）。」出现两次（Lane G 写「三条→七条」时误复制标题行）。本收口删除第二遍，语义零改动。
+- 复核 Lane G 的「三查询 op 直连无 State 核心」说法属实：`stock_pipeline/core.rs` 的 `pipeline_history_rows` / `pipeline_run_detail_row` 本就是 IPC 命令的提取核心，`pending_evolution_plans` 的 `evo_hist::list_pending_asc` 与宿主命令 `stock_list_pending_evolution_plans` 同体。
+
+### 137.3 未做清单（本批范围裁定）
+
+1. **worker 侧行为测试未补**——E 批三条在 `axagent-plugins/crates/plugin-stock/tests/protocol.rs` 同样没有逐臂行为测试（只有 `stock_get_quote` 一条走接缝的代表性测试）；四臂与 E 批同构透传，判定同 E 批：不补。取数逻辑由 ② 段宿主 provider 的既有无 State 核心测试与 dao 层测试覆盖。
+2. **宿主四命令未删**——试点批语义是「双声明期验证 T2 通道」，前端调用方（#250 已切）与智能体工具面（尚未声明）分两步走；删宿主命令等 T2 验收批。
+3. **登记表读数回写已收口（订正本条首版编造的「接缝计数回写」）**——登记表**没有** stock.analysis 的 op 计数锚：`stockBoundaryCommands` 302 / `stockAuditDomainCommands` 304 数的是宿主 `register_commands.rs` 的命令面，本批四条命令全是插件侧命名命令（`COMMAND_*`，不进宿主清单）⇒ 两数不动；`l1ForeignStock` 3 也不动（本批不改 tools/）。实际回写 = evidence 三条（workflow.reflector 5082→5139、workflow.evolver 5174→5231/5222→5279，全部 +57，由 `--repin-code --apply` 回写，token/anchorText 一字未动；+57 而非 §137.1 ⑤ 段原估 +63，以复算器为准）；`frontendFileCaliber` / `frontendDirCaliber` 两条**刻意不回写**——工作树被并行批未提交搬迁污染（91784 vs 提交树 87540，差额 4244 = §132.1 口径扩张 3993 + 并行批其它，Lane H 前端贡献仅几十行），按 `21a743fa5` 自我纠错先例（登记值是提交树读数，污染树上回写=把并行批成果钉进本批账）⇒ 这两条 FAIL 属并行批在途既存红，由提交其改动的批收口，本批带红提交。第五道门终态：2 条硬失败（全为体量锚）/ 其余全绿。
+
+### 137.4 验证状态（本收口时点）
+
+- harness 内联测试：Lane G 报过绿（stub 表 4 项），主 crate check 在后台排队跑（**共享锁上有并行批的 `cargo check -p axagent`，不 kill、排队等它跑完再跑本批定点**）。
+- 清单语法：`node --check scripts/build-plugin-bundle.mjs` PASS。清单校验（`--check` 起 worker 握手）须等 worker 重编译后跑，与本批提交同窗口。

@@ -16,7 +16,7 @@ import { formatDateTime, formatDuration } from "../formatUtils";
 import { RunStatusTag } from "../RunStatusTag";
 
 interface PipelineRunDetailDrawerProps {
-  /** 为空时 Drawer 关闭；切换 run 时按 runId 拉 get_pipeline_run_detail 明细 */
+  /** 为空时 Drawer 关闭；切换 run 时按 runId 经 pipelineStore 拉 stock_get_pipeline_run_detail 明细 */
   run: PipelineRun | null;
   onClose: () => void;
 }

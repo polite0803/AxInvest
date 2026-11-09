@@ -7153,6 +7153,33 @@ async function executeCommand<T>(
       return null as unknown as T;
     case "run_stock_pipeline":
       return null as unknown as T;
+
+    // ── 股票插件命名命令（插件命令桥 T2 试点批，#248 前端半）────────────
+    // 4 条股票宿主命令已接入插件命令桥：前端调用方切到 `stock_*` 插件命名命令
+    // （真机由插件命令桥按「插件已启用」闸门路由到 stock 插件；宿主命令双声明期
+    // 保留）。浏览器模式没有插件安装根、也没有命令桥 ⇒ 此处 mock 分支镜像的是
+    // 「归属闸门放行后的执行形态」：与对应宿主命令的 mock 同形（同一 DTO、
+    // 同一消费端），否则前端切名后浏览器模式功能静默降级。
+    // ⚠ 必须逐命令显式声明，不许靠 default 前缀兜底（实证过的坑）：这批命令名
+    // 均不以 `get_` / `list_` 开头，`stock_list_pending_evolution_plans` 仅因
+    // 以 s 结尾碰上空数组兜底，其余三条兜底返回 undefined ⇒ 消费端
+    // `.filter` / `setReport` 直接踩空。同形对照：上方「股票管道」段、下方
+    // P4 审批段的宿主命令 mock。
+    case "stock_get_pipeline_history":
+      return [] as unknown as T;
+    case "stock_get_pipeline_run_detail":
+      return null as unknown as T;
+    case "stock_list_pending_evolution_plans":
+      // 与宿主命令 `list_pending_evolution_plans` 的 mock 同源同形
+      // （mockPendingEvolutionPlans：1 条演示待审批计划 + 审批只改内存数组）；
+      // 宿主卡投影（task_card_host_cards 的 summaryCommand）双声明期仍指宿主命令名。
+      return mockPendingEvolutionPlans() as unknown as T;
+    case "stock_wf_des_integration":
+      // 浏览器模式没有 WalkForward / DES 仿真引擎，无报告可算 ⇒ 显式返回 null
+      // （消费端 report 为 falsy 时渲染空态）。宿主命令 wf_des_integration 此前
+      // 无显式 case、一直落 default 返回 undefined——这里显式化并消除告警。
+      return null as unknown as T;
+
     // 暂停 / 恢复仅需成功 resolve（无返回体）。
     case "workflow_pause":
     case "workflow_resume":

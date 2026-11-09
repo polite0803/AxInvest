@@ -183,8 +183,8 @@ export function WfDesTab() {
         strategyName: STRATEGY,
       };
 
-      // 4. 调用后端
-      const result = await invoke<WfDesReport>("wf_des_integration", { request: req });
+      // 4. 调用后端（#248 T2 试点批：插件命名命令，原 wf_des_integration，双声明期宿主命令保留）
+      const result = await invoke<WfDesReport>("stock_wf_des_integration", { request: req });
       setReport(result);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

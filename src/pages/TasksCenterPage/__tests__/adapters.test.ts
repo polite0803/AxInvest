@@ -534,7 +534,10 @@ describe("moverRecall.mapBatchSummary", () => {
 describe("aggregateRuns 源失败隔离", () => {
   it("单源 reject 只产生 SourceFetchError，其余源正常", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_pipeline_history") {
+      // #248 T2 试点批：适配器已切到插件命名命令（原 get_pipeline_history）。
+      // 分发名若与实际调用名错位，此处会走 default resolve([]) ⇒ 无 errors ⇒
+      // 下方断言真红（不会因「没被调用」假绿）。
+      if (cmd === "stock_get_pipeline_history") {
         return Promise.reject(new Error("backend down"));
       }
       return Promise.resolve([]);
@@ -544,6 +547,9 @@ describe("aggregateRuns 源失败隔离", () => {
     expect(agg.errors).toEqual([
       { source: "stock-pipeline", message: "backend down" },
     ]);
+    // 正控：锁住插件命名命令确实被以 camelCase 参数键发出（禁区 13），
+    // 防止上述 reject 分支因「命令名恰好没被调用」而空转。
+    expect(invokeMock).toHaveBeenCalledWith("stock_get_pipeline_history", { limit: 50 });
   });
 });
 

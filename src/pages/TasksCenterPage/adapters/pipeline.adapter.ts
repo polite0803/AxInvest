@@ -9,9 +9,9 @@ import { runIdOf, type RunState, type UnifiedRun } from "../model";
 import type { TaskSourceAdapter } from "./types";
 
 /**
- * stock-pipeline 源：股票分析管道按日运行（get_pipeline_history/detail）。
+ * stock-pipeline 源：股票分析管道按日运行（stock_get_pipeline_history/detail）。
  * 无取消/重试命令（盘点 1.2）；步骤仅实时事件（pipeline-step），历史 run 无 steps 可取，
- * 故能力位只开 viewIO（详情抽屉拉 get_pipeline_run_detail）。
+ * 故能力位只开 viewIO（详情抽屉经 pipelineStore 拉 stock_get_pipeline_run_detail）。
  */
 export const pipelineAdapter: TaskSourceAdapter = {
   id: "stock-pipeline",
@@ -19,7 +19,8 @@ export const pipelineAdapter: TaskSourceAdapter = {
   color: "blue",
 
   async list(): Promise<UnifiedRun[]> {
-    const rows = await invoke<PipelineRun[]>("get_pipeline_history", { limit: 50 });
+    // #248 T2 试点批：插件命名命令（原 get_pipeline_history，双声明期宿主命令保留）
+    const rows = await invoke<PipelineRun[]>("stock_get_pipeline_history", { limit: 50 });
     if (!Array.isArray(rows)) {
       return [];
     }

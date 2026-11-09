@@ -7132,3 +7132,84 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 
 两条定点测试齐了：`commands::opc_setup` 5 passed / EXIT=0；`commands::opc_workflows` **16 passed** / EXIT=0。
 配合 `e9f4404d0` 的配置/专家 prompt 去声明，全仓已无 `OpcSendNotification` 活声明。
+
+## 132. 刀 C：前端反向 STOCK 25/23 逐条分类台账（#241，2026-11-09；**只登记，不动代码、不改任何读数**）
+
+### 132.1 先说结论：本批不处置，是因为取数基准仍被并行批占用
+
+**Rust 侧已归零**：`node scripts/audit-l1-blockers.mjs` 实测「Rust 反向阻塞（待改写，H 桶除外）= **0 处 / 0 文件**」、H 桶 3/3 白名单 ⇒ #35 的剩余面**只剩前端反向**。
+
+前端反向的取数基准当前三分，**必须分开记，不许互相替代**：
+
+| 基准 | 命令 | STOCK | 性质 |
+|---|---|---|---|
+| **HEAD 提交树** | `--fe-json --before HEAD` | **48 / 39** | 提交树真值；`capability-register.json` 的 `feForeignReverse.value` 现记此值 |
+| **工作树** | `--fe-json` | **25 / 23** | 现值；差额来自并行批在途 |
+| `frontendFileCaliber`（hard:true） | `--dump-readings` | 工作树 91 543 / 321、HEAD 87 550 / 307 | 同批污染（差 3 993 行 / 14 文件） |
+
+`frontendDirCaliber`（hard:true）同理：工作树 66 162 / 239、HEAD 66 157 / 239（差 5 行）。
+
+⇒ **此时改任何前端代码都无法分离归因**（改完的读数里既有我的改动、也有别人的在途搬迁），与本轮刚修的 `21a743fa5` 计量基准错误是同一陷阱。因此本批**只做分类台账**，与 §91.1 ① 的「判据误报只登记不改判据」同处置形态。
+
+### 132.2 差额 23 处 / 16 文件 100% 归并行批（集合差分逐条可核）
+
+`HEAD` 减工作树：**消失 16 文件 / 新增 0 / `src/stores/index.ts` 5→1**。消失的 16 个：
+
+- 4 个 `components/office/panels/{ChatPanel,DirectMessagePanel,RiskRoomMiniBar,TokenPanel}.tsx` —— 整文件删除（连带删 `src/hooks/useOfficeStockPanels.ts`、`usePaperPortfolioDetails.ts`）；
+- 5 个 `src/lib/{agentOutput,dataQualityDiagnosis,decision-agreement,decisionInputDiagnosis,recoIcStats}.ts` **加** 7 个同名测试 —— `git status` 记为 `R`（rename）迁入 `src/lib/stock-analysis/**`，迁后路径含 `stock-analysis/` ⇒ 命中 `feRe` 变成 owned、退出 foreign 桶（**不是这些 import 消失了，是文件换了归属**）。
+
+**交集核查（决定本批能不能动）**：工作树 25 处的 23 个文件与 `git status --porcelain -uall` 的 112 条脏项取交集 ⇒ **只有 `src/stores/index.ts` 一个**，其余 22 个文件干净。故本批若处置，也只能动这 22 个；但见 132.1，本批一律不动。
+
+### 132.3 四类归属（6 + 5 + 8 + 6 = 25 处 / 5 + 5 + 8 + 5 = 23 文件）
+
+**① 判据误报 6 处 / 5 文件**（`feRe` 词义误命中，与股票域无任何关系；按 §91.1 ① 只登记不改判据）
+
+| 文件:行 | 说明符 | 撞词 |
+|---|---|---|
+| `components/chat/ChatViewMessages.tsx:86` | `./QuoteBlock` | `quote` |
+| `components/chat/InputArea.tsx:69` | `./QuotePreviewBar` | `quote` |
+| `pages/SettingsPage.tsx:73` | `@/components/chat/PluginMarketplace` | `market` |
+| `components/workflow/WorkflowSettings.tsx:4` | `@/pages/WorkflowMarketplace` | `market` |
+| `pages/opc/OpcPage.tsx:22,25` | `./components/{MarketPackTab,TalentMarketTab}` | `market`（2 处） |
+
+前两条是聊天**「引用回复」气泡**（`quotedMessage`），后三条是**插件/工作流/人才市场**，都不是证券行情。`OpcPage` 那 2 处导入方与目标**都是 OPC 自有文件** —— 前端缺 Rust 侧那套 `cross` 桶，属两域判据不同源。
+
+**② 共享基元下沉 5 处 / 5 文件**（§91.2 ② 已裁：必须逐函数判中性，整文件搬是洗绿）
+
+| 文件:行 | 说明符 | 导出 |
+|---|---|---|
+| `components/time-travel/batchTables.tsx:3` | `@/lib/stock-analysis-utils` | `horizonLabelKey` |
+| `components/time-travel/TimeTravelBatchCard.tsx:4` | 同上 | `horizonLabelKey` |
+| `components/time-travel/ReplayWorkbench.tsx:7` | `@/lib/investRoutes` | `investPath` |
+| `theme/__tests__/tokenSingleSource.test.ts:14` | 同上 | `RECO_STYLE_ALIASES` / `RECO_STYLE_HUE` |
+| `utils/__tests__/workflowNodeLabel.test.ts:1` | 同上 | `HORIZON_T_SUFFIX` |
+
+注意 `horizonLabelKey` 实现体里写死 `stockAnalysis.timeHorizon${suffix}` 前缀 ⇒ 带域语义，**不能直接下沉**；`investPath` 是投资中心深链的**唯一构造入口**（`src/lib/investRoutes.ts` 头部注释），宿主确实需要「跳到投资页」的通用导航口。
+
+**③ 类型归位 8 处 / 8 文件**（域 DTO 被宿主/跨域层直接 import）
+
+- ⚠ **最值得单独立项的一条**：`stores/shared/timeAnchorStore.ts:2` → `AsOfDegradationEntry, AsOfDegradationKind`。这个 store 位于**跨组件共享层**（`stores/shared/`）却 import 股票域类型 = 层次倒挂；而**后端权威在 `axagent-core/crates/harness/src/as_of.rs`，被 `market_data.rs` / `trading_engine.rs` 共用**（非股票域独占）⇒ 终局应是把 AsOf 降级类型上收前端中立层，而不是改路径洗绿。`stores/feature/serenityStore.ts:1` 同型。
+- `stores/feature/screenshotDiagnosisStore.ts:19` → `@/types/paper-portfolio`（`PaperPortfolio`）
+- `lib/ipc-schemas.ts:41` → `AnalysisSummary`（宿主 IPC 契约校验表直接吃股票域 DTO）
+- `pages/TasksCenterPage/{adapters/moverRecallAnalysis.adapter.ts:5, jobs/MoverRecallBatchDrawer.tsx:5, jobs/StartMoverRecallBatchModal.tsx:5, __tests__/adapters.test.ts:11}` → `MoverRecall*` 4 处
+
+**④ 随插件迁出 6 处 / 5 文件**（§91.2 ④：页面/任务中心走插件 `pages[]` 或渲染器注册表）
+
+| 文件:行 | 说明符 |
+|---|---|
+| `components/layout/ContentArea.tsx:44` | `@/pages/InvestPage`（lazy 路由） |
+| `pages/TasksCenterPage/forms/TaskCreateModal.tsx:25,26` | `./investTaskDefs` + `./InvestTaskFields`（2 处） |
+| `main.tsx:44` | `components/office/phaser/investSceneTemplates`（注册式注入，`queueMicrotask` 期调用） |
+| `components/office/phaser/__tests__/sceneTemplates.labelKey.test.ts:4` | `../investSceneTemplates` |
+| `stores/index.ts:109` | `./feature/stockAnalysisStore`（barrel 域 re-export，⚠ 与本批唯一脏项同文件，禁动） |
+
+### 132.4 OPC 侧同批复核：12 处 / 9 文件，与既有归因逐条一致
+
+10 处 `Horizon*` 词义误报（`components/stock-analysis/{DebatePanel,AnalystReportGrid,RiskMatrix,ReflectionPanel,DecisionBanner}.tsx` + `dual-view/{DecisionComparisonPanel,CompactDecisionComparison}.tsx`）+ `lib/browserMock.ts:59`（`@/types/opc`）+ `components/layout/ContentArea.tsx:12`（`@/pages/opc/routes`，宿主→域入口）。⇒ **#36 前端只余「补 `cross` 桶判据同源化」这一条口径债，无待迁代码。**
+
+### 132.5 本批未做（如实列）
+
+1. **未动任何前端代码**（理由见 132.1）；25 处全部原样在盘。
+2. **未改 `feRe` / 未加 `cross` 桶**：改判据会让 48→25 失去连续性，且当前 `frontendFileCaliber` 已被污染，改完无法归因。
+3. **未回写 `feForeignReverse.value`**：仍为 48/39（HEAD 真值）。等并行批落地提交后，由该批或后续批重新取基线再回写。
+4. **③ 类里 `timeAnchorStore` 的层次倒挂未修**：正确终局是上收前端中立层（对标后端 `harness/src/as_of.rs` 的跨 crate 共用），需单独立项，不在本批「只登记」范围内。

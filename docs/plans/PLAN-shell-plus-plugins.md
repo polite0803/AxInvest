@@ -7248,9 +7248,9 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 | 同上 → `opc_list_runtime_industries` | 同上 | 同上 |
 | `PLAN-shared-primitives-neutrality.md::src/lib/decision-agreement.ts → StockActionType` | `12ea20171`（#35 批 R） | 该文件被 `R` 迁入 `src/lib/stock-analysis/`，引用路径未同批改 |
 | 同上 → `src/stores/index.ts → PortfolioStressResult` | `12ea20171` 或 `b98834810` | barrel re-export 被摘 |
-| `PLAN-shell-plus-plugins.md::command_bridge.rs → PluginCommandBridge` | `21a743fa5`（#240 E 批） | `command_bridge.rs` 现 3689 行，`PluginCommandBridge` 不在 583 附近（实际 593/623 是 `map_domain` 与 `CapabilityDomain`） |
+| `PLAN-shell-plus-plugins.md::command_bridge.rs → PluginCommandBridge` | `21a743fa5`（#240 E 批） | **已修（`739ed5c5e`）**：583 订正为 623 = `impl axagent_harness::PluginCommandBridge for AppPluginCommandBridge`。⚠ 本条原写「593/623 是 `map_domain` 与 `CapabilityDomain`」**是错的**（实测 593 是 `PluginCommandBridge` 的文档注释、623 才是 impl 行；`map_domain` 在 250、`CapabilityDomain` 首现于 `use` 的 17 行），已同批改正 |
 
-⇒ 这 4 条（除第一条外）都是「代码迁走后活文档行号/符号未同批订正」的同一形态。本批只登记，不动别人的 PLAN（与 §131 的处置口径一致）。
+⇒ 余下 4 条（除第一条外）都是「代码迁走后活文档行号/符号未同批订正」的同一形态；**本批只修自有 PLAN 的那 1 条**（第 5 行），另 4 条属别人的 PLAN，按 §131 处置口径不越界改。修后 `SYMDRIFT 活文档面` 788 → **787**（`OK` 6885 不变，该引用由漂移转一致）。
 
 ### 132.7 §132.3 ③ 的 `timeAnchorStore` 层次倒挂已修（提交 `6b0bb1aa1`）
 

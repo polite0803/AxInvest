@@ -7190,7 +7190,8 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 
 **③ 类型归位 8 处 / 8 文件**（域 DTO 被宿主/跨域层直接 import）
 
-- ⚠ **最值得单独立项的一条**：`stores/shared/timeAnchorStore.ts:2` → `AsOfDegradationEntry, AsOfDegradationKind`。这个 store 位于**跨组件共享层**（`stores/shared/`）却 import 股票域类型 = 层次倒挂；而**后端权威在 `axagent-core/crates/harness/src/as_of.rs`，被 `market_data.rs` / `trading_engine.rs` 共用**（非股票域独占）⇒ 终局应是把 AsOf 降级类型上收前端中立层，而不是改路径洗绿。`stores/feature/serenityStore.ts:1` 同型。
+- ⚠ **最值得单独立项的一条（已落地，见 §132.7）**：`stores/shared/timeAnchorStore.ts:2` → `AsOfDegradationEntry, AsOfDegradationKind`。这个 store 位于**跨组件共享层**（`stores/shared/`）却 import 股票域类型 = 层次倒挂；**后端权威在 `axagent-core/crates/harness/src/as_of.rs`**（harness 基座契约，非股票域独占）⇒ 终局应是把 AsOf 降级类型上收前端中立层，而不是改路径洗绿。`stores/feature/serenityStore.ts:1` 同型。
+  > **事实前提订正（2026-11-09 实测，不改结论只换依据）**：原地曾写「被 `market_data.rs` / `trading_engine.rs` 共用」，**共用对象写错了** —— 那两个文件共用的是 `AsOfContext`（各自命中 38 处 / 4 处），而 `DegradationEntry` 在两者**零命中**。`DegradationEntry` 的真实消费面是：`astock-data` 的 as_of 模块（pub use 源 + 全局降级缓冲，8 处）、`analysis-engine` 的 blackboard 与 recommender/types（经 `axagent_astock_data::as_of` 转发）、以及宿主 `src-tauri/src/commands/stock_analysis.rs` 的 `get_asof_degradation_log`（1 处）。取证命令：`git grep -c DegradationEntry -- <两个 harness 文件>` 均为 0；`git grep -n DegradationEntry -- '*.rs'` 共 21 条、无落在那两个文件。**结论仍成立**：消费方横跨 implementor 层（astock-data / analysis-engine）与 wiring 层（宿主命令）⇒ 它不是股票域 DTO，本就该上收前端中立层。
 - `stores/feature/screenshotDiagnosisStore.ts:19` → `@/types/paper-portfolio`（`PaperPortfolio`）
 - `lib/ipc-schemas.ts:41` → `AnalysisSummary`（宿主 IPC 契约校验表直接吃股票域 DTO）
 - `pages/TasksCenterPage/{adapters/moverRecallAnalysis.adapter.ts:5, jobs/MoverRecallBatchDrawer.tsx:5, jobs/StartMoverRecallBatchModal.tsx:5, __tests__/adapters.test.ts:11}` → `MoverRecall*` 4 处
@@ -7214,7 +7215,7 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 1. **未动任何前端代码**（理由见 132.1）；25 处全部原样在盘。
 2. **未改 `feRe` / 未加 `cross` 桶**：改判据会让 48→25 失去连续性，且当前 `frontendFileCaliber` 已被污染，改完无法归因。
 3. **未回写 `feForeignReverse.value`**：仍为 48/39（HEAD 真值）。等并行批落地提交后，由该批或后续批重新取基线再回写。
-4. **③ 类里 `timeAnchorStore` 的层次倒挂未修**：正确终局是上收前端中立层（对标后端 `harness/src/as_of.rs` 的跨 crate 共用），需单独立项，不在本批「只登记」范围内。
+4. ~~**③ 类里 `timeAnchorStore` 的层次倒挂未修**~~ —— **已落地，见 §132.7**（正确终局即上收前端中立层，已按此做）。
 
 ### 132.6 收口验证与本批顺带修掉的两条门禁红
 
@@ -7250,4 +7251,34 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 | `PLAN-shell-plus-plugins.md::command_bridge.rs → PluginCommandBridge` | `21a743fa5`（#240 E 批） | `command_bridge.rs` 现 3689 行，`PluginCommandBridge` 不在 583 附近（实际 593/623 是 `map_domain` 与 `CapabilityDomain`） |
 
 ⇒ 这 4 条（除第一条外）都是「代码迁走后活文档行号/符号未同批订正」的同一形态。本批只登记，不动别人的 PLAN（与 §131 的处置口径一致）。
+
+### 132.7 §132.3 ③ 的 `timeAnchorStore` 层次倒挂已修（提交 `6b0bb1aa1`）
+
+**做法**：新建 `src/types/asOf.ts`（30 行）作为前端中立层，装 `AsOfDegradationKind`（:19）+ `AsOfDegradationEntry`（:22）；`src/types/stock-analysis.ts` 删掉本地两份定义（原 :2275-2292）改为 `import type { AsOfDegradationEntry } from "./asOf"`（:2），并在原位留下「已上收」的说明注释而非 re-export。三个消费方全部改指新层：
+
+| 文件 | 行 | 改前 | 改后 |
+|---|---|---|---|
+| `src/stores/shared/timeAnchorStore.ts` | :2 | `@/types/stock-analysis` | `@/types/asOf` |
+| `src/stores/feature/serenityStore.ts` | :1 | `@/types/stock-analysis` | `@/types/asOf` |
+| `src/components/stock-analysis/SerenityScreeningPanel.tsx` | :14 | `@/types/stock-analysis` | `@/types/asOf` |
+
+**为什么不留在 `stock-analysis.ts` 里 re-export**：转出等于让单域门面继续替一个跨层 DTO 背书 —— 消费方只要还能从 `@/types/stock-analysis` 拿到它，层次倒挂就没解除，只是从「定义地挂错」变成「出口挂错」。故三处消费方**同批**改指。
+
+**为什么不进宿主 barrel（`src/types/index.ts`）**：`./timeTravel`（`TimeTravelBatchState` 一族）是**单域 DTO**，进 barrel 合理；而 `AsOfDegradationEntry` 的消费方横跨 `stores/shared/`（跨组件共享层）、`stores/feature/`（股票域）与 `components/time-travel/`，属「中性 DTO」—— 与禁区 3「跨域共享 DTO 归宿主 barrel、域内类型归域本身」的判据**不冲突但也不适用**（它既不跨域共享业务语义、也不属任何域），落在 `src/types/` 顶层与 `./timeTravel` 同级，避免给 barrel 加第 N 个键。
+
+**验证**：
+- `npm run typecheck` → `[check-tsc] tsc 发现 src 源文件 1538 个`、`EXIT=0`（用包装器，UNC 下裸 `npx tsc --noEmit` 会静默空跑）
+- `npm run test:run -- src/stores/shared/__tests__/timeAnchorStore.test.ts` → **20 passed**、`EXIT=0`（该测试 mock 了 `@/lib/invoke` 并断言 `summarizeDegradations` 三档分色）
+- `npx dprint check`（全仓；UNC 下定点会报 `No files found`）→ 全绿
+- 逐字节 CRLF 计数：5 个文件全为 `CRLF=0`
+- `node scripts/check-component-neutrality.mjs` → `扫描 919 文件 · 原始跨域引用 8 · 白名单豁免后 0`、`PASS`
+
+**门禁读数变化（如实记，不回写）**：`check-capability-register.mjs` 仍是 2 条硬失败，均与刀无关：
+
+| 锚点 | 登记 | 上一轮实测 | 本轮实测 | 归因 |
+|---|---|---|---|---|
+| `frontendFileCaliber` | 87 550 | 91 543 | **91 533**（−10） | −10 行 = 我删掉的两份本地类型定义；**其余 +3 973 属并行批在途搬迁**（见 §132.1），整锚点在刀前已红 |
+| `frontendDirCaliber` | 66 157 | 66 162 | **66 162**（逐字未变） | 本刀改动全在 `src/types` / `src/stores` / `src/components/stock-analysis` 之一（`SerenityScreeningPanel.tsx` 属 `components/stock-analysis`，但仅改一行 import 路径、行数净 0） |
+
+⇒ **不回写这两条**：工作树被并行批的 112 条脏项污染，此刻写任何数都会把别人的在途改动钉进镜像表（与 §132.1 同判据）。等该批落地提交后重新取基线。
 

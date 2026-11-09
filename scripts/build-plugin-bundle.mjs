@@ -572,9 +572,12 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_delete_content_asset",
   "opc_delete_customer",
   "opc_delete_invoice",
+  "opc_delete_landing_page",
   "opc_delete_project",
+  "opc_mark_contact_read",
   "opc_process_due_schedules",
   "opc_publish_blog_post",
+  "opc_publish_landing_page",
   "opc_transition_invoice",
   "opc_update_content_asset",
   "opc_update_customer",
@@ -950,6 +953,42 @@ function opcManifest({ version, binaryName, sha256 }) {
             content: { type: "string", description: "正文（Markdown）" },
           },
           required: ["title", "slug", "content"],
+        },
+      },
+      {
+        name: "opc_publish_landing_page",
+        description: "发布 OPC 落地页（经宿主 opc.store 写面；回发布后的列裁剪视图）",
+        command: "worker://opc_publish_landing_page",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "落地页 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_delete_landing_page",
+        description: "删除 OPC 落地页（经宿主 opc.store 写面；成功无载荷）",
+        command: "worker://opc_delete_landing_page",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "落地页 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_mark_contact_read",
+        description: "把 OPC 联系提交标成已读（经宿主 opc.store 写面；成功无载荷）",
+        command: "worker://opc_mark_contact_read",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "联系提交 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
         },
       },
       {

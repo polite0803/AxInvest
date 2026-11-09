@@ -5,6 +5,7 @@ import { cssVar } from "@/lib/cssVar";
 import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
 import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
+import type { LandingPageSummaryView } from "@/types/opc";
 import {
   DollarOutlined,
   FileTextOutlined,
@@ -25,6 +26,10 @@ import { useTranslation } from "react-i18next";
  * 否则这个计数会随接缝的单页上限静默偏小（判据见 `plugin-opc` 的 `blog_posts`）。
  */
 const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
+// 落地页列表（#36 第 D-4 刀：宿主同名 Tauri 命令迁入 OPC 插件，与 ContentMediaTab /
+// SitesTab 同通道）。本仪表盘只用它的 `length` 当 `landing_pages_count` ⇒ 不传分页时
+// 插件必须取尽整表，否则这个计数会随接缝的单页上限静默偏小。
+const LIST_LANDING_PAGES_COMMAND = "opc_list_landing_pages";
 // 内容资产 / 发布计划的只读取数命令（`plugin.opc` 命名命令；宿主同名 Tauri 命令本批仍在，
 // 前端已改走插件通道，与 ContentMediaTab 同通道）。
 const LIST_CONTENT_ASSETS_COMMAND = "opc_list_content_assets";
@@ -83,10 +88,6 @@ interface BlogPost {
   published: boolean;
 }
 
-interface LandingPage {
-  id: string;
-}
-
 const formatTs = (ts: number): string => {
   const d = new Date(ts * 1000);
   return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -128,12 +129,12 @@ export function DashboardTab() {
     (async () => {
       try {
         const [assets, schedules, posts, pages] = await Promise.all([
-          // 三条只读插件命令（#36 系列迁移）与宿主落地页命令同处置：失败 / 插件没装都落空数组，
+          // 四条只读插件命令（#36 系列迁移）同处置：失败 / 插件没装都落空数组，
           // 与本行既存的 `.catch(() => [])` 语义一致（一条只读查询坏了不拖垮整张图）。
           fetchPluginRows<ContentAsset>(LIST_CONTENT_ASSETS_COMMAND).catch(() => []),
           fetchPluginRows<PublishSchedule>(LIST_PUBLISH_SCHEDULES_COMMAND).catch(() => []),
           fetchPluginRows<BlogPost>(LIST_BLOG_POSTS_COMMAND).catch(() => []),
-          invoke<LandingPage[]>("opc_list_landing_pages").catch(() => []),
+          fetchPluginRows<LandingPageSummaryView>(LIST_LANDING_PAGES_COMMAND).catch(() => []),
         ]);
         if (cancelled) { return; }
         const typeCounts: Record<string, number> = {};

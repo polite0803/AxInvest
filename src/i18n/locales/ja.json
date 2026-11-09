@@ -11966,7 +11966,6 @@
       "tagsPlaceholder": "tech, rust, opc",
       "contactColumnName": "姓名",
       "contactColumnEmail": "邮箱",
-      "contactColumnMessage": "消息",
       "contactColumnSource": "来源",
       "contactColumnStatus": "状态",
       "contactColumnTime": "时间",

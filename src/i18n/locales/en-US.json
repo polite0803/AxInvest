@@ -13470,7 +13470,6 @@
       "tagsPlaceholder": "tech, rust, opc",
       "contactColumnName": "Name",
       "contactColumnEmail": "Email",
-      "contactColumnMessage": "Message",
       "contactColumnSource": "Source",
       "contactColumnStatus": "Status",
       "contactColumnTime": "Time",

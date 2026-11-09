@@ -266,3 +266,30 @@ export interface ScanPolicy {
   /** LLM 精评预筛阈值：规则商业价值分 ≥ 此值才送评（0-100） */
   llmEvalMinRuleScore: number;
 }
+
+// ! 落地页 / 联系人面板的插件命令接缝视图（#36 第 D-4 刀：宿主 `opc_*` 命令迁入插件）
+// !
+// ! 出参线格式 = 插件出口的 camelCase 键（禁区 13，插件出口不做键名改写）；时间口径
+// ! = epoch 秒（`SitesTab` 渲染 `* 1000`）。视图只含列表 / 摘要命令回传的字段，
+// ! 明细字段（description / message / content）一律不在视图里。
+
+/** `opc_list_landing_pages` / `opc_create_landing_page` / `opc_publish_landing_page` 的行视图 */
+export interface LandingPageSummaryView {
+  id: string;
+  title: string;
+  slug: string;
+  published: boolean;
+  /** 创建时间（epoch 秒） */
+  createdAt: number;
+}
+
+/** `opc_list_contacts` 的行视图（无 message —— 列表命令不回传正文） */
+export interface ContactSummaryView {
+  id: string;
+  name: string;
+  email: string;
+  source: string;
+  read: boolean;
+  /** 提交时间（epoch 秒） */
+  createdAt: number;
+}

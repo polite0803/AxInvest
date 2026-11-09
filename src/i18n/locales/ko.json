@@ -11966,7 +11966,6 @@
       "tagsPlaceholder": "tech, rust, opc",
       "contactColumnName": "이름",
       "contactColumnEmail": "이메일",
-      "contactColumnMessage": "메시지",
       "contactColumnSource": "출처",
       "contactColumnStatus": "상태",
       "contactColumnTime": "시간",

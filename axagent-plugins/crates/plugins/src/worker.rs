@@ -501,7 +501,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "process_due_schedules"
             | "update_project"
             | "delete_project"
-            | "complete_milestone",
+            | "complete_milestone"
+            | "publish_landing_page"
+            | "delete_landing_page"
+            | "mark_contact_read",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -3191,6 +3194,58 @@ impl HostPeer {
                 };
                 match result {
                     Ok(view) => to_value("ProjectDetailView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 发布落地页：纯 `id` 入参（同 `delete_project`）；出参是发布后的摘要视图
+            // （`published` 已翻转）。缺行是域服务 `NotFound` 透传 ⇒ `Err(Provider)`。
+            "opc.store" if op == "publish_landing_page" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.publish_landing_page(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("LandingPageSummaryView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 删除落地页：纯 `id` 入参（同 `delete_project`）；成功无载荷 ⇒ `Value::Null`。
+            "opc.store" if op == "delete_landing_page" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_landing_page(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 标记联系提交已读：纯 `id` 入参（同 `delete_project`）；成功无载荷 ⇒ `Value::Null`。
+            "opc.store" if op == "mark_contact_read" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.mark_contact_read(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
                     Err(e) => seam_provider_error(e),
                 }
             },

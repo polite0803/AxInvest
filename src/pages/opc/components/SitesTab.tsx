@@ -2,6 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
+import type { ContactSummaryView, LandingPageSummaryView } from "@/types/opc";
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, message, Modal, Row, Space, Table, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
@@ -11,9 +12,7 @@ import { useTranslation } from "react-i18next";
  * 博客列表的取数命令（`plugin.opc` 的命名命令，与 manifest `commands[].name` 逐字一致）。
  *
  * 原先这条是宿主 Tauri 命令 `opc_list_blog_posts`，#36 第 4 步迁入 OPC 插件 ⇒ 宿主侧已删。
- * 出参线格式 = 接缝视图 `BlogPostView` 的 camelCase 键，插件出口不再做键名改写（禁区 13）⇒
- * 本文件 `interface BlogPost` 与表格列 `dataIndex` 用的就是那套 camelCase 名，与前端其它
- * 仍由宿主命令喂的数据（`LandingPage` / `ContactSubmission`，线格式仍是 snake_case）互不相干。
+ * 出参线格式 = 接缝视图 `BlogPostView` 的 camelCase 键，插件出口不再做键名改写（禁区 13）。
  */
 const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
 // 博客写面三条（#36 blog 刀）：宿主同名 Tauri 命令已删，插件命令是唯一通道。
@@ -21,6 +20,16 @@ const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
 const PUBLISH_BLOG_POST_COMMAND = "opc_publish_blog_post";
 const DELETE_BLOG_POST_COMMAND = "opc_delete_blog_post";
 const CREATE_BLOG_POST_COMMAND = "opc_create_blog_post";
+
+// 落地页 + 联系人六条（#36 第 D-4 刀）：宿主同名 Tauri 命令迁入 OPC 插件，插件命令
+// 是唯一通道。入参平铺（与博客命令同口径），出参 = `@/types/opc` 的接缝视图
+// `LandingPageSummaryView` / `ContactSummaryView`（camelCase，禁区 13）。
+const LIST_LANDING_PAGES_COMMAND = "opc_list_landing_pages";
+const CREATE_LANDING_PAGE_COMMAND = "opc_create_landing_page";
+const PUBLISH_LANDING_PAGE_COMMAND = "opc_publish_landing_page";
+const DELETE_LANDING_PAGE_COMMAND = "opc_delete_landing_page";
+const LIST_CONTACTS_COMMAND = "opc_list_contacts";
+const MARK_CONTACT_READ_COMMAND = "opc_mark_contact_read";
 
 // 写命令的插件通道执行（与上面 load() 的取数同形）：按清单解析启用插件 ⇒ 宿主
 // `plugin_execute_command` 派发。插件未装 / 未启用抛错，与取数失败同一路径处置，
@@ -33,20 +42,10 @@ async function execPluginCommand(name: string, input: Record<string, unknown>): 
   return invoke<string>("plugin_execute_command", { pluginId, name, input });
 }
 
-interface LandingPage {
-  id: string;
-  title: string;
-  slug: string;
-  description: string;
-  published: boolean;
-  published_at: number | null;
-  created_at: number;
-}
-
 // 插件命令 `opc_list_blog_posts` 的行类型 = 接缝视图 `BlogPostView` 的本面板已读子集
 // （帧里其实有 10 个 camelCase 键，含 `publishedAt` / `updatedAt`，这里只声明消费到的那些）。
-// 时间口径与同文件 `LandingPage.created_at` / `ContactSubmission.created_at` **是同一个单位**：
-// epoch 秒（这几列由宿主 `now_ts()` 写入，`now_ms()` 才是毫秒）⇒ 渲染要 `* 1000`。
+// 时间口径与 `@/types/opc` 的 `LandingPageSummaryView.createdAt` / `ContactSummaryView.createdAt`
+// **是同一个单位**：epoch 秒（这几列由宿主 `now_ts()` 写入，`now_ms()` 才是毫秒）⇒ 渲染要 `* 1000`。
 interface BlogPost {
   id: string;
   title: string;
@@ -56,16 +55,6 @@ interface BlogPost {
   published: boolean;
   viewCount: number;
   createdAt: number;
-}
-
-interface ContactSubmission {
-  id: string;
-  name: string;
-  email: string;
-  message: string;
-  source: string;
-  read: boolean;
-  created_at: number;
 }
 
 export function SitesTab() {
@@ -87,7 +76,7 @@ export function SitesTab() {
 
 function LandingPagesPanel() {
   const { t } = useTranslation();
-  const [pages, setPages] = useState<LandingPage[]>([]);
+  const [pages, setPages] = useState<LandingPageSummaryView[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -98,8 +87,10 @@ function LandingPagesPanel() {
     setLoading(true);
     (async () => {
       try {
-        const data = await invoke<LandingPage[]>("opc_list_landing_pages");
-        setPages(data);
+        // 取数走插件执行通道（#36 第 D-4 刀）：宿主同名命令已删 ⇒ 没有兜底第二条路。
+        // 插件未装 / 未启用按「取数失败」处置，与 catch 里既有那条 `loadFailed` 同一路径。
+        const raw = await execPluginCommand(LIST_LANDING_PAGES_COMMAND, {});
+        setPages(JSON.parse(raw) as LandingPageSummaryView[]);
       } catch (e) {
         message.error(t("opc.common.loadFailed", { error: String(e) }));
         setPages([]);
@@ -114,13 +105,14 @@ function LandingPagesPanel() {
 
   const handleCreate = async (values: Record<string, unknown>) => {
     try {
-      await invoke("opc_create_landing_page", {
-        input: {
-          title: values.title,
-          slug: values.slug,
-          description: (values.description as string) || "",
-          content: "",
-        },
+      // 入参平铺（插件清单 inputSchema 口径，不再套宿主命令时代的 `{ input }` 外层）；
+      // 表单字段原样透传，content 由面板固定传空串（正文不在本面板编辑）。
+      // 出参是创建行的列裁剪视图（含 id 句柄），本处不消费，刷新列表即见。
+      await execPluginCommand(CREATE_LANDING_PAGE_COMMAND, {
+        title: values.title,
+        slug: values.slug,
+        description: (values.description as string) || "",
+        content: "",
       });
       message.success(t("opc.site.landingCreated"));
       setModalOpen(false);
@@ -133,7 +125,8 @@ function LandingPagesPanel() {
 
   const handlePublish = async (id: string) => {
     try {
-      await invoke("opc_publish_landing_page", { id });
+      // 出参是发布后的 `LandingPageSummaryView`，本处不消费（状态列随 load() 刷新即见）。
+      await execPluginCommand(PUBLISH_LANDING_PAGE_COMMAND, { id });
       message.success(t("opc.site.published"));
       load();
     } catch (e) {
@@ -150,7 +143,10 @@ function LandingPagesPanel() {
 
   const handleBatchDelete = async () => {
     try {
-      await Promise.all(selectedRowKeys.map((id) => invoke("opc_delete_landing_page", { id })));
+      // 出参 null（行已删）⇒ 本处不消费，逐条 await 成功即计成功。
+      await Promise.all(
+        selectedRowKeys.map((id) => execPluginCommand(DELETE_LANDING_PAGE_COMMAND, { id })),
+      );
       message.success(t("opc.common.batchDeleteSuccess"));
       setSelectedRowKeys([]);
       load();
@@ -165,19 +161,19 @@ function LandingPagesPanel() {
     {
       title: t("opc.site.columnStatus"),
       key: "status",
-      render: (_: unknown, r: LandingPage) =>
+      render: (_: unknown, r: LandingPageSummaryView) =>
         r.published ? <Tag color="green">{t("opc.site.published")}</Tag> : <Tag>{t("opc.site.draftTag")}</Tag>,
     },
     {
       title: t("opc.site.columnCreated"),
       key: "created",
-      render: (_: unknown, r: LandingPage) => new Date(r.created_at * 1000).toLocaleDateString(),
+      render: (_: unknown, r: LandingPageSummaryView) => new Date(r.createdAt * 1000).toLocaleDateString(),
     },
     {
       title: t("opc.common.actions"),
       key: "actions",
       width: 100,
-      render: (_: unknown, r: LandingPage) =>
+      render: (_: unknown, r: LandingPageSummaryView) =>
         !r.published && <Button size="small" onClick={() => handlePublish(r.id)}>{t("opc.site.publish")}</Button>,
     },
   ];
@@ -463,7 +459,7 @@ function BlogPostsPanel() {
 
 function ContactsPanel() {
   const { t } = useTranslation();
-  const [contacts, setContacts] = useState<ContactSubmission[]>([]);
+  const [contacts, setContacts] = useState<ContactSummaryView[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -472,8 +468,10 @@ function ContactsPanel() {
     setLoading(true);
     (async () => {
       try {
-        const data = await invoke<ContactSubmission[]>("opc_list_contacts");
-        setContacts(data);
+        // 取数走插件执行通道（#36 第 D-4 刀），处置与落地页面板同路径。
+        // 行类型 = 接缝 `ContactSummaryView`：无 message 字段（列表命令不回传正文）。
+        const raw = await execPluginCommand(LIST_CONTACTS_COMMAND, {});
+        setContacts(JSON.parse(raw) as ContactSummaryView[]);
       } catch (e) {
         message.error(t("opc.common.loadFailed", { error: String(e) }));
         setContacts([]);
@@ -488,7 +486,8 @@ function ContactsPanel() {
 
   const handleMarkRead = async (id: string) => {
     try {
-      await invoke("opc_mark_contact_read", { id });
+      // 出参 null（已置位）⇒ 不消费，状态列随 load() 刷新即见。
+      await execPluginCommand(MARK_CONTACT_READ_COMMAND, { id });
       load();
     } catch (e) {
       message.error(t("opc.common.opFailed", { error: String(e) }));
@@ -504,7 +503,9 @@ function ContactsPanel() {
 
   const handleBatchMarkRead = async () => {
     try {
-      await Promise.all(selectedRowKeys.map((id) => invoke("opc_mark_contact_read", { id })));
+      await Promise.all(
+        selectedRowKeys.map((id) => execPluginCommand(MARK_CONTACT_READ_COMMAND, { id })),
+      );
       message.success(t("opc.common.batchSuccess"));
       setSelectedRowKeys([]);
       load();
@@ -516,24 +517,25 @@ function ContactsPanel() {
   const columns = [
     { title: t("opc.site.contactColumnName"), dataIndex: "name", key: "name" },
     { title: t("opc.site.contactColumnEmail"), dataIndex: "email", key: "email" },
-    { title: t("opc.site.contactColumnMessage"), dataIndex: "message", key: "message", ellipsis: true, width: 300 },
+    // message 列已删（#36 第 D-4 刀）：`ContactSummaryView` 契约无 message（列表命令
+    // 不回传正文），保留列位会渲染一列恒空的「留言」假象。
     { title: t("opc.site.contactColumnSource"), dataIndex: "source", key: "source" },
     {
       title: t("opc.site.contactColumnStatus"),
       key: "status",
-      render: (_: unknown, r: ContactSubmission) =>
+      render: (_: unknown, r: ContactSummaryView) =>
         r.read ? <Tag>{t("opc.site.readTag")}</Tag> : <Tag color="orange">{t("opc.site.unreadTag")}</Tag>,
     },
     {
       title: t("opc.site.contactColumnTime"),
       key: "created",
-      render: (_: unknown, r: ContactSubmission) => new Date(r.created_at * 1000).toLocaleString(),
+      render: (_: unknown, r: ContactSummaryView) => new Date(r.createdAt * 1000).toLocaleString(),
     },
     {
       title: t("opc.common.actions"),
       key: "actions",
       width: 80,
-      render: (_: unknown, r: ContactSubmission) =>
+      render: (_: unknown, r: ContactSummaryView) =>
         !r.read && <Button size="small" onClick={() => handleMarkRead(r.id)}>{t("opc.site.markRead")}</Button>,
     },
   ];

@@ -11,12 +11,12 @@ use sea_orm::ActiveModelTrait;
 use tauri::State;
 
 use axagent_company_runtime::opc::{
-    AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService, CreateKpiInput,
-    CreateLandingPageInput, Customer, CustomerService, DashboardSummary, DefaultAnalyticsService,
-    DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService, DefaultProjectService,
-    DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice, Invoice, InvoiceService,
-    KpiRecord, LandingPage, Project, ProjectService, PublishSchedule, PublishScheduleService,
-    RevenueRecord, SiteService, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
+    AnalyticsService, ContentAsset, ContentAssetService, CreateKpiInput, Customer, CustomerService,
+    DashboardSummary, DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService,
+    DefaultInvoiceService, DefaultProjectService, DefaultSiteService, FinanceService,
+    FinancialReport, InvestmentAdvice, Invoice, InvoiceService, KpiRecord, Project, ProjectService,
+    PublishSchedule, PublishScheduleService, RevenueRecord, UpdateInvoiceInput, UpdateProjectInput,
+    UpdatePublishScheduleInput,
 };
 
 use axagent_company_runtime::opc::capability_pack::{
@@ -149,78 +149,13 @@ pub async fn opc_complete_milestone(
 }
 
 // ── Site / Landing Page Commands ────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建着陆页")]
-#[tauri::command]
-pub async fn opc_create_landing_page(
-    state: State<'_, AppState>,
-    input: CreateLandingPageInput,
-) -> Result<LandingPage, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.create_landing_page(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出着陆页")]
-#[tauri::command]
-pub async fn opc_list_landing_pages(
-    state: State<'_, AppState>,
-) -> Result<Vec<LandingPage>, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.list_landing_pages().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "发布着陆页")]
-#[tauri::command]
-pub async fn opc_publish_landing_page(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<LandingPage, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.publish_landing_page(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-// ── Contact Commands ────────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出联系提交")]
-#[tauri::command]
-pub async fn opc_list_contacts(
-    state: State<'_, AppState>,
-) -> Result<Vec<ContactSubmission>, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.list_contacts().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "标记联系已读")]
-#[tauri::command]
-pub async fn opc_mark_contact_read(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.mark_contact_read(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+//
+// #36 D-4 刀：落地页 / 联系人的六条宿主命令（`opc_create_landing_page` /
+// `opc_list_landing_pages` / `opc_publish_landing_page` / `opc_delete_landing_page` /
+// `opc_list_contacts` / `opc_mark_contact_read`）已删除 —— 接缝补齐 `publish_landing_page` /
+// `delete_landing_page` / `mark_contact_read` 三条写 op 后，前端经
+// `opc_list_landing_pages` / `opc_list_contacts` / `opc_create_landing_page` 等插件命令
+// 走 worker 通道（先例 #144 的双声明收口：宿主侧随接缝补齐同批删除）。
 
 // ── Analytics Commands ──────────────────────────────────────────────
 
@@ -452,23 +387,6 @@ pub async fn opc_create_work_item(
         ))
     })?;
     serde_json::to_value(&model).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 删除落地页（修复 P0-5：前端 SitesTab 调用但后端缺失）。
-///
-/// #180-③：改前是裸 `Entity::delete_by_id(..).exec(..)` —— 越过 service、且**不检
-/// `rows_affected`** ⇒ 删不存在的 id 也回成功，与同族 `delete_content_asset` / `delete_invoice`
-/// 的 `NotFound` 口径打架。现在走 service，缺行统一 `NotFound`。
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除落地页")]
-#[tauri::command]
-pub async fn opc_delete_landing_page(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.delete_landing_page(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,

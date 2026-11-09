@@ -118,6 +118,12 @@ const OPC_STORE_UPDATE_PROJECT: &str = "update_project";
 const OPC_STORE_DELETE_PROJECT: &str = "delete_project";
 const OPC_STORE_COMPLETE_MILESTONE: &str = "complete_milestone";
 
+/// #36 D-4 刀的三条 op（都要 `write`）：发布 / 删除落地页 + 联系标记已读。
+/// 后两条成功无载荷（接缝出 `Value::Null`）；发布出参是摘要视图（`published` 已翻转）。
+const OPC_STORE_PUBLISH_LANDING_PAGE: &str = "publish_landing_page";
+const OPC_STORE_DELETE_LANDING_PAGE: &str = "delete_landing_page";
+const OPC_STORE_MARK_CONTACT_READ: &str = "mark_contact_read";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -177,6 +183,13 @@ const COMMAND_GET_PROJECT: &str = "opc_get_project";
 const COMMAND_UPDATE_PROJECT: &str = "opc_update_project";
 const COMMAND_DELETE_PROJECT: &str = "opc_delete_project";
 const COMMAND_COMPLETE_MILESTONE: &str = "opc_complete_milestone";
+
+/// #36 D-4 刀的三条落地页 / 联系命令（清单 `commands[].name` 必须逐字一致）：
+/// 发布 / 删除落地页 + 联系标记已读，宿主同名 Tauri 命令随本刀删除
+/// （先例 #144 的双声明收口）——本组是这三个写面的唯一通道。
+const COMMAND_PUBLISH_LANDING_PAGE: &str = "opc_publish_landing_page";
+const COMMAND_DELETE_LANDING_PAGE: &str = "opc_delete_landing_page";
+const COMMAND_MARK_CONTACT_READ: &str = "opc_mark_contact_read";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -460,6 +473,31 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_COMPLETE_MILESTONE => {
             match complete_milestone(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── #36 D-4 刀：落地页发布 / 删除 + 联系标记已读（成功无载荷的两条出 Null）──
+        COMMAND_PUBLISH_LANDING_PAGE => {
+            match publish_landing_page(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_DELETE_LANDING_PAGE => {
+            match delete_landing_page(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_MARK_CONTACT_READ => {
+            match mark_contact_read(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -1236,6 +1274,46 @@ fn complete_milestone(
         json!({ "projectId": project_id, "milestoneId": milestone_id }),
         call_chain,
     )
+}
+
+/// `opc_publish_landing_page`：发布落地页（#36 D-4 刀的写 op）。
+///
+/// 入参只有 `id`（只判形状，非空判在宿主 provider，同 [`delete_project`] 的分工）；
+/// 出参 = 发布后的摘要视图逐字透传（`published` 已翻转，全部 camelCase，出口零改写）。
+fn publish_landing_page(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_publish_landing_page";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_PUBLISH_LANDING_PAGE, json!({ "id": id }), call_chain)
+}
+
+/// `opc_delete_landing_page`：删除落地页（#36 D-4 刀的写 op）。
+///
+/// 入参只有 `id`；成功无载荷（接缝出 `Value::Null`，逐字透传）。
+fn delete_landing_page(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_landing_page";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_DELETE_LANDING_PAGE, json!({ "id": id }), call_chain)
+}
+
+/// `opc_mark_contact_read`：把联系提交标成已读（#36 D-4 刀的写 op）。
+///
+/// 入参只有 `id`；成功无载荷（接缝出 `Value::Null`，逐字透传）。
+fn mark_contact_read(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_mark_contact_read";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_MARK_CONTACT_READ, json!({ "id": id }), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

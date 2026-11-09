@@ -744,6 +744,31 @@ impl OpcStoreProvider for HostOpcStore {
             )?;
         Ok(project_detail_view(p))
     }
+
+    async fn publish_landing_page(&self, id: String) -> Result<LandingPageSummaryView> {
+        require_id(&id, "publish_landing_page")?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        let lp = SiteService::publish_landing_page(&svc, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::publish_landing_page 发布失败: {e}"))
+        })?;
+        Ok(landing_page_summary_view(lp))
+    }
+
+    async fn delete_landing_page(&self, id: String) -> Result<()> {
+        require_id(&id, "delete_landing_page")?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        SiteService::delete_landing_page(&svc, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::delete_landing_page 删除失败: {e}"))
+        })
+    }
+
+    async fn mark_contact_read(&self, id: String) -> Result<()> {
+        require_id(&id, "mark_contact_read")?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        SiteService::mark_contact_read(&svc, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::mark_contact_read 标记失败: {e}"))
+        })
+    }
 }
 
 // ── #36 批 2 写 op 的依赖 ─────────────────────────────────────────────────

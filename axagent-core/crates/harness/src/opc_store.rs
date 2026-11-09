@@ -540,6 +540,34 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::complete_milestone 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 发布落地页（`publish_landing_page` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 出参是发布后的摘要视图（`published` 已翻转）；缺行 ⇒ `Err(Provider)`
+    /// （域服务 `NotFound` 透传，不造 Outcome 两态）。
+    async fn publish_landing_page(&self, _id: String) -> Result<LandingPageSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::publish_landing_page 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除落地页（`delete_landing_page` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 硬删，成功无载荷；缺行 ⇒ `Err(Provider)`（域服务 `NotFound` 透传）。
+    async fn delete_landing_page(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_landing_page 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 标记联系提交已读（`mark_contact_read` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 成功无载荷；缺行 ⇒ `Err(Provider)`（域服务 `NotFound` 透传）。
+    async fn mark_contact_read(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::mark_contact_read 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

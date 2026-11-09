@@ -879,7 +879,7 @@
       "expectMissingFields": ["k", "reading"],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "src-tauri/src/commands/agent/command_bridge.rs:1653", "file": "src-tauri/src/commands/agent/command_bridge.rs", "line": 1653, "token": "pub trait CommandHandler", "anchorText": "pub trait CommandHandler: Send + Sync {", "role": "契约" }
+        { "ref": "src-tauri/src/commands/agent/command_bridge.rs:1649", "file": "src-tauri/src/commands/agent/command_bridge.rs", "line": 1649, "token": "pub trait CommandHandler", "anchorText": "pub trait CommandHandler: Send + Sync {", "role": "契约" }
       ],
       "note": "实现者 15 写在行内括号里（§0.7.7 无实现者列，此处属行内自述）⇒ 可机械复算并硬拦。原文「命令注册已由 build.rs 自动生成（禁区 7）」。本行不判接缝登记状态：command.handler 是主壳 IPC 路由，PLAN 未声明它在 capability_registry / SUPPORTED_REMOTE_SEAMS 的任何一侧。",
       "planAnchorText": "| `command.handler`（`src-tauri/src/commands/agent/command_bridge.rs:1608`，15 实现者） | K3 | 主壳 IPC 路由机制本身；命令注册已由 `build.rs` 自动生成（禁区 7） |", "planLine": 315

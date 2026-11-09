@@ -2,9 +2,14 @@
 
 //! 股票分析数据面接缝（`stock.analysis`）— Trait（DTO 留在域包）。
 //!
-//! 宿主把三条**确定性取数/落库**能力经本接缝暴露给插件：
+//! 宿主把七条**确定性取数/落库/计算**能力经本接缝暴露给插件：
 //! `industry_constituents`（按行业取全 A 股成分股）、`batch_upsert_mainlines`（按日批量
-//! upsert 市场主线）、`stock_factor`（逐票 1 月涨跌幅，反转因子原料）。
+//! upsert 市场主线）、`stock_factor`（逐票 1 月涨跌幅，反转因子原料）——E 批三条；
+//! `pipeline_history`（管道执行历史）、`pipeline_run_detail`（单次执行详情）、
+//! `pending_evolution_plans`（待审批进化计划）、`des_integration`（Walk-Forward + DES
+//! 对比仿真）——T2 试点批（#248）四条，插件命名命令 `stock_get_pipeline_history` /
+//! `stock_get_pipeline_run_detail` / `stock_list_pending_evolution_plans` /
+//! `stock_wf_des_integration` 的取数面。
 //!
 //! ## 为什么需要它
 //!
@@ -30,8 +35,9 @@
 //!
 //! **只有 `batch_upsert_mainlines` 是写 op**（它改 `market_mainlines` 表：插入 / 更新 /
 //! 可选归档当日未提及的主线）。权限登记在 `worker.rs` 的 `required_permission_for`，
-//! 本 trait 不重复校验。另两个 op 是纯读面 ⇒ **一条都不许加闸**（给读缝加闸会让只读插件
-//! 被无端拒掉，判据同 `opc.store` 模块头）。
+//! 本 trait 不重复校验。其余六个 op 是纯读/纯计算面 ⇒ **一条都不许加闸**（给读缝加闸
+//! 会让只读插件被无端拒掉，判据同 `opc.store` 模块头）。`des_integration` 虽是重 CPU
+//! 仿真，但它不落库、不外发，读/写权限面同样不适用。
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -83,6 +89,50 @@ pub trait StockAnalysisProvider: Send + Sync {
             "StockAnalysisProvider::stock_factor 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── T2 试点批（#248）：四条宿主命令的取数面 ─────────────────────────────
+    // 与上面三条不同，这四条的 DTO 权威**不在 analysis-engine**，而在主壳 commands 层
+    // （pipeline 行是 `core.rs` 手拼的 `json!`、进化计划是 dao 的 `EvolutionHistoryModel`、
+    // DES 仿真是 `commands/wf_des.rs` 的 `WfDesRequest`/`WfDesReport`）。仍按本接缝的
+    // 「Value 透传」铁律处理：形状权威在哪一侧，provider 就照哪一侧透传，本层不上收。
+    //
+    // 三个查询命令的入参形状与前端 `invoke` 传参逐字一致（Tauri 自动 camelCase 映射）：
+    // `pipeline_history` 收 `{limit?}`、`pipeline_run_detail` 收 `{runId}`、
+    // `pending_evolution_plans` 收 `{}`；`des_integration` 收 `WfDesRequest` 的 camelCase
+    // JSON（provider 侧 `serde_json::from_value` 是唯一形状权威，缺料由它报 Validation）。
+
+    /// 管道执行历史（`pipeline_history` op）—— 读 op，无权限闸。
+    async fn pipeline_history(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::pipeline_history 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 单次管道执行详情（`pipeline_run_detail` op）—— 读 op，无权限闸。
+    async fn pipeline_run_detail(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::pipeline_run_detail 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 待审批进化计划列表（`pending_evolution_plans` op）—— 读 op，无权限闸。
+    async fn pending_evolution_plans(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::pending_evolution_plans 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// Walk-Forward + DES 对比仿真（`des_integration` op）—— 纯计算 op，无权限闸。
+    ///
+    /// ⚠ 重 CPU（秒级）：宿主 provider 必须 `spawn_blocking` 执行，不许在 async
+    /// executor 上同步跑；实现体内部自建 tokio runtime（`commands/wf_des.rs` 的同步
+    /// 命令形态），**只能**在 blocking 线程上调，否则构成嵌套 runtime。
+    async fn des_integration(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::des_integration 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -111,6 +161,16 @@ mod tests {
                 futures::executor::block_on(stub.batch_upsert_mainlines(Value::Null)),
             ),
             ("stock_factor", futures::executor::block_on(stub.stock_factor(Value::Null))),
+            ("pipeline_history", futures::executor::block_on(stub.pipeline_history(Value::Null))),
+            (
+                "pipeline_run_detail",
+                futures::executor::block_on(stub.pipeline_run_detail(Value::Null)),
+            ),
+            (
+                "pending_evolution_plans",
+                futures::executor::block_on(stub.pending_evolution_plans(Value::Null)),
+            ),
+            ("des_integration", futures::executor::block_on(stub.des_integration(Value::Null))),
         ];
         for (name, result) in cases {
             let err = result.expect_err(&format!("{name} 缺省实现应报错"));

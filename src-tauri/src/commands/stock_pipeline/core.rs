@@ -593,9 +593,16 @@ pub async fn get_pipeline_history(
     state: State<'_, AppState>,
     limit: Option<u64>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let db = state.harness.db();
-    let limit = limit.unwrap_or(20);
+    pipeline_history_rows(&state.harness.db(), limit.unwrap_or(20)).await
+}
 
+/// 管道执行历史的**无 State 核心**：IPC 命令与 `stock.analysis` 接缝的
+/// `pipeline_history` op（T2 试点批 #248，`stock_get_pipeline_history` 命令）共用同一份
+/// 行构造 —— 第二份 `json!` 列清单就是第二套形状（禁区 12）。
+pub(crate) async fn pipeline_history_rows(
+    db: &sea_orm::DatabaseConnection,
+    limit: u64,
+) -> Result<Vec<serde_json::Value>, String> {
     // 读列表前先收敛遗留 running 行：否则进程退出过一次，任务中心就永久显示
     // 「运行中」（2026-08-26 起四条僵尸行的实际形态）。
     ensure_stale_reaped(db).await;
@@ -626,18 +633,25 @@ pub async fn get_pipeline_history(
         .collect())
 }
 
-/// 查询单次管道执行详情
 #[agent_command(domain = invest, safety = Safe, call_mode = StateInput, description = "查询单次管道执行详情")]
 #[tauri::command]
 pub async fn get_pipeline_run_detail(
     state: State<'_, AppState>,
     run_id: String,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
+    pipeline_run_detail_row(&state.harness.db(), &run_id).await
+}
 
+/// 单次管道执行详情的**无 State 核心**：IPC 命令与 `stock.analysis` 接缝的
+/// `pipeline_run_detail` op（`stock_get_pipeline_run_detail` 命令）共用同一份构造。
+pub(crate) async fn pipeline_run_detail_row(
+    db: &sea_orm::DatabaseConnection,
+    run_id: &str,
+) -> Result<serde_json::Value, String> {
+    // 同上：详情页也可能在僵尸行停留后打开，先收敛再读。
     ensure_stale_reaped(db).await;
 
-    let run = stock_pipeline_runs::Entity::find_by_id(&run_id)
+    let run = stock_pipeline_runs::Entity::find_by_id(run_id)
         .one(db)
         .await
         .map_err(|e| {

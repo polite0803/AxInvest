@@ -595,6 +595,60 @@ function stockManifest({ version, binaryName, sha256 }) {
           required: ["stock_codes"],
         },
       },
+      // ── T2 试点批（#248）：四条宿主命令的取数面（只读 / 纯计算），经 `stock.analysis` 接缝 ──
+      // 与 E 批三条同一透传纪律：字段形状的权威在主壳 commands 层（pipeline 手拼行 /
+      // dao 进化模型 / `commands/wf_des.rs` 的 WfDes DTO），插件侧改写即第二套形状。
+      // 四条都只读，宿主 `required_permission_for` 不登记权限（同 E 批只读三条）。
+      {
+        name: "stock_get_pipeline_history",
+        description: "列出管道执行历史（经宿主 stock.analysis 接缝，只读；返回手拼行数组）",
+        command: "worker://stock_get_pipeline_history",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "取数上限，宿主缺省取 20" },
+          },
+        },
+      },
+      {
+        name: "stock_get_pipeline_run_detail",
+        description: "查询单次管道执行详情（经宿主 stock.analysis 接缝，只读；缺席 run 由宿主报错）",
+        command: "worker://stock_get_pipeline_run_detail",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            runId: { type: "string", description: "管道执行 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["runId"],
+        },
+      },
+      {
+        // 该命令无参：入参非空对象会被宿主 provider 的 Validation 拒收。
+        name: "stock_list_pending_evolution_plans",
+        description: "列出待审批的反思进化计划（经宿主 stock.analysis 接缝，只读，无参数）",
+        command: "worker://stock_list_pending_evolution_plans",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // 清单不复刻 DTO（同 stock_market_mainline_batch_upsert 宽形态先例）：形状权威在
+        // `commands/wf_des.rs` 的 WfDesRequest（camelCase，四字段全必填），此处只锁最外层。
+        name: "stock_wf_des_integration",
+        description: "Walk-Forward 回测 + DES 对比仿真（纯计算，经宿主 stock.analysis 接缝）",
+        command: "worker://stock_wf_des_integration",
+        inputSchema: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            klines: { type: "array", description: "历史 K 线（Bar 数组，宿主拒空集）" },
+            wfConfig: { type: "object", description: "Walk-Forward 配置（trainDays/testDays/stepDays/riskFreeAnnual）" },
+            desConfig: { type: "object", description: "DES 模拟配置" },
+            strategyName: { type: "string", description: "策略名（当前仅 ma_cross）" },
+          },
+          required: ["klines", "wfConfig", "desConfig", "strategyName"],
+        },
+      },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
     // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，

@@ -2,9 +2,12 @@
 
 //! `stock.analysis` 接缝的**宿主侧实现**（wiring 层）。
 //!
-//! 契约在 `axagent-core/crates/harness/src/stock_analysis.rs`（三个 op：两个读 + 一个写）。
-//! 三个 op 的实现体在 `analysis-engine`（implementor，持 `entities`）；本文件是宿主与接缝
-//! 之间**唯一**的 `Value` ↔ 域 DTO 转换点。
+//! 契约在 `axagent-core/crates/harness/src/stock_analysis.rs`（七个 op：五个读/纯计算 +
+//! 一个写）。前三个 op 的实现体在 `analysis-engine`（implementor，持 `entities`）；后四个
+//! （T2 试点批 #248）的形状权威在主壳 commands 层 —— pipeline 两行直接调
+//! `commands/stock_pipeline/core.rs` 抽出的**无 State 核心**，进化计划走 dao 的
+//! `list_pending_asc`，DES 仿真把入参交回 `commands/wf_des.rs` 的权威实现。本文件是宿主
+//! 与接缝之间**唯一**的 `Value` ↔ 域 DTO 转换点。
 //!
 //! ## 为什么转换点必须唯一
 //!
@@ -50,6 +53,11 @@ use axagent_analysis_engine::industry_constituents::{
 };
 use axagent_analysis_engine::market_mainline::{BatchUpsertInput, batch_upsert_mainlines};
 use axagent_analysis_engine::stock_factor::{fetch_stock_chg_1m, parse_stock_refs};
+// T2 试点批（#248）：pipeline 两行的形状权威在主壳 commands 层 —— 无 State 核心是
+// IPC 命令与本接缝的**同一份**列清单（第二份 `json!` 就是第二套形状，禁区 12）。
+use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
+use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
+use axagent_dao::repo::stock_evolution_history as evo_hist;
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::stock_analysis::StockAnalysisProvider;
@@ -161,6 +169,92 @@ impl StockAnalysisProvider for HostStockAnalysis {
             )?;
         serde_json::to_value(&report).map_err(|e| {
             AxAgentError::Provider(format!("stock.analysis::stock_factor 序列化失败: {e}"))
+        })
+    }
+
+    // ── T2 试点批（#248）：四条宿主命令的取数面（全只读/纯计算，无权限闸）──────
+    // 入参形状与前端 `invoke` 传参逐字一致（Tauri 自动 camelCase 映射）；出参就是宿主
+    // 命令原样返回的那个 JSON（权威在同一处，见模块头）。
+
+    /// 读 op：管道执行历史（宿主 `get_pipeline_history` 的接缝面）。
+    ///
+    /// 缺省 limit 与宿主命令逐字一致（20），插件侧不拍第二个数。
+    async fn pipeline_history(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct HistoryRequest {
+            limit: Option<u64>,
+        }
+        let request = serde_json::from_value::<HistoryRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::pipeline_history 参数解析失败: {e}。期望 {{limit?: number}}"
+            ))
+        })?;
+        let rows =
+            pipeline_history_rows(&self.db, request.limit.unwrap_or(20)).await.map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::pipeline_history 查询失败: {e}"))
+            })?;
+        Ok(Value::Array(rows))
+    }
+
+    /// 读 op：单次管道执行详情（宿主 `get_pipeline_run_detail` 的接缝面）。
+    async fn pipeline_run_detail(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RunDetailRequest {
+            run_id: String,
+        }
+        let request = serde_json::from_value::<RunDetailRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::pipeline_run_detail 参数解析失败: {e}。期望 {{runId: string}}"
+            ))
+        })?;
+        pipeline_run_detail_row(&self.db, &request.run_id).await.map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::pipeline_run_detail 查询失败: {e}"))
+        })
+    }
+
+    /// 读 op：待审批进化计划列表（宿主 `list_pending_evolution_plans` 的接缝面）。
+    ///
+    /// 出参 = dao `EvolutionHistoryModel` 数组的 JSON（宿主命令原样返回该模型）。
+    /// 入参恒 `{}` —— 该命令无参。
+    async fn pending_evolution_plans(&self, input: Value) -> Result<Value> {
+        if !input.is_null() && !input.as_object().is_some_and(|o| o.is_empty()) {
+            return Err(AxAgentError::Validation(
+                "stock.analysis::pending_evolution_plans 不收参数（期望 {} 或缺省）".into(),
+            ));
+        }
+        let rows = evo_hist::list_pending_asc(&self.db).await.map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::pending_evolution_plans 查询失败: {e}"))
+        })?;
+        serde_json::to_value(&rows).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::pending_evolution_plans 序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 纯计算 op：Walk-Forward + DES 对比仿真（宿主 `wf_des_integration` 的接缝面）。
+    ///
+    /// ⚠ 实现体内部自建 tokio runtime（`commands/wf_des.rs` 的同步命令形态），**必须**
+    /// `spawn_blocking` 执行 —— 在 async executor 上直调构成嵌套 runtime（禁区 9）。
+    async fn des_integration(&self, input: Value) -> Result<Value> {
+        let request: WfDesRequest = serde_json::from_value(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::des_integration 参数解析失败: {e}。期望 WfDesRequest \
+                 （形状权威：commands/wf_des.rs，camelCase）"
+            ))
+        })?;
+        let report = tokio::task::spawn_blocking(move || wf_des_integration(request))
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::des_integration 任务失败: {e}"))
+            })?
+            .map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::des_integration 仿真失败: {e}"))
+            })?;
+        serde_json::to_value(&report).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::des_integration 序列化失败: {e}"))
         })
     }
 }

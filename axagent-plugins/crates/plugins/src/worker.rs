@@ -2706,6 +2706,63 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // ── stock.analysis 接缝 · T2 试点批（#248）：四条宿主命令的取数面 ──
+            // 方向与上面三条同族（宿主 → 插件），全部只读/纯计算 ⇒ `required_permission_for`
+            // **一条都不登记**（给读缝加闸会让只读插件被无端拒掉）。入参嵌一层
+            // `{"request": {...}}` 透传，形状权威在主壳 commands 层（pipeline 行是手拼
+            // `json!`、进化计划是 dao 模型、DES 仿真是 `commands/wf_des.rs` 的 DTO）。
+            "stock.analysis" if op == "pipeline_history" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.pipeline_history(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "pipeline_run_detail" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.pipeline_run_detail(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "pending_evolution_plans" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.pending_evolution_plans(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "des_integration" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.des_integration(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // ── opc.store 接缝：宿主把 `opc_blog_posts` 的列表读面 + 三个写面暴露给插件 ──
             // 方向与 analysis.record 同类（宿主 → 插件，见上方先例注释）：只走入站分派，
             // **不进** `SUPPORTED_REMOTE_SEAMS`（那是「插件提供给宿主」的清单）。

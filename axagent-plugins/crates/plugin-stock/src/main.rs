@@ -53,9 +53,9 @@ const WORKFLOW_RUN_SEAM: &str = "workflow.run";
 const ANALYSIS_RECORD_SEAM: &str = "analysis.record";
 /// 股票分析数据面接缝（E 批 #240）：成分股 / 逐票 1 月涨跌幅 / 市场主线批量 upsert。
 ///
-/// 这三件能力的实现体在 `analysis-engine`（implementor），宿主 `tools` 层原先直连它
-/// ⇒ 构成跨包口。改走本接缝后，工具只发命令、取数经宿主往返（判据见
-/// `harness/src/stock_analysis.rs` 模块头）。
+/// 这七件能力的实现体分布在 `analysis-engine`（implementor，前三件）与主壳 commands 层
+/// （后四件：pipeline 行 / 进化计划 / DES 仿真 DTO）⇒ 跨包口判据见
+/// `harness/src/stock_analysis.rs` 模块头。全接缝只有 `batch_upsert_mainlines` 一个写 op。
 const STOCK_ANALYSIS_SEAM: &str = "stock.analysis";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
@@ -63,6 +63,16 @@ const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 const COMMAND_MAINLINE_BATCH_UPSERT: &str = "stock_market_mainline_batch_upsert";
 /// 逐票 1 月涨跌幅命令（工具 `get_stock_factor` 的执行面）。
 const COMMAND_STOCK_FACTOR: &str = "stock_get_stock_factor";
+// ── T2 试点批（#248）：四条宿主命令改走本接缝（宿主同名 Tauri 命令待删）──
+// 与 E 批三条同形态：`Value` 整块透传，插件侧不裁剪不改名（形状权威在主壳 commands 层）。
+/// 管道执行历史（宿主 `get_pipeline_history`，前端 `pipelineStore.ts:27`）。
+const COMMAND_PIPELINE_HISTORY: &str = "stock_get_pipeline_history";
+/// 单次管道执行详情（宿主 `get_pipeline_run_detail`，前端 `pipelineStore.ts:52`）。
+const COMMAND_PIPELINE_RUN_DETAIL: &str = "stock_get_pipeline_run_detail";
+/// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
+const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
+/// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
+const COMMAND_DES_INTEGRATION: &str = "stock_wf_des_integration";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
@@ -206,6 +216,53 @@ fn handle_command(
             peer,
             &request.call_chain,
             "batch_upsert_mainlines",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // ── T2 试点批（#248）：四条宿主命令的取数面，全只读/纯计算 ──
+        // 与 E 批三条同一透传纪律：字段形状的权威在主壳 commands 层（pipeline 手拼行 /
+        // dao 进化模型 / `commands/wf_des.rs` 的 WfDes DTO），插件侧改写即第二套形状。
+        COMMAND_PIPELINE_HISTORY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "pipeline_history",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_PIPELINE_RUN_DETAIL => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "pipeline_run_detail",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_PENDING_EVOLUTION_PLANS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "pending_evolution_plans",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_DES_INTEGRATION => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "des_integration",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),

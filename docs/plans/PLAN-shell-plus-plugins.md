@@ -7215,3 +7215,39 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 2. **未改 `feRe` / 未加 `cross` 桶**：改判据会让 48→25 失去连续性，且当前 `frontendFileCaliber` 已被污染，改完无法归因。
 3. **未回写 `feForeignReverse.value`**：仍为 48/39（HEAD 真值）。等并行批落地提交后，由该批或后续批重新取基线再回写。
 4. **③ 类里 `timeAnchorStore` 的层次倒挂未修**：正确终局是上收前端中立层（对标后端 `harness/src/as_of.rs` 的跨 crate 共用），需单独立项，不在本批「只登记」范围内。
+
+### 132.6 收口验证与本批顺带修掉的两条门禁红
+
+**提交**：`7494fa656`（台账主体）、`a540cee31`（撞词列改全角引号）、`8ab611d3d`（`PLAN-office-auto-provision.md:32` 行号订正）。
+
+**`check-doc-refs` 读数变化（改前 `EXIT=1` → 改后 `EXIT=1`，但红项逐条减少）**：
+
+| 度量 | 改前 | 改后 | 说明 |
+|---|---|---|---|
+| `OK` | 6881 | 6882 | +1 = `PLAN-office-auto-provision.md:32` 从 STALE 转 OK |
+| `STALE` | 71 | 70 | −1 = 同上 |
+| `SYMDRIFT` 活文档面 | 789 | 788 | −1 = 本条 `PLAN-shell-plus-plugins.md:7169` 的 `quote` 假簇 |
+| 第二层基线外新增 | 6 | 5 | −1 = 同上（见下） |
+| 第一层基线外新增 | 2 | 1 | −1 = 行号订正 |
+
+**顺带修掉的两条（都是我自己的账，不是别人的）**：
+
+1. **`a540cee31` 撞词列造出的假 SYMDRIFT**：§132.3 表格的「撞词」列原本写裸反引号 `` `quote` `` / `` `market` ``，而 `check-doc-refs` 的 `comparableSymbolSpan` 会把**同一行内与引用相邻的裸反引号标识符**当成「句中所述符号」并比对行号 ⇒ `comparableSymbolSpan("quote")` 返回 `form=ident`（长度 5、纯 ASCII、无数字、无路径分隔、命中唯一），门禁于是断言「`quote` 该在第 86 行」并判红。改全角引号「quote」后该簇不再被当符号。⚠ **这是本仓文档写法的一条硬约束**：写「撞词 / 别名 / 短标识符」列时**不能用裸反引号**，否则会凭空给 SYMDRIFT 棘轮加键（新造的红比漏报更难发现 —— 它长得像真缺陷）。
+2. **`8ab611d3d` 行号越界**：`PLAN-office-auto-provision.md:32` 原写 `opc.rs` 的 1129–1257 区间，是我在 `f9a61432c`（#32 批 C）写入的，而**同一提交**删掉了 opc.rs 里 149 行 ⇒ 引用当场越界（目标缩到 1387 行，现为 1093 行）。原区间本也不含 `opc_sync_fleet` 函数体（1129 是 `parse_frontmatter_brief` 的文档注释）。订正为实测的 **866–999**（`///` 注释起 → 函数收尾 `}`），`agent_profile_id: None` 在 965。⚠ **同批删代码必须同批改引用** —— 这次漏了，直到五日后的门禁才浮出来。
+
+> ⚠ **写本节时的自身踩坑（已修）**：上面这两段最初把旧引用写成可解析形态，本门立刻把它们当**新引用**判红（`PLAN-shell-plus-plugins.md` 自身 +2 条）—— 门禁不区分「引述」与「引用」。⇒ **本仓文档里描述一条坏引用时，必须写成不可解析形态**（去掉盘上路径前缀只留文件名 + 用全角破折号 `1129–1257` 而非半角连字符、或干脆写「1129 至 1257」）。同族先例见 §「源码文本判据要剥注释」：退役注释引用被删原文，判据会自证失败。
+
+**剩余 1 条 BROKEN 不属本批、且按规范不许我动**：`docs/audits/AUDIT-industry-label-removal-2026-09-14.md:434` 指向「RiskRoomMiniBar.tsx」的第 300 行（该文件名当时存在）。取证：它在 `HEAD` 存在（blob `cd7463af7`），但工作树里被**并行批暂存删除**（`D  src/components/office/panels/RiskRoomMiniBar.tsx`，与 `ChatPanel` / `DirectMessagePanel` / `TokenPanel` / `TradingRoomMiniBar` 同批）。而 `docs/audits/` 是**时点快照**（`SNAPSHOT_DOC_RULES`，§「文档放置」），其记录的是「当时的世界」，删除后引用失效是快照的正常形态 ⇒ **两边都不能改**：改快照违反「快照不订正」，改代码是接手别人的在途批次。⇒ 交回并行批：它落地时若该文件确已整体删除，正确处置是让快照保持原样并接受这条 1 条红，或在 `doc-refs-baseline.json` 里把该键**显式登记为已知快照债**（需安静窗口 + 该批授权）。
+
+**第二层余下 5 条新增也全非本批**（逐条取证，均止于各自的引入提交）：
+
+| 键 | 引入提交 | 成因 |
+|---|---|---|
+| `PLAN-industry-to-domain-migration.md::register_commands.rs → opc_list_industries` | `f9a61432c`（我 #32 批 C） | 同批删命令后该 PLAN 引用的命令名失效 —— ⚠ 是我上一批的遗债，但属另一份 PLAN，本批不越界改 |
+| 同上 → `opc_list_runtime_industries` | 同上 | 同上 |
+| `PLAN-shared-primitives-neutrality.md::src/lib/decision-agreement.ts → StockActionType` | `12ea20171`（#35 批 R） | 该文件被 `R` 迁入 `src/lib/stock-analysis/`，引用路径未同批改 |
+| 同上 → `src/stores/index.ts → PortfolioStressResult` | `12ea20171` 或 `b98834810` | barrel re-export 被摘 |
+| `PLAN-shell-plus-plugins.md::command_bridge.rs → PluginCommandBridge` | `21a743fa5`（#240 E 批） | `command_bridge.rs` 现 3689 行，`PluginCommandBridge` 不在 583 附近（实际 593/623 是 `map_domain` 与 `CapabilityDomain`） |
+
+⇒ 这 4 条（除第一条外）都是「代码迁走后活文档行号/符号未同批订正」的同一形态。本批只登记，不动别人的 PLAN（与 §131 的处置口径一致）。
+

@@ -78,27 +78,79 @@ const DOMAINS = {
   },
 };
 
+// 禁区 3 封闭清单（AGENTS.md 前端禁区 3 逐条点名 + src/types/index.ts 拆除登记注释）：
+// 已摘宿主 barrel 门面的四域类型**必须**经深路径直取 —— 这类 import 是合规做法，
+// 不是跨域反向阻塞，任何域都不计。封闭清单四条逐字落地，扩清单必须先改 AGENTS.md 禁区 3。
+const FE_TYPES_DEEP_RE = /^@\/types\/(quant|stock-analysis|pipeline|opc)$/;
+
+// resolve 一条 import 说明符为仓库相对路径，判它是否命中某域 feRe。
+// 只认 @/ 别名（=src/）与 ./ ../ 相对路径；裸包名（node_modules）一律不 resolve ⇒ 不豁免（保守留红）。
+// 目标必须能在 fileList 里找到（试 .ts / .tsx / index 双扩展）才判 feRe —— resolve 失败 ⇒ false，宁可留红不许白豁免。
+function resolveSpecHits(spec, fromFile, fileSet, re) {
+  let p;
+  if (spec.startsWith('@/')) {
+    p = 'src/' + spec.slice(2);
+  } else if (spec.startsWith('./') || spec.startsWith('../')) {
+    const parts = fromFile.split('/').slice(0, -1);
+    for (const seg of spec.split('/')) {
+      if (seg === '.') continue;
+      if (seg === '..') { parts.pop(); continue; }
+      parts.push(seg);
+    }
+    p = parts.join('/');
+  } else {
+    return false;
+  }
+  for (const c of [p, p + '.ts', p + '.tsx', p + '/index.ts', p + '/index.tsx']) {
+    if (fileSet.has(c) && re.test(c)) return true;
+  }
+  return false;
+}
+
 // ── 前端反向扫描（§3 权威判据，抽成纯函数：注入文件清单 + 内容读取器）────────
 // 判定档 / --fe-json / --selftest **共用同一实现** ⇒ 「复算器 = 权威脚本自身」，仓内不存在第二套扫描器
 // （PLAN §125.7 加锚次序①；对照教训：k2TraitFaces 因复算器出自一次性工件，至今只能 manual/hard:false）。
-// ⚠ 现状口径两条由 --selftest 锁定，改任一必须与 PLAN §0.10 读数同批：
+// ⚠ 现状口径四条由 --selftest 锁定，改任一必须与 PLAN §0.10 读数同批：
 //   ① 归属用文件**整条路径**判 feRe（命名不规范者会误判，PLAN 判读口径 3）；
-//   ② import 说明符命中即计，**不剥注释行**（与 Rust 段 §1 剥 `//` 的做法**不同**，56/43、29/11 就是这样数出来的）。
+//   ② import 说明符命中即计，**不剥注释行**（与 Rust 段 §1 剥 `//` 的做法**不同**，56/43、29/11 就是这样数出来的）；
+//   ③ 禁区 3 四域 types 深路径（FE_TYPES_DEEP_RE）不计 —— AGENTS.md 点名的合规直取；
+//   ④ 同域互引不计 —— 引用方自身属域 X（路径命中 X.feRe）时，说明符命中的若是 X 域文件
+//      （resolve 后命中 X.feRe），那是 X 域内耦合，对其它域 dk 不构成「反向」（对齐 Rust §1 的
+//      fileOwner 三态：fileOwner ≠ dk ⇒ cross 形态，此处按豁免降级不单列桶，豁免量在 fe.waived 可见）。
+//      反之 fileOwner 为空的真·主壳/中性文件照计 foreign；resolve 失败或目标不存在照计（不许白豁免）。
 function scanFeDomain(fileList, contentOf) {
+  const fileSet = new Set(fileList);
   const fe = { STOCK: { owned: [], foreign: [] }, OPC: { owned: [], foreign: [] } };
+  const waived = { sameDomain: 0, typesDeep: 0 };
   for (const f of fileList) {
     if (!FE_FILE_RE.test(f)) continue;
     const src = contentOf(f);
     if (src === null) continue; // --before 语义下改前不存在 / 已删除的文件：跳过不崩
-    for (const [dk, d] of Object.entries(DOMAINS)) {
-      const hits = [];
-      src.split('\n').forEach((l, i) => {
-        for (const m of l.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)) if (d.feRe.test(m[1])) hits.push(i + 1);
-      });
-      if (!hits.length) continue;
-      (d.feRe.test(f) ? fe[dk].owned : fe[dk].foreign).push({ file: f, n: hits.length, lines: hits.slice(0, 8) });
+    const ownerDks = Object.keys(DOMAINS).filter((dk) => DOMAINS[dk].feRe.test(f));
+    // 每条说明符先判豁免再分发到命中域 —— 豁免在说明符粒度计一次，不随域循环双计
+    const perDomain = { STOCK: [], OPC: [] };
+    src.split('\n').forEach((l, i) => {
+      for (const m of l.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+        const spec = m[1];
+        if (FE_TYPES_DEEP_RE.test(spec)) {
+          // 豁免计数只记「真的挡掉了本会计算的命中」：spec 还须命中某域 feRe；
+          // 否则（如 @/types/pipeline 不含任何域词）本来就不计，无豁免可言
+          if (Object.values(DOMAINS).some((d) => d.feRe.test(spec))) waived.typesDeep++;
+          continue;
+        }
+        for (const [dk, d] of Object.entries(DOMAINS)) {
+          if (!d.feRe.test(spec)) continue;
+          if (ownerDks.some((od) => od !== dk && resolveSpecHits(spec, f, fileSet, DOMAINS[od].feRe))) { waived.sameDomain++; continue; }
+          perDomain[dk].push(i + 1);
+        }
+      }
+    });
+    for (const [dk, lines] of Object.entries(perDomain)) {
+      if (!lines.length) continue;
+      (DOMAINS[dk].feRe.test(f) ? fe[dk].owned : fe[dk].foreign).push({ file: f, n: lines.length, lines: lines.slice(0, 8) });
     }
   }
+  fe.waived = waived;
   return fe;
 }
 
@@ -465,11 +517,12 @@ function runFeJson() {
   perFile.sort((a, b) => b.points - a.points || a.file.localeCompare(b.file));
   console.log(JSON.stringify({
     tool: 'scripts/audit-l1-blockers.mjs --fe-json',
-    caliber: '§3 feRe（权威实现自身）：src/**.ts(x) 整条路径不命中域 feRe、而 from/import 说明符命中 ⇒ 计 foreign；注释行不剥（--selftest 锁定，改此口径必须与 PLAN §0.10 读数同批）',
+    caliber: '§3 feRe（权威实现自身）：src/**.ts(x) 整条路径不命中域 feRe、而 from/import 说明符命中 ⇒ 计 foreign；禁区 3 四域 types 深路径与同域互引（说明符 resolve 后命中引用方自身域 feRe）豁免不计，豁免量见 waived；注释行不剥（--selftest 锁定，改此口径必须与 PLAN §0.10 读数同批）',
     basis,
     commit,
     stock: { points: sum(fe.STOCK.foreign), files: fe.STOCK.foreign.length },
     opc: { points: sum(fe.OPC.foreign), files: fe.OPC.foreign.length },
+    waived: fe.waived,
     perFile,
   }, null, 1));
   process.exit(0);
@@ -544,18 +597,33 @@ function runSelftest() {
     'src/components/stock/Panel.tsx': "import { x } from '@/lib/stock-api';\n",
     'src/pages/Plain.tsx': "// import { q } from '@/lib/market-data';\nimport { q } from '@/lib/market-data';\n",
     'src/lib/opc-thing.ts': "import pack from '@/features/capability-pack/store';\n",
+    'src/lib/mockHost.ts': "import type { X } from '@/types/opc';\nimport type { Y } from '@/types/stock-analysis';\n",
+    'src/components/stock-analysis/DebatePanel.tsx': "import { H } from './HorizonStrip';\n",
+    'src/components/stock-analysis/HorizonStrip.tsx': "export const H = 1;\n",
+    'src/components/stock-analysis/Ghost.tsx': "import { G } from './GhostHorizon';\n",
+    'src/lib/hostStuff.ts': "import type { Z } from '@/types/stock-extra';\n",
+    'src/stores/index.ts': "export { s } from './feature/stockStore';\n",
+    'src/stores/feature/stockStore.ts': "export const s = 1;\n",
     'src/x/gone.ts': null,
   };
   const fixContent = (p) => (p in FIX_FE ? FIX_FE[p] : null);
   const fe = scanFeDomain(Object.keys(FIX_FE), fixContent);
   const pts = (dk) => fe[dk].foreign.reduce((x, r) => x + r.n, 0);
-  chk(pts('STOCK') === 3 && fe.STOCK.foreign.length === 2, '正控：STOCK 反向应为 3 处 / 2 文件（helper 1 + Plain 2），实得 ' + pts('STOCK') + ' / ' + fe.STOCK.foreign.length);
+  chk(pts('STOCK') === 5 && fe.STOCK.foreign.length === 4, '正控：STOCK 反向应为 5 处 / 4 文件（helper 1 + Plain 2 + hostStuff 1 + stores barrel 1），实得 ' + pts('STOCK') + ' / ' + fe.STOCK.foreign.length);
   chk(fe.STOCK.foreign.every((r) => r.file !== 'src/components/stock/Panel.tsx') && fe.STOCK.owned.length === 1, '负控：路径自身命中 feRe 的文件落 owned、不得落 foreign（域自有随迁出整体搬走）');
-  chk(fe.OPC.foreign.length === 0 && pts('OPC') === 0 && fe.OPC.owned.length === 1, '负控：opc 路径文件 import capability-pack 说明符 ⇒ 计 owned 侧，OPC foreign 保持空');
+  chk(fe.OPC.foreign.length === 1 && pts('OPC') === 1 && fe.OPC.owned.length === 1, '负控：opc 路径文件 import capability-pack 说明符 ⇒ 计 owned 侧；OPC foreign 只剩 Ghost（resolve 不到目标不豁免）');
   chk(!fe.STOCK.foreign.some((r) => r.file === 'src/x/gone.ts'), '负控：内容读不到的文件（--before 语义下改前已删）跳过、不崩、不计');
   chk((fe.STOCK.foreign.find((r) => r.file === 'src/pages/Plain.tsx') || {}).n === 2, '口径锁定：注释行里的 import **照计** —— 56/43、29/11 就是这样数出来的；改这条必须与 PLAN §0.10 读数同批，不许借自检偷改口径');
   const fe2 = scanFeDomain(['src/pages/Plain.tsx'], () => "import { q } from './plain';\n");
   chk(fe2.STOCK.foreign.length === 0 && fe2.OPC.foreign.length === 0, '灵敏度负控：把说明符换成非域路径 ⇒ foreign 必须归零（判据没跑才会让合成读数原样不动）');
+
+  // —— 二) 判据豁免两形态（禁区 3 四域深路径 + 同域互引）的正负控 ——
+  chk(!fe.STOCK.foreign.some((r) => r.file === 'src/lib/mockHost.ts') && !fe.OPC.foreign.some((r) => r.file === 'src/lib/mockHost.ts'), '正控：禁区 3 四域 types 深路径（@/types/opc、@/types/stock-analysis）不计任何域 foreign');
+  chk(!fe.OPC.foreign.some((r) => r.file === 'src/components/stock-analysis/DebatePanel.tsx'), '正控：同域互引豁免 —— stock-analysis 文件引同域 Horizon* 组件不落 OPC foreign（对齐 Rust §1 fileOwner 三态）');
+  chk(fe.waived.typesDeep === 2 && fe.waived.sameDomain === 1, '豁免可见性：waived 计数如实（typesDeep 2、sameDomain 1），豁免不许静默');
+  chk(fe.OPC.foreign.some((r) => r.file === 'src/components/stock-analysis/Ghost.tsx'), '负控：同域互引豁免不许白给 —— resolve 目标不在盘上 ⇒ 照计 foreign');
+  chk(fe.STOCK.foreign.some((r) => r.file === 'src/lib/hostStuff.ts'), '负控：禁区 3 是封闭清单四条精确锚，@/types/stock-extra 这类清单外深路径照计');
+  chk(fe.STOCK.foreign.some((r) => r.file === 'src/stores/index.ts'), '负控：owner 为空的中性文件（barrel re-export 域 store）不得借同域互引豁免 —— #222 形态必须继续被抓住');
 
   // —— 二) registerAuditRow：自动登记（正控）+ 四种拒写（负控），全部走合成文本、零真盘 ——
   const IDX_FIX = [

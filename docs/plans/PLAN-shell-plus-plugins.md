@@ -7367,7 +7367,9 @@ for(const f of H){if(R.test(f)&&!W.has(f))b+=hn(f);}
 console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 ```
 
-## 134. #243 ③ 类剩余 5 处逐条裁定（2026-11-09；**结论：无一条能由本批改**）
+## 135. #243 ③ 类剩余 5 处逐条裁定（2026-11-09；**结论：无一条能由本批改**）
+
+> **为什么编号跳过一档**：`l1ForeignStock` 锚点登记了一个 `planOld` 旧读数（任务 #136 把它从旧值降到 133，旧值现为 `planOld.number`），第五道门按 `numberOccurrences` 在 PLAN 全文找它在漂移段之外的任何出现 —— 章节号若与该旧值同数，会被判成「旧读数段外复现」而硬失败（`alsoAt` 白名单区段对它无一处相符）。改号避开即可，不动判据：那个数该不该出现在正文里是内容问题，不是门禁问题。
 
 **先纠任务口径**：#243 立的是「③ 类剩余 6 处」（原 8 − §132.7 消掉的 As-Of 两条）。实际现在是 **5 处 / 5 文件** —— 第 6 处已**由并行批完成**：`git status --porcelain` 报 `R  src/stores/feature/screenshotDiagnosisStore.ts -> src/stores/feature/stock-analysis/screenshotDiagnosisStore.ts`，新位置 import 头（`src/stores/feature/stock-analysis/screenshotDiagnosisStore.ts:19`）只吃 `@/types/paper-portfolio` 与 `@/types/screenshot-diagnosis` 两个中性说明符。该 rename 让**文件自身路径命中** `feRe` 的 stock 词根 ⇒ 按 `audit-l1-blockers.mjs` §3「归属用文件整条路径判」落 `owned` 而非 `foreign`。判定：这是**归属正确**（该 store 本就是股票持仓截图诊断），不是洗绿；`stores/feature/{opc,quant,stock-analysis}` 三个域子目录已有先例。
 

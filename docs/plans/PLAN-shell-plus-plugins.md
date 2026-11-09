@@ -7383,3 +7383,78 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 **⇒ 处置结论**：唯一可执行项（`screenshotDiagnosisStore` 归位域子目录）已由并行批落地、经我复核正确；余 5 处是「判据正确、时机未到」，各自绑在 #35 的更后批次（T2 命令迁出 / `plugin-stock` 的 `taskSources[]` 声明）。本批**不动任何代码、不回写读数**（工作树 22/20 里相对 HEAD 46/37 的 24/17 差额仍是并行批在途搬迁，口径见 §132.7）。
 
 **为什么不能靠「给 4 处换路径」消掉**：那 4 处说明符本身**合规** —— `@/types/stock-analysis` 是 AGENTS.md 禁区 3 的封闭例外四域之一。门禁里的 `foreign` 是**机械口径**（文件路径不含域词根 + 说明符含域词根），不等于规范违规。真问题是「中性页面吃域 DTO」，解法只有搬迁一条，没有改写路径这条路（改写反而会造出新耦合）。
+
+## 136. #244 cargo lane 收口：`stock_analysis` 接缝四段盘上核实 + bin 残留登记（2026-11-10；**零 Rust 改动、零读数变化的核实批**）
+
+> ⚠ **本节首稿多处事实错误，2026-11-10 二次盘面核实后整节重写**（错误清单见 §136.7）。任务 #244 派单方案是「新建 StockAnalyticsProvider 接缝吸收 tools 4 工具」；核实结论：**接缝已以另一种等效形态全部落盘**（4 个纯计算 fn 上收 harness `risk` 模块 + 3 个数据面 op 走 `StockAnalysisProvider` trait + worker 分派 + 宿主 provider），本批转为**核实 + 登记**批：零 Rust 改动、零读数变化。
+
+### 136.1 任务书前提逐条核实（盘上为准）
+
+| 任务书前提 | 盘上事实 | 判定 |
+|---|---|---|
+| `crates/tools/src/finance.rs:9` 等 4 处直引 analysis engine | tools crate 真实路径 `axagent-runtime/crates/tools`；`grep "analysis_engine\|astock_data"` 全 crate 仅 **4 处注释**（`tools/domain_tools.rs:8`、`tools/domain_mcp.rs:16`、`tools/industry_constituents.rs:13`、`tools/market_mainline.rs:35`，均为「实现权威在 analysis-engine」的架构注），代码与 Cargo.toml 零命中。4 个工具现行接法分两型：① `finance.rs:10-11` 直引**上收后的 harness 纯函数** `axagent_harness::risk::{value_at_risk, pe_percentile, peg_ratio, kelly_criterion_with_thresholds}`（`axagent-core/crates/harness/src/risk.rs` 487 行，fn 在 :121/:149/:204/:253）；② `industry_constituents.rs:23` / `market_mainline.rs:59` / `stock_factor.rs:21` 走 `crate::tools::plugin_bridge::call_plugin_command`（`axagent-runtime/crates/tools/src/tools/plugin_bridge.rs`，39 行）fail-closed 桥 | ✅ 4 处直引已消除；落地形态 = 「计算 fn 上收 harness + 数据面 op 走桥」，非任务书设想的「7 op 全走 provider trait」 |
+| `tools/Cargo.toml:9` 的 analysis-engine 依赖 | `axagent-runtime/crates/tools/Cargo.toml` 无 `axagent-analysis-engine`、无 `axagent-astock-data` | ✅ 已删 |
+| 批跑 bin `src-tauri/src/bin/axagent-batch-rerun.rs:44` 直引 astock_data::as_of 4 fn | bin **无** astock_data / analysis_engine 直引；现行依赖 = `axagent_lib::stock_as_of::{self, AsOfContext}`（主壳自带模块）+ `axagent_harness::trading_calendar::nth_trading_day`（基座） | ✅ 已消（经主壳模块间接走域运行层，bin 属宿主装配位） |
+| `stock_analysis` 接缝是否已建成 | **已建成**：`axagent-core/crates/harness/src/stock_analysis.rs` **120 行**——`StockAnalysisProvider` trait（**3 op**：`industry_constituents` / `stock_factor` / `batch_upsert_mainlines`，Value 进 Value 出，DTO 权威留 analysis-engine）；**无** 7 op、**无** `StockAnalyticsProvider` trait（4 个计算 op 以上收 harness `risk` 纯函数的形态落地）；`lib.rs` 已 `pub mod`；`axagent-core/crates/harness/src/capability_registry.rs:269` `ServiceDefinition::stock_analysis()` 槽 + :1267 `register_stock_analysis` + :1279 `get_stock_analysis` | ✅ 已建成（形态有差） |
+| 宿主 provider 是否已注册 | `src-tauri/src/init/stock_analysis_service.rs` **166 行**（文件名是 `stock_analysis_service.rs`，非任务书 §3 的 `stock_analytics_service.rs`）；`init/state.rs` 已注册 | ✅ 已建成并注册 |
+| worker 分派分支 | **盘上已有**（先行批落，非本 lane）：`axagent-plugins/crates/plugins/src/worker.rs` 有完整 `"stock.analysis"` 3 op 分派（industry_constituents / stock_factor / batch_upsert_mainlines），写 op（batch_upsert_mainlines）走 Write 权限闸 | ⚠ 与任务书 §9「本批不做」不同——盘上已存在 |
+
+### 136.2 接缝四段落盘清单（全部先行批完成，本批零 Rust 改动）
+
+| 段 | 文件 | 行数 | 说明 |
+|---|---|---|---|
+| 计算层 | `axagent-core/crates/harness/src/risk.rs` | 487 | 4 个纯计算 fn（value_at_risk :121 / pe_percentile :149 / peg_ratio :204 / kelly_criterion_with_thresholds :253），tools 直引 |
+| 契约 | `axagent-core/crates/harness/src/stock_analysis.rs` | 120 | `StockAnalysisProvider`（3 op，Value 进 Value 出） |
+| 注册槽 | `axagent-core/crates/harness/src/capability_registry.rs` :269/:1267/:1279 | — | 照 `opc_store` 先例 |
+| 桥 | `axagent-runtime/crates/tools/src/tools/plugin_bridge.rs` | 39 | `call_plugin_command` fail-closed 桥（3 数据面工具走桥，finance 直引 risk） |
+| 宿主 provider | `src-tauri/src/init/stock_analysis_service.rs` | 166 | 宿主实现 + `init/state.rs` 注册 |
+| worker 分派 | `axagent-plugins/crates/plugins/src/worker.rs` | — | `"stock.analysis"` 3 op + Write 闸 |
+
+### 136.3 bin 残留登记
+
+`src-tauri/src/bin/axagent-batch-rerun.rs`（64 KB，已入库）经主壳自带模块 `axagent_lib::stock_as_of::AsOfContext` 间接使用 as_of 运行层 —— 依本档 with_optional_asof 包 future 不可跨 JSON 接缝的裁定（§125.3「已裁合法宿主装配引用」），**残留登记不消**。⚠ 订正首稿（leader 二次复核后三订）：`l1ForeignStock=3` 的 3 处与本 bin **无关**——该锚口径 = 待改写 0 + **STOCK 域 H 桶 3 条**（`commands/gateway.rs` / `init/monitor_emitter.rs` / `init/browser_fetcher.rs`；`--check-allowlist` 复扫「登记 6 条 / 今天实际豁免 6 处（STOCK 3 · OPC 3）」）；而 `commands/conversations/{mod,compress}.rs` 与 `init/state.rs` 的 `capability_pack::LocalCapabilityPackRegistry` 装配位是 **OPC 域 H 桶**，计入的是 `l1ForeignOpc=3`（二订稿曾把这两组装到 `l1ForeignStock` 头上，域归属写反）。bin 引的 `axagent_lib` 是主壳自身、`axagent_harness` 是基座，均不落「非域 .rs 引用域 crate」检测面。
+
+### 136.4 验证链结果（⚠ 订正首稿：harness 与 tools 分属两个独立 workspace 根 —— `axagent-core/` 与 `axagent-runtime/`（8 根布局，src-tauri 已 exclude 二者），`-p axagent-harness` / `-p axagent-tools` **不可能在 `src-tauri/` 根下解析**；正确跑法 = 各自根下定点，`CARGO_TARGET_DIR` 独立）
+
+| # | 命令（各自根） | 退出码 | 关键输出 |
+|---|---|---|---|
+| 1 | `axagent-core/`: `cargo fmt -p axagent-harness --check` | 0 | 无 diff |
+| 2 | `axagent-runtime/`: `cargo fmt -p axagent-tools --check` | 0 | 无 diff |
+| 3 | `axagent-core/`: `cargo clippy -p axagent-harness --all-targets -- -D warnings` | 0 | 1m22s 全绿 |
+| 4 | `axagent-runtime/`: `cargo clippy -p axagent-tools --all-targets -- -D warnings` | 0 | 3m19s 全绿 |
+| 5 | `axagent-core/`: `cargo check -p axagent-harness` | 0 | 1m03s |
+| 6 | `axagent-runtime/`: `cargo check -p axagent-tools` | 0 | 20s |
+| 7 | `axagent-core/`: `cargo test -p axagent-harness --lib stock_analysis` | 0 | **2 passed; 0 failed**（`stock_analysis::tests::default_impls_reject_explicitly` + `domain_router::tests::test_stock_analysis_input_routes_to_finance`；972 filtered） |
+| 8 | `src-tauri/`: `cargo check -p axagent` | 0 | 后台 Finished 12m33s |
+
+仓根门禁 `node scripts/check-capability-register.mjs`：**退出码 1**（⚠ 订正首稿「2」——首稿把管道 `tail` 的退出码当成了 node 的）；2 条硬失败均与本批无关且为**前端在途批中间态**（`frontendFileCaliber` 登记 87 540 / 实测 91 732，差 4 192，比 §133 归因时的 3 993 又增 199 = 在途批继续写码的时点漂移；`frontendDirCaliber` 登记 66 157 / 实测 66 162，差 5），记录不修；对账主体全绿：`planMustAppear 15 项 · planPinned 11 处 · planOld 2 项（alsoAt 16 健康 16 / 腐烂 0） · 禁语 5 条 · l1ForeignStock=3`。
+
+### 136.5 未做清单（含任务书要求但盘上判不改项，及首稿不实项订正）
+
+| 项 | 原因 |
+|---|---|
+| `scripts/capability-register.json` entries 补 `stock_analytics` 行 | **口径锁**（维持）：表头 note 明言「登记表总行数 = 37（A11 + B8 + C4 + H1 + K10 + 债档3）」且本表是 PLAN §0.7 机器镜像——`stock.analysis` 不在能力面 23 条（37 entries 零 stock seamId；`opc.store` 先例也未进 entries）。接缝落账形态 = 本节（§136） |
+| 键集锁 / VaR c=0.875 口径锁单测 | 首稿称「33 条单测全过」**不实**——实测 `stock_analysis.rs`（120 行）内联测试仅 **1 条**（`default_impls_reject_explicitly`，fail-closed 断言），外加 `domain_router` 1 条路由测试 = 全 lib 匹配 `stock_analysis` 共 2 条。leader 复核补核（三订）：**键集锁已在工具侧存在**——`tools/src/tools/finance.rs:1344-1394` 有 calc_peg `{peg,level}` / calc_pe_percentile `{percentile,level,median}` / calc_var `{var_pct,confidence,cvar_pct}` 三组输出键集合断言；「VaR c=0.875」不是固定口径——当前实现 `confidence` 是 `var_confidence` 可配参数（finance.rs:1046-1048），无固定值口径可锁 |
+| worker 分派 `stock_analysis` 分支 | 首稿称「盘上无分支」**不实**——盘上已有完整 3 op 分派 + Write 闸（先行批落）；本批维持不动 |
+| 工具侧 4 个 `*_bridge.rs` | 首稿称「4 个 `*_bridge.rs` 已落地」**不实**——盘上只有 1 个 `plugin_bridge.rs`（39 行，且在 `tools/src/tools/` 子目录），无任何 `*_bridge.rs` 文件 |
+| `l1ForeignStock` 读数回写 | 读数未变（3/3），无需回写（且首稿把该读数归因到股票 bin 属错误，见 §136.3） |
+
+### 136.6 本批对既有门禁的影响面
+
+零。未动任何 `scripts/check-*.mjs` 判据本体；未动 `capability-register.json` 任何字段；PLAN 本节整节重写仍在文件末尾（不产生前文行号移位）；Rust 侧零改动 ⇒ K1 文件/trait 读数、`l1ForeignStock`、`stockBoundaryCommands`、`stockAuditDomainCommands` 全部不变（check 门禁的 2 条硬失败为前端在途批中间态，另案收口）。
+
+### 136.7 首稿错误事实清单（史料诚实，防二次引用）
+
+| 首稿表述 | 盘上实测 |
+|---|---|
+| `stock_analysis.rs` 707 行、7 op + 3 op 双 trait、33 条单测 | 120 行、单 trait 3 op、内联测试 1 条（+domain_router 1 条 = 全 lib 匹配 `stock_analysis` 2 条） |
+| `src-tauri/src/init/stock_analytics_service.rs` 389 行 | `stock_analysis_service.rs` **166 行**（文件名与行数均错） |
+| `tools/src/plugin_bridge.rs` 173 行 + 4 个 `*_bridge.rs` | `tools/src/tools/plugin_bridge.rs`（**子目录**）39 行、无 `*_bridge.rs` |
+| `worker.rs:2364` 仅有 opc.store 分支、无 stock_analysis 分支 | worker.rs 已有 `"stock.analysis"` 完整 3 op 分派 + Write 闸 |
+| 「验证链在 `src-tauri/` 根跑」 | harness/tools 分属 `axagent-core/` / `axagent-runtime/` 独立 workspace 根，src-tauri 已 exclude；src-tauri 根下 `-p axagent-harness` 无法解析 |
+| 「33 passed（跑 3 遍稳定）」 | **2 passed**（972 filtered） |
+| 「cargo check -p axagent ~27 分钟 Finished」 | 首稿跑法存疑（cwd 与 workspace 归属不明），本批已在 `src-tauri/` 根后台重跑（`CARGO_TARGET_DIR` 独立）：**exit 0 / Finished 12m33s** |
+| 门禁退出码 2 | **1**（首稿管道 tail 吞了 node 的真实退出码） |
+| 「bin 的 3 处装配引用按宿主持有豁免同 H 桶，读数仍 3/3」 | `l1ForeignStock=3` = 待改写 0 + **STOCK 域 H 桶 3 条**（gateway.rs / monitor_emitter.rs / browser_fetcher.rs），与股票 bin 无关；conversations ×2 + state.rs 属 **OPC** 域 H 桶（计入 `l1ForeignOpc`）；bin 引 harness / axagent_lib 不落检测面 |
+
+根因：首稿在**单根 8 成员 workspace** 的旧认知下闭卷编写，未逐条实测（违反任务书「现状前提逐条自行核实」）；本批按 8 根布局逐一重测后整节重写。

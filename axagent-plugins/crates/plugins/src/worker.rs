@@ -11448,6 +11448,10 @@ mod tests {
         delete_asset_calls: Mutex<Vec<String>>,
         cancel_schedule_calls: Mutex<Vec<String>>,
         batch2_not_found: bool,
+        /// D-4 三条写 op 的入参逐字：发布/删除落地页与联系已读，都是纯 `id`。
+        landing_publish_calls: Mutex<Vec<String>>,
+        landing_delete_calls: Mutex<Vec<String>>,
+        contact_read_calls: Mutex<Vec<String>>,
     }
 
     impl FixedOpcStore {
@@ -11465,6 +11469,9 @@ mod tests {
                 delete_asset_calls: Mutex::new(Vec::new()),
                 cancel_schedule_calls: Mutex::new(Vec::new()),
                 batch2_not_found: false,
+                landing_publish_calls: Mutex::new(Vec::new()),
+                landing_delete_calls: Mutex::new(Vec::new()),
+                contact_read_calls: Mutex::new(Vec::new()),
             }
         }
 
@@ -11565,6 +11572,7 @@ mod tests {
                     status: "sent".into(),
                     total: 100.0,
                     currency: "CNY".into(),
+                    due_at: None,
                     created_at: 1_700_000_000,
                 },
             ))
@@ -11616,6 +11624,32 @@ mod tests {
             } else {
                 axagent_harness::RemovePublishScheduleOutcome::Removed
             })
+        }
+
+        // ── D-4：落地页与联系人三条写 op 的替身 ──
+
+        async fn publish_landing_page(
+            &self,
+            id: String,
+        ) -> axagent_harness::core_error::Result<axagent_harness::LandingPageSummaryView> {
+            self.landing_publish_calls.lock().push(id);
+            Ok(axagent_harness::LandingPageSummaryView {
+                id: "lp-1".into(),
+                title: "落地页".into(),
+                slug: "lp-slug".into(),
+                published: true,
+                created_at: 1_700_000_000,
+            })
+        }
+
+        async fn delete_landing_page(&self, id: String) -> axagent_harness::core_error::Result<()> {
+            self.landing_delete_calls.lock().push(id);
+            Ok(())
+        }
+
+        async fn mark_contact_read(&self, id: String) -> axagent_harness::core_error::Result<()> {
+            self.contact_read_calls.lock().push(id);
+            Ok(())
         }
     }
 
@@ -11740,17 +11774,18 @@ mod tests {
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
     }
 
-    /// `opc.store` 的权限表**逐条枚举锁**（七个写 op + 九个读 op + 两侧的反向锁）：
+    /// `opc.store` 的权限表**逐条枚举锁**（十个写 op + 九个读 op + 两侧的反向锁）：
     /// blog 三件 + #36 批 2 的四条（`transition_invoice` / `update_content_asset` /
-    /// `delete_content_asset` / `cancel_publish_schedule`）⇒ `Write`；九条读 op
-    /// （`list_blog_posts` + #36 批 1 的八条列表 op）⇒ **必须仍是 `None`**；表外 op 与近似
-    /// 接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
+    /// `delete_content_asset` / `cancel_publish_schedule`）+ D-4 的三条
+    /// （`publish_landing_page` / `delete_landing_page` / `mark_contact_read`）⇒ `Write`；
+    /// 九条读 op（`list_blog_posts` + #36 批 1 的八条列表 op）⇒ **必须仍是 `None`**；
+    /// 表外 op 与近似接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
     /// 这条承诺唯一的机械防线就是本用例 —— 多登记一条会把只读插件（今天
     /// `opc_list_*` 那几条命名命令）无端拒成 `PLUGIN_PERMISSION_DENIED`。
     #[test]
-    fn opc_store_permission_table_gates_exactly_the_seven_write_ops() {
+    fn opc_store_permission_table_gates_exactly_the_ten_write_ops() {
         for write_op in [
             "publish_blog_post",
             "delete_blog_post",
@@ -11759,6 +11794,9 @@ mod tests {
             "update_content_asset",
             "delete_content_asset",
             "cancel_publish_schedule",
+            "publish_landing_page",
+            "delete_landing_page",
+            "mark_contact_read",
         ] {
             assert_eq!(
                 required_permission_for("opc.store", write_op),
@@ -11801,10 +11839,101 @@ mod tests {
             "update_content_asset",
             "delete_content_asset",
             "cancel_publish_schedule",
+            "publish_landing_page",
+            "delete_landing_page",
+            "mark_contact_read",
         ] {
             assert_eq!(required_permission_for("opc", write_op), None);
             assert_eq!(required_permission_for("opc.stores", write_op), None);
         }
+    }
+
+    /// D-4 三条写 op 的跨层口径（一条用例串起来）：
+    /// ① 无 `write` ⇒ 三条全被拒且**零触达**；
+    /// ② `publish_landing_page` 纯 `id` 进门，出参是发布后的摘要视图（camelCase 线格式）；
+    /// ③ 两条无载荷写（删落地页 / 联系已读）成功出参是 `Value::Null`，`id` 逐字进门。
+    #[test]
+    fn opc_store_d4_writes_gate_and_return_views() {
+        // ① 无 write：三条都被拒，替身一条都没收到。
+        let denied = Arc::new(FixedOpcStore::new());
+        let (peer, _runtime) = opc_store_peer_with_permissions(denied.clone(), Vec::new());
+        let denied_responses =
+            with_watchdog(Duration::from_secs(5), "opc.store D-4 无权限", move || {
+                ["publish_landing_page", "delete_landing_page", "mark_contact_read"]
+                    .into_iter()
+                    .map(|op| {
+                        peer.handle_call_seam(
+                            &json!({ "seam": "opc.store", "op": op, "args": { "id": "lp-1" } }),
+                            &[],
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
+        for (index, response) in denied_responses.iter().enumerate() {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_PERMISSION_DENIED),
+                "第 {} 条写 op 无 write 必须被拒：{response:?}",
+                index
+            );
+        }
+        assert!(
+            denied.landing_publish_calls.lock().is_empty()
+                && denied.landing_delete_calls.lock().is_empty()
+                && denied.contact_read_calls.lock().is_empty(),
+            "被拒时不得触达 provider"
+        );
+
+        // ②③ 有 write：`id` 逐字进门；发布出参是摘要视图，另两条成功无载荷。
+        let store = Arc::new(FixedOpcStore::new());
+        let (peer, _runtime) =
+            opc_store_peer_with_permissions(store.clone(), vec![PluginPermission::Write]);
+        let (publish, delete, read) =
+            with_watchdog(Duration::from_secs(5), "opc.store D-4 有权限", move || {
+                let publish = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "publish_landing_page",
+                        "args": { "id": "lp-1" },
+                    }),
+                    &[],
+                );
+                let delete = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "delete_landing_page",
+                        "args": { "id": "lp-1" },
+                    }),
+                    &[],
+                );
+                let read = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "mark_contact_read",
+                        "args": { "id": "ct-1" },
+                    }),
+                    &[],
+                );
+                (publish, delete, read)
+            });
+
+        assert_eq!(publish.kind, ResponseKind::Success, "发布应成功：{publish:?}");
+        let publish_value = publish.value.expect("成功帧必须带 value");
+        assert_eq!(publish_value["id"], json!("lp-1"), "视图逐字回显 id：{publish_value}");
+        assert_eq!(publish_value["published"], json!(true), "发布后 published 已翻转");
+        assert_eq!(
+            store.landing_publish_calls.lock().clone(),
+            vec!["lp-1".to_string()],
+            "id 必须逐字进门"
+        );
+
+        assert_eq!(delete.kind, ResponseKind::Success, "删除应成功：{delete:?}");
+        assert_eq!(delete.value, Some(Value::Null), "无载荷写成功出参是 Value::Null");
+        assert_eq!(store.landing_delete_calls.lock().clone(), vec!["lp-1".to_string()]);
+
+        assert_eq!(read.kind, ResponseKind::Success, "标记已读应成功：{read:?}");
+        assert_eq!(read.value, Some(Value::Null), "无载荷写成功出参是 Value::Null");
+        assert_eq!(store.contact_read_calls.lock().clone(), vec!["ct-1".to_string()]);
     }
 
     /// #36 批 2 四条写 op 的跨层口径（一条用例串起来）：

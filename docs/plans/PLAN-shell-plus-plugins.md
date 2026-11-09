@@ -7145,7 +7145,7 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 |---|---|---|---|
 | **HEAD 提交树** | `--fe-json --before HEAD` | **48 / 39** | 提交树真值；`capability-register.json` 的 `feForeignReverse.value` 现记此值 |
 | **工作树** | `--fe-json` | **25 / 23** | 现值；差额来自并行批在途 |
-| `frontendFileCaliber`（hard:true） | `--dump-readings` | 工作树 91 543 / 321、HEAD 87 550 / 307 | 同批污染（差 3 993 行 / 14 文件） |
+| `frontendFileCaliber`（hard:true） | `--dump-readings` | 工作树 91 533 / 321、HEAD 87 540 / 307 | 差额 3 993 行 / 14 文件 —— ⚠ **性质已订正**：99.87% 是 `src/lib/*` 迁入 `src/lib/stock-analysis/` 后路径命中 `feRe` 造成的**永久口径扩张**，不是会在途消失的增量，也不是「污染」；仅 5 行是当批真改动。逐条归因见 §133 |
 
 `frontendDirCaliber`（hard:true）同理：工作树 66 162 / 239、HEAD 66 157 / 239（差 5 行）。
 
@@ -7296,3 +7296,73 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 - 本次回写的是**提交树**读数（`--fe-json --before HEAD`、`frontendFileCaliber` 的 HEAD 侧）—— `6b0bb1aa1..HEAD` 实测无任何 `src/` 改动（`git diff --name-status 6b0bb1aa1..HEAD -- src` 空输出）⇒ 提交树里那 10 行差额只有一个来源，就是我这一刀。**这笔账不写，并行批落地后它会静默记到该批头上**（它从未碰过 `src/types/stock-analysis.ts`）。
 - 副作用如实记：登记值现在是 HEAD 真值，而门禁读**工作树** ⇒ 在该批落地提交前，`check-capability-register.mjs` 的这两条会持续红（`frontendFileCaliber` 91 533 vs 87 540、`feForeignReverse` 25/23 vs 46/37）。这是**正确的红** —— 差异真实存在于工作树，不是我的登记值写错。该批提交后由它自己回写。
 
+
+## 133. `frontendFileCaliber` 3 993 行差额 100% 归因（2026-11-09；订正 §132.1「同批污染」措辞）
+
+### 133.1 结论先说：3 988 / 3 993 是**目录改名造成的口径扩张**，不是会在途消失的代码增量
+
+§132.1 把这条差额记作「同批污染（差 3 993 行 / 14 文件）」，数字对，但**性质写错**：这个词让人以为「等并行批落地提交，差额就没了」。实测不是 —— 差额的 99.87% 来自 `src/lib/*.ts` 迁入 `src/lib/stock-analysis/` 后**路径里多出 `stock-analysis` 一词**，被 `feRe` 判为 owned。改的是路径不是内容，**提交落地后这份差额一字不减**。
+
+| 分项 | 文件 | 行 | 性质 |
+|---|---|---|---|
+| ① 因改名而新进统计面 | 17 | **+4 611** | 内容零改动，仅路径含 `stock-analysis` |
+| ② 因整文件删除而退出 | 3 | **−623** | `TradingRoomMiniBar.tsx` 545 + `useOfficeStockPanels.ts` 61 + `usePaperPortfolioDetails.ts` 17 |
+| ③ 改名跨前后两侧（自身抵消） | 1 对 | 0 | `src/lib/__tests__/stockAnalysisHorizon.test.ts` 482 → `src/lib/stock-analysis/__tests__/`，同 482 |
+| ④ 既存文件内真改动 | 1 | **+5** | `src/components/stock-analysis/dual-view/CompactRiskSummary.tsx`（import 路径改写折行） |
+| **合计** | | **+3 993** | 4 611 − 623 + 5 |
+
+**文件数对得上的方式**（否则「新增 18」与「① 17」会被读成矛盾）：工作树新纳入 **18** 个文件 = ① 的 **17** 个 + ③ 的 **1** 个（horizon）；已移出 **4** 个 = ② 的 **3** 个 + ③ 的 **1** 个（horizon）。③ 在两侧各计一次、净 0，故不进 ①/② 的行数小计。文件数净差 `18 − 4 = 14`，与 §132.1 记的「14 文件」逐字相符。
+
+核验等式：`git ls-tree HEAD` 侧 307 文件 / 87 540 行 ⇒ 工作树 321 文件 / 91 533 行，差 **3 993**；分项 `4 611 − 623 + 5 = 3 993` 逐字闭合。标题的「3 988」指扣掉 ④ 之后的净值（4 611 − 623），即**纯改名/删除**部分；+5 是当批唯一真改动。
+
+### 133.2 ① 的 17 个文件（全部为纯改名，内容零改动）
+
+`src/lib/{agentOutput,dataQualityDiagnosis,decision-agreement,decisionInputDiagnosis,recoIcStats,risk-assessment}.ts` 及 11 个 `__tests__/*.test.ts`（含 `evidenceWeights.pluginRoute.test.ts`、`analystTallyRealFixtures.test.ts` 等）。合计 4 611 行，逐条明细：
+
+| 行 | 路径 |
+|---|---|
+| 1164 | `src/lib/stock-analysis/agentOutput.ts` |
+| 633 | `src/lib/stock-analysis/__tests__/agentOutput.test.ts` |
+| 414 | `src/lib/stock-analysis/decisionInputDiagnosis.ts` |
+| 308 | `src/lib/stock-analysis/decision-agreement.ts` |
+| 270 | `src/lib/stock-analysis/__tests__/analystSentiment.test.ts` |
+| 263 | `src/lib/stock-analysis/__tests__/analysisHistoryFilter.test.ts` |
+| 223 | `src/lib/stock-analysis/dataQualityDiagnosis.ts` |
+| 216 | `src/lib/stock-analysis/__tests__/decisionAgreement.test.ts` |
+| 200 | `src/lib/stock-analysis/__tests__/analystTallyRealFixtures.test.ts` |
+| 190 | `src/lib/stock-analysis/__tests__/decisionInputDiagnosis.test.ts` |
+| 184 | `src/lib/stock-analysis/risk-assessment.ts` |
+| 116 | `src/lib/stock-analysis/__tests__/risk-assessment.test.ts` |
+| 112 | `src/lib/stock-analysis/__tests__/agentOutput.f7Reference.test.ts` |
+| 104 | `src/lib/stock-analysis/__tests__/dataQualityDiagnosis.test.ts` |
+| 85 | `src/lib/stock-analysis/__tests__/evidenceWeights.pluginRoute.test.ts` |
+| 83 | `src/lib/stock-analysis/__tests__/analystContradiction.test.ts` |
+| 46 | `src/lib/stock-analysis/recoIcStats.ts` |
+
+### 133.3 这个发现意味着两件事，方向相反，不要只取一面
+
+1. **旧登记值 87 540 是低估，不是「真值」**：`agentOutput` / `risk-assessment` / `dataQualityDiagnosis` 等本就是**纯股票域助手**，只因住在 `src/lib/` 这个中性目录才没被 `feRe` 计入。改名后计入是**判据变准**，不是判据被污染。⇒ §132.7 表里「87 540 = HEAD 真值」只对「当时的树」成立，对「这个口径该量什么」是低估；后续回写应写改名后的读数，不要试图把 3 988 行「找回来」。
+2. **§132.1「无法分离归因」的前提已被推翻**：既然三分账能 100% 闭合（①+②+③+④ = 实测差，零残差），那么「改前端代码后读数混着别人的改动」**不再成立** —— 别人的那部分是可精确扣除的常量。§132.1 拒绝处置 22 个干净文件的理由（取数基准被占）在此失效，处置可以开工，**只需在每次读数时扣除 3 993 这个已知常量**。
+
+### 133.4 订正与验证
+
+- **订正 §132.1 第 148 行的措辞**：`同批污染（差 3 993 行 / 14 文件）` ⇒ 该差额 99.87% 是**永久口径扩张**，仅 5 行是当批真改动；「污染」一词会误导后续批次去「等它消失」。文件数 14 = 新增 18 − 移出 4，数字本身无误。
+- **不改任何登记值**：`frontendFileCaliber` 仍记 87 540（提交树真值），工作树 91 533 的红是**正确的红** —— 差异真实存在，且不会自行消失。
+- **取证命令**（可重复）：对 `HEAD` 与工作树各取 `git ls-tree -r --name-only` / `git ls-files --cached --others --exclude-standard`，按 `feRe` 过滤后求和 `split("\n").length`；三维集合差分（新纳入 / 已移出 / 两侧皆有）必须闭合到实测差，残差为 0 才算归因完成。
+- ⚠ **脚本输出与上表分组不同，别当成算错**：脚本按「集合归属」机械切分，会把 ③ 那对改名各自并入相邻桶 ⇒ 打印 **新增 5093 / 移出 1105 / 改动 5**（= 4611+482 / 623+482 / 5），合计仍是 3993。上表把 ③ 单列成 0 是为了让「改名不产生行数」这件事可见；**两套分组的结论同为 3993，逐位闭合**。
+- **实测证据**：`git diff --cached --name-status -M` 报 20 条 `R`、7 条 `D`；18 个新纳入文件**逐一**能在地图上找到「同相对路径、去掉 `stock-analysis/` 段」的 `HEAD` 前身（改名而来 18 / 真新增 0）。
+
+```bash
+# 一行复核（在仓根、非 UNC 路径下跑）
+node -e '
+const {execSync}=require("child_process"),fs=require("fs");
+const R=/stock|quote|kline|technical|portfolio|trading|advis|invest|quant|market/i;
+const ls=(c)=>execSync(c,{encoding:"utf8",maxBuffer:1<<28}).split("\n").filter(f=>/\.(ts|tsx)$/.test(f));
+const H=new Set(ls("git ls-tree -r --name-only HEAD -- src")),W=new Set(ls("git ls-files --cached --others --exclude-standard -- src"));
+const hn=(f)=>execSync(`git show HEAD:"${f}"`,{encoding:"utf8",maxBuffer:1<<26}).split("\n").length;
+const wn=(f)=>{try{return fs.readFileSync(f,"utf8").split("\n").length}catch{return 0}};
+let a=0,b=0,c=0;
+for(const f of W){if(!R.test(f))continue; if(!H.has(f))a+=wn(f); else c+=wn(f)-hn(f);}
+for(const f of H){if(R.test(f)&&!W.has(f))b+=hn(f);}
+console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
+```

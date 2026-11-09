@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import type { AsOfDegradationEntry, AsOfDegradationKind } from "@/types/stock-analysis";
+import type { AsOfDegradationEntry, AsOfDegradationKind } from "@/types/asOf";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 

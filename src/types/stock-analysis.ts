@@ -1,4 +1,5 @@
 // i18n-exempt: 股票分析类型定义（含后端数据值枚举，如风险等级/催化剂方向中文标识），类型定义非 UI 文案。
+import type { AsOfDegradationEntry } from "./asOf";
 import type { DashboardIndexQuote } from "./generated/dto";
 // ── 运行时工具函数（实现已在 @/lib/stock-analysis-utils.ts） ──
 // 向后兼容的 re-export，新代码应直接从 @/lib/stock-analysis-utils 导入。
@@ -2273,20 +2274,9 @@ export interface HorizonResultEntry {
 export type HorizonResultsMap = Partial<Record<"ultra_short" | "short" | "mid" | "long", HorizonResultEntry | null>>;
 
 /**
- * as-of 降级的严重度分档（T14）—— 与后端 `axagent_harness::as_of::DegradationKind`
- * 的 serde 输出逐值对齐（改一边必须改另一边）。
+ * As-Of 降级类型已上收前端中立层 `@/types/asOf`（§132.3 ③ 层次倒挂的终局修法）。
  *
- * 动因：降级条目此前只有一种视觉权重 ⇒「个股没有场内期权」和「接口 301 挂了」
- * 长得一样，面板读不出「哪条值得去修」。
+ * 它**不属于股票域**：后端权威在 `axagent-core/crates/harness/src/as_of.rs`（harness 基座契约），
+ * 消费方横跨 `stores/shared/timeAnchorStore`（跨组件共享层）与 `components/time-travel`
+ * ⇒ 本文件不再转出，一律从 `@/types/asOf` 直取（转出等于让单域门面继续替中立类型背书）。
  */
-export type AsOfDegradationKind = "failure" | "noData" | "structuralGap";
-
-/** `get_asof_degradation_log` 返回的一条记录 */
-export interface AsOfDegradationEntry {
-  vendor: string;
-  method: string;
-  reason: string;
-  /** 该 DTO 是 wire snake_case 的既成例外（后端字段就叫 as_of），非本仓 camelCase 标准 */
-  as_of: string;
-  kind: AsOfDegradationKind;
-}

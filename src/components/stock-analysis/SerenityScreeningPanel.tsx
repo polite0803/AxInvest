@@ -11,7 +11,7 @@ import {
   useSerenityStore,
 } from "@/stores/feature/serenityStore";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
-import { type AsOfDegradationEntry } from "@/types/stock-analysis";
+import { type AsOfDegradationEntry } from "@/types/asOf";
 import {
   AlertOutlined,
   CheckCircleOutlined,

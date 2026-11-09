@@ -7166,11 +7166,13 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 
 | 文件:行 | 说明符 | 撞词 |
 |---|---|---|
-| `components/chat/ChatViewMessages.tsx:86` | `./QuoteBlock` | `quote` |
-| `components/chat/InputArea.tsx:69` | `./QuotePreviewBar` | `quote` |
-| `pages/SettingsPage.tsx:73` | `@/components/chat/PluginMarketplace` | `market` |
-| `components/workflow/WorkflowSettings.tsx:4` | `@/pages/WorkflowMarketplace` | `market` |
-| `pages/opc/OpcPage.tsx:22,25` | `./components/{MarketPackTab,TalentMarketTab}` | `market`（2 处） |
+| `components/chat/ChatViewMessages.tsx:86` | `./QuoteBlock` | 「quote」 |
+| `components/chat/InputArea.tsx:69` | `./QuotePreviewBar` | 「quote」 |
+| `pages/SettingsPage.tsx:73` | `@/components/chat/PluginMarketplace` | 「market」 |
+| `components/workflow/WorkflowSettings.tsx:4` | `@/pages/WorkflowMarketplace` | 「market」 |
+| `pages/opc/OpcPage.tsx:22,25` | `./components/{MarketPackTab,TalentMarketTab}` | 「market」（2 处） |
+
+> 撞词列刻意用全角引号而非反引号：`check-doc-refs` 的符号簇提取会把同一行内与引用相邻的**裸反引号标识符**当作「句中所述符号」去比对行号（`comparableSymbolSpan`），`quote` 这种词会凭空造出一条 SYMDRIFT 基线外新增。
 
 前两条是聊天**「引用回复」气泡**（`quotedMessage`），后三条是**插件/工作流/人才市场**，都不是证券行情。`OpcPage` 那 2 处导入方与目标**都是 OPC 自有文件** —— 前端缺 Rust 侧那套 `cross` 桶，属两域判据不同源。
 

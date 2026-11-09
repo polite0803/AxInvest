@@ -7212,7 +7212,7 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 
 ### 132.5 本批未做（如实列）
 
-1. **未动任何前端代码**（理由见 132.1）；25 处全部原样在盘。
+1. ~~**未动任何前端代码**（理由见 132.1）；25 处全部原样在盘。~~ —— **本批主体（§132.1–132.6）确实一字未动**；例外是 §132.7 那一刀（`6b0bb1aa1`，5 文件 37+/18−）：它不处置这 25 处里的任何一条 import 语句，而是修 ③ 类背后的**定义地**——新建 `src/types/asOf.ts` 并让三个消费方改指。落地后 ③ 类里的 `stores/shared/timeAnchorStore.ts:2` 与 `stores/feature/serenityStore.ts:1` 两条 foreign 读数消失（该文件整条路径不含 `feRe` 词，改完说明符也不再命中），现树复算 **23 处 / 21 文件**（25−2、23−2），与 `audit-l1-blockers.mjs --fe-json` 的 `stock: {points:23, files:21}` 逐字一致。
 2. **未改 `feRe` / 未加 `cross` 桶**：改判据会让 48→25 失去连续性，且当前 `frontendFileCaliber` 已被污染，改完无法归因。
 3. **未回写 `feForeignReverse.value`**：仍为 48/39（HEAD 真值）。等并行批落地提交后，由该批或后续批重新取基线再回写。
 4. ~~**③ 类里 `timeAnchorStore` 的层次倒挂未修**~~ —— **已落地，见 §132.7**（正确终局即上收前端中立层，已按此做）。
@@ -7254,7 +7254,7 @@ key-parity 0（11 语言 16241 叶子一致）、jsx-text-i18n 0（基线外 0�
 
 ### 132.7 §132.3 ③ 的 `timeAnchorStore` 层次倒挂已修（提交 `6b0bb1aa1`）
 
-**做法**：新建 `src/types/asOf.ts`（30 行）作为前端中立层，装 `AsOfDegradationKind`（:19）+ `AsOfDegradationEntry`（:22）；`src/types/stock-analysis.ts` 删掉本地两份定义（原 :2275-2292）改为 `import type { AsOfDegradationEntry } from "./asOf"`（:2），并在原位留下「已上收」的说明注释而非 re-export。三个消费方全部改指新层：
+**做法**：新建 `src/types/asOf.ts`（29 行，与 `6b0bb1aa1` 的 stat `29 +++` 逐字相符）作为前端中立层，装 `AsOfDegradationKind`（:19）+ `AsOfDegradationEntry`（:22）；`src/types/stock-analysis.ts` 删掉本地两份定义（原 :2275-2292）改为 `import type { AsOfDegradationEntry } from "./asOf"`（:2），并在原位留下「已上收」的说明注释而非 re-export。三个消费方全部改指新层：
 
 | 文件 | 行 | 改前 | 改后 |
 |---|---|---|---|

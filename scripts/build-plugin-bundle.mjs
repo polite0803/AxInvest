@@ -403,11 +403,18 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 5 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 8 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
-    permissions: ["subprocess_execution"],
+    //
+    // ⚠ `write` 是 E 批（#240）加的，**两个面都要它**，缺一条即「装得上、跑必失败」：
+    // ① 插件出站：`worker.rs::required_permission_for(("stock.analysis", "batch_upsert_mainlines"))`
+    //    返回 `Write`，而 `has_permission` 是**精确 contains**（不套 `implies_*`，
+    //    `subprocess_execution` 顶不上）⇒ 命令在接缝调用前落 `PLUGIN_PERMISSION_DENIED`；
+    // ② 命令入站：该命令 `requiredPermission: "workspace-write"`，`check_command_gate`
+    //    要求插件声明 `write | file_system_write`，否则整条命令被拒。
+    permissions: ["subprocess_execution", "write"],
     mcp_servers: [],
     skills: [],
     agents: [],
@@ -513,6 +520,79 @@ function stockManifest({ version, binaryName, sha256 }) {
             limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
             offset: { type: "integer", description: "分页偏移，缺省 0" },
           },
+        },
+      },
+      // ── E 批（#240）：三条数据面命令，取数经宿主 `stock.analysis` 接缝 ──
+      // 三个工具（`get_industry_constituents` / `market_mainline_batch_upsert` /
+      // `get_stock_factor`）只发命令，不再直连 `analysis-engine`（跨包口归零）。
+      // `name` 必须与 worker 的三个 `COMMAND_*` 常量逐字一致。
+      {
+        // 只读：纯查询，宿主 `required_permission_for` 不给它登记权限（值仍是 `None`）。
+        name: "stock_get_industry_constituents",
+        description: "按行业名查询 A 股成分股分组（经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_get_industry_constituents",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            industries: {
+              type: "array",
+              items: {
+                oneOf: [
+                  { type: "string" },
+                  {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      leaderCode: { type: "string" },
+                    },
+                    required: ["name"],
+                  },
+                ],
+              },
+            },
+          },
+          required: ["industries"],
+        },
+      },
+      {
+        // 唯一写命令：`requiredPermission` 必须是 `workspace-write`（否则按未声明=只读档，
+        // 智能体面把它当 `Safe` 暴露、确认弹窗形同虚设）；`permissions` 里也必须有 `write`，
+        // 否则 `check_command_gate` 直接拒（见上方 permissions 注释的两面）。
+        name: "stock_market_mainline_batch_upsert",
+        description: "批量写入市场主线（经宿主 stock.analysis 写面；回 inserted / updated / archived）",
+        command: "worker://stock_market_mainline_batch_upsert",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            mainline_date: { type: "string", description: "主线日期 YYYY-MM-DD（必填，也收 mainlineDate）" },
+            mainlines: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+            archive_missing: { type: "boolean", description: "归档当日未提及主线（也收 archiveMissing）" },
+            source_workflow_execution_id: { type: "string" },
+          },
+          required: ["mainline_date", "mainlines"],
+        },
+      },
+      {
+        // 只读：逐票 1 月涨跌幅，宿主不登记权限（`None`）。
+        name: "stock_get_stock_factor",
+        description: "逐票查询 1 月涨跌幅（经宿主 stock.analysis 接缝，只读；缺席票单独报）",
+        command: "worker://stock_get_stock_factor",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stock_codes: {
+              description: "股票代码清单（宽容形态）：字符串数组、{\"stockCode\"|\"code\"} 对象数组、或含 stocks 分组的信封",
+            },
+            as_of_date: { type: "string", description: "可选截止日（YYYY-MM-DD）" },
+          },
+          required: ["stock_codes"],
         },
       },
     ],

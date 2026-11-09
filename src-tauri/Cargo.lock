@@ -1689,7 +1689,6 @@ name = "axagent-tools"
 version = "3.0.0"
 dependencies = [
  "async-trait",
- "axagent-analysis-engine",
  "axagent-dao",
  "axagent-document-parser",
  "axagent-harness",

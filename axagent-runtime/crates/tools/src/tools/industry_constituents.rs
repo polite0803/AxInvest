@@ -11,21 +11,28 @@
 //! # 与 Tauri 命令层的关系
 //!
 //! 实现在 `axagent_analysis_engine::industry_constituents`（implementor 层，有 entities
-//! 访问权）；本文件只是薄包装，不自己写 SQL。DB 经 `global_state::get_sea_db()`
-//! 槽位（`init/database.rs` 启动时注入）—— 同 `market_mainline.rs` 先例。
+//! 访问权）；本文件只是薄包装 —— 但**不再直连那个域包**：本 crate 是 consumer，
+//! 按依赖铁律不得依赖 implementor（#240 E 批）。数据面改走插件命名命令
+//! `stock_get_industry_constituents` → 宿主 `stock.analysis` 接缝，SQL 与归一都留在
+//! 域包一侧，本层只做「明显缺料」闸 + 信封组装。
 //!
 //! # 只读与幂等
 //!
 //! 纯查询：不落任何表 ⇒ `is_read_only = true`、`is_idempotent = true`。
 
-use crate::{Tool, ToolCategory, ToolContext, ToolDomain, ToolError, ToolResult, global_state};
+use crate::tools::plugin_bridge::call_plugin_command;
+use crate::{Tool, ToolCategory, ToolContext, ToolDomain, ToolError, ToolResult};
 use async_trait::async_trait;
-use axagent_analysis_engine::industry_constituents::{
-    IndustryConstituentsInput, fetch_industry_constituents,
-};
 use serde_json::Value;
 
 pub const GET_INDUSTRY_CONSTITUENTS_TOOL: &str = "get_industry_constituents";
+
+/// 插件侧命令名 —— 必须与 `plugin-stock/src/main.rs` 的 `COMMAND_INDUSTRY_CONSTITUENTS`
+/// 及插件清单 `commands[].name` **逐字相同**。
+const COMMAND: &str = "stock_get_industry_constituents";
+
+/// 插件 id（清单 `name`）。
+const PLUGIN_ID: &str = "stock";
 
 pub struct IndustryConstituentsTool;
 
@@ -86,37 +93,44 @@ impl Tool for IndustryConstituentsTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        // 先解析参数、再取 DB：否则「参数错」会被误报成「数据库未初始化」。
-        let parsed: IndustryConstituentsInput = serde_json::from_value(input).map_err(|e| {
-            ToolError::invalid_input(format!(
-                "get_industry_constituents 参数解析失败: {e}。期望 industries 数组\
-                 （元素为行业名字符串或 {{name, leaderCode}}）"
-            ))
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // 参数错必须显式报错，且不得伪装成「插件命令桥未注入」—— 故本层的闸先于桥。
+        // 只闸「明显缺料」：元素形状的宽容解析归插件命令 → 宿主 provider（唯一转换点）。
+        let industries = input
+            .get("industries")
+            .ok_or_else(|| ToolError::invalid_input("缺少 industries 参数"))?;
+        let arr = industries.as_array().ok_or_else(|| {
+            ToolError::invalid_input("get_industry_constituents industries 必须是数组")
         })?;
-        if parsed.industries.is_empty() {
+        if arr.is_empty() {
             return Err(ToolError::invalid_input(
                 "get_industry_constituents industries 为空：至少给一个行业名",
             ));
         }
-        let db = global_state::get_sea_db().ok_or_else(|| {
-            ToolError::execution_failed("数据库未初始化（wiring 缺失：init 须调用 set_sea_db）")
-        })?;
-        let report = fetch_industry_constituents(db.as_ref(), &parsed)
+
+        let report = call_plugin_command(ctx, PLUGIN_ID, COMMAND, input.clone())
             .await
             .map_err(|e| ToolError::execution_failed(format!("行业成分股查询失败: {e}")))?;
-        // 输出走 {status, data, detail} 信封 —— 与 astock 工具族一致，
-        // rhai 消费端（candidate-pool.rhai 的 to_array）按信封下钻 data。
+        // 出参信封 `{status, data, detail}` 是**工具面契约**：rhai 消费端
+        // （candidate-pool.rhai 的 to_array）按信封下钻 data。接缝只给域 DTO
+        // （`{groups, universeTotal, universeWithIndustry}`），信封在本层组装。
+        let groups = report.get("groups").cloned().unwrap_or(Value::Array(Vec::new()));
+        let total = report.get("universeTotal").map(value_as_u64).unwrap_or(0);
+        let with_industry = report.get("universeWithIndustry").map(value_as_u64).unwrap_or(0);
         let ok = serde_json::json!({
             "status": "ok",
-            "data": serde_json::to_value(&report.groups).unwrap_or_default(),
+            "data": groups,
             "detail": format!(
-                "universe_total={} universe_with_industry={}",
-                report.universe_total, report.universe_with_industry
+                "universe_total={total} universe_with_industry={with_industry}"
             ),
         });
         Ok(ToolResult::success(ok.to_string()))
     }
+}
+
+/// 接缝给的是 JSON 数字；`u64` 与 `f64` 两种编码都要吃下（serde 对 `u64` 溢出会降级成 f64）。
+fn value_as_u64(v: &Value) -> u64 {
+    v.as_u64().or_else(|| v.as_f64().map(|f| f.max(0.0) as u64)).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -133,23 +147,74 @@ mod tests {
     }
 
     #[test]
-    fn empty_industries_rejected_before_db_lookup() {
-        // 参数错必须显式报错，且不得伪装成「数据库未初始化」。
+    fn empty_industries_rejected_before_bridge_call() {
+        // 参数错必须显式报错，且不得伪装成「插件命令桥未注入」（闸先于桥）。
         let t = IndustryConstituentsTool;
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let out =
             rt.block_on(t.call(serde_json::json!({"industries": []}), &ToolContext::new(".")));
         let err = out.expect_err("空 industries 应报错");
         assert!(err.to_string().contains("industries 为空"), "实际: {err}");
+        assert!(!err.to_string().contains("插件命令桥未注入"), "闸必须早于桥：{err}");
     }
 
     #[test]
-    fn malformed_params_rejected_before_db_lookup() {
+    fn non_array_industries_rejected_before_bridge_call() {
         let t = IndustryConstituentsTool;
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let out =
             rt.block_on(t.call(serde_json::json!({"industries": 42}), &ToolContext::new(".")));
         let err = out.expect_err("坏参数应报错");
-        assert!(err.to_string().contains("参数解析失败"), "实际: {err}");
+        assert!(err.to_string().contains("必须是数组"), "实际: {err}");
+    }
+
+    /// 桥未注入 ⇒ fail-closed（不回落直连 `analysis-engine`）。
+    #[test]
+    fn missing_bridge_fails_closed() {
+        let t = IndustryConstituentsTool;
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let err = rt
+            .block_on(t.call(serde_json::json!({"industries": ["半导体"]}), &ToolContext::new(".")))
+            .expect_err("桥缺失必须失败");
+        assert!(err.to_string().contains("插件命令桥未注入"), "实际: {err}");
+    }
+
+    #[test]
+    fn passthrough_and_envelope_are_verbatim() {
+        // 出参信封形状是**工具面契约**（rhai 按 status/data/detail 下钻），钉死。
+        #[derive(Debug)]
+        struct Stub(Value);
+        #[async_trait]
+        impl axagent_harness::PluginCommandBridge for Stub {
+            async fn execute(
+                &self,
+                plugin_id: &str,
+                command: &str,
+                input: Value,
+            ) -> Result<Value, String> {
+                assert_eq!(plugin_id, "stock");
+                assert_eq!(command, "stock_get_industry_constituents");
+                // 入参**逐字**进桥（工具层不改名、不裁剪）。
+                assert_eq!(input, serde_json::json!({"industries": ["半导体"]}));
+                Ok(self.0.clone())
+            }
+        }
+        let t = IndustryConstituentsTool;
+        let ctx = ToolContext::new("mock").with_plugin_command_bridge(std::sync::Arc::new(Stub(
+            serde_json::json!({
+                "groups": [{"industry": "半导体", "matchedIndustry": null,
+                            "matchMode": "missing", "stocks": []}],
+                "universeTotal": 5123,
+                "universeWithIndustry": 3700,
+            }),
+        )));
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let out = rt
+            .block_on(t.call(serde_json::json!({"industries": ["半导体"]}), &ctx))
+            .expect("桥桩应答应成功");
+        let payload: Value = serde_json::from_str(&out.content).expect("信封必须是 JSON 文本");
+        assert_eq!(payload["status"], "ok");
+        assert_eq!(payload["data"][0]["industry"], "半导体");
+        assert_eq!(payload["detail"], "universe_total=5123 universe_with_industry=3700");
     }
 }

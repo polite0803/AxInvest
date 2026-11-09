@@ -51,6 +51,18 @@ const WORKFLOW_RUN_SEAM: &str = "workflow.run";
 /// `workflow.run` 按 owner 隔离看不见。清单声明（`taskSources[]`）留给后续批 —— 本步只把
 /// 出站准入（`calls`）与本命令的实现打通。
 const ANALYSIS_RECORD_SEAM: &str = "analysis.record";
+/// 股票分析数据面接缝（E 批 #240）：成分股 / 逐票 1 月涨跌幅 / 市场主线批量 upsert。
+///
+/// 这三件能力的实现体在 `analysis-engine`（implementor），宿主 `tools` 层原先直连它
+/// ⇒ 构成跨包口。改走本接缝后，工具只发命令、取数经宿主往返（判据见
+/// `harness/src/stock_analysis.rs` 模块头）。
+const STOCK_ANALYSIS_SEAM: &str = "stock.analysis";
+/// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
+const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
+/// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
+const COMMAND_MAINLINE_BATCH_UPSERT: &str = "stock_market_mainline_batch_upsert";
+/// 逐票 1 月涨跌幅命令（工具 `get_stock_factor` 的执行面）。
+const COMMAND_STOCK_FACTOR: &str = "stock_get_stock_factor";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
@@ -161,6 +173,46 @@ fn handle_command(
                 },
             }
         },
+        // ── E 批（#240）：股票域三条数据面命令，取数一律经宿主 `stock.analysis` 接缝 ──
+        // 三个工具（`get_industry_constituents` / `market_mainline_batch_upsert` /
+        // `get_stock_factor`）只发命令，**不再直连 analysis-engine**（跨包口归零）。
+        // 入参出参都是 `Value` 整块透传：字段形状的权威在 `analysis-engine` 的 DTO，
+        // 宿主 provider 是唯一的转换点；插件侧改写字段就是造第二套形状（禁区 12）。
+        COMMAND_INDUSTRY_CONSTITUENTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "industry_constituents",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_STOCK_FACTOR => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "stock_factor",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // 唯一写命令：`write` 权限闸在宿主 `required_permission_for` 侧，本层不重复校验
+        // （manifest 必须同批声明 `"write"`，否则宿主在收帧时自拒）。
+        COMMAND_MAINLINE_BATCH_UPSERT => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "batch_upsert_mainlines",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
         other => CommandOutcome::Fault(CommandFault::for_frame(
             &frame,
             error_codes::PLUGIN_COMMAND_UNKNOWN,
@@ -185,6 +237,7 @@ fn declaration() -> FrameResponse {
                 MARKET_SEAM.to_string(),
                 WORKFLOW_RUN_SEAM.to_string(),
                 ANALYSIS_RECORD_SEAM.to_string(),
+                STOCK_ANALYSIS_SEAM.to_string(),
             ],
             capabilities: vec![CapabilityDecl {
                 seam: "tool.set".to_string(),
@@ -548,10 +601,49 @@ fn fetch_quote(
     }
 }
 
+/// 命令入参 → 接缝 `request` 载荷：**原样透传**，不裁剪、不改名、不补默认值。
+///
+/// 字段形状（含 `BatchUpsertInput` 的 snake / camel 双写 alias、「缺省 vs 空数组」的区别）
+/// 的唯一权威在 `analysis-engine` 的 DTO；插件侧「顺手整理一下」就会变成第二套形状
+/// （禁区 12），而且会把「必填缺失」翻译成默认值 —— 那正是写出假主线的入口。
+fn stock_analysis_request(input: &Value) -> Value {
+    input.clone()
+}
+
+/// 调宿主 `stock.analysis` 接缝 —— 三个工具命令的唯一取数路径（E 批 #240）。
+///
+/// 入参嵌一层 `{"request": {...}}`，与 `opc.store` 的 `*ListQuery` 同形：宿主
+/// `dispatch_seam` 按 `args["request"]` 取载荷（见 `worker.rs` 的三条分派臂）。
+/// 出参整块回给命令面**不在这里解构** —— 信封形状归宿主 provider 与域 DTO。
+fn call_analysis_seam(
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+    call_chain: &[String],
+    op: &str,
+    request: Value,
+) -> Result<Value, (String, String)> {
+    let reply = peer
+        .call_seam(STOCK_ANALYSIS_SEAM, op, json!({ "request": request }), call_chain.to_vec())
+        .map_err(|e| {
+            (
+                error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+                format!("股票分析接缝（{op}）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        // 接缝报错 ⇒ 原样透传错误码：宿主侧已裁定是 invalid_args / permission / 内部错误，
+        // 插件再包一层就丢掉宿主给的分类（智能体侧的重试分支依赖它）。
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| format!("股票分析接缝（{op}）返回错误但未说明")),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        map_analysis_state_to_run_state, map_execution_state_to_run_state,
+        map_analysis_state_to_run_state, map_execution_state_to_run_state, stock_analysis_request,
         task_run_row_from_analysis_record, task_run_row_from_execution,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, is_plugin_task_run_state};
@@ -785,5 +877,40 @@ mod tests {
         assert_eq!(rows[0]["analysisDate"], "2026-11-05", "记录字段原样保留，不裁剪");
         assert_eq!(rows[0]["analysisKind"], "live");
         assert_eq!(rows[0], record, "投影只包一层数组，不改任何键");
+    }
+
+    /// 接缝载荷**逐字透传**：形状权威在 `analysis-engine` 的 DTO，插件侧任何「整理」
+    /// 都是第二套形状。这里钉三个容易被顺手改掉的点：snake_case 原样保留、
+    /// `archive_missing` 不被补默认值、缺键仍然缺键（补 `null` 会让 `serde` 走到另一分支）。
+    #[test]
+    fn analysis_request_passes_payload_through_verbatim() {
+        let input = json!({
+            "mainline_date": "2026-11-09",
+            "mainlines": [{ "theme": "AI 算力", "narrative": "测试" }],
+        });
+        let request = stock_analysis_request(&input);
+        assert_eq!(request, input, "载荷必须逐字透传");
+        assert!(request.get("archive_missing").is_none(), "缺键不得被补成 false：{request}");
+        assert!(request.get("mainlineDate").is_none(), "不得做 snake→camel 改名：{request}");
+        assert_eq!(request["mainline_date"], "2026-11-09", "snake_case 必须原样保留");
+    }
+
+    /// 出站准入：`calls` 少写一条，宿主 `handle_call_seam` 会在运行时拒掉（`SEAM_CALL_NOT_DECLARED`）。
+    /// 这条钉住「声明面与实现面同批」，避免命令臂写了而声明忘了。
+    #[test]
+    fn declaration_declares_stock_analysis_seam() {
+        let response = super::declaration();
+        let value = response.value.expect("describe 必须带回声明体");
+        let calls: Vec<&str> = value["calls"]
+            .as_array()
+            .expect("calls 必须是数组")
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default())
+            .collect();
+        assert!(
+            calls.contains(&super::STOCK_ANALYSIS_SEAM),
+            "`calls` 未声明 `{}`：三个 E 批命令会在宿主侧被拒。实际: {calls:?}",
+            super::STOCK_ANALYSIS_SEAM
+        );
     }
 }

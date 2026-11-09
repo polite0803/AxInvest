@@ -21,6 +21,7 @@ pub mod plugin_ui_schema;
 pub mod plugins;
 pub mod services;
 pub mod state;
+pub mod stock_analysis_service;
 pub mod stock_automation_cron_seed;
 pub mod stock_domain_state;
 pub mod stock_domain_tools;

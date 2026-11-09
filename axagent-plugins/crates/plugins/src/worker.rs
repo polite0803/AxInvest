@@ -474,6 +474,11 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ) => Some(PluginPermission::Write),
         ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
         ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
+        // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
+        // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
+        // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
+        // `None`**（给读缝加闸会把只读插件无端拒掉，正反向锁在 `stock_analysis_*` 用例）。
+        ("stock.analysis", "batch_upsert_mainlines") => Some(PluginPermission::Write),
         // `opc.store` 的写 op 一律要 `write`：blog 三件（发布 / 删除 / 创建）+ #36 批 2 的
         // 四条 id·枚举写 op（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）+
         // #36 批 3 的八条创建 / 流程写 op + #32 批 B 的项目三件（更新 / 删除 / 里程碑完成）
@@ -2648,6 +2653,56 @@ impl HostPeer {
                     // 具名对象 `{"records": [...], "total": n}`：空表是空数组 + total 0，
                     // **不是错误**（先例 `jobs.store` 的 `count` 口径）。
                     Ok(outcome) => to_value("AnalysisRecordListOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── stock.analysis 接缝：宿主把股票域三条确定性数据面暴露给插件 ──
+            // 方向同 `analysis.record` / `opc.store`（宿主 → 插件），只走入站分派，
+            // **不进** `SUPPORTED_REMOTE_SEAMS`（那是「插件提供给宿主」的清单）。
+            // 三个 op 的 payload 与出参**整块 `Value` 透传**（形状权威在 `analysis-engine`，
+            // harness 是 foundation 不上收 DTO，判据见 `stock_analysis` 模块头）⇒
+            // 本层不反序列化、不做字段级改名，避免出现第二套形状定义（禁区 12）。
+            // 权限闸**只加写 op**：`batch_upsert_mainlines => Write`，两个读 op 仍 `None`。
+            "stock.analysis" if op == "industry_constituents" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                // 入参是嵌一层 `{"request": {...}}`（与 `opc.store` 的 `*ListQuery` 同形），
+                // 缺键时按 `Null` 透传 ⇒ 由域包侧的 `serde` 报缺料（那才是唯一的形状权威）。
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.industry_constituents(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "stock_factor" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.stock_factor(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 唯一的写 op：`write` 权限闸由 `dispatch_seam` 开头统一把关（见
+            // `required_permission_for(("stock.analysis", "batch_upsert_mainlines"))`）。
+            "stock.analysis" if op == "batch_upsert_mainlines" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.batch_upsert_mainlines(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -10335,6 +10390,57 @@ mod tests {
         }
     }
 
+    /// 假 `stock.analysis` 提供者：三个 op 都记录收到的**原始 payload**（`Value` 原样），
+    /// 让「整块透传 / 被拒时零触达」两类判据都能取证。
+    ///
+    /// 返回的是最小合法形状，形状细节归 `analysis-engine` 的 DTO —— 本层只验分派。
+    struct FixedStockAnalysisProvider {
+        upsert_calls: Mutex<Vec<Value>>,
+        industry_calls: Mutex<Vec<Value>>,
+        factor_calls: Mutex<Vec<Value>>,
+    }
+
+    impl FixedStockAnalysisProvider {
+        fn new() -> Self {
+            Self {
+                upsert_calls: Mutex::new(Vec::new()),
+                industry_calls: Mutex::new(Vec::new()),
+                factor_calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::StockAnalysisProvider for FixedStockAnalysisProvider {
+        async fn industry_constituents(
+            &self,
+            input: Value,
+        ) -> axagent_harness::core_error::Result<Value> {
+            self.industry_calls.lock().push(input);
+            Ok(json!({ "groups": [], "universeTotal": 0, "universeWithIndustry": 0 }))
+        }
+
+        async fn batch_upsert_mainlines(
+            &self,
+            input: Value,
+        ) -> axagent_harness::core_error::Result<Value> {
+            self.upsert_calls.lock().push(input);
+            Ok(json!({ "inserted": 0, "updated": 0, "archived": 0 }))
+        }
+
+        async fn stock_factor(&self, input: Value) -> axagent_harness::core_error::Result<Value> {
+            self.factor_calls.lock().push(input);
+            Ok(json!({
+                "rows": [],
+                "requested": 0,
+                "scored": 0,
+                "missing": [],
+                "cutoffDate": "",
+                "windowRows": 0,
+            }))
+        }
+    }
+
     // ───── stock.monitor 接缝（9 op）+ quote.watcher 接缝（3 op）─────
 
     /// 假股票监控提供者：**刻意只实现部分 op**，其余吃 trait 默认实现
@@ -10585,6 +10691,151 @@ mod tests {
                 "只读 op `{seam}`/`{read_op}` 不得设权限闸"
             );
         }
+    }
+
+    // ─────────────── #240 E 批：`stock.analysis` 三 op 的权限闸（正反向锁） ───────────────
+
+    /// 装假 `stock.analysis` 提供者的 peer + 保活到用例结束的 runtime。
+    fn stock_analysis_peer_with_permissions(
+        provider: Arc<FixedStockAnalysisProvider>,
+        permissions: Vec<PluginPermission>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        let provider: Arc<dyn axagent_harness::StockAnalysisProvider> = provider;
+        registry.register_stock_analysis(provider).expect("stock.analysis 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.stock".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["stock.analysis".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions,
+        };
+        (peer, runtime)
+    }
+
+    /// 权限表枚举锁（**反向**）：三个 op 里只有 `batch_upsert_mainlines` 要 `write`，
+    /// 两个读 op 一条闸都不许加 —— 给读缝加闸会把只读插件无端拒掉。
+    ///
+    /// 这条锁的存在理由是 `required_permission_for` 的注释（`worker.rs:474-480`）明文承诺
+    /// 「正反向锁在 `stock_analysis_*` 用例」：注释承诺的锁必须真有，否则就是注释假话。
+    #[test]
+    fn stock_analysis_write_op_requires_write_and_read_ops_require_nothing() {
+        let verdict = with_watchdog(Duration::from_secs(2), "stock.analysis 权限表", || {
+            (
+                required_permission_for("stock.analysis", "batch_upsert_mainlines"),
+                required_permission_for("stock.analysis", "industry_constituents"),
+                required_permission_for("stock.analysis", "stock_factor"),
+            )
+        });
+        assert_eq!(verdict.0, Some(PluginPermission::Write), "唯一写 op 必须要求 write");
+        assert_eq!(verdict.1, None, "读 op `industry_constituents` 不得设权限闸");
+        assert_eq!(verdict.2, None, "读 op `stock_factor` 不得设权限闸");
+        // 接缝维度参与判定：同名 op 换接缝不得再命中本条。
+        assert_eq!(required_permission_for("opc.store", "batch_upsert_mainlines"), None);
+    }
+
+    /// 正向：无 `write` 权限 ⇒ 写 op 在取 provider 之前被拒（零触达）；
+    /// 同一 peer 的两个读 op 必须**照常放行**（证明闸只挂在写 op 上）。
+    #[test]
+    fn stock_analysis_write_denied_without_permission_while_reads_pass() {
+        let provider = Arc::new(FixedStockAnalysisProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = stock_analysis_peer_with_permissions(provider, Vec::new());
+
+        let (denied, industry, factor) =
+            with_watchdog(Duration::from_secs(2), "stock.analysis 权限闸", move || {
+                let denied = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.analysis",
+                        "op": "batch_upsert_mainlines",
+                        "args": { "request": { "mainline_date": "2026-11-09", "mainlines": [] } },
+                    }),
+                    &[],
+                );
+                let industry = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.analysis",
+                        "op": "industry_constituents",
+                        "args": { "request": { "industries": ["光模块"] } },
+                    }),
+                    &[],
+                );
+                let factor = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.analysis",
+                        "op": "stock_factor",
+                        "args": { "request": { "stock_codes": ["600519"] } },
+                    }),
+                    &[],
+                );
+                (denied, industry, factor)
+            });
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 的 batch_upsert_mainlines 必须被拒，实际 {denied:?}"
+        );
+        let detail = denied.message.clone().unwrap_or_default();
+        assert!(detail.contains("write"), "文案应点明缺失的权限，实际：{detail}");
+        assert!(detail.contains("stock.analysis"), "文案应点明接缝，实际：{detail}");
+        assert!(captured.upsert_calls.lock().is_empty(), "被拒的写 op 不得触达 provider");
+        assert_eq!(
+            industry.kind,
+            axagent_plugin_proto::ResponseKind::Success,
+            "读 op 必须放行（无 write 权限也要能读），实际 {industry:?}"
+        );
+        assert_eq!(
+            factor.kind,
+            axagent_plugin_proto::ResponseKind::Success,
+            "读 op 必须放行（无 write 权限也要能读），实际 {factor:?}"
+        );
+        assert_eq!(captured.industry_calls.lock().len(), 1, "读 op 应触达 provider 一次");
+        assert_eq!(captured.factor_calls.lock().len(), 1, "读 op 应触达 provider 一次");
+    }
+
+    /// 分派形态：入参**整块**取 `args["request"]` 原样交给 provider（不改名、不裁剪）。
+    ///
+    /// 形状权威在 `analysis-engine` 的 DTO；分派层若自己「整理」一次就是第二套形状。
+    #[test]
+    fn stock_analysis_request_is_passed_through_verbatim() {
+        let provider = Arc::new(FixedStockAnalysisProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) =
+            stock_analysis_peer_with_permissions(provider, vec![PluginPermission::Write]);
+
+        let payload = json!({
+            "mainline_date": "2026-11-09",
+            "mainlines": [{ "theme": "AI 算力", "narrative": "测试" }],
+            "archive_missing": true,
+        });
+        let expected = payload.clone();
+        let (response,) =
+            with_watchdog(Duration::from_secs(2), "stock.analysis 透传", move || {
+                let response = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.analysis",
+                        "op": "batch_upsert_mainlines",
+                        "args": { "request": payload },
+                    }),
+                    &[],
+                );
+                (response,)
+            });
+        assert_eq!(
+            response.kind,
+            axagent_plugin_proto::ResponseKind::Success,
+            "有 write 权限的写 op 必须成功，实际 {response:?}"
+        );
+        assert_eq!(
+            captured.upsert_calls.lock().clone(),
+            vec![expected],
+            "载荷必须逐字到 provider：不改名、不补默认值、不裁剪"
+        );
     }
 
     /// 裁定 N2 的两种反面形态都必须落 `SEAM_CALL_INVALID_ARGS` 且零调用：

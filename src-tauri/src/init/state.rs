@@ -698,6 +698,16 @@ pub async fn create_app_state_with_resource_dir(
                 },
             }
         }
+        // ── 插件命名命令桥（#240 E 批）──
+        // 三工具（行业成分股 / 市场主线写入 / 逐票因子）与 OPC 工具族经此执行插件命令，
+        // 不再直连域 crate。**必须在这里注入**：本注册表是工作流 `ToolResolver` 与
+        // 离线 bin（`axagent-batch-rerun` / `axagent-validate-backfill`）/ `server_main`
+        // 的共同来源，而它们都走 `create_app_state`（无 `AppHandle`）。
+        // 桥未注入时工具 fail-closed ⇒ 工作流里这些工具「调不通」，且只在运行时才暴露。
+        registry.plugin_command_bridge =
+            Some(Arc::new(crate::commands::agent::command_bridge::AppPluginCommandBridge::new(
+                plugin_manager.clone(),
+            )));
         Arc::new(tokio::sync::Mutex::new(registry))
     };
     // ── 阶段 5:工作流反思 / 进化 / 优化三层 trait 实现 ──
@@ -1786,6 +1796,19 @@ pub async fn create_app_state_with_resource_dir(
         match axagent_harness::get_capability_registry().register_opc_store(provider) {
             Ok(_) => tracing::info!("opc.store 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("opc.store 注册失败: {e}"),
+        }
+    }
+
+    // ── stock.analysis 接缝：把三个域权威函数（行业成分股 / 主线批量写 / 1 月涨幅）暴露给插件 ──
+    // 三工具的 DTO 权威在 `analysis-engine`（implementor），而 harness 是 foundation，按依赖铁律
+    // 不得依赖 implementor ⇒ 接缝载荷用 `Value` 整块透传，转换点只有本 provider 一处。
+    // 失败只 warn，不阻断启动（与 market.quote / jobs.store / analysis.record / opc.store 同策略）。
+    {
+        let provider: Arc<dyn axagent_harness::StockAnalysisProvider> =
+            Arc::new(crate::init::stock_analysis_service::HostStockAnalysis::new(sea_db.clone()));
+        match axagent_harness::get_capability_registry().register_stock_analysis(provider) {
+            Ok(_) => tracing::info!("stock.analysis 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("stock.analysis 注册失败: {e}"),
         }
     }
 

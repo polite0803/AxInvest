@@ -23,6 +23,7 @@ use sea_orm::DatabaseConnection;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Emitter;
 use tauri::Manager;
@@ -544,7 +545,25 @@ async fn execute_plugin_agent_command(
     command: &str,
     args: &Value,
 ) -> Result<String, String> {
-    let manager = app_handle.state::<crate::AppState>().plugin_manager.clone();
+    execute_plugin_command_on(
+        app_handle.state::<crate::AppState>().plugin_manager.clone(),
+        plugin_id,
+        command,
+        args,
+    )
+    .await
+}
+
+/// [`execute_plugin_agent_command`] 的**无 `AppHandle`** 核心：直接持 manager。
+///
+/// 拆出来的理由见 `AppPluginCommandBridge` 的文档注释 —— `create_app_state`
+/// （离线 bin / 工作流注册表 / server_main 的共同入口）拿不到 `AppHandle`。
+async fn execute_plugin_command_on(
+    manager: Arc<tokio::sync::RwLock<axagent_plugins::PluginManager>>,
+    plugin_id: &str,
+    command: &str,
+    args: &Value,
+) -> Result<String, String> {
     let plugin_id = plugin_id.to_string();
     let command = command.to_string();
     let args = args.clone();
@@ -574,9 +593,30 @@ async fn execute_plugin_agent_command(
 /// `PluginCommandBridge` 契约（#225），供 wiring 层注入 `UnifiedToolRegistry`。
 /// 域工具（如 opc.rs 的 blog 工具）经 ToolContext 消费此桥执行插件命名命令，
 /// 不再直连域 crate —— 与 [`AppAskUserBridge`]（agent/mod.rs）同属 wiring 桥家族。
+///
+/// **为什么持 `PluginManager` 而不是 `AppHandle`**（#240 E 批实测）：
+/// 只有 `commands/agent/mod.rs` 的聊天路径能拿到 `AppHandle`，而三工具还有另外三条
+/// 执行入口 —— `init/state.rs` 的 `local_tool_registry`（工作流 `ToolResolver`）、
+/// 离线 bin `axagent-batch-rerun` / `axagent-validate-backfill`、`server_main`。
+/// 它们共同经过 `create_app_state`，而那里**没有** `AppHandle`（它是 Tauri 才有的）。
+/// 若继续持 `AppHandle`，那三条入口的桥永远注入不进去 ⇒ 工作流调用三工具时
+/// `plugin_command_bridge` 恒 None ⇒ fail-closed（工具「调不通」而非「报错」）。
+/// `plugin_manager` 在 `create_app_state` 内就有（早于工具注册表构造），故改持它。
 #[derive(Debug)]
 pub struct AppPluginCommandBridge {
-    pub(crate) app_handle: AppHandle,
+    pub(crate) plugin_manager: Arc<tokio::sync::RwLock<axagent_plugins::PluginManager>>,
+}
+
+impl AppPluginCommandBridge {
+    /// 从 `AppHandle` 取 `plugin_manager` 构造（聊天路径沿用，等价于旧形态）。
+    pub fn from_app_handle(app_handle: &AppHandle) -> Self {
+        Self { plugin_manager: app_handle.state::<crate::AppState>().plugin_manager.clone() }
+    }
+
+    /// 直接持 manager 构造（`create_app_state` 等无 `AppHandle` 的入口用）。
+    pub fn new(plugin_manager: Arc<tokio::sync::RwLock<axagent_plugins::PluginManager>>) -> Self {
+        Self { plugin_manager }
+    }
 }
 
 #[async_trait::async_trait]
@@ -588,7 +628,8 @@ impl axagent_harness::PluginCommandBridge for AppPluginCommandBridge {
         input: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
         let raw =
-            execute_plugin_agent_command(&self.app_handle, plugin_id, command, &input).await?;
+            execute_plugin_command_on(self.plugin_manager.clone(), plugin_id, command, &input)
+                .await?;
         // 回帧本身就是 JSON 文本；解析失败说明插件协议损坏，不得静默透传原文
         serde_json::from_str(&raw).map_err(|e| format!("插件命令回帧解析失败: {e}"))
     }

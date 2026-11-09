@@ -6,7 +6,6 @@ publish = false
 
 [dependencies]
 async-trait = "0.1"
-axagent-analysis-engine = { version = "3.0.0", path = "../../../axagent-quant/crates/analysis-engine" }
 axagent-dao = { version = "3.0.0", path = "../../../axagent-infra/crates/dao" }
 axagent-document-parser = { version = "3.0.0", path = "../../../axagent-infra/crates/document-parser" }
 axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }

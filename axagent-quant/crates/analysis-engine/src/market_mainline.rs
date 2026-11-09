@@ -507,4 +507,30 @@ mod tests {
         assert!(ensure_date_non_empty("   ").is_err(), "纯空白必须被拒");
         assert!(ensure_date_non_empty("2026-07-26").is_ok(), "正常日期必须通过");
     }
+
+    /// camelCase 主名必须仍可解析 —— `alias` 是加性扩宽，不得把原契约弄坏。
+    ///
+    /// 该覆盖原在 `axagent-runtime/crates/tools/src/tools/market_mainline.rs` 的测试里，
+    /// #240 让工具改走插件命令后那儿不再持有 DTO ⇒ 覆盖归 DTO 权威处（本文件）。
+    #[test]
+    fn camel_case_payload_still_accepted() {
+        let v = serde_json::json!({
+            "mainlineDate": "2026-09-20",
+            "mainlines": [{
+                "theme": "光模块",
+                "themeCategory": "科技",
+                "narrative": "测试",
+                "representativeSymbols": ["002281"],
+                "strengthScore": 70,
+                "persistence": "1d"
+            }],
+            "archiveMissing": false
+        });
+        let p: BatchUpsertInput = serde_json::from_value(v).expect("camelCase 必须仍可解析");
+        assert_eq!(p.mainline_date, "2026-09-20");
+        assert!(!p.archive_missing);
+        assert!(p.mainlines[0].mainline_date.is_empty(), "逐项日期应留空由外层提供");
+        assert_eq!(p.mainlines[0].theme_category, "科技");
+        assert_eq!(p.mainlines[0].strength_score, 70.0);
+    }
 }

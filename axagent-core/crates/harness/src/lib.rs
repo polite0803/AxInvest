@@ -418,6 +418,11 @@ pub use opc_store::{
     RemovePublishScheduleOutcome, TransitionInvoiceOutcome, UpdateContentAssetInput,
     UpdateContentAssetOutcome, UpdateCustomerRequest, UpdateProjectRequest,
 };
+// ── 股票分析数据面接缝（`stock.analysis`：读两条 + 写一条；DTO 留域包，见模块头）──
+// 为什么 payload 是 `Value` 而不是上收 DTO：三个 op 的结构体权威在 `analysis-engine`
+// （implementor），harness 是 foundation 不得依赖它 ⇒ 上收会造出第二份定义（禁区 12）。
+pub mod stock_analysis;
+pub use stock_analysis::StockAnalysisProvider;
 // ── 轨迹库只读接缝（`trajectory.store`，首批无写 op；视图裁剪与 limit 闸见模块头）──
 pub mod trajectory_store;
 pub use trajectory_store::{

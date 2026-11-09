@@ -256,6 +256,27 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 stock-analysis 接缝（股票分析数据面，宿主独占实现）。
+    ///
+    /// 宿主把 `analysis-engine` 的三条确定性能力经本接缝暴露给插件：读两条
+    /// （`industry_constituents` 成分股 / `stock_factor` 逐票 1 月涨跌幅）与写一条
+    /// （`batch_upsert_mainlines` 按日批量 upsert 市场主线，含可选归档）。
+    /// **DTO 不上收 harness**：三个 op 的结构体权威在 `analysis-engine`（implementor），
+    /// harness 是 foundation、不得依赖它 ⇒ payload 与出参一律 `serde_json::Value`，
+    /// 形状判据见 `stock_analysis` 模块头。
+    /// ⚠ 权限闸**只加写 op**（`write`，判在 `worker.rs` 的 `required_permission_for`）；
+    /// 两个读 op 一条都不加 —— 给读缝加闸会让只读插件被无端拒掉。
+    pub fn stock_analysis() -> Self {
+        Self::new(
+            "stock.analysis",
+            "1.0",
+            "axagent_harness::StockAnalysisProvider",
+            "股票分析数据面：industry_constituents（行业成分股分组）\
+             / stock_factor（逐票 1 月涨跌幅 + 缺席清单）\
+             / batch_upsert_mainlines（按日批量 upsert 市场主线，写 op，要 write 权限）",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -1233,6 +1254,30 @@ impl CapabilityRegistry {
     /// 取回 opc.store 接缝上的 OPC 站点内容提供者（若已注册）。
     pub fn get_opc_store(&self) -> Option<Arc<dyn crate::OpcStoreProvider>> {
         self.provider_as::<dyn crate::OpcStoreProvider>("opc.store")
+    }
+
+    // ── stock.analysis 接缝（股票分析数据面，单实例；读两条 + 写一条） ──
+
+    /// 注册一个股票分析数据面提供者（`stock.analysis` 接缝）。
+    ///
+    /// 宿主把 `analysis-engine` 的三条能力经本接缝暴露；**入参/出参的 JSON 形状映射点
+    /// 必须唯一**（在宿主 provider 内），否则形状会在多处各写一遍并各自漂移。
+    /// 外部实现注册同一接缝即可整体替换。写 op（`batch_upsert_mainlines`）的 `write`
+    /// 权限闸判在 `worker.rs` 的 `required_permission_for`，本 trait 不重复校验。
+    pub fn register_stock_analysis(
+        &self,
+        provider: Arc<dyn crate::StockAnalysisProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(
+            ServiceDefinition::stock_analysis(),
+            Arc::new(provider),
+            "stock-analysis",
+        )
+    }
+
+    /// 取回 stock.analysis 接缝上的股票分析数据面提供者（若已注册）。
+    pub fn get_stock_analysis(&self) -> Option<Arc<dyn crate::StockAnalysisProvider>> {
+        self.provider_as::<dyn crate::StockAnalysisProvider>("stock.analysis")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

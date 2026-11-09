@@ -64,6 +64,7 @@ pub mod opc_demand_scan;
 pub mod package_ecosystem_scanner;
 pub mod personality;
 pub mod plan;
+pub mod plugin_bridge;
 pub mod product_hunt_scanner;
 pub mod push_notification;
 pub mod reddit_scanner;
@@ -385,13 +386,13 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
     // ── 行业成分股工具（趋势智选候选池数据面，阶段 2）──
     //
     // 工作流 ToolResolver 判据是 register_all 注册集 ∪ mcp_tools ⇒ 未注册则
-    // 快速链 t-constituents / 原链聚合注入全部「工具未注册」。实现委托
-    // `axagent_analysis_engine::industry_constituents`，DB 走 `get_sea_db()` 槽位
-    // （同 market_mainline 先例）。只读、幂等。
+    // 快速链 t-constituents / 原链聚合注入全部「工具未注册」。数据面走插件命令
+    // `stock_get_industry_constituents` → 宿主 `stock.analysis` 接缝（#240 E 批）：
+    // 本 crate 是 consumer，不再依赖 `analysis-engine`。只读、幂等。
     tools.push(std::sync::Arc::new(industry_constituents::IndustryConstituentsTool));
 
     // ── 逐票 1 月反转因子工具（趋势智选打分重构数据面，阶段 3）──
-    // 实现委托 `axagent_analysis_engine::stock_factor`，DB 走 `get_sea_db()` 槽位。
+    // 数据面走插件命令 `stock_get_stock_factor` → 宿主 `stock.analysis` 接缝。
     tools.push(std::sync::Arc::new(stock_factor::StockFactorTool));
 
     // ── OPC 业务工具（一人公司：发票 / 客户 / 项目 / 站点内容 / KPI / 发布计划）──

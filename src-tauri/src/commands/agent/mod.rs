@@ -2233,8 +2233,9 @@ pub async fn agent_query(
 
     // #225：注入插件命名命令桥，blog 等 OPC 工具经此执行 plugin-opc 的命令，
     // 不再直连域 crate（桥未注入时工具 fail-closed，不回落直连）。
+    // #240：桥改持 plugin_manager（不再持 AppHandle），见 `AppPluginCommandBridge` 文档。
     tool_registry.plugin_command_bridge =
-        Some(Arc::new(AppPluginCommandBridge { app_handle: app.clone() }));
+        Some(Arc::new(AppPluginCommandBridge::from_app_handle(&app)));
 
     // 屏幕感知（computer_use 工具）受 settings.screen_perception_enabled 门控。
     // 关闭时禁用该工具，用户无法触发桌面控制 / 截图能力。

@@ -294,7 +294,7 @@ impl OpcStoreProvider for HostOpcStore {
             .map_err(|e| {
                 AxAgentError::Provider(format!("opc.store::list_projects 取项目列表失败: {e}"))
             })?;
-        Ok(rows.into_iter().map(project_summary_view).collect())
+        Ok(rows.iter().map(project_summary_view).collect())
     }
 
     async fn list_landing_pages(&self) -> Result<Vec<LandingPageSummaryView>> {
@@ -519,7 +519,7 @@ impl OpcStoreProvider for HostOpcStore {
         let p = ProjectService::create_project(&svc, input).await.map_err(|e| {
             AxAgentError::Provider(format!("opc.store::create_project 创建失败: {e}"))
         })?;
-        Ok(project_summary_view(p))
+        Ok(project_summary_view(&p))
     }
 
     async fn add_milestone(&self, request: AddMilestoneRequest) -> Result<ProjectSummaryView> {
@@ -536,7 +536,7 @@ impl OpcStoreProvider for HostOpcStore {
         let p = ProjectService::add_milestone(&svc, &request.project_id, milestone).await.map_err(
             |e| AxAgentError::Provider(format!("opc.store::add_milestone 添加失败: {e}")),
         )?;
-        Ok(project_summary_view(p))
+        Ok(project_summary_view(&p))
     }
 
     async fn create_landing_page(
@@ -682,6 +682,68 @@ impl OpcStoreProvider for HostOpcStore {
             .await
             .map_err(|e| AxAgentError::Provider(format!("opc.store::delete_invoice 删除失败: {e}")))
     }
+
+    // ── #32 批 B：项目详情 / 更新 / 删除 / 里程碑完成 ─────────────────────
+    //
+    // 四个 op 与批 A 三条同型：空 id ⇒ `Err(Validation)`（`require_id`，在 IO **之前**）；
+    // 缺行 ⇒ 域服务 `NotFound` 透传成 `Err(Provider)`（不借「两态 Outcome」表达缺行）。
+
+    async fn get_project(&self, id: String) -> Result<ProjectDetailView> {
+        require_id(&id, "get_project")?;
+        let svc = DefaultProjectService::new(self.db.clone());
+        let p = ProjectService::get_project(&svc, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_project 取项目失败: {e}"))
+        })?;
+        Ok(project_detail_view(p))
+    }
+
+    async fn update_project(
+        &self,
+        id: String,
+        request: UpdateProjectRequest,
+    ) -> Result<ProjectDetailView> {
+        require_id(&id, "update_project")?;
+        let svc = DefaultProjectService::new(self.db.clone());
+        // `title` / `description` / `notes` 在域包是单层 `Option<String>`（`budget` /
+        // `deadline` 才是双层）⇒ `flatten()` 口径同 `update_customer`：线上 `Some(None)`
+        // 不可达，`None` = 不动。
+        let input = UpdateProjectInput {
+            title: request.title.flatten(),
+            description: request.description.flatten(),
+            budget: request.budget,
+            deadline: request.deadline,
+            notes: request.notes.flatten(),
+        };
+        let p = ProjectService::update_project(&svc, &id, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::update_project 更新失败: {e}"))
+        })?;
+        Ok(project_detail_view(p))
+    }
+
+    async fn delete_project(&self, id: String) -> Result<()> {
+        require_id(&id, "delete_project")?;
+        let svc = DefaultProjectService::new(self.db.clone());
+        ProjectService::delete_project(&svc, &id)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::delete_project 删除失败: {e}")))
+    }
+
+    async fn complete_milestone(
+        &self,
+        project_id: String,
+        milestone_id: String,
+    ) -> Result<ProjectDetailView> {
+        // 两个 id 都设闸：里程碑 id 空串会让域服务在明细里空转一圈再回 NotFound
+        // （那是「这一行不存在」的读数，与「入参非法」不是同一档）。
+        require_id(&project_id, "complete_milestone")?;
+        require_id(&milestone_id, "complete_milestone")?;
+        let svc = DefaultProjectService::new(self.db.clone());
+        let p =
+            ProjectService::complete_milestone(&svc, &project_id, &milestone_id).await.map_err(
+                |e| AxAgentError::Provider(format!("opc.store::complete_milestone 完成失败: {e}")),
+            )?;
+        Ok(project_detail_view(p))
+    }
 }
 
 // ── #36 批 2 写 op 的依赖 ─────────────────────────────────────────────────
@@ -693,15 +755,15 @@ impl OpcStoreProvider for HostOpcStore {
 use axagent_harness::opc_store::{
     AddMilestoneRequest, CreateContentAssetRequest, CreateCustomerRequest, CreateInvoiceRequest,
     CreateLandingPageRequest, CreateProjectRequest, CreatePublishScheduleRequest,
-    FinancialReportView, RemoveContentAssetOutcome, RemovePublishScheduleOutcome,
-    TransitionInvoiceOutcome, UpdateContentAssetInput, UpdateContentAssetOutcome,
-    UpdateCustomerRequest,
+    FinancialReportView, MilestoneView, ProjectDetailView, RemoveContentAssetOutcome,
+    RemovePublishScheduleOutcome, TransitionInvoiceOutcome, UpdateContentAssetInput,
+    UpdateContentAssetOutcome, UpdateCustomerRequest, UpdateProjectRequest,
 };
 // #36 批 3 的域入参 / 枚举 / 服务：同样放在 impl 之后（理由同上 —— impl 行被登记表钉住）。
 use axagent_company_runtime::opc::{
     CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput, CreateLandingPageInput,
     CreateProjectInput, CreatePublishScheduleInput, CustomerSource, DefaultFinanceService,
-    FinanceService, InvoiceLineItem, Milestone, UpdateCustomerInput,
+    FinanceService, InvoiceLineItem, Milestone, UpdateCustomerInput, UpdateProjectInput,
 };
 use std::str::FromStr;
 
@@ -816,20 +878,53 @@ fn opc_source_to_str(s: &CustomerSource) -> String {
 
 /// 里程碑只带两个计数（完成数是现算的，判据同迁移前 `OpcListProjects`：
 /// `m.status == MilestoneStatus::Completed`）。
-fn project_summary_view(p: Project) -> ProjectSummaryView {
+///
+/// 入参取引用：详情视图要在同一份读数上算摘要 + 明细（`project_detail_view`），
+/// 按值收会让那个映射函数被迫把九个字段再抄一遍（禁区 12）。
+fn project_summary_view(p: &Project) -> ProjectSummaryView {
     let milestone_total = p.milestones.len();
     let milestone_completed =
         p.milestones.iter().filter(|m| m.status == MilestoneStatus::Completed).count();
     ProjectSummaryView {
-        id: p.id,
-        title: p.title,
+        id: p.id.clone(),
+        customer_id: p.customer_id.clone(),
+        title: p.title.clone(),
         status: p.status.as_str().to_string(),
         budget: p.budget,
-        currency: p.currency,
+        currency: p.currency.clone(),
+        deadline: p.deadline,
         milestone_total,
         milestone_completed,
         created_at: p.created_at,
     }
+}
+
+/// 里程碑 → 详情行（状态落枚举串，与库里的落库串同形）。
+///
+/// 域包 `MilestoneStatus` 只有 `Serialize`（`snake_case`），本函数据同一判据本地映射 ——
+/// 不让「视图串」和「落库串」各漂一套（前端按 `completed` 判可点 / 已完成）。
+fn project_milestone_view(m: Milestone) -> MilestoneView {
+    let status = match m.status {
+        MilestoneStatus::Pending => "pending",
+        MilestoneStatus::InProgress => "in_progress",
+        MilestoneStatus::Completed => "completed",
+        MilestoneStatus::Skipped => "skipped",
+    };
+    MilestoneView {
+        id: m.id,
+        title: m.title,
+        description: m.description,
+        due_at: m.due_at,
+        completed_at: m.completed_at,
+        status: status.to_string(),
+    }
+}
+
+/// 项目详情视图：摘要（复用 [`project_summary_view`]，计数同一口径）+ 详情三列。
+fn project_detail_view(p: Project) -> ProjectDetailView {
+    let summary = project_summary_view(&p);
+    let milestones = p.milestones.into_iter().map(project_milestone_view).collect();
+    ProjectDetailView { summary, description: p.description, notes: p.notes, milestones }
 }
 
 fn landing_page_summary_view(p: LandingPage) -> LandingPageSummaryView {
@@ -1163,7 +1258,7 @@ mod tests {
         );
         assert!(customer.get("notes").is_none(), "备注不过线");
 
-        let project = serde_json::to_value(project_summary_view(Project {
+        let project = serde_json::to_value(project_summary_view(&Project {
             id: "prj-1".into(),
             customer_id: None,
             title: "项目".into(),
@@ -1201,10 +1296,12 @@ mod tests {
             &project,
             &[
                 "id",
+                "customerId",
                 "title",
                 "status",
                 "budget",
                 "currency",
+                "deadline",
                 "milestoneTotal",
                 "milestoneCompleted",
                 "createdAt",
@@ -1212,7 +1309,7 @@ mod tests {
         );
         assert_eq!(project["milestoneTotal"], 2);
         assert_eq!(project["milestoneCompleted"], 1, "只数 `Completed`，不数 in_progress");
-        assert!(project.get("milestones").is_none(), "里程碑明细不过线");
+        assert!(project.get("milestones").is_none(), "里程碑明细不过线（明细只在详情面）");
 
         let landing = serde_json::to_value(landing_page_summary_view(LandingPage {
             id: "lp-1".into(),

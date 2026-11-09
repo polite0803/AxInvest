@@ -411,11 +411,12 @@ pub use opc_store::{
     CreateInvoiceRequest, CreateLandingPageRequest, CreateProjectRequest,
     CreatePublishScheduleRequest, CustomerListQuery, CustomerSummaryView, FinancialReportView,
     InvoiceLineItemInput, InvoiceListQuery, InvoiceSummaryView, KpiListQuery, KpiSummaryView,
-    LandingPageSummaryView, OPC_BLOG_POST_CONTENT_MAX_BYTES, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
-    OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, ProjectListQuery, ProjectSummaryView,
-    PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome,
-    RemoveContentAssetOutcome, RemovePublishScheduleOutcome, TransitionInvoiceOutcome,
-    UpdateContentAssetInput, UpdateContentAssetOutcome, UpdateCustomerRequest,
+    LandingPageSummaryView, MilestoneView, OPC_BLOG_POST_CONTENT_MAX_BYTES,
+    OPC_BLOG_POST_LIST_DEFAULT_LIMIT, OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider,
+    ProjectDetailView, ProjectListQuery, ProjectSummaryView, PublishBlogPostOutcome,
+    PublishScheduleSummaryView, RemoveBlogPostOutcome, RemoveContentAssetOutcome,
+    RemovePublishScheduleOutcome, TransitionInvoiceOutcome, UpdateContentAssetInput,
+    UpdateContentAssetOutcome, UpdateCustomerRequest, UpdateProjectRequest,
 };
 // ── 轨迹库只读接缝（`trajectory.store`，首批无写 op；视图裁剪与 limit 闸见模块头）──
 pub mod trajectory_store;

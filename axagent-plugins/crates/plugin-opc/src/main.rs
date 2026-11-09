@@ -110,6 +110,14 @@ const OPC_STORE_UPDATE_CUSTOMER: &str = "update_customer";
 const OPC_STORE_DELETE_CUSTOMER: &str = "delete_customer";
 const OPC_STORE_DELETE_INVOICE: &str = "delete_invoice";
 
+/// #32 批 B 的四条项目 op（读 1 / 写 3）：详情读 + 更新 + 删除 + 里程碑完成。
+/// `get_project` 是读 op（宿主 `required_permission_for` 刻意不登记 ⇒ 不要 `write`）；
+/// 其余三条改库，其中删除**不可逆** ⇒ 都要 `write`。
+const OPC_STORE_GET_PROJECT: &str = "get_project";
+const OPC_STORE_UPDATE_PROJECT: &str = "update_project";
+const OPC_STORE_DELETE_PROJECT: &str = "delete_project";
+const OPC_STORE_COMPLETE_MILESTONE: &str = "complete_milestone";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -162,6 +170,13 @@ const COMMAND_PROCESS_DUE_SCHEDULES: &str = "opc_process_due_schedules";
 const COMMAND_UPDATE_CUSTOMER: &str = "opc_update_customer";
 const COMMAND_DELETE_CUSTOMER: &str = "opc_delete_customer";
 const COMMAND_DELETE_INVOICE: &str = "opc_delete_invoice";
+
+/// #32 批 B 的四条项目命令（清单 `commands[].name` 必须逐字一致）：一条只读详情
+/// （`opc_get_project`，与宿主同名命令同义，批 C 删宿主侧后本条是唯一通道）+ 三条写命令。
+const COMMAND_GET_PROJECT: &str = "opc_get_project";
+const COMMAND_UPDATE_PROJECT: &str = "opc_update_project";
+const COMMAND_DELETE_PROJECT: &str = "opc_delete_project";
+const COMMAND_COMPLETE_MILESTONE: &str = "opc_complete_milestone";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -423,6 +438,33 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
+        },
+        // ── #32 批 B：四条项目命令（详情读出参 = 详情视图；删除出参 = 无载荷）──
+        COMMAND_GET_PROJECT => match get_project(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_UPDATE_PROJECT => match update_project(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_DELETE_PROJECT => match delete_project(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_COMPLETE_MILESTONE => {
+            match complete_milestone(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
         },
         COMMAND_CREATE_PROJECT => match create_project(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -1122,6 +1164,78 @@ fn delete_invoice(
     const OP: &str = "opc_delete_invoice";
     let id = require_str(input, OP, "id")?;
     call_opc_store(peer, OPC_STORE_DELETE_INVOICE, json!({ "id": id }), call_chain)
+}
+
+/// `opc_get_project`：取项目详情（#32 批 B 的读 op，宿主侧无写权限闸）。
+///
+/// 入参只有 `id`（散标量，不套 `request` 壳）；出参 = 接缝 `ProjectDetailView`
+/// 逐字透传（摘要列 + 描述 / 备注 / 里程碑明细，全部 camelCase，出口零改写）。
+fn get_project(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_project";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_GET_PROJECT, json!({ "id": id }), call_chain)
+}
+
+/// `opc_update_project`：更新项目（#32 批 B 的写 op）。
+///
+/// `id` 必填（散标量）；可选字段平铺组装 `{"request": {…}}`，缺键 / `null` 都不转发
+/// ⇒ 接缝 DTO 外层 `None` = 该列不动。⚠ `customerId` / `currency` 刻意不转发：域包
+/// `UpdateProjectInput` 没有这两个更新位（转发等于宣称「改了」，实际静默不生效）。
+fn update_project(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_project";
+    let id = require_str(input, OP, "id")?;
+    let mut request = serde_json::Map::new();
+    copy_optional_strings(input, OP, &mut request, &["title", "description", "notes"])?;
+    copy_optional_f64(input, OP, &mut request, &["budget"])?;
+    copy_optional_i64(input, OP, &mut request, &["deadline"])?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_PROJECT,
+        json!({ "id": id, "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_delete_project`：删除一个项目（#32 批 B 的写 op）。
+///
+/// 入参只有 `id`（只判形状，非空判在宿主 provider，同 [`delete_customer`] 的分工）；
+/// 成功无载荷（接缝出 `Value::Null`，逐字透传）。
+fn delete_project(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_project";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_DELETE_PROJECT, json!({ "id": id }), call_chain)
+}
+
+/// `opc_complete_milestone`：把项目里的一个里程碑标成完成（#32 批 B 的写 op）。
+///
+/// 两个散标量（`projectId` / `milestoneId`）；出参 = 完成后的详情视图（前端据此原地
+/// 刷新时间线）。`milestoneId` 必须在项目明细里命中（宿主域服务否则回 `NotFound`）。
+fn complete_milestone(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_complete_milestone";
+    let project_id = require_str(input, OP, "projectId")?;
+    let milestone_id = require_str(input, OP, "milestoneId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_COMPLETE_MILESTONE,
+        json!({ "projectId": project_id, "milestoneId": milestone_id }),
+        call_chain,
+    )
 }
 
 /// `opc_create_project`：创建项目（写 op）。

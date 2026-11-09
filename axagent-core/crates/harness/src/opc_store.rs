@@ -485,6 +485,61 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::delete_invoice 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 项目详情 / 更新 / 删除 / 里程碑推进（#32 批 B：ProjectsTab 迁插件通道）──
+    //
+    // 四个 op 是前端 `ProjectsTab` 迁插件通道的缺口补齐：域服务 `ProjectService` 本就有
+    // 这四个方法，接缝此前只透了 `list_projects` / `create_project` / `add_milestone` 三件。
+    // 出参判据与 #32 批 A 的三条同型：缺行 = `Err(Provider)`（域服务 `NotFound` 透传），
+    // 不造「两态 Outcome」—— 域服务没有 `RemoveContentAssetOutcome` 那种「缺行不算错」的分支。
+
+    /// 项目详情（`get_project` op）—— **读 op**，不设权限闸。
+    ///
+    /// 出参 [`ProjectDetailView`] = 摘要（`#[serde(flatten)]` **复用** [`ProjectSummaryView`]，
+    /// 计数字段不另算一遍）+ 详情列（描述 / 备注 / 里程碑明细）。为什么不把明细直接塞进摘要：
+    /// 列表 op 一次回整表，明细数组会让单帧体积与「项目数 × 里程碑数」相乘 —— 判据同博客
+    /// `content` 不过线（见模块头「视图裁剪」）。
+    async fn get_project(&self, _id: String) -> Result<ProjectDetailView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_project 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新项目（`update_project` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参 [`UpdateProjectRequest`]：字段缺席 = 该列不动；成功 ⇒ 更新后的详情视图。
+    async fn update_project(
+        &self,
+        _id: String,
+        _request: UpdateProjectRequest,
+    ) -> Result<ProjectDetailView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_project 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除项目（`delete_project` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 硬删（域服务 `delete_project` 走 `delete_by_id`），成功无载荷；缺行 ⇒ `Err(Provider)`。
+    async fn delete_project(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_project 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 完成里程碑（`complete_milestone` op）—— 写 op，要 `write` 权限。
+    ///
+    /// `milestone_id` 必须在项目明细里命中（域服务否则回 `NotFound`）；出参是完成后的
+    /// 详情视图 —— 前端详情弹层据此原地刷新时间线，不必再追一次 `get_project`。
+    async fn complete_milestone(
+        &self,
+        _project_id: String,
+        _milestone_id: String,
+    ) -> Result<ProjectDetailView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::complete_milestone 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -670,14 +725,23 @@ pub struct CustomerSummaryView {
 }
 
 /// 项目摘要视图（里程碑只带两个计数，不带明细）。
+///
+/// 字段面 = 列表页**真实展示 / 筛选**的那一档（#32 批 B 补 `customerId` / `deadline`：
+/// 前端项目表的客户筛选与「截止」列此前直读宿主 DTO，迁接缝后不回退成空白）。
+/// 里程碑明细**不在**摘要里 —— 见 [`ProjectDetailView`]（列表一次回整表，明细数组会让
+/// 单帧体积与「项目数 × 里程碑数」相乘）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSummaryView {
     pub id: String,
+    /// 所属客户（`None` = 未关联；前端客户筛选与「编辑」表单回填都读它）。
+    pub customer_id: Option<String>,
     pub title: String,
     pub status: String,
     pub budget: Option<f64>,
     pub currency: String,
+    /// 截止时刻（epoch 秒）；`None` = 未设截止。列表要展示且可排序。
+    pub deadline: Option<i64>,
     pub milestone_total: usize,
     pub milestone_completed: usize,
     pub created_at: i64,
@@ -980,6 +1044,68 @@ pub struct FinancialReportView {
     pub risk_level: String,
     pub recommended_amount: f64,
     pub advice: String,
+}
+
+// ── #32 批 B：项目详情视图与更新入参 ──────────────────────────────────────
+//
+// 三个 DTO 与 `UpdateCustomerRequest` 同族：详情视图 = 摘要 + 详情列，更新入参 =
+// 域包 `UpdateProjectInput` 的能力面逐项对齐。位置在 trait 之后，理由同上方「写 op 的
+// 出参」一节（`pub trait` 那一行被登记表按行号钉住）。
+
+/// 一条里程碑的**详情行**（项目详情视图的明细元素）。
+///
+/// 字段与域包 `Milestone` 逐项对应（`status` 落枚举串 `pending` / `in_progress` /
+/// `completed` / `skipped`，与库里的落库串同形）；时间同样是 epoch 秒。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MilestoneView {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    /// 到期时刻（epoch 秒）；`None` = 未设到期。
+    pub due_at: Option<i64>,
+    /// 完成时刻（epoch 秒）；`None` = 未完成。
+    pub completed_at: Option<i64>,
+    /// 状态枚举串（`pending` / `in_progress` / `completed` / `skipped`）。
+    pub status: String,
+}
+
+/// 项目**详情**视图 = 摘要（`#[serde(flatten)]`，线格式上平铺，不套壳）+ 详情列。
+///
+/// 复用 [`ProjectSummaryView`] 而不是把摘要的字段在这里再抄一遍：摘要的两个里程碑计数
+/// 与列表行**必须同一口径**，抄一份就迟早有一处漂移（禁区 12）。线格式是扁平的
+/// 一个对象（`flatten` 不改键名），故前端详情与列表行可以共用同一个行类型。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDetailView {
+    #[serde(flatten)]
+    pub summary: ProjectSummaryView,
+    /// 项目描述（列表不展示，详情 / 编辑表单要）。
+    pub description: String,
+    /// 备注（同 `description` 的理由）。
+    pub notes: String,
+    /// 里程碑明细（列表只带两个计数，明细只在详情面）。
+    pub milestones: Vec<MilestoneView>,
+}
+
+/// `update_project` 的入参：**逐字段对齐域包 `UpdateProjectInput` 的能力面**（翻译零损失）。
+///
+/// 形态照 [`UpdateCustomerRequest`]（三种写法并存的那个解释逐字适用）：
+/// - **双层列**（`budget` / `deadline` 在域包本就是 `Option<Option<T>>`）：接缝同形，
+///   JSON 字段缺席 = 外层 `None` = 不动；显式 `null` 同样落外层 ⇒ `Some(None)`（清空）
+///   在跨进程 JSON 路径不可表达（与既存宿主 Tauri 命令同为 JSON 反序列化，行为一致）；
+/// - **单层列**（`title` / `description` / `notes` 在域包是单层 `Option<String>`）：接缝
+///   统一用双层承载「缺席 / 值」两态，provider 侧 `flatten()` 后 `None` = 不动；
+/// - **能力面外**：`customerId` / `currency` / `status` / 里程碑都不在域包
+///   `UpdateProjectInput` 里 ⇒ 契约刻意不摆（摆上等于宣称「能改」，实际静默不生效）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpdateProjectRequest {
+    pub title: Option<Option<String>>,
+    pub description: Option<Option<String>>,
+    pub budget: Option<Option<f64>>,
+    pub deadline: Option<Option<i64>>,
+    pub notes: Option<Option<String>>,
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────
@@ -1410,10 +1536,12 @@ mod tests {
 
         let project = ProjectSummaryView {
             id: "prj-1".into(),
+            customer_id: Some("cus-1".into()),
             title: "项目".into(),
             status: "active".into(),
             budget: None,
             currency: "CNY".into(),
+            deadline: None,
             milestone_total: 3,
             milestone_completed: 1,
             created_at: 1,
@@ -1422,14 +1550,57 @@ mod tests {
             &serde_json::to_value(&project).expect("可序列化"),
             &[
                 "id",
+                "customerId",
                 "title",
                 "status",
                 "budget",
                 "currency",
+                "deadline",
                 "milestoneTotal",
                 "milestoneCompleted",
                 "createdAt",
             ],
+        );
+
+        // 详情视图 = 摘要**平铺**（`flatten`）+ 详情列：键集合是两者的并集，没有内层壳键
+        // （`summary` 之类的壳键一旦出现，前端就得为详情另写一套行类型）。
+        let detail = ProjectDetailView {
+            summary: project.clone(),
+            description: "描述".into(),
+            notes: "备注".into(),
+            milestones: vec![MilestoneView {
+                id: "ms-1".into(),
+                title: "里程碑".into(),
+                description: "说明".into(),
+                due_at: Some(1),
+                completed_at: None,
+                status: "pending".into(),
+            }],
+        };
+        let detail_value = serde_json::to_value(&detail).expect("可序列化");
+        expect_keys(
+            &detail_value,
+            &[
+                "id",
+                "customerId",
+                "title",
+                "status",
+                "budget",
+                "currency",
+                "deadline",
+                "milestoneTotal",
+                "milestoneCompleted",
+                "createdAt",
+                "description",
+                "notes",
+                "milestones",
+            ],
+        );
+        assert!(detail_value.get("summary").is_none(), "flatten 后的线格式不得带内层壳键");
+        assert_eq!(
+            detail_value["milestones"][0]["dueAt"],
+            json!(1),
+            "里程碑明细的键必须是 camelCase（禁区 13）"
         );
 
         let landing = LandingPageSummaryView {
@@ -1528,5 +1699,20 @@ mod tests {
             serde_json::from_value(json!({ "period": "2026-11", "limit": 20 })).expect("键应可解");
         assert_eq!(kpi.period.as_deref(), Some("2026-11"));
         assert_eq!(kpi.limit, Some(20));
+
+        // `update_project` 入参：缺席 = 不动；给了值 = 写入；显式 `null` 同样落外层
+        // `None`（= 不动，清空在 JSON 线上不可表达，判据同 `UpdateCustomerRequest`）。
+        let absent: UpdateProjectRequest = serde_json::from_str("{}").expect("空对象走 Default");
+        assert!(absent.title.is_none() && absent.budget.is_none() && absent.deadline.is_none());
+        let update: UpdateProjectRequest = serde_json::from_value(json!({
+            "title": "新标题",
+            "budget": 12.5,
+            "deadline": null
+        }))
+        .expect("camelCase 键应可解");
+        assert_eq!(update.title, Some(Some("新标题".to_string())));
+        assert_eq!(update.budget, Some(Some(12.5)));
+        assert!(update.deadline.is_none(), "显式 null 落外层 None（清空不可表达）");
+        assert!(update.notes.is_none(), "缺键 = 不动");
     }
 }

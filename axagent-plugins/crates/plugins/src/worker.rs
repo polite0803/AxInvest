@@ -476,9 +476,9 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
         // `opc.store` 的写 op 一律要 `write`：blog 三件（发布 / 删除 / 创建）+ #36 批 2 的
         // 四条 id·枚举写 op（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）+
-        // #36 批 3 的八条创建 / 流程写 op —— 全都改库，删除类还**不可逆**。读 op
-        // （八个列表 + `get_financial_report`）**必须仍是 `None`**（给读缝加闸会把只读插件
-        // 无端拒掉）。
+        // #36 批 3 的八条创建 / 流程写 op + #32 批 B 的项目三件（更新 / 删除 / 里程碑完成）
+        // —— 全都改库，删除类还**不可逆**。读 op（八个列表 + `get_financial_report` +
+        // `get_project`）**必须仍是 `None`**（给读缝加闸会把只读插件无端拒掉）。
         (
             "opc.store",
             "publish_blog_post"
@@ -498,7 +498,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "create_landing_page"
             | "create_content_asset"
             | "create_publish_schedule"
-            | "process_due_schedules",
+            | "process_due_schedules"
+            | "update_project"
+            | "delete_project"
+            | "complete_milestone",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -3104,6 +3107,90 @@ impl HostPeer {
                 };
                 match result {
                     Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #32 批 B：项目详情 / 更新 / 删除 / 里程碑完成 ─────────────────
+            // `get_project` 是**读** op（`required_permission_for` 里刻意不登记它）：
+            // 入参是散标量 `id`（不套 `request` 壳，同 `publish_blog_post`）；出参是详情视图
+            // （摘要 + 描述 / 备注 / 里程碑明细）。
+            "opc.store" if op == "get_project" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_project(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("ProjectDetailView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 更新是「散标量 + 嵌一层」混合（同 `update_customer`）：`id` 单收，可选字段进
+            // `request`（接缝 DTO 是双层 `Option`，缺席 = 不动由 provider 判）。
+            "opc.store" if op == "update_project" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let request: axagent_harness::UpdateProjectRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_project(id, request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("ProjectDetailView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 删除项目：纯 `id` 入参（同 `delete_customer`）；成功无载荷 ⇒ `Value::Null`。
+            "opc.store" if op == "delete_project" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_project(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 完成里程碑：两个散标量（`projectId` / `milestoneId`，同 `transition_invoice`
+            // 的 `id` + `target` 形态）；出参是完成后的详情视图，前端据此原地刷新时间线。
+            "opc.store" if op == "complete_milestone" => {
+                let project_id: String = match deserialize_arg(&args, "projectId", seam) {
+                    Ok(value) => value,
+                    Err(response) => return response,
+                };
+                let milestone_id: String = match deserialize_arg(&args, "milestoneId", seam) {
+                    Ok(value) => value,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.complete_milestone(project_id, milestone_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("ProjectDetailView", &view),
                     Err(e) => seam_provider_error(e),
                 }
             },

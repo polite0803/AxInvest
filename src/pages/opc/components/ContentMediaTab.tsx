@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { DeleteOutlined, EditOutlined, PlusOutlined, ScheduleOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   Button,
@@ -19,29 +20,55 @@ import {
   Tabs,
   Tag,
 } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+// 本面板的八条命令（`plugin.opc` 命名命令，与 manifest `commands[].name` 逐字一致）。
+// 宿主同名 Tauri 命令本批仍在（另一批负责删除与登记表收口），前端统一改走插件通道。
+// ⚠ 宿主 `opc_delete_publish_schedule` 的插件侧等价是 `opc_cancel_publish_schedule`：
+// 名字不同，语义同 —— 取消发布计划 = 硬删该行（接缝 `cancel_publish_schedule` 走
+// `delete_by_id`，不是状态位改写）。
+const LIST_CONTENT_ASSETS_COMMAND = "opc_list_content_assets";
+const CREATE_CONTENT_ASSET_COMMAND = "opc_create_content_asset";
+const UPDATE_CONTENT_ASSET_COMMAND = "opc_update_content_asset";
+const DELETE_CONTENT_ASSET_COMMAND = "opc_delete_content_asset";
+const LIST_PUBLISH_SCHEDULES_COMMAND = "opc_list_publish_schedules";
+const CREATE_PUBLISH_SCHEDULE_COMMAND = "opc_create_publish_schedule";
+const CANCEL_PUBLISH_SCHEDULE_COMMAND = "opc_cancel_publish_schedule";
+const PROCESS_DUE_SCHEDULES_COMMAND = "opc_process_due_schedules";
+
+// 插件命令通道执行（与 InvoicesTab / CustomersTab / SitesTab 同形）：按清单解析启用插件 ⇒
+// 宿主 `plugin_execute_command` 派发，出参是命令回执的 JSON 文本。插件未装 / 未启用抛错，
+// 与取数失败同一路径处置，不新造错误码。
+async function execPluginCommand(name: string, input: Record<string, unknown>): Promise<string> {
+  const pluginId = await resolvePluginForCommand(name);
+  if (!pluginId) {
+    throw new Error(`no enabled plugin provides command \`${name}\``);
+  }
+  return invoke<string>("plugin_execute_command", { pluginId, name, input });
+}
+
+// 行类型 = 接缝视图 `ContentAssetSummaryView` 的已读子集（出参线格式 = 视图 camelCase 键，
+// 插件出口不改写，禁区 13）。`createdAt` 是 epoch 秒 ⇒ 渲染要 `* 1000`。
+// ⚠ `body` / `updatedAt` **不过线**（摘要视图列裁剪）：搜索只能按标题，编辑弹窗无法回填正文
+// ⇒ 未改动正文时**不发** `body`（见 `handleUpdate`），免得把库里正文覆盖成空串。
 interface ContentAsset {
   id: string;
   title: string;
-  content_type: string;
-  body: string;
-  tags_json: string;
+  contentType: string;
   status: string;
-  created_at: number;
-  updated_at: number;
+  tags: string[];
+  createdAt: number;
 }
 
+// 行类型 = 接缝视图 `PublishScheduleSummaryView` 的已读子集。
 interface PublishSchedule {
   id: string;
-  content_ref_type: string;
-  content_ref_id: string;
-  scheduled_at: number;
+  contentRefType: string;
+  contentRefId: string;
   status: string;
-  published_at: number | null;
-  created_at: number;
-  updated_at: number;
+  scheduledAt: number;
+  publishedAt: number | null;
 }
 
 const CONTENT_TYPES = ["article", "video", "image", "social_post", "newsletter"] as const;
@@ -78,14 +105,18 @@ function ContentAssetsPanel() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<ContentAsset | null>(null);
   const [searchText, setSearchText] = useState("");
+  // 编辑弹窗的正文框是否被用户动过：正文不在列表视图里，没动过就不能回传（否则覆盖成空串）。
+  const [bodyDirty, setBodyDirty] = useState(false);
+  // 编辑序号：异步回读全文（见 openEdit）晚到时用它判「弹窗是否已切到别的行/已关闭」。
+  const editSeqRef = useRef(0);
   const [form] = Form.useForm();
 
   const load = () => {
     setLoading(true);
     (async () => {
       try {
-        const data = await invoke<ContentAsset[]>("opc_list_content_assets");
-        setAssets(data);
+        const raw = await execPluginCommand(LIST_CONTENT_ASSETS_COMMAND, {});
+        setAssets(JSON.parse(raw) as ContentAsset[]);
       } catch (e) {
         message.error(t("opc.common.loadFailed", { error: String(e) }));
         setAssets([]);
@@ -101,14 +132,14 @@ function ContentAssetsPanel() {
 
   const handleCreate = async (values: Record<string, unknown>) => {
     try {
-      await invoke("opc_create_content_asset", {
-        input: {
-          title: values.title,
-          content_type: values.content_type,
-          body: values.body,
-          tags: values.tags ? String(values.tags).split(",").map((s) => s.trim()).filter(Boolean) : [],
-          status: values.status || "draft",
-        },
+      // 出站 input 键 = 清单 `inputSchema` 的 camelCase（禁区 13）；表单内部字段名不变。
+      // ⚠ 不传 `status`：接缝 `CreateContentAssetRequest` 没有该字段，新建恒为 draft
+      // （发布走下面的 update / schedule，裁定见 PLAN §128.18）；`body` 是必填串 ⇒ 缺省补空串。
+      await execPluginCommand(CREATE_CONTENT_ASSET_COMMAND, {
+        title: values.title,
+        contentType: values.content_type,
+        body: values.body ?? "",
+        tags: values.tags ? String(values.tags).split(",").map((s) => s.trim()).filter(Boolean) : [],
       });
       message.success(t("opc.contentMedia.assetCreated"));
       setCreateOpen(false);
@@ -122,19 +153,24 @@ function ContentAssetsPanel() {
   const handleUpdate = async (values: Record<string, unknown>) => {
     if (!editingAsset) { return; }
     try {
-      await invoke("opc_update_content_asset", {
+      const payload: Record<string, unknown> = {
         id: editingAsset.id,
-        input: {
-          title: values.title,
-          content_type: values.content_type,
-          body: values.body,
-          tags: values.tags ? String(values.tags).split(",").map((s) => s.trim()).filter(Boolean) : [],
-          status: values.status,
-        },
-      });
+        title: values.title,
+        contentType: values.content_type,
+        status: values.status,
+        tags: values.tags ? String(values.tags).split(",").map((s) => s.trim()).filter(Boolean) : [],
+      };
+      // 缺键 = 该列不动（接缝 `UpdateContentAssetInput` 五字段全 `Option`）。正文没回填，
+      // 只有用户动过才发，否则「改标题」会顺手把整篇正文清空。
+      if (bodyDirty) {
+        payload.body = values.body ?? "";
+      }
+      await execPluginCommand(UPDATE_CONTENT_ASSET_COMMAND, payload);
       message.success(t("opc.contentMedia.assetUpdated"));
       setEditOpen(false);
       setEditingAsset(null);
+      setBodyDirty(false);
+      editSeqRef.current += 1;
       form.resetFields();
       load();
     } catch (e) {
@@ -144,7 +180,7 @@ function ContentAssetsPanel() {
 
   const handleDelete = async (id: string) => {
     try {
-      await invoke("opc_delete_content_asset", { id });
+      await execPluginCommand(DELETE_CONTENT_ASSET_COMMAND, { id });
       message.success(t("opc.contentMedia.assetDeleted"));
       load();
     } catch (e) {
@@ -153,31 +189,45 @@ function ContentAssetsPanel() {
   };
 
   const openEdit = (asset: ContentAsset) => {
+    const seq = ++editSeqRef.current;
     setEditingAsset(asset);
+    setBodyDirty(false);
     form.setFieldsValue({
       title: asset.title,
-      content_type: asset.content_type,
-      body: asset.body,
-      tags: asset.tags_json ? JSON.parse(asset.tags_json).join(",") : "",
+      content_type: asset.contentType,
+      tags: asset.tags.join(","),
       status: asset.status,
     });
     setEditOpen(true);
+    // 正文不在列表摘要视图里（接缝裁剪，不过线）⇒ 编辑必须回读全文：宿主
+    // `opc_get_content_asset`（本批不删）返回完整 `ContentAsset`（含 body）。
+    // 取失败不阻塞编辑 —— 正文框保持空且 `bodyDirty=false`，用户不动就不覆盖原文；
+    // 序号比对防止慢响应把值回填到已切行/已关闭的弹窗。
+    void (async () => {
+      try {
+        const full = await invoke<{ id: string; body?: string | null }>("opc_get_content_asset", {
+          id: asset.id,
+        });
+        if (editSeqRef.current === seq) {
+          form.setFieldsValue({ body: full.body ?? "" });
+        }
+      } catch {
+        // 保持空正文 + bodyDirty 守卫。
+      }
+    })();
   };
 
+  // 正文不过线（摘要视图裁剪）⇒ 关键词只匹配标题。
   const filteredAssets = searchText
-    ? assets.filter(
-      (a) =>
-        a.title.toLowerCase().includes(searchText.toLowerCase())
-        || a.body.toLowerCase().includes(searchText.toLowerCase()),
-    )
+    ? assets.filter((a) => a.title.toLowerCase().includes(searchText.toLowerCase()))
     : assets;
 
   const columns = [
     { title: t("opc.contentMedia.columnTitle"), dataIndex: "title", key: "title", width: 200 },
     {
       title: t("opc.contentMedia.columnType"),
-      dataIndex: "content_type",
-      key: "content_type",
+      dataIndex: "contentType",
+      key: "contentType",
       width: 100,
       render: (type: string) => t(`opc.contentMedia.type_${type}`),
     },
@@ -194,20 +244,13 @@ function ContentAssetsPanel() {
       title: t("opc.contentMedia.columnTags"),
       key: "tags",
       width: 200,
-      render: (_: unknown, r: ContentAsset) => {
-        try {
-          const tags: string[] = r.tags_json ? JSON.parse(r.tags_json) : [];
-          return tags.map((tag) => <Tag key={tag}>{tag}</Tag>);
-        } catch {
-          return null;
-        }
-      },
+      render: (_: unknown, r: ContentAsset) => r.tags.map((tag) => <Tag key={tag}>{tag}</Tag>),
     },
     {
       title: t("opc.contentMedia.columnCreated"),
-      key: "created_at",
+      key: "createdAt",
       width: 120,
-      render: (_: unknown, r: ContentAsset) => new Date(r.created_at * 1000).toLocaleDateString(),
+      render: (_: unknown, r: ContentAsset) => new Date(r.createdAt * 1000).toLocaleDateString(),
     },
     {
       title: t("opc.common.actions"),
@@ -307,6 +350,8 @@ function ContentAssetsPanel() {
         onCancel={() => {
           setEditOpen(false);
           setEditingAsset(null);
+          setBodyDirty(false);
+          editSeqRef.current += 1;
           form.resetFields();
         }}
         okText={t("opc.common.update")}
@@ -323,7 +368,8 @@ function ContentAssetsPanel() {
             />
           </Form.Item>
           <Form.Item name="body" label={t("opc.contentMedia.columnBody")}>
-            <Input.TextArea rows={4} />
+            {/* 正文不在列表视图里（不过线）⇒ 弹窗为空是正常态；用户动过才回传（bodyDirty）。 */}
+            <Input.TextArea rows={4} onChange={() => setBodyDirty(true)} />
           </Form.Item>
           <Form.Item name="tags" label={t("opc.contentMedia.columnTags")}>
             <Input placeholder={t("opc.contentMedia.tagsPlaceholder")} />
@@ -354,8 +400,8 @@ function PublishSchedulesPanel() {
     setLoading(true);
     (async () => {
       try {
-        const data = await invoke<PublishSchedule[]>("opc_list_publish_schedules");
-        setSchedules(data);
+        const raw = await execPluginCommand(LIST_PUBLISH_SCHEDULES_COMMAND, {});
+        setSchedules(JSON.parse(raw) as PublishSchedule[]);
       } catch (e) {
         message.error(t("opc.common.loadFailed", { error: String(e) }));
         setSchedules([]);
@@ -367,8 +413,8 @@ function PublishSchedulesPanel() {
 
   const loadAssets = async () => {
     try {
-      const data = await invoke<ContentAsset[]>("opc_list_content_assets");
-      setAssets(data);
+      const raw = await execPluginCommand(LIST_CONTENT_ASSETS_COMMAND, {});
+      setAssets(JSON.parse(raw) as ContentAsset[]);
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
       setAssets([]);
@@ -382,12 +428,11 @@ function PublishSchedulesPanel() {
 
   const handleCreate = async (values: Record<string, unknown>) => {
     try {
-      await invoke("opc_create_publish_schedule", {
-        input: {
-          content_ref_type: "content_asset",
-          content_ref_id: values.content_ref_id,
-          scheduled_at: Math.floor((values.scheduled_at as Date).getTime() / 1000),
-        },
+      // `contentRefId` 是**被发布内容的主键**（内容资产 id），不是发布计划自己的 id。
+      await execPluginCommand(CREATE_PUBLISH_SCHEDULE_COMMAND, {
+        contentRefType: "content_asset",
+        contentRefId: values.content_ref_id,
+        scheduledAt: Math.floor((values.scheduled_at as Date).getTime() / 1000),
       });
       message.success(t("opc.contentMedia.scheduleCreated"));
       setCreateOpen(false);
@@ -398,9 +443,10 @@ function PublishSchedulesPanel() {
     }
   };
 
+  // 宿主 `opc_delete_publish_schedule` 的插件侧等价是 `opc_cancel_publish_schedule`（硬删）。
   const handleCancel = async (id: string) => {
     try {
-      await invoke("opc_delete_publish_schedule", { id });
+      await execPluginCommand(CANCEL_PUBLISH_SCHEDULE_COMMAND, { id });
       message.success(t("opc.contentMedia.scheduleCancelled"));
       load();
     } catch (e) {
@@ -410,7 +456,7 @@ function PublishSchedulesPanel() {
 
   const handleProcessDue = async () => {
     try {
-      await invoke("opc_process_due_schedules");
+      await execPluginCommand(PROCESS_DUE_SCHEDULES_COMMAND, {});
       message.success(t("opc.contentMedia.processDueSuccess"));
       load();
     } catch (e) {
@@ -420,14 +466,14 @@ function PublishSchedulesPanel() {
 
   const assetOptions = assets.map((a) => ({
     value: a.id,
-    label: `${a.title} (${a.content_type})`,
+    label: `${a.title} (${a.contentType})`,
   }));
 
   const columns = [
     {
       title: t("opc.contentMedia.columnContentRef"),
-      dataIndex: "content_ref_id",
-      key: "content_ref_id",
+      dataIndex: "contentRefId",
+      key: "contentRefId",
       render: (id: string) => {
         const asset = assets.find((a) => a.id === id);
         return asset ? asset.title : id;
@@ -435,14 +481,14 @@ function PublishSchedulesPanel() {
     },
     {
       title: t("opc.contentMedia.columnRefType"),
-      dataIndex: "content_ref_type",
-      key: "content_ref_type",
+      dataIndex: "contentRefType",
+      key: "contentRefType",
       width: 120,
     },
     {
       title: t("opc.contentMedia.columnScheduledAt"),
-      dataIndex: "scheduled_at",
-      key: "scheduled_at",
+      dataIndex: "scheduledAt",
+      key: "scheduledAt",
       width: 160,
       render: (ts: number) => new Date(ts * 1000).toLocaleString(),
     },
@@ -576,31 +622,29 @@ function ContentCreationWizard() {
       // #180-④：改前用 `wizardData.asset_id || crypto.randomUUID()` 当后端 id —— 但本分支**总是新建**，
       // 后端会自己 `gen_id()` 生成真 id ⇒ 排期落一个悬空 `content_ref_id`、直发 `opc_update_content_asset`
       // 打到不存在的行（回 NotFound）。改为直接取 create 的返回值。
-      const created = await invoke<ContentAsset>("opc_create_content_asset", {
-        input: {
+      const created = JSON.parse(
+        await execPluginCommand(CREATE_CONTENT_ASSET_COMMAND, {
           title: wizardData.title,
-          content_type: "article",
+          contentType: "article",
           body: wizardData.body,
           tags: wizardData.tags ? wizardData.tags.split(",").map((s) => s.trim()).filter(Boolean) : [],
-          // ⚠ 不传 status：`CreateContentAssetInput` 没有该字段（serde 会静默丢弃），
+          // ⚠ 不传 status：接缝 `CreateContentAssetRequest` 没有该字段（清单 `inputSchema` 同样不收），
           // 新建恒为 draft；发布/排期走下面的 update / schedule（裁定见 PLAN §128.18）。
-        },
-      });
+        }),
+      ) as ContentAsset;
       const assetId = created.id;
 
       if (wizardData.publish_type === "scheduled" && wizardData.scheduled_at) {
-        await invoke("opc_create_publish_schedule", {
-          input: {
-            content_ref_type: "content_asset",
-            content_ref_id: assetId,
-            scheduled_at: wizardData.scheduled_at,
-          },
+        await execPluginCommand(CREATE_PUBLISH_SCHEDULE_COMMAND, {
+          contentRefType: "content_asset",
+          contentRefId: assetId,
+          scheduledAt: wizardData.scheduled_at,
         });
         message.success(t("opc.contentMedia.wizard.scheduleCreated"));
       } else {
-        await invoke("opc_update_content_asset", {
+        await execPluginCommand(UPDATE_CONTENT_ASSET_COMMAND, {
           id: assetId,
-          input: { status: "published" },
+          status: "published",
         });
         message.success(t("opc.contentMedia.wizard.publishedNow"));
       }

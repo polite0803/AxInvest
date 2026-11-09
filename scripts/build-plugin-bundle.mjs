@@ -560,6 +560,7 @@ function stockManifest({ version, binaryName, sha256 }) {
 const OPC_WRITE_COMMANDS = new Set([
   "opc_add_milestone",
   "opc_cancel_publish_schedule",
+  "opc_complete_milestone",
   "opc_create_blog_post",
   "opc_create_content_asset",
   "opc_create_customer",
@@ -571,11 +572,13 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_delete_content_asset",
   "opc_delete_customer",
   "opc_delete_invoice",
+  "opc_delete_project",
   "opc_process_due_schedules",
   "opc_publish_blog_post",
   "opc_transition_invoice",
   "opc_update_content_asset",
   "opc_update_customer",
+  "opc_update_project",
 ]);
 
 function withRequiredPermission(commands) {
@@ -590,7 +593,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 26 条命名命令（4 条 blog 读写 + 9 条只读查询 + 4 条写操作 + 8 条写命令 + 1 条财务报表）",
+      "OPC 域功能包（#36）：worker 通道 + 33 条命名命令（读 12 条 · 写 21 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -842,6 +845,63 @@ function opcManifest({ version, binaryName, sha256 }) {
             id: { type: "string", description: "发票 id（接缝主键；空值由宿主 provider 拒收）" },
           },
           required: ["id"],
+        },
+      },
+      // ── #32 批 B：四条项目命令（详情读 1 + 写 3，均走 opc.store ⇒ 写命令由
+      //    `withRequiredPermission` 按上面 `OPC_WRITE_COMMANDS` 自动挂 workspace-write）。
+      //    详情出参 = 摘要列 + 描述 / 备注 / 里程碑明细（一个扁平对象，无内层壳键）。
+      {
+        name: "opc_get_project",
+        description: "获取 OPC 项目详情（经宿主 opc.store 只读接缝；含描述 / 备注 / 里程碑明细）",
+        command: "worker://opc_get_project",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "项目 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_update_project",
+        description: "更新 OPC 项目（经宿主 opc.store 写面；回更新后的详情视图）",
+        command: "worker://opc_update_project",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "项目 id（接缝主键；空值由宿主 provider 拒收）" },
+            title: { type: "string", description: "新标题（缺省 = 该列不动）" },
+            description: { type: "string", description: "新描述（缺省 = 该列不动）" },
+            budget: { type: "number", description: "新预算（缺省 = 该列不动）" },
+            deadline: { type: "number", description: "新截止时间戳（epoch 秒，缺省 = 不动）" },
+            notes: { type: "string", description: "新备注（缺省 = 该列不动）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_delete_project",
+        description: "删除 OPC 项目（经宿主 opc.store 写面；成功无载荷）",
+        command: "worker://opc_delete_project",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "项目 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_complete_milestone",
+        description: "完成 OPC 项目的里程碑（经宿主 opc.store 写面；回完成后的详情视图）",
+        command: "worker://opc_complete_milestone",
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectId: { type: "string", description: "项目 id" },
+            milestoneId: { type: "string", description: "里程碑 id（须在该项目明细里）" },
+          },
+          required: ["projectId", "milestoneId"],
         },
       },
       {

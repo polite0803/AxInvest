@@ -25,6 +25,29 @@ import { useTranslation } from "react-i18next";
  * 否则这个计数会随接缝的单页上限静默偏小（判据见 `plugin-opc` 的 `blog_posts`）。
  */
 const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
+// 内容资产 / 发布计划的只读取数命令（`plugin.opc` 命名命令；宿主同名 Tauri 命令本批仍在，
+// 前端已改走插件通道，与 ContentMediaTab 同通道）。
+const LIST_CONTENT_ASSETS_COMMAND = "opc_list_content_assets";
+const LIST_PUBLISH_SCHEDULES_COMMAND = "opc_list_publish_schedules";
+
+/**
+ * 取一个插件只读命令的行数组。
+ *
+ * 插件未装 / 未启用（`resolvePluginForCommand` 回 `null`）与命令执行失败同处置：落空数组
+ * ——「一条只读查询坏了不拖垮整张图」是本面板既有的 `.catch(() => [])` 语义。
+ */
+async function fetchPluginRows<T>(command: string): Promise<T[]> {
+  const pluginId = await resolvePluginForCommand(command);
+  if (!pluginId) {
+    return [];
+  }
+  const raw = await invoke<string>("plugin_execute_command", {
+    pluginId,
+    name: command,
+    input: {},
+  });
+  return JSON.parse(raw) as T[];
+}
 
 interface DashboardSummary {
   total_revenue: number;
@@ -46,7 +69,7 @@ interface ContentMediaKpis {
 interface ContentAsset {
   id: string;
   title: string;
-  content_type: string;
+  contentType: string;
   status: string;
 }
 
@@ -105,26 +128,17 @@ export function DashboardTab() {
     (async () => {
       try {
         const [assets, schedules, posts, pages] = await Promise.all([
-          invoke<ContentAsset[]>("opc_list_content_assets").catch(() => []),
-          invoke<PublishSchedule[]>("opc_list_publish_schedules").catch(() => []),
-          // 取数改走插件执行通道（#36 第 4 步）：宿主同名命令已删。失败与「插件没装」都落
-          // 空数组，与本行既存的 `.catch(() => [])` 语义一致（一条只读查询坏了不拖垮整张图）。
-          (async () => {
-            const pluginId = await resolvePluginForCommand(LIST_BLOG_POSTS_COMMAND);
-            if (!pluginId) { return []; }
-            const raw = await invoke<string>("plugin_execute_command", {
-              pluginId,
-              name: LIST_BLOG_POSTS_COMMAND,
-              input: {},
-            });
-            return JSON.parse(raw) as BlogPost[];
-          })().catch(() => []),
+          // 三条只读插件命令（#36 系列迁移）与宿主落地页命令同处置：失败 / 插件没装都落空数组，
+          // 与本行既存的 `.catch(() => [])` 语义一致（一条只读查询坏了不拖垮整张图）。
+          fetchPluginRows<ContentAsset>(LIST_CONTENT_ASSETS_COMMAND).catch(() => []),
+          fetchPluginRows<PublishSchedule>(LIST_PUBLISH_SCHEDULES_COMMAND).catch(() => []),
+          fetchPluginRows<BlogPost>(LIST_BLOG_POSTS_COMMAND).catch(() => []),
           invoke<LandingPage[]>("opc_list_landing_pages").catch(() => []),
         ]);
         if (cancelled) { return; }
         const typeCounts: Record<string, number> = {};
         for (const a of assets) {
-          typeCounts[a.content_type] = (typeCounts[a.content_type] || 0) + 1;
+          typeCounts[a.contentType] = (typeCounts[a.contentType] || 0) + 1;
         }
         const pending = schedules.filter((s) => s.status === "pending").length;
         const published = schedules.filter((s) => s.status === "published").length;

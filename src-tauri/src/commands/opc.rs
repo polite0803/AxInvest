@@ -11,14 +11,12 @@ use sea_orm::ActiveModelTrait;
 use tauri::State;
 
 use axagent_company_runtime::opc::{
-    AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService,
-    CreateContentAssetInput, CreateKpiInput, CreateLandingPageInput, CreateProjectInput,
-    CreatePublishScheduleInput, Customer, CustomerService, DashboardSummary,
-    DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService,
-    DefaultProjectService, DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice,
-    Invoice, InvoiceService, KpiRecord, LandingPage, Milestone, Project, ProjectFilter,
-    ProjectService, PublishSchedule, PublishScheduleService, RevenueRecord, SiteService,
-    UpdateContentAssetInput, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
+    AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService, CreateKpiInput,
+    CreateLandingPageInput, Customer, CustomerService, DashboardSummary, DefaultAnalyticsService,
+    DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService, DefaultProjectService,
+    DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice, Invoice, InvoiceService,
+    KpiRecord, LandingPage, Project, ProjectService, PublishSchedule, PublishScheduleService,
+    RevenueRecord, SiteService, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
 };
 
 use axagent_company_runtime::opc::capability_pack::{
@@ -26,59 +24,6 @@ use axagent_company_runtime::opc::capability_pack::{
     import_capability_pack, list_capability_pack_enabled_map, resolve_capability_packs_dir,
     set_capability_pack_enabled,
 };
-
-/// 记录 OPC 操作轨迹到 trajectory 系统供学习
-async fn record_opc_trajectory(
-    storage: &axagent_trajectory::TrajectoryStorage,
-    op_name: &str,
-    entity_id: &str,
-    outcome: axagent_trajectory::TrajectoryOutcome,
-    details: &str,
-) {
-    let now = chrono::Utc::now();
-    let step = axagent_trajectory::TrajectoryStep {
-        timestamp_ms: now.timestamp_millis() as u64,
-        role: axagent_trajectory::MessageRole::User,
-        content: format!("OPC:{op_name} id={entity_id} {details}"),
-        reasoning: None,
-        tool_calls: Some(vec![axagent_trajectory::ToolCall {
-            id: axagent_harness::util_fns::gen_id(),
-            name: format!("opc_{op_name}"),
-            arguments: serde_json::json!({"id": entity_id, "details": details}).to_string(),
-        }]),
-        tool_results: Some(vec![axagent_trajectory::TrajectoryToolResult {
-            tool_use_id: String::new(),
-            tool_name: format!("opc_{op_name}"),
-            output: format!("OPC {op_name} completed: {entity_id}"),
-            is_error: outcome == axagent_trajectory::TrajectoryOutcome::Failure,
-        }]),
-    };
-
-    let trajectory = axagent_trajectory::Trajectory::new(
-        "opc_session".to_string(),
-        "system".to_string(),
-        format!("OPC:{op_name}"),
-        format!("{op_name}: {entity_id}"),
-        outcome,
-        0u64,
-        vec![step],
-    );
-
-    if let Err(e) = storage.save_trajectory(&trajectory).await {
-        tracing::warn!("[opc-trajectory] Failed to save: {e}");
-    }
-}
-
-/// 成功轨迹的简便封装
-async fn record_opc_success(
-    storage: &axagent_trajectory::TrajectoryStorage,
-    op: &str,
-    id: &str,
-    details: &str,
-) {
-    record_opc_trajectory(storage, op, id, axagent_trajectory::TrajectoryOutcome::Success, details)
-        .await;
-}
 
 // ── Invoice Commands ──────────────────────────────────────────────
 
@@ -140,52 +85,18 @@ pub async fn opc_find_customer_by_email(
 }
 
 // ── Project Commands ──────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建项目")]
-#[tauri::command]
-pub async fn opc_create_project(
-    state: State<'_, AppState>,
-    input: CreateProjectInput,
-) -> Result<Project, String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    let result = svc.create_project(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    });
-    if let Ok(ref p) = result {
-        record_opc_success(
-            &state.trajectory_storage,
-            "create_project",
-            &p.id,
-            &format!("title={}", p.title),
-        )
-        .await;
-    }
-    result
-}
+//
+// #32 批 B：`opc_create_project` / `opc_list_projects` / `opc_add_milestone` 三条已删 ——
+// 前端 `ProjectsTab` 与智能体面都走插件命令 `opc_create_project` / `opc_list_projects` /
+// `opc_add_milestone`（`axagent-plugins/crates/plugin-opc`）。⚠ 删 `opc_create_project` 同时
+// 带走了本文件唯一的轨迹记录点（`record_opc_success`）：插件进程不持 trajectory 存储，
+// 该记录在插件通道上不可达；要恢复须在宿主分派层另开记录位，不在本刀范围。
 
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取项目")]
 #[tauri::command]
 pub async fn opc_get_project(state: State<'_, AppState>, id: String) -> Result<Project, String> {
     let svc = DefaultProjectService::new(state.harness.db().clone());
     svc.get_project(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出项目")]
-#[tauri::command]
-pub async fn opc_list_projects(
-    state: State<'_, AppState>,
-    filter: ProjectFilter,
-) -> Result<Vec<Project>, String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    svc.list_projects(filter).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -214,22 +125,6 @@ pub async fn opc_update_project(
 pub async fn opc_delete_project(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let svc = DefaultProjectService::new(state.harness.db().clone());
     svc.delete_project(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "添加项目里程碑")]
-#[tauri::command]
-pub async fn opc_add_milestone(
-    state: State<'_, AppState>,
-    project_id: String,
-    milestone: Milestone,
-) -> Result<Project, String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    svc.add_milestone(&project_id, milestone).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -583,35 +478,6 @@ pub async fn opc_delete_landing_page(state: State<'_, AppState>, id: String) -> 
 
 // ── Content Asset Commands ──────────────────────────────────────────
 
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建内容资产")]
-#[tauri::command]
-pub async fn opc_create_content_asset(
-    state: State<'_, AppState>,
-    input: CreateContentAssetInput,
-) -> Result<ContentAsset, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.create_content_asset(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出内容资产")]
-#[tauri::command]
-pub async fn opc_list_content_assets(
-    state: State<'_, AppState>,
-) -> Result<Vec<ContentAsset>, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.list_content_assets().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取内容资产详情")]
 #[tauri::command]
 pub async fn opc_get_content_asset(
@@ -620,37 +486,6 @@ pub async fn opc_get_content_asset(
 ) -> Result<ContentAsset, String> {
     let svc = DefaultSiteService::new(state.harness.db().clone());
     svc.get_content_asset(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "更新内容资产")]
-#[tauri::command]
-pub async fn opc_update_content_asset(
-    state: State<'_, AppState>,
-    id: String,
-    input: UpdateContentAssetInput,
-) -> Result<ContentAsset, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.update_content_asset(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除内容资产")]
-#[tauri::command]
-pub async fn opc_delete_content_asset(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.delete_content_asset(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -1291,37 +1126,6 @@ async fn opc_batch_role_status(
 
 // ── 发布计划 Tauri 命令 ─────────────────────────────────────────
 
-/// 创建发布计划
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建发布计划")]
-#[tauri::command]
-pub async fn opc_create_publish_schedule(
-    state: State<'_, AppState>,
-    input: CreatePublishScheduleInput,
-) -> Result<PublishSchedule, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.create_publish_schedule(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 列出所有发布计划
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "列出发布计划")]
-#[tauri::command]
-pub async fn opc_list_publish_schedules(
-    state: State<'_, AppState>,
-) -> Result<Vec<PublishSchedule>, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.list_publish_schedules().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 /// 获取单个发布计划
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "获取发布计划详情")]
 #[tauri::command]
@@ -1348,22 +1152,6 @@ pub async fn opc_update_publish_schedule(
 ) -> Result<PublishSchedule, String> {
     let svc = DefaultSiteService::new(state.harness.db().clone());
     svc.update_publish_schedule(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 删除发布计划
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除发布计划")]
-#[tauri::command]
-pub async fn opc_delete_publish_schedule(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.delete_publish_schedule(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,

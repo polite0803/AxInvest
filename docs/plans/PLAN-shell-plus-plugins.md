@@ -7366,3 +7366,18 @@ for(const f of W){if(!R.test(f))continue; if(!H.has(f))a+=wn(f); else c+=wn(f)-h
 for(const f of H){if(R.test(f)&&!W.has(f))b+=hn(f);}
 console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 ```
+
+## 134. #243 ③ 类剩余 5 处逐条裁定（2026-11-09；**结论：无一条能由本批改**）
+
+**先纠任务口径**：#243 立的是「③ 类剩余 6 处」（原 8 − §132.7 消掉的 As-Of 两条）。实际现在是 **5 处 / 5 文件** —— 第 6 处已**由并行批完成**：`git status --porcelain` 报 `R  src/stores/feature/screenshotDiagnosisStore.ts -> src/stores/feature/stock-analysis/screenshotDiagnosisStore.ts`，新位置 import 头（`src/stores/feature/stock-analysis/screenshotDiagnosisStore.ts:19`）只吃 `@/types/paper-portfolio` 与 `@/types/screenshot-diagnosis` 两个中性说明符。该 rename 让**文件自身路径命中** `feRe` 的 stock 词根 ⇒ 按 `audit-l1-blockers.mjs` §3「归属用文件整条路径判」落 `owned` 而非 `foreign`。判定：这是**归属正确**（该 store 本就是股票持仓截图诊断），不是洗绿；`stores/feature/{opc,quant,stock-analysis}` 三个域子目录已有先例。
+
+**工作树复算**：`node scripts/audit-l1-blockers.mjs --fe-json` ⇒ `stock: {points:22, files:20}`（OPC 侧 `12/9` 逐字未变），与 ③ 剩余 5 处逐条对得上。⚠ **§132.5 第 1 条记的 23/21 已过期**：那 1 点 / 1 文件的差额就是并行批把 `screenshotDiagnosisStore` 迁进域子目录造成的 —— 本批不提它，只在此标出「台账 23/21 是旧读数，实测以 22/20 为准」。
+
+| # | 位置 | 说明符 | 裁定 | 解锁前置（硬证据） |
+|---|---|---|---|---|
+| ① | `src/lib/ipc-schemas.ts:41`（import 行；被校验的两条命令登记在同一文件 `:75` `list_stock_analyses` / `:79` `get_stock_analysis`） | `AnalysisSummary`（`@/types/stock-analysis`） | **不改** | 该表是宿主 IPC **返回值校验表**（执行点 `src/lib/invoke.ts:468` 的 `validateIpcResult(cmd, result)`），登记的就是这两条**宿主命令**。取证：`git grep -ln "fn list_stock_analyses\|fn get_stock_analysis" -- '*.rs'` 命中 `src-tauri/src/commands/stock_analysis.rs`（真实现在宿主）与 `axagent-core/crates/harness/src/capability_registry.rs`（仅能力声明）。命令没迁，校验表就得知道其返回形状；私有化那 3 个字段等于让 zod 契约与域 DTO 脱钩 ⇒ 削契约凑读数。**随这两条命令走 T2 迁出时自然消失。** |
+| ②–⑤ | `src/pages/TasksCenterPage/adapters/moverRecallAnalysis.adapter.ts:5`、`jobs/MoverRecallBatchDrawer.tsx:5`、`jobs/StartMoverRecallBatchModal.tsx:5`、`__tests__/adapters.test.ts:11` | `MoverRecall*` 四型（同一说明符） | **不改** | 两理由叠加：**(a) 后端权威** —— 宿主 `src-tauri/src/commands/mover_recall_analysis.rs` 是股票域文件（`use axagent_analysis_engine::mover_recall` / `axagent_astock_data` / `axagent_dao::repo::mover_recall_batches` 等处直连），属 Rust 反向阻塞面待迁项；其 wire DTO 留在 `src/types/` 是禁区 12「前端权威来源」的要求。**(b) 解锁通道未通** —— §132.3 ④ 已裁「任务中心走插件 pages 声明或渲染器注册表」，而 `plugin-stock` 今天**没有任何清单声明体**：`git grep -n taskSources -- 'axagent-plugins/crates/plugin-stock/**'` 只命中 `axagent-plugins/crates/plugin-stock/src/main.rs:51` 的一句注释「清单声明（`taskSources[]`）留给后续批」。⇒ 现在把四型私有化进页内，命令迁出时要**再搬一次**，且中间态违反分层。 |
+
+**⇒ 处置结论**：唯一可执行项（`screenshotDiagnosisStore` 归位域子目录）已由并行批落地、经我复核正确；余 5 处是「判据正确、时机未到」，各自绑在 #35 的更后批次（T2 命令迁出 / `plugin-stock` 的 `taskSources[]` 声明）。本批**不动任何代码、不回写读数**（工作树 22/20 里相对 HEAD 46/37 的 24/17 差额仍是并行批在途搬迁，口径见 §132.7）。
+
+**为什么不能靠「给 4 处换路径」消掉**：那 4 处说明符本身**合规** —— `@/types/stock-analysis` 是 AGENTS.md 禁区 3 的封闭例外四域之一。门禁里的 `foreign` 是**机械口径**（文件路径不含域词根 + 说明符含域词根），不等于规范违规。真问题是「中性页面吃域 DTO」，解法只有搬迁一条，没有改写路径这条路（改写反而会造出新耦合）。

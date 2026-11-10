@@ -102,24 +102,17 @@ impl RecoCronJobResponse {
     }
 }
 
-// ── Tauri 命令：荐股 cron 删除 ──
+// ── Tauri 命令：趋势智选 cron 删除 ──
 //
-// create / list / toggle 三条宿主命令已在 #35 批 1b 退役：前端与智能体的对应动作
-// 只走插件命令 `stock_{create,list,toggle}_recommendation_cron`（档位等价：Caution /
-// Safe / Caution）。delete 三族本批一并暂留（PLAN §141.2-④）：pool_scan /
-// trend_screening 的宿主版是 `Dangerous`，与插件清单 `workspace-write`（投影 Caution）
-// 不等价，删掉会放松智能体删除面。本条的 `Caution` 虽与插件等阶，但与
-// `delete_trend_screening_cron` 同文件同族、共享核心 ⇒ 留给权限档位对齐批一次处置。
-
-/// 删除荐股定时任务
-#[agent_command(domain = "general", safety = Caution, call_mode = StateOnly, description =  "删除荐股定时任务")]
-#[tauri::command]
-pub async fn delete_recommendation_cron(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    delete_recommendation_cron_core(&state.cron_job_store, &id).await
-}
+// 荐股的四条宿主命令（create / list / toggle / delete）均已退役（#35 批 1b + 批 1c），
+// 前端与智能体的对应动作只走插件命令 `stock_{create,list,toggle,delete}_recommendation_cron`，
+// 两侧档位逐条等阶（Caution / Safe / Caution / Caution）。
+//
+// 趋势的 delete 仍保留宿主版：宿主档位是 `Dangerous`，而 `command_bridge.rs` 的
+// `command_decision` 对 Dangerous 无条件硬拒（任何会话模式都不放行），插件清单只到
+// `workspace-write`（投影 Caution）。若删掉宿主版，同名插件命令会进智能体索引并以
+// Caution 真正可执行 ⇒ 把「禁止」放松成「需确认」。两侧都不可执行的现状是终局形态，
+// 不再追求把清单提到 Dangerous（无逐命令授权，只能整包提权，且提权后同样被硬拒）。
 
 // ── 趋势智选定任务：链白名单与配置辅助（命令见上方 cron 删除簇）──
 //

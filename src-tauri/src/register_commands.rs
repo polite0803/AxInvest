@@ -1010,7 +1010,6 @@ macro_rules! register_all_commands {
             commands::quickbar::hide_quickbar,
             #[cfg(not(mobile))]
             commands::quickbar::show_quickbar,
-            commands::recommendation_cron::delete_recommendation_cron,
             commands::recommendation_cron::delete_trend_screening_cron,
             commands::reflection::clear_reflection_history,
             commands::reflection::get_reflection_history,

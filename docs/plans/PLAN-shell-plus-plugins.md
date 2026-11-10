@@ -7805,3 +7805,91 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 ⑤ 智能体命令索引端到端未跑（需运行实例）；本轮以清单握手 + 真 worker 协议测试覆盖。
 ⑥ 文档行号引用门（`node scripts/check-doc-refs.mjs --selftest` EXIT=0，243 条断言全过；判定档 EXIT=1）**唯一一条基线外新增判红不属本批**：快照文档 `AUDIT-industry-label-removal-2026-09-14.md` 里一处指向 `RiskRoomMiniBar.tsx` 的引用报「仓内不存在该文件」。归属实测：该 AUDIT 文档工作树干净（`git status` 零条目），而 `src/components/office/panels/` 下那批面板文件是**另一并行批已暂存的删除**（状态列 `D `，`git cat-file -e HEAD:` 证明它们仍在 HEAD）⇒ 判红来自那次删除，修法由删除方决定（订正快照引用或回退删除），本批不代改他人的暂存条目。本批 §144 新增的 `文件:行号` 连写引用共 **10 条**（`main.rs` 3 + `market_data.rs` 1 + `stock_analysis_bridge.rs` 1 + 前端 3 + `README.md` 1 + `stockAnalysisStore.ts` 1），另有多处以「同文件 `:893`」形态书写的简写不被门扫 —— 10 条全部未进任何判红桶，段对齐与新鲜度均通过。（本节刻意不写「文件名 + 行号」的连写形式 —— 门会把它当新引用扫，指到已删文件即自造判红。）
 ⑦ `axagent-plugins/crates/README.md:11` 的 plugin-stock 命令举例仍只列 `stock_get_quote` / `parse_analysis_intent`（非穷举表述，本批不改写他人文档；要收口应整段重写为「见清单 `scripts/build-plugin-bundle.mjs`」）。
+
+## 145. `#35` 批 2c：五条榜单/盘面命令进表驱动路由（零入参形态；2026-11-10）
+
+### 145.1 刀口与映射
+
+| 插件命令 | 分派形态 | 接缝 op | 命令面入参 | 接缝载荷 |
+|---|---|---|---|---|
+| `stock_get_hot_stocks` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:817`） | `market.quote / get_hot_stocks` | 无 | 无 |
+| `stock_get_industry_ranking` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:818`） | `get_industry_ranking` | 无 | 无 |
+| `stock_get_index_quotes` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:819`） | `get_index_quotes_outcome` | 无 | 无 |
+| `stock_get_market_dragon_tiger` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:820`） | `get_market_dragon_tiger` | 无 | 无 |
+| `stock_get_north_bound_flow` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:823`） | `get_north_bound_flow` | 无 | 无 |
+
+五条都是**零入参** op ⇒ `keys: None`，与先例 `get_cls_flash` 同构（`keys: None` 的语义是「不读 input 任何键」，不是「键可有可无」）。路由表由 12 条扩到 17 条；测试 `market_read_commands_map_to_their_own_ops_and_keys` 的 `cases` 同步 12 → 17（去重断言用的是 `cases.len()`，无需再改常数）。
+
+`stock_get_index_quotes` 的 op 名是 `get_index_quotes_outcome` —— **不按命令名剥前缀**：宿主命令体调的就是带 `outcome` 后缀的 trait 方法（`axagent-core/crates/harness/src/market_data.rs:530`），路由表按「命令 → 真实方法名」直写，不做推断。清单侧五条声明落在 `scripts/build-plugin-bundle.mjs` 的 stock 段 `commands[]` 尾部，`inputSchema` 为零入参形态 `{ type: "object", additionalProperties: false, properties: {} }`。
+
+### 145.2 `index_quotes` 的信封等价性（本批唯一需要裁定的一条）
+
+其余四条两侧返回形状同型（数组 / 单对象），`index_quotes` 在宿主侧返回的是 `DataOutcome` 信封，接缝侧要重新序列化一次 —— 逐层核对：
+
+| 层 | 读数 | 结论 |
+|---|---|---|
+| 宿主命令 | `src-tauri/src/commands/stock_analysis.rs:4035` 的返回类型就是 `DataOutcome<Vec<IndexQuote>>`，函数体 `:4040` 原样返回（注释明写「返回信封而非裸数组」） | 前端此前收到的已是信封 |
+| worker 分派 | `axagent-plugins/crates/plugins/src/worker.rs:1545` 用 `to_value("DataOutcome", &outcome)` 透传同一类型 | 结构不变，只换序列化器 |
+| 状态枚举 | harness `data_outcome.rs:35-44` 的 `DataStatus` 恰 4 变体（`Ok` / `EmptyByTime` / `SourceFailed` / `SchemaChanged`，`snake_case`），与前端 `DATA_STATUSES` 白名单逐字一致 | 无第五态，不会误落 `schema_changed` |
+
+⇒ 等价，可切。前端仍保留「裸数组」兼容分支（历史载荷与历史 mock 可能回裸数组），不认识形状时**抛错** → `connectionFailed`，不把「读不懂」说成「没有数据」。
+
+### 145.3 前端切换与 mock / 测试
+
+**10 个调用点**切 `invokePluginCommand`：`HotStocksPanel.tsx:65`；`IndustryRankingPanel.tsx:54` 与同文件 `:109`；`SectorHeatmapPanel.tsx:50` 与同文件 `:99`（后两个面板共用 `stock_get_industry_ranking`）；`DragonTigerPanel.tsx:58` 与同文件 `:107`；`NorthBoundPanel.tsx:43` 与同文件 `:94`（单对象 DTO，非数组）；`IndexQuotesPanel.tsx:67`。
+
+> **记账**：提交 `0818cb736` 的消息写「11 个调用点」是**计数错误**，实测 10（五个榜单面板 9 + 指数面板 1）。以本节实测为准。
+
+`src/lib/browserMock.ts:7226` 起补 4 条显式 case（3 条回 `[]`、`stock_get_north_bound_flow` 回 `{}`）：后三条既不以 `get_` 开头也不以 `s` 结尾，default 兜底会给 `undefined` ⇒ 消费端 `.slice` / `Array.isArray` 当场踩空，浏览器模式静默变 `connectionFailed`；`stock_get_hot_stocks` 虽以 `s` 结尾看似能兜，仍显式登记（兜底规则一旦收紧不受牵连）。
+
+测试两条：
+- `src/lib/__tests__/browserMockStockPlugin.test.ts` 补 4 条出参形状正控（**12 passed**）。
+- `src/components/stock-analysis/__tests__/IndexQuotesPanel.status.test.tsx` 的 mock 是**名字无关**的单一 `invokeMock`，切桥后不改 mock 也照绿 —— 正因如此补了一条命令名钉桩（`invokeMock.mock.calls[0][0] === "stock_get_index_quotes"`），否则「改回宿主同名命令」同样静默绿（**6 passed**）。
+
+### 145.4 读数
+
+`node scripts/audit-l1-blockers.mjs`（判定档，工作树口径）EXIT=0：STOCK 前端反向阻塞 **14 处 / 13 文件**、Rust 反向阻塞 0 处 / 0 文件、OPC 前端反向 0 处 / 0 文件（14/13 里本批贡献 0，−1/−1 来自 #263 的装载口，见 §146）。命令条数 288 / 19 与 91 / 10 **不变** —— 插件命名命令不进 `parseRegistry`（该口径只数 `src-tauri/src/register_commands.rs` 的宿主条目）⇒ 本批**无需回写** `scripts/capability-register.json`。
+
+第五道门（`check-capability-register.mjs`）本轮**未跑**：本批零宿主注册表改动，且该门单轮约 610 s（与并行前端批抢 SMB 吞吐），留到联合收口批一次跑。
+
+### 145.5 验收（逐条实测退出码）与如实未做
+
+Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）：
+- `cargo fmt -p axagent-plugin-stock --check` EXIT=0。
+- `cargo check -p axagent-plugin-stock --all-targets` EXIT=0（`Finished dev profile in 1m 12s`）。
+- `cargo test -p axagent-plugin-stock` EXIT=0：**bins 13 passed**（含 17 条映射表用例）+ **`tests/protocol.rs` 13 passed**。
+- `node scripts/build-plugin-bundle.mjs --check` EXIT=0（三条自证：bundle 页 entry / 2 条任务源声明自洽 / describe 握手 + shutdown + 退出码 0 + `sha256 f6e84ac6…` 一致）。
+
+前端：
+- `npm run typecheck` EXIT=0（`check-tsc` 列出 **1544** 个源文件，非空跑；运行于 `IndexQuotesPanel` 两处编辑之后）。
+- `npx dprint check` 定点 11 文件 EXIT=0；`awk` 复核 0 行 CRLF。
+- vitest **逐文件单跑**：`browserMockStockPlugin.test.ts` 12 passed、`IndexQuotesPanel.status.test.tsx` 6 passed。⚠ 多文件同批跑会撞 `[vitest-pool-runner]: Timeout waiting for worker to respond`（#141 同族），**且该次命令退出码仍是 0**（`Test Files no tests` + 2 个 Unhandled Error）—— 这种形态不得当绿读。
+
+**未做**：
+① 浏览器内实际点击验证（本机未起运行实例）；本轮以 typecheck + 单测 + 清单握手覆盖。
+② 宿主同名命令（`get_hot_stocks` / `get_industry_ranking` / `get_index_quotes` / `get_market_dragon_tiger` / `get_north_bound_flow`）按 §143.2 双声明期保留，收口条件不变。
+③ `get_limit_up_pool` 带可选 `date` 入参，套不进「零入参 / 单标的」两形态 ⇒ 需先给 `MarketReadRoute` 加可选键档，明确属下一刀。
+④ 三条并行 lane（批 2c 前端半 61 次工具、ContentArea 48 次、OPC 取证 32 次）**同一轮全部异常中止**（报错文本同型，与本批代码无关）；落盘改动的验证链全部由 leader 重跑（本节 EXIT 均为 leader 亲自跑出），OPC 取证 lane 未落结论 ⇒ #266 的消费面取证需重做一遍。
+
+## 146. `#263` 第一批：`/invest` 装载权交回投资域（2026-11-10）
+
+### 146.1 刀口
+
+`src/components/layout/ContentArea.tsx:43` 原先有一条 `lazy(() => import("@/pages/InvestPage"))` —— 宿主布局层持有一条命中股票域 `feRe` 的说明符，是前端反向阻塞里**唯一可当场消掉**的一处（其余 14 处属同域互引或判据误报，归因已在 #245 逐一登记）。
+
+做法与 OPC 先例同构（#230 的 `src/pages/opc/routes.tsx`）：新建 `src/pages/invest/routes.tsx`，导出 `DOMAIN_PAGES`（声明在 `src/pages/invest/routes.tsx:35`）声明 `path: "/invest"` / `pageKey: "finance-investment"`，由注册表的 eager glob（`src/lib/domainPageRegistry.ts:163`）装载并投影给 `<Routes>`；`ContentArea` 摘掉该 `lazy` 与对应 `<Route>`，只留说明注释（`src/components/layout/ContentArea.tsx:235`）。
+
+三点边界：
+
+- **本批只交回装载权**，不交导航声明权：`/invest/replay` 仍走宿主 `BUILTIN_PAGE_PATH`，侧栏项仍由 `navRegistry` 的 `finance-investment` 持有；域模块**不再重复贡献**同 key 导航项（`getNavItems()` 是「宿主内置 + 域贡献」直接拼接，重复 key 会在侧栏长出双入口）。
+- 域模块对注册表只能 `import type`：注册表 eager 装载本模块，反向 import 运行时符号会形成环并踩 const 的 TDZ，应用启动即报错。
+- 路由匹配按 v7 的路径特异性排序、与 `<Routes>` 内顺序无关 ⇒ 域贡献的 `/invest` 与宿主 `/invest/replay` 不冲突。
+
+### 146.2 读数与验收
+
+- 域注册表测试的条数断言 18 → 19（`src/lib/__tests__/domainPageRegistry.test.ts:40`，「OPC 18 + 投资域 1」），**7 passed**。
+- `node scripts/audit-l1-blockers.mjs` STOCK 前端反向阻塞 **15 处 / 14 文件 → 14 处 / 13 文件**（−1 / −1），OPC 维持 0 / 0。
+- `npm run typecheck` EXIT=0（1544 个源文件，与 §145 同轮）；`npx dprint check` 三个文件 EXIT=0；`awk` 复核 0 行 CRLF。
+- 提交 `f057d9900`（3 文件 / +52 −13）。
+
+**未做**：① 浏览器内实际点开 `/invest` 验证（无运行实例）。② 第二批 2 处（`RECO_STYLE_*` / `HORIZON_T_SUFFIX`）需等 `src/lib/stock-analysis-utils.ts` 的并行改动交回后再动，本轮不碰。

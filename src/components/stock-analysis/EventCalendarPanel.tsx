@@ -1,5 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Segmented, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
@@ -48,9 +49,12 @@ export function EventCalendarPanel() {
 
   const fetchOneStock = async (code: string, name: string, items: EventItem[]) => {
     try {
-      const lu: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_lockup_schedule", {
-        stockCode: code,
-      }) as Record<
+      const lu: Record<string, unknown>[] = await invokePluginCommand<Record<string, unknown>[]>(
+        "stock_get_lockup_schedule",
+        {
+          stockCode: code,
+        },
+      ) as Record<
         string,
         unknown
       >[];
@@ -69,9 +73,12 @@ export function EventCalendarPanel() {
       }
     } catch { /* 单只失败不影响其他 */ }
     try {
-      const dv: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_dividend_records", {
-        stockCode: code,
-      }) as Record<
+      const dv: Record<string, unknown>[] = await invokePluginCommand<Record<string, unknown>[]>(
+        "stock_get_dividend_records",
+        {
+          stockCode: code,
+        },
+      ) as Record<
         string,
         unknown
       >[];
@@ -93,9 +100,12 @@ export function EventCalendarPanel() {
     } catch { /* */ }
     // R3-B 接入:财报披露事件
     try {
-      const evs: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_earnings_calendar", {
-        stockCode: code,
-      }) as Record<
+      const evs: Record<string, unknown>[] = await invokePluginCommand<Record<string, unknown>[]>(
+        "stock_get_earnings_calendar",
+        {
+          stockCode: code,
+        },
+      ) as Record<
         string,
         unknown
       >[];
@@ -188,7 +198,7 @@ export function EventCalendarPanel() {
         if (stockCode) {
           await (async () => {
             try {
-              const lu = await invoke<unknown[]>("get_lockup_schedule", { stockCode: stockCode });
+              const lu = await invokePluginCommand<unknown[]>("stock_get_lockup_schedule", { stockCode: stockCode });
               if (Array.isArray(lu)) {
                 for (const l of lu.slice(0, 5)) {
                   const item = l as Record<string, unknown>;
@@ -205,7 +215,7 @@ export function EventCalendarPanel() {
               }
             } catch { /* 单只失败不影响其他 */ }
             try {
-              const dv = await invoke<unknown[]>("get_dividend_records", { stockCode: stockCode });
+              const dv = await invokePluginCommand<unknown[]>("stock_get_dividend_records", { stockCode: stockCode });
               if (Array.isArray(dv)) {
                 for (const d of dv.slice(0, 3)) {
                   const item = d as Record<string, unknown>;
@@ -224,7 +234,7 @@ export function EventCalendarPanel() {
               }
             } catch { /* */ }
             try {
-              const evs = await invoke<unknown[]>("get_earnings_calendar", { stockCode: stockCode });
+              const evs = await invokePluginCommand<unknown[]>("stock_get_earnings_calendar", { stockCode: stockCode });
               if (Array.isArray(evs)) {
                 for (const e of evs.slice(0, 6)) {
                   const item = e as Record<string, unknown>;
@@ -254,9 +264,12 @@ export function EventCalendarPanel() {
               const code = w.stockCode as string;
               const name = (w.stockName ?? w.stockCode) as string;
               try {
-                const lu: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_lockup_schedule", {
-                  stockCode: code,
-                }) as Record<string, unknown>[];
+                const lu: Record<string, unknown>[] = await invokePluginCommand<Record<string, unknown>[]>(
+                  "stock_get_lockup_schedule",
+                  {
+                    stockCode: code,
+                  },
+                ) as Record<string, unknown>[];
                 if (Array.isArray(lu)) {
                   for (const l of lu.slice(0, 5)) {
                     const date = (l.unlockDate ?? l.unlock_date ?? "") as string;
@@ -272,9 +285,12 @@ export function EventCalendarPanel() {
                 }
               } catch { /* 单只失败不影响其他 */ }
               try {
-                const dv: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_dividend_records", {
-                  stockCode: code,
-                }) as Record<string, unknown>[];
+                const dv: Record<string, unknown>[] = await invokePluginCommand<Record<string, unknown>[]>(
+                  "stock_get_dividend_records",
+                  {
+                    stockCode: code,
+                  },
+                ) as Record<string, unknown>[];
                 if (Array.isArray(dv)) {
                   for (const d of dv.slice(0, 3)) {
                     const ex = (d.exDate ?? d.ex_date ?? "") as string;
@@ -292,8 +308,8 @@ export function EventCalendarPanel() {
                 }
               } catch { /* */ }
               try {
-                const evs: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>(
-                  "get_earnings_calendar",
+                const evs: Record<string, unknown>[] = await invokePluginCommand<Record<string, unknown>[]>(
+                  "stock_get_earnings_calendar",
                   {
                     stockCode: code,
                   },

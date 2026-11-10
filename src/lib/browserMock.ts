@@ -7180,6 +7180,28 @@ async function executeCommand<T>(
       // 无显式 case、一直落 default 返回 undefined——这里显式化并消除告警。
       return null as unknown as T;
 
+    // ── 股票插件命名命令（插件命令桥 批 2a，#35 行情只读批）──────────────
+    // 11 条行情只读命令：真机经插件命令桥走宿主 `market.quote` 接缝；浏览器模式
+    // 既没有插件安装根也没有行情接缝 ⇒ 按消费端形状回空态（数组 op 回 `[]`，
+    // 可空 DTO 的 op 回 `null`）。
+    // ⚠ 逐条显式声明：这批名字既不以 `get_` 开头、也不全以 s 结尾
+    // （`stock_get_cls_flash` / `stock_get_earnings_calendar` /
+    // `stock_get_option_pcr` / `stock_get_lockup_schedule` 会被 default 兜成
+    // undefined，消费端 `.slice` / `Array.isArray` 直接踩空）。
+    case "stock_get_research_reports":
+    case "stock_get_announcements":
+    case "stock_get_earnings_calendar":
+    case "stock_get_concept_board_members":
+    case "stock_get_cls_flash":
+    case "stock_get_peers":
+    case "stock_get_lockup_schedule":
+    case "stock_get_dividend_records":
+    case "stock_get_financials":
+      return [] as unknown as T;
+    case "stock_get_concept_blocks":
+    case "stock_get_option_pcr":
+      return null as unknown as T;
+
     // 暂停 / 恢复仅需成功 resolve（无返回体）。
     case "workflow_pause":
     case "workflow_resume":

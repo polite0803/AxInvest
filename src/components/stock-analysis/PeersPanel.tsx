@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Table } from "antd";
 import { useEffect, useState } from "react";
@@ -33,7 +33,7 @@ export function PeersPanel() {
     setLoading(true);
     setEmptyKind(null);
     try {
-      const data = await invoke<PeerComparison[]>("get_stock_peers", { stockCode });
+      const data = await invokePluginCommand<PeerComparison[]>("stock_get_peers", { stockCode });
       if (Array.isArray(data) && data.length > 0) {
         setPeers(data);
       } else {
@@ -60,7 +60,7 @@ export function PeersPanel() {
       if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
-      return invoke<PeerComparison[]>("get_stock_peers", { stockCode });
+      return invokePluginCommand<PeerComparison[]>("stock_get_peers", { stockCode });
     })
       .then((data) => {
         if (cancelled || !data) { return; }

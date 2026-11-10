@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Button, Card, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -34,7 +34,7 @@ export function ConceptBlocksPanel({ stockCode }: { stockCode: string }) {
     setLoading(true);
     setEmptyKind(null);
     try {
-      const result = await invoke<ConceptBlocks | null>("get_stock_concept_blocks", { stockCode });
+      const result = await invokePluginCommand<ConceptBlocks | null>("stock_get_concept_blocks", { stockCode });
       // 没有行业/概念/地区数据，按"无数据"处理
       if (!result || (result.industry === "未知" && result.concepts.length === 0 && result.regions.length === 0)) {
         setData(null);
@@ -62,7 +62,7 @@ export function ConceptBlocksPanel({ stockCode }: { stockCode: string }) {
       if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
-      return invoke<ConceptBlocks | null>("get_stock_concept_blocks", { stockCode });
+      return invokePluginCommand<ConceptBlocks | null>("stock_get_concept_blocks", { stockCode });
     })
       .then((result) => {
         if (cancelled || !result) { return; }

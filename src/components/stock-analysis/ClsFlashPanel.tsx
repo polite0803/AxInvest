@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Button, Card, Spin, Tag, Timeline } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,7 +24,7 @@ export function ClsFlashPanel() {
     setLoading(true);
     setEmptyKind(null);
     try {
-      const data = await invoke<Record<string, string | null | undefined>[]>("get_cls_flash");
+      const data = await invokePluginCommand<Record<string, string | null | undefined>[]>("stock_get_cls_flash");
       if (Array.isArray(data) && data.length > 0) {
         // 兼容后端字段名变化：驼峰/下划线都接受
         const normalized: ClsFlashItem[] = data.slice(0, 20).map((d) => ({
@@ -52,7 +52,7 @@ export function ClsFlashPanel() {
       if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
-      return invoke<Record<string, string | null | undefined>[]>("get_cls_flash");
+      return invokePluginCommand<Record<string, string | null | undefined>[]>("stock_get_cls_flash");
     })
       .then((data) => {
         if (cancelled || !data) { return; }

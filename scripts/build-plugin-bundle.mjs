@@ -816,6 +816,125 @@ function stockManifest({ version, binaryName, sha256 }) {
           required: ["id"],
         },
       },
+      // ── 批 2a（#35）：十一条行情只读命令，一律经宿主 market.quote 接缝 ──
+      // 不声明 requiredPermission ⇒ 投影 Safe，与宿主同名命令的 `safety = Safe` 逐条等阶。
+      // 入参是 camelCase（禁区 13），插件路由表翻成接缝要求的 snake_case。
+      {
+        name: "stock_get_research_reports",
+        description: "获取研究报告（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_research_reports",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_concept_blocks",
+        description: "获取个股所属概念板块（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_concept_blocks",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_announcements",
+        description: "获取公司公告（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_announcements",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_earnings_calendar",
+        description: "获取财报披露日历（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_earnings_calendar",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_concept_board_members",
+        description: "获取概念板块成分股（经宿主 market.quote 接缝，只读；入参是板块代码）",
+        command: "worker://stock_get_concept_board_members",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { boardCode: { type: "string", description: "板块代码，如 BK0475" } },
+          required: ["boardCode"],
+        },
+      },
+      {
+        name: "stock_get_cls_flash",
+        description: "获取财联社快讯（经宿主 market.quote 接缝，只读；无入参）",
+        command: "worker://stock_get_cls_flash",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_get_peers",
+        description: "获取同行业对比（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_peers",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_option_pcr",
+        description: "获取期权 PCR（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_option_pcr",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_lockup_schedule",
+        description: "获取限售解禁时间表（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_lockup_schedule",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_dividend_records",
+        description: "获取分红记录（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_dividend_records",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_financials",
+        description: "获取股票财务数据（经宿主 market.quote 接缝，只读；对比面板使用）",
+        command: "worker://stock_get_financials",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
     // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，

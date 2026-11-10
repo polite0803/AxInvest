@@ -101,6 +101,32 @@ const COMMAND_LIST_POOL_SCAN_CRONS: &str = "stock_list_pool_scan_crons";
 const COMMAND_TOGGLE_POOL_SCAN_CRON: &str = "stock_toggle_pool_scan_cron";
 /// 删除候选池扫描定时任务（宿主 `delete_pool_scan_cron`）。
 const COMMAND_DELETE_POOL_SCAN_CRON: &str = "stock_delete_pool_scan_cron";
+// ── 批 2a（#35）：十一条行情只读命令，一律经宿主 `market.quote` 接缝 ──
+// 宿主同名命令（`get_stock_*`）全部 `safety = Safe`，插件清单不声明 requiredPermission
+// ⇒ 两档逐条等阶。命令面入参是 camelCase（与前端的 `{ stockCode }` 调用点一致，禁区 13），
+// 接缝面键名由路由表翻成 snake_case（宿主 `worker.rs` 的既有协议，不改）。
+/// 获取研究报告（宿主 `get_stock_research_reports`）。
+const COMMAND_GET_RESEARCH_REPORTS: &str = "stock_get_research_reports";
+/// 获取概念板块（宿主 `get_stock_concept_blocks`）。
+const COMMAND_GET_CONCEPT_BLOCKS: &str = "stock_get_concept_blocks";
+/// 获取公司公告（宿主 `get_stock_announcements`）。
+const COMMAND_GET_ANNOUNCEMENTS: &str = "stock_get_announcements";
+/// 获取财报披露日历（宿主 `get_earnings_calendar`）。
+const COMMAND_GET_EARNINGS_CALENDAR: &str = "stock_get_earnings_calendar";
+/// 获取板块成分股（宿主 `get_concept_board_members`，入参是板块代码而非股票代码）。
+const COMMAND_GET_CONCEPT_BOARD_MEMBERS: &str = "stock_get_concept_board_members";
+/// 获取财联社快讯（宿主 `get_cls_flash`，全局快讯，不吃标的代码）。
+const COMMAND_GET_CLS_FLASH: &str = "stock_get_cls_flash";
+/// 获取同行业对比（宿主 `get_stock_peers`）。
+const COMMAND_GET_PEERS: &str = "stock_get_peers";
+/// 获取期权 PCR（宿主 `get_stock_option_pcr`）。
+const COMMAND_GET_OPTION_PCR: &str = "stock_get_option_pcr";
+/// 获取限售解禁时间表（宿主 `get_lockup_schedule`）。
+const COMMAND_GET_LOCKUP_SCHEDULE: &str = "stock_get_lockup_schedule";
+/// 获取分红记录（宿主 `get_dividend_records`）。
+const COMMAND_GET_DIVIDEND_RECORDS: &str = "stock_get_dividend_records";
+/// 获取股票财务数据（宿主 `get_stock_financials`，对比面板使用）。
+const COMMAND_GET_FINANCIALS: &str = "stock_get_financials";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
@@ -302,23 +328,34 @@ fn handle_command(
         // 三条 create 回建好的任务、九条管理面回 `null`（与宿主命令的 `()` 一致）；
         // 插件只透传入参，配置归一/响应形状的权威在宿主无 State 核心里。
         // 十二段转发用表驱动（`cron_seam_op`）而非逐条复制 —— 每个臂的形态完全一致。
-        other => match cron_seam_op(other) {
-            Some(op) => match call_analysis_seam(
-                peer,
-                &request.call_chain,
-                op,
-                stock_analysis_request(&frame.input),
-            ) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
+        other => match market_read_route(other) {
+            // 批 2a（#35）：十一条行情只读命令，经宿主 `market.quote` 接缝。
+            Some(route) => {
+                match fetch_market_read(route, &frame.input, &request.call_chain, peer) {
+                    Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                    Err((code, message)) => {
+                        CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                    },
+                }
             },
-            None => CommandOutcome::Fault(CommandFault::for_frame(
-                &frame,
-                error_codes::PLUGIN_COMMAND_UNKNOWN,
-                format!("股票插件没有命令 `{other}` 的实现"),
-            )),
+            None => match cron_seam_op(other) {
+                Some(op) => match call_analysis_seam(
+                    peer,
+                    &request.call_chain,
+                    op,
+                    stock_analysis_request(&frame.input),
+                ) {
+                    Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                    Err((code, message)) => {
+                        CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                    },
+                },
+                None => CommandOutcome::Fault(CommandFault::for_frame(
+                    &frame,
+                    error_codes::PLUGIN_COMMAND_UNKNOWN,
+                    format!("股票插件没有命令 `{other}` 的实现"),
+                )),
+            },
         },
     };
     outcome
@@ -712,6 +749,87 @@ fn stock_analysis_request(input: &Value) -> Value {
     input.clone()
 }
 
+/// 行情只读命令的路由：`market.quote` 的 op 名 + 标的入参的键名对照。
+///
+/// `keys` 是 `(命令面键, 接缝面键)`：命令面 camelCase（禁区 13，与前端调用点一致），
+/// 接缝面 snake_case（宿主 `worker.rs` 的既有协议，不改）。`None` = 该 op 不吃标的代码
+/// （`get_cls_flash` 是全局快讯）。
+#[derive(Clone, Copy)]
+struct MarketReadRoute {
+    op: &'static str,
+    keys: Option<(&'static str, &'static str)>,
+}
+
+/// 插件命令名 → `market.quote` 路由（批 2a 十一条行情只读命令）。
+///
+/// 表驱动而非十一段复制：转发形态完全一致，只有 op 与入参键不同；但 op 必须逐条写死
+/// （不按 `stock_` 前缀机械剥离），否则改名时命令会静默打到相邻的数据面上。
+fn market_read_route(command: &str) -> Option<MarketReadRoute> {
+    let stock = Some(("stockCode", "stock_code"));
+    Some(match command {
+        COMMAND_GET_RESEARCH_REPORTS => MarketReadRoute { op: "get_research_reports", keys: stock },
+        COMMAND_GET_CONCEPT_BLOCKS => MarketReadRoute { op: "get_concept_blocks", keys: stock },
+        COMMAND_GET_ANNOUNCEMENTS => MarketReadRoute { op: "get_announcements", keys: stock },
+        COMMAND_GET_EARNINGS_CALENDAR => {
+            MarketReadRoute { op: "get_earnings_calendar", keys: stock }
+        },
+        COMMAND_GET_CONCEPT_BOARD_MEMBERS => MarketReadRoute {
+            op: "get_concept_board_members",
+            keys: Some(("boardCode", "board_code")),
+        },
+        COMMAND_GET_CLS_FLASH => MarketReadRoute { op: "get_cls_flash", keys: None },
+        COMMAND_GET_PEERS => MarketReadRoute { op: "get_peers", keys: stock },
+        COMMAND_GET_OPTION_PCR => MarketReadRoute { op: "get_option_pcr", keys: stock },
+        COMMAND_GET_LOCKUP_SCHEDULE => MarketReadRoute { op: "get_lockup_schedule", keys: stock },
+        COMMAND_GET_DIVIDEND_RECORDS => MarketReadRoute { op: "get_dividend_records", keys: stock },
+        COMMAND_GET_FINANCIALS => MarketReadRoute { op: "get_financials", keys: stock },
+        _ => return None,
+    })
+}
+
+/// 调宿主 `market.quote` 接缝取一条只读数据。
+///
+/// 与 `fetch_quote` 同一纪律：凭证 / provider / 限流都在宿主侧，插件只传标的；
+/// `call_chain` 原样带上入站链，否则宿主侧的环检测收不到这条边。
+/// `as_of` 不开放 —— 宿主同名命令也不接受该参数，保持调用面等价（多开一个入参
+/// 等于让插件命令比宿主命令多一条未验证的时间旅行路径）。
+fn fetch_market_read(
+    route: MarketReadRoute,
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let mut args = serde_json::Map::new();
+    if let Some((input_key, seam_key)) = route.keys {
+        let Some(value) =
+            input.get(input_key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+        else {
+            return Err((
+                error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
+                format!("`{input_key}` 缺失或为空白"),
+            ));
+        };
+        args.insert(seam_key.to_string(), json!(value));
+    }
+
+    let reply = peer
+        .call_seam(MARKET_SEAM, route.op, Value::Object(args), call_chain.to_vec())
+        .map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("行情接缝（{}）调用失败：{e}", route.op),
+            )
+        })?;
+
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "行情接缝返回了错误但没有说明".to_string()),
+        )),
+    }
+}
+
 /// 插件命令名 → `stock.analysis` 接缝 op 名（批 1a 的十二条 cron 配置命令）。
 ///
 /// 表驱动而非十二段复制：每个臂的转发形态完全一致（透传入参、整块回出参），
@@ -768,7 +886,8 @@ fn call_analysis_seam(
 mod tests {
     use super::{
         cron_seam_op, map_analysis_state_to_run_state, map_execution_state_to_run_state,
-        stock_analysis_request, task_run_row_from_analysis_record, task_run_row_from_execution,
+        market_read_route, stock_analysis_request, task_run_row_from_analysis_record,
+        task_run_row_from_execution,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, is_plugin_task_run_state};
     use serde_json::{Value, json};
@@ -1069,5 +1188,48 @@ mod tests {
         ops.dedup();
         assert_eq!(ops.len(), cases.len(), "十二个命令必须映射到十二个不同 op：{ops:?}");
         assert_eq!(cron_seam_op("stock_unknown_cron"), None, "未知命令不得落到任何 op");
+    }
+
+    /// 批 2a（#35）十一条行情只读命令 → (`market.quote` op, 入参键) 必须逐条正确。
+    ///
+    /// 同 `cron_seam_op` 的理由：表里错一行不会有任何编译错误，命令照样回成功，
+    /// 只是把「财务数据」打到了「同行业对比」的 op 上。入参键也一并锁住 ——
+    /// camel/snake 写反时宿主 `deserialize_arg` 会报缺参，但只有这条测试能指出是哪一格。
+    #[test]
+    fn market_read_commands_map_to_their_own_ops_and_keys() {
+        let stock = Some(("stockCode", "stock_code"));
+        let cases = [
+            ("stock_get_research_reports", "get_research_reports", stock),
+            ("stock_get_concept_blocks", "get_concept_blocks", stock),
+            ("stock_get_announcements", "get_announcements", stock),
+            ("stock_get_earnings_calendar", "get_earnings_calendar", stock),
+            (
+                "stock_get_concept_board_members",
+                "get_concept_board_members",
+                Some(("boardCode", "board_code")),
+            ),
+            ("stock_get_cls_flash", "get_cls_flash", None),
+            ("stock_get_peers", "get_peers", stock),
+            ("stock_get_option_pcr", "get_option_pcr", stock),
+            ("stock_get_lockup_schedule", "get_lockup_schedule", stock),
+            ("stock_get_dividend_records", "get_dividend_records", stock),
+            ("stock_get_financials", "get_financials", stock),
+        ];
+        let mut ops: Vec<&str> = Vec::new();
+        for (command, expected_op, expected_keys) in cases {
+            let route = market_read_route(command).unwrap_or_else(|| panic!("`{command}` 未映射"));
+            assert_eq!(route.op, expected_op, "`{command}` 必须打自己的 op");
+            assert_eq!(route.keys, expected_keys, "`{command}` 的入参键不对");
+            ops.push(route.op);
+        }
+        ops.sort_unstable();
+        ops.dedup();
+        assert_eq!(ops.len(), cases.len(), "十一条命令必须映射到十一个不同 op：{ops:?}");
+
+        assert!(market_read_route("stock_unknown_market_read").is_none(), "未知命令不得落到行情表");
+        assert!(
+            market_read_route("stock_list_recommendation_crons").is_none(),
+            "cron 命令不得被行情表吞掉"
+        );
     }
 }

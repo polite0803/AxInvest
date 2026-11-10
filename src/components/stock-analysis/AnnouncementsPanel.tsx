@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Button, Card, Spin, Table, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,7 +30,7 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
     setLoading(true);
     setEmptyKind(null);
     try {
-      const data = await invoke<Announcement[]>("get_stock_announcements", { stockCode });
+      const data = await invokePluginCommand<Announcement[]>("stock_get_announcements", { stockCode });
       if (Array.isArray(data) && data.length > 0) {
         setItems(data);
       } else {
@@ -57,7 +57,7 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
       if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
-      return invoke<Announcement[]>("get_stock_announcements", { stockCode });
+      return invokePluginCommand<Announcement[]>("stock_get_announcements", { stockCode });
     })
       .then((data) => {
         if (cancelled || !data) { return; }

@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Button, Card, Spin } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -32,7 +32,7 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
     setLoading(true);
     setEmptyKind(null);
     try {
-      const result = await invoke<OptionPCR | null>("get_stock_option_pcr", { stockCode });
+      const result = await invokePluginCommand<OptionPCR | null>("stock_get_option_pcr", { stockCode });
       if (result && (result.callVolume > 0 || result.putVolume > 0)) {
         setPcr(result);
       } else {
@@ -59,7 +59,7 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
       if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
-      return invoke<OptionPCR | null>("get_stock_option_pcr", { stockCode });
+      return invokePluginCommand<OptionPCR | null>("stock_get_option_pcr", { stockCode });
     })
       .then((result) => {
         if (cancelled || !result) { return; }

@@ -7678,3 +7678,61 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 - `cargo check -p axagent`：EXIT=0（后台、共享 `CARGO_TARGET_DIR`；`build.rs` 同批重生成注册表）。
 - 第五道门：判定档硬失败仍为并行批那 2 条体量锚（`frontendFileCaliber` / `frontendDirCaliber`），本批 5 条读数锚全绿，契约 A 三方 1499/1499/1499。
 - **未做**：① 智能体命令索引端到端（本机 vitest 环境起不来，静态面覆盖）；② 两条 `Dangerous` delete 按 §142.3 不再动，**不留待办**。
+
+## 143. `#35` 批 2a：十一条行情只读命令迁入 T2（双声明期；2026-11-10）
+
+### 143.1 迁移面（11 条命令）
+
+插件侧在 `axagent-plugins/crates/plugin-stock/src/main.rs` 新增一张静态路由表 `MarketReadRoute`（`market_read_route` + `fetch_market_read`），逐条写死 op 名，**不按 `stock_` 前缀机械剥离**（否则改名时命令会静默打到相邻数据面）。接缝统一走宿主 `market.quote`：
+
+| 插件命令 | 接缝 op | 入参（命令面 → 接缝面） |
+|---|---|---|
+| `stock_get_research_reports` | `get_research_reports` | `stockCode` → `stock_code` |
+| `stock_get_concept_blocks` | `get_concept_blocks` | 同上 |
+| `stock_get_announcements` | `get_announcements` | 同上 |
+| `stock_get_earnings_calendar` | `get_earnings_calendar` | 同上 |
+| `stock_get_concept_board_members` | `get_concept_board_members` | `boardCode` → `board_code` |
+| `stock_get_cls_flash` | `get_cls_flash` | 无标的入参 |
+| `stock_get_peers` | `get_peers` | `stockCode` → `stock_code` |
+| `stock_get_option_pcr` | `get_option_pcr` | 同上 |
+| `stock_get_lockup_schedule` | `get_lockup_schedule` | 同上 |
+| `stock_get_dividend_records` | `get_dividend_records` | 同上 |
+| `stock_get_financials` | `get_financials` | 同上 |
+
+- **命名分野**：命令面 / 清单 `inputSchema` / 前端调用键一律 camelCase（禁区 13）；接缝面键名 snake_case 是宿主 `worker.rs` 的既有协议，由插件侧路由表翻译，宿主零改动。
+- **`as_of` 不开放**：宿主同名命令不接受该参数，插件也不透传 —— 调用面等价，不多开一条未验证的时间旅行路径。
+- **`handle_command` 两级回落**：`market_read_route` 命中优先，未命中再落 `cron_seam_op`，都不中才 `PLUGIN_COMMAND_UNKNOWN`。单测 `market_read_commands_map_to_their_own_ops_and_keys` 逐条钉 `op` 与 `keys`，并 dedup 断言 11 个 op 互不重复，另加两条负控（不存在的 `stock_` 命令、`stock_list_recommendation_crons` 都不得被行情表吞掉）。
+
+### 143.2 判据：本批不删宿主命令（双声明期）
+
+11 条宿主命令（`get_stock_research_reports` / `get_stock_concept_blocks` / `get_stock_announcements` / `get_earnings_calendar` / `get_concept_board_members` / `get_cls_flash` / `get_stock_peers` / `get_stock_option_pcr` / `get_lockup_schedule` / `get_dividend_records` / `get_stock_financials`）**保留**，本轮只做「插件侧具备等价能力 + 前端调用点切换」：
+
+1. **智能体工具面的消费方不止前端**：`src-tauri/agency_experts/**` 有 18 处按 `get_stock_*` 原名引用这些工具（`skills/{market-mainline,risk-management,stock-pick}/SKILL.md` 与 `stock-analysis/` 下 15 个专家提示词）。删宿主版会让「不装插件 / 插件未启用」时这些技能资产指向不存在的工具，属静默功能退化。
+2. **与试点批同形态**：§142 之前试点批迁移的 `get_pipeline_history` / `list_pending_evolution_plans` 至今仍是双声明，本批沿用同一形态。
+3. **权限逐条等阶**：11 条宿主命令均 `safety = Safe`，清单**不声明** `requiredPermission`（`plugin_command_safety` 对未声明项投影 Safe）⇒ 两档等阶，双声明不引入授权差。
+
+### 143.3 前端与 mock
+
+- 7 个文件 / **21 处**调用改 `invokePluginCommand`：`AnnouncementsPanel` 2、`ClsFlashPanel` 2、`CompareView` 2（同文件另两条 `get_stock_quote` 仍走宿主，本批不动）、`ConceptBlocksPanel` 2、`EventCalendarPanel` 9（lockup 3 / dividend 3 / earnings 3，同文件 `list_watchlist` 仍走宿主）、`OptionPcrPanel` 2、`PeersPanel` 2。`stock_get_research_reports` 与 `stock_get_concept_board_members` 前端零调用，只补插件面（智能体/第三方插件可用）。
+- `src/lib/browserMock.ts` 新增 11 条显式 case（9 条回 `[]`、`stock_get_concept_blocks` / `stock_get_option_pcr` 回 `null`）：这批名字不以 `get_` 开头，`stock_get_cls_flash` / `..._earnings_calendar` / `..._option_pcr` / `..._lockup_schedule` 也不以 `s` 结尾 ⇒ 不显式声明会被 default 兜成 `undefined`，消费端 `.slice` / `Array.isArray` 踩空。
+
+### 143.4 读数级联：零变化
+
+| 锚点 | 值 |
+|---|---|
+| `commandTotal` / `registryFileLines` | 1499 / 1566（**不变**：宿主零增删，`register_commands.rs` 未变） |
+| `stockBoundaryCommands` | 283 / 20（不变） |
+| `stockAuditDomainCommands` | 288 / 19（不变） |
+
+插件命令不进入 `parseRegistry` 口径（该口径只数 `src/register_commands.rs` 的宿主条目），故本批对登记表五个读数锚零影响，**无需回写 `scripts/capability-register.json`**。
+
+### 143.5 验收与如实未做
+
+- `npm run typecheck` EXIT=0（列出 1543 个源文件，`--noEmit` 通过）。
+- `npx dprint check <本批 8 个 TS 文件>` EXIT=0（首轮 `EventCalendarPanel.tsx` 报 1 处折行，已 `dprint fmt` 该单文件后复跑为 0）。
+- `cargo fmt -p axagent-plugin-stock --check` 首轮报 4 处折行（均在 `main.rs` 本批新增段），`cargo fmt -p axagent-plugin-stock` 后复跑 EXIT=0；`git status` 确认该 package 只改 `main.rs`。
+- `cargo check -p axagent-plugin-stock --all-targets` EXIT=0（38.78s）。
+- `cargo test -p axagent-plugin-stock --bins market_read_commands` EXIT=0（1 passed / 11 filtered）。
+- `node scripts/build-plugin-bundle.mjs --check` EXIT=0：构建 `axagent-plugin-stock` 后真起 worker，三条自证全过 —— 「1 个 bundle 页的 entry 均存在且在白名单内」「2 个任务源声明自洽」「describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致」（sha256 `c01bf4b6…`）。
+- `cargo check -p axagent --all-targets` EXIT=0（41.88s；`build.rs` 对注册表的复算结果与盘上一致，未产生新行）。
+- **未做**：① `src/stores/feature/stockAnalysisStore.ts:2300` 的 `get_earnings_calendar` 仍走宿主 —— 该文件带着另一并行批的未提交改动（20/20），本批不碰，留待该批落地后一并切换；② 11 条宿主命令按 §143.2 保留，双声明期结束条件 = 插件默认安装/启用成为产品形态后，再按 `agency_experts` 消费面逐条改指；③ 智能体命令索引端到端未跑（本机 vitest 环境限制，仍以静态面 + 清单握手覆盖）。

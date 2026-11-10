@@ -2,6 +2,7 @@ import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import i18n from "@/i18n";
 import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { StockQuote } from "@/types";
 import { SwapOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Input, Spin, Tag } from "antd";
@@ -60,8 +61,10 @@ export function CompareView() {
       const [q1, q2, f1, f2] = await Promise.all([
         invoke<StockQuote>("get_stock_quote", { stockCode: code1 }),
         invoke<StockQuote>("get_stock_quote", { stockCode: code2 }),
-        invoke<Record<string, unknown>[]>("get_stock_financials", { stockCode: code1 }).then(parseFin),
-        invoke<Record<string, unknown>[]>("get_stock_financials", { stockCode: code2 }).then(parseFin),
+        invokePluginCommand<Record<string, unknown>[]>("stock_get_financials", { stockCode: code1 })
+          .then(parseFin),
+        invokePluginCommand<Record<string, unknown>[]>("stock_get_financials", { stockCode: code2 })
+          .then(parseFin),
       ]);
       setQuote1(q1);
       setQuote2(q2);

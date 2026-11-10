@@ -40,7 +40,8 @@ const LazyLearningGraphPage = lazy(() =>
 const LazyDynamicPageViewer = lazy(() =>
   import("@/pages/DynamicPageViewer").then((m) => ({ default: m.DynamicPageViewer }))
 );
-const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage })));
+// 2026-11-11 #263：投资域主页的装载权已交回域自身（域目录 `routes.tsx` 经注册表投影贡献），
+// 宿主主壳不再点名域页面组件。
 const LazyReplayWorkbenchPage = lazy(() =>
   import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
 );
@@ -230,14 +231,11 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          <Route
-            path={BUILTIN_PAGE_PATH["finance-investment"]}
-            element={
-              <PageContextProvider page="finance-investment">
-                <SafeLazyPage Page={LazyInvestPage} />
-              </PageContextProvider>
-            }
-          />
+          {
+            /* 2026-11-11 #263：/invest 主页路由已移交投资域声明（`src/pages/invest/routes.tsx`
+            经注册表投影渲染），本文件不再登记；下面的 /invest/replay 仍走宿主表取 path，
+            属后续批次（导航声明权移交）的范围。 */
+          }
           {/* 回放工作台：2026-10-28 起归入投资域，旧 /replay-workbench 302 */}
           <Route
             path={`${BUILTIN_PAGE_PATH["finance-investment"]}/replay`}
@@ -258,7 +256,8 @@ export const ContentArea = memo(function ContentArea() {
           />
           {
             /* ── 域贡献的页面路由（注册表投影）：宿主不 import 任何域页面组件 ──
-              覆盖 OPC 主页（/opc、/opc/:tab）、14 个能力包页（/opc/domain/:id）与需求发现页。
+              覆盖 OPC 主页（/opc、/opc/:tab）、14 个能力包页（/opc/domain/:id）、需求发现页
+              与投资域主页（/invest，#263）。
               域侧增删页面改 `src/pages/<域>/routes.tsx`，本文件不动（#36 迁出期解耦点）。 */
           }
           {contributedPages.map(({ id, path, pageKey, Page }) => (

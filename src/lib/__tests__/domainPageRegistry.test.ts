@@ -33,13 +33,16 @@ describe("domainPageRegistry", () => {
   it("glob 装载口求值了域路由模块（命中为空 ⇒ 域目录改名，不是「没有域页面」）", () => {
     const sources = loadedDomainRouteSources();
     expect(sources.filter((s) => s.includes("pages/opc/routes"))).toHaveLength(1);
+    // #263：投资域主页装载口迁入 `src/pages/invest/routes.tsx`，同一 glob 自动命中
+    expect(sources.filter((s) => s.includes("pages/invest/routes"))).toHaveLength(1);
   });
 
-  it("OPC 贡献 18 条路由：主页两段 + 需求发现 + 14 个能力包页 + 域聚合页", () => {
+  it("注册表共 19 条路由：OPC 18（主页两段 + 需求发现 + 14 个能力包页 + 域聚合页）+ 投资域 1", () => {
     const routes = getDomainPageRoutes();
-    expect(routes).toHaveLength(18);
+    expect(routes).toHaveLength(19);
     expect(routes.filter((r) => r.id.startsWith("domain:"))).toHaveLength(14);
-    // 带侧栏入口的 16 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口
+    // 带侧栏入口的 16 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口；
+    // 投资域 `/invest` 无入口（侧栏项仍由宿主 builtinNavItems 持有，见 invest/routes.tsx 头注）
     expect(routes.filter((r) => r.nav)).toHaveLength(16);
   });
 

@@ -7489,3 +7489,38 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 
 - harness 内联测试：Lane G 报过绿（stub 表 4 项），主 crate check 在后台排队跑（**共享锁上有并行批的 `cargo check -p axagent`，不 kill、排队等它跑完再跑本批定点**）。
 - 清单语法：`node --check scripts/build-plugin-bundle.mjs` PASS。清单校验（`--check` 起 worker 握手）须等 worker 重编译后跑，与本批提交同窗口。
+
+## 138. #259 死命令退役前置核查：cron 管理三族 18 条逐条判定（2026-11-10；**只读取证、零代码改动、零读数变化**）
+
+### 138.1 口径
+
+- **候选面**：`register_commands.rs` 中名字含 `cron` 的 34 条（`create` 8 + `update_validate_decisions_cron` 1 + `nl_to_cron` 1 + delete/list/toggle 各 8）。
+- **前端调用面**：`git grep -o` 数 `src/**` 内命令名出现次数 —— **宽口径**（含 dev mock 与测试），所以「0」比「无 invoke 调用点」更强。
+- **Rust 侧引用面**：`git grep -n` 扫 `src-tauri/src`（排除构建产物 `register_commands.rs`）、`src-tauri/plugins`、`scripts`、`extension`、`e2e`。
+- **动态拼名盲区已排除**：`src/**` 内不存在 `*_cron` 的模板拼接或字符串数组引用；三个语料族在 `src/` 的唯一命中是 `investTaskDefs.ts` 的三处 `create_*` 字面量与 `browserMock.ts` 的三条 mock 分支。
+
+### 138.2 逐族判定（18 条 = 6 类型 × delete/list/toggle）
+
+| 类型族 | 前端 | Rust 内部引用 | 插件命令声明 | 判定 |
+|---|---|---|---|---|
+| `pool_scan` | 0 | `init/stock_analysis_service.rs:431`（delete）/`:412`（list）/`:421`（toggle）按 op 分派；`_core` 在 `commands/pool_scan.rs:722` / `:733` / `:751` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_pool_scan_cron` 四条声明，产物 `dist/plugins/stock/plugin.json` 的 24 条 commands 内含 `stock_delete_pool_scan_cron` 等 | **不可退役**（插件/智能体通道在用） |
+| `recommendation` | 0 | 同形分派（`:345` / `:326` / `:335`）；`_core` 在 `commands/recommendation_cron.rs:326` / `:337` / `:355` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_recommendation_cron` 四条声明 | **不可退役** |
+| `trend_screening` | 0 | 同形分派（`:389` / `:367` / `:376`）；`_core` 在 `commands/recommendation_cron.rs:401` / `:412` / `:430` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_trend_screening_cron` 四条声明 | **不可退役** |
+| `batch_reflection` | 0 | 无 —— 仓内只有定义 `commands/stock_analysis.rs:6477` / `:6491` / `:6513` | 无 | **可退役** |
+| `watchlist_scan` | 0 | 无 —— 只有定义 `commands/stock_analysis.rs:6121` / `:6135` / `:6157` | 无 | **可退役** |
+| `decision_backtest` | 0 | 无 —— 只有定义 `commands/backtest_validation.rs:1476` / `:1490` / `:1512` | 无 | **可退役** |
+
+### 138.3 为什么「前端零调用」不等于功能缺失
+
+管理面走**通用**面：`src/components/settings/SchedulerSettings.tsx:175` 起用 `list_scheduled_tasks` / `delete_scheduled_task` / `pause_scheduled_task` / `resume_scheduled_task`（`src-tauri/src/commands/scheduled_task.rs:281` / `:384` / `:395` / `:406`），对全部 cron job 通用；create 三兄弟仍被任务中心表单使用（`src/pages/TasksCenterPage/forms/investTaskDefs.ts:84` / `:134` / `:155`）。⇒ 删这三族的 delete/list/toggle **不影响 UI 的任何现有路径**，且不给「建得了、管不了」留新缺口（那本就是通用面在管）。
+
+### 138.4 与任务描述「15 条」的差异（如实声明）
+
+任务 #259 描述记 15 条 = 5 个机型（batch_reflection / pool_scan / recommendation / trend_screening / watchlist_scan）× 3 族；本轮实测把 `decision_backtest` 族（3 条，源在 `backtest_validation.rs` 而非 `stock_analysis.rs`）一并纳入 ⇒ **18 条**。差异是覆盖面，不是判据分歧；可退役面因此是 **9 条**（batch_reflection 3 + watchlist_scan 3 + decision_backtest 3），不是 15 条全退役。
+
+### 138.5 退役执行批的前置（本批未做）
+
+1. 删 9 个 `#[tauri::command]` fn（2 个文件），`src-tauri/build.rs` 自动重建 `register_commands.rs`（**禁手改构建产物**）。
+2. 读数级联必须同批实测回写：`commandTotal` / `commandNameSetParity` 1518 → 1509；`stockBoundaryCommands` 302、`stockAuditDomainCommands` 304 的实际级联**以执行批扫描器实测为准**（按 module/name 口径可能同时下调，不许照抄本条预估）。
+3. 文档与基线同批改指：`docs/features/reflection-evolution.md:77` 引 `list_batch_reflection_crons`，且其中的 `stock_analysis.rs:6454` 已与盘上 `:6477` 漂移（属 `scripts/doc-refs-baseline.json:423` 在册条目）⇒ 删命令时必删该引用并收紧基线。
+4. 验证：主 crate `cargo check`（23–28 min，须后台并让出共享锁）+ 第五道门 `--selftest` 与判定档 + `check-doc-refs`。

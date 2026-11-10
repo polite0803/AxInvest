@@ -134,6 +134,20 @@ const COMMAND_GET_LOCKUP_SCHEDULE: &str = "stock_get_lockup_schedule";
 const COMMAND_GET_DIVIDEND_RECORDS: &str = "stock_get_dividend_records";
 /// 获取股票财务数据（宿主 `get_stock_financials`，对比面板使用）。
 const COMMAND_GET_FINANCIALS: &str = "stock_get_financials";
+// ── 批 2c（#262）：五条全市场榜单/盘面只读命令，全部零入参，同走 `market.quote` 接缝 ──
+// 与 `get_cls_flash` 同形（`keys: None`）：榜单是全局数据，不吃标的代码；
+// 凭证 / 限流 / provider 选择全在宿主接缝侧，插件只传 op。
+/// 获取热门股票榜（宿主 `get_hot_stocks`，零入参）。
+const COMMAND_GET_HOT_STOCKS: &str = "stock_get_hot_stocks";
+/// 获取行业排名榜（宿主 `get_industry_ranking`，零入参）。
+const COMMAND_GET_INDUSTRY_RANKING: &str = "stock_get_industry_ranking";
+/// 获取指数行情（宿主 `get_index_quotes`，零入参；⚠ 接缝 op 名与命令名**不同源**，
+/// 是 `get_index_quotes_outcome` —— 宿主命令体调的 trait 方法就带 `outcome` 后缀，见路由表）。
+const COMMAND_GET_INDEX_QUOTES: &str = "stock_get_index_quotes";
+/// 获取全市场龙虎榜（宿主 `get_market_dragon_tiger`，零入参）。
+const COMMAND_GET_MARKET_DRAGON_TIGER: &str = "stock_get_market_dragon_tiger";
+/// 获取北向资金（宿主 `get_north_bound_flow`，零入参）。
+const COMMAND_GET_NORTH_BOUND_FLOW: &str = "stock_get_north_bound_flow";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
@@ -337,7 +351,8 @@ fn handle_command(
         // 插件只透传入参，配置归一/响应形状的权威在宿主无 State 核心里。
         // 十二段转发用表驱动（`cron_seam_op`）而非逐条复制 —— 每个臂的形态完全一致。
         other => match market_read_route(other) {
-            // 批 2a（#35）：十一条行情只读命令，经宿主 `market.quote` 接缝。
+            // 批 2a（#35）十一条 + 批 2b quote + 批 2c（#262）五条全市场榜单/盘面命令，
+            // 一律经宿主 `market.quote` 接缝，形态由路由表决定。
             Some(route) => {
                 match fetch_market_read(route, &frame.input, &request.call_chain, peer) {
                     Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -770,9 +785,10 @@ struct MarketReadRoute {
     keys: Option<(&'static str, &'static str)>,
 }
 
-/// 插件命令名 → `market.quote` 路由（批 2a 十一条 + 批 2b 的 `stock_get_quote`，共十二条）。
+/// 插件命令名 → `market.quote` 路由（批 2a 十一条 + 批 2b 的 `stock_get_quote` +
+/// 批 2c 五条全市场榜单/盘面命令，共十七条）。
 ///
-/// 表驱动而非十二段复制：转发形态完全一致，只有 op 与入参键不同；但 op 必须逐条写死
+/// 表驱动而非逐段复制：转发形态完全一致，只有 op 与入参键不同；但 op 必须逐条写死
 /// （不按 `stock_` 前缀机械剥离），否则改名时命令会静默打到相邻的数据面上。
 fn market_read_route(command: &str) -> Option<MarketReadRoute> {
     let stock = Some(("stockCode", "stock_code"));
@@ -794,6 +810,17 @@ fn market_read_route(command: &str) -> Option<MarketReadRoute> {
         COMMAND_GET_LOCKUP_SCHEDULE => MarketReadRoute { op: "get_lockup_schedule", keys: stock },
         COMMAND_GET_DIVIDEND_RECORDS => MarketReadRoute { op: "get_dividend_records", keys: stock },
         COMMAND_GET_FINANCIALS => MarketReadRoute { op: "get_financials", keys: stock },
+        // ── 批 2c（#262）：五条全市场榜单/盘面命令，零入参 ⇒ `keys: None`（与 `get_cls_flash` 同形）。
+        // `stock_get_index_quotes` 的 op 是 `get_index_quotes_outcome`，**不按命令名剥前缀**：
+        // 宿主命令 `get_index_quotes` 体内调的 trait 方法 / `worker.rs` 分派臂都叫 `*_outcome`
+        // （返回 `DataOutcome` 信封而非裸数组）；机械剥成 `get_index_quotes` 会打到不存在的 op 上。
+        COMMAND_GET_HOT_STOCKS => MarketReadRoute { op: "get_hot_stocks", keys: None },
+        COMMAND_GET_INDUSTRY_RANKING => MarketReadRoute { op: "get_industry_ranking", keys: None },
+        COMMAND_GET_INDEX_QUOTES => MarketReadRoute { op: "get_index_quotes_outcome", keys: None },
+        COMMAND_GET_MARKET_DRAGON_TIGER => {
+            MarketReadRoute { op: "get_market_dragon_tiger", keys: None }
+        },
+        COMMAND_GET_NORTH_BOUND_FLOW => MarketReadRoute { op: "get_north_bound_flow", keys: None },
         _ => return None,
     })
 }
@@ -1273,7 +1300,8 @@ mod tests {
         assert_eq!(cron_seam_op("stock_unknown_cron"), None, "未知命令不得落到任何 op");
     }
 
-    /// 批 2a（#35）十一条行情只读命令 → (`market.quote` op, 入参键) 必须逐条正确。
+    /// 批 2a（#35）十一条 + 批 2b quote + 批 2c（#262）五条榜单/盘面命令，
+    /// 共十七条行情只读命令 → (`market.quote` op, 入参键) 必须逐条正确。
     ///
     /// 同 `cron_seam_op` 的理由：表里错一行不会有任何编译错误，命令照样回成功，
     /// 只是把「财务数据」打到了「同行业对比」的 op 上。入参键也一并锁住 ——
@@ -1298,6 +1326,13 @@ mod tests {
             ("stock_get_lockup_schedule", "get_lockup_schedule", stock),
             ("stock_get_dividend_records", "get_dividend_records", stock),
             ("stock_get_financials", "get_financials", stock),
+            // 批 2c（#262）：五条全市场榜单/盘面命令，零入参 ⇒ keys = None；
+            // `stock_get_index_quotes` 的 op 带 `_outcome` 后缀（与命令名不同源），逐条钉死。
+            ("stock_get_hot_stocks", "get_hot_stocks", None),
+            ("stock_get_industry_ranking", "get_industry_ranking", None),
+            ("stock_get_index_quotes", "get_index_quotes_outcome", None),
+            ("stock_get_market_dragon_tiger", "get_market_dragon_tiger", None),
+            ("stock_get_north_bound_flow", "get_north_bound_flow", None),
         ];
         let mut ops: Vec<&str> = Vec::new();
         for (command, expected_op, expected_keys) in cases {
@@ -1308,7 +1343,7 @@ mod tests {
         }
         ops.sort_unstable();
         ops.dedup();
-        assert_eq!(ops.len(), cases.len(), "十二条命令必须映射到十二个不同 op：{ops:?}");
+        assert_eq!(ops.len(), cases.len(), "十七条命令必须映射到十七个不同 op：{ops:?}");
 
         assert!(market_read_route("stock_unknown_market_read").is_none(), "未知命令不得落到行情表");
         assert!(

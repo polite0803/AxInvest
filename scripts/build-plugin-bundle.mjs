@@ -958,6 +958,39 @@ function stockManifest({ version, binaryName, sha256 }) {
           required: ["stockCode"],
         },
       },
+      // ── 批 2c（#262）：五条全市场榜单/盘面只读命令，零入参，同走 market.quote 接缝 ──
+      // `stock_get_index_quotes` 的接缝 op 是 `get_index_quotes_outcome`（返回 DataOutcome
+      // 信封，与宿主命令同形）；清单面命令名与宿主 `get_index_quotes` 对齐。
+      {
+        name: "stock_get_hot_stocks",
+        description: "获取热门股票榜（经宿主 market.quote 接缝，只读；无入参）",
+        command: "worker://stock_get_hot_stocks",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_get_industry_ranking",
+        description: "获取行业排名榜（经宿主 market.quote 接缝，只读；无入参）",
+        command: "worker://stock_get_industry_ranking",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_get_index_quotes",
+        description: "获取指数行情（经宿主 market.quote 接缝，只读；无入参，返回 DataOutcome 信封）",
+        command: "worker://stock_get_index_quotes",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_get_market_dragon_tiger",
+        description: "获取全市场龙虎榜（经宿主 market.quote 接缝，只读；无入参）",
+        command: "worker://stock_get_market_dragon_tiger",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_get_north_bound_flow",
+        description: "获取北向资金（经宿主 market.quote 接缝，只读；无入参）",
+        command: "worker://stock_get_north_bound_flow",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
     // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，

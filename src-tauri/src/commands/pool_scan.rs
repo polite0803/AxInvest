@@ -34,7 +34,7 @@
 
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::recommender::Period;
-use axagent_runtime_core::{CronJob, CronJobStatus};
+use axagent_runtime_core::{CronJob, CronJobStatus, CronJobStore};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -614,20 +614,84 @@ pub async fn create_pool_scan_cron(
     max_per_run: Option<usize>,
     run_deadline_seconds: Option<u64>,
 ) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
+    create_pool_scan_cron_core(
+        &state.cron_job_store,
+        PoolCreateRequest {
+            cron_expression,
+            lookback_days,
+            max_stocks,
+            min_confidence,
+            enabled,
+            max_per_run,
+            run_deadline_seconds,
+        },
+    )
+    .await
+}
+
+/// 列出所有候选池扫描定时任务
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出候选池分析定时任务")]
+#[tauri::command]
+pub async fn list_pool_scan_crons(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
+    list_pool_scan_crons_core(&state.cron_job_store).await
+}
+
+/// 启停候选池扫描定时任务
+#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关候选池分析定时任务")]
+#[tauri::command]
+pub async fn toggle_pool_scan_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    toggle_pool_scan_cron_core(&state.cron_job_store, &id, enabled).await
+}
+
+/// 删除候选池扫描定时任务
+#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除候选池分析定时任务")]
+#[tauri::command]
+pub async fn delete_pool_scan_cron(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    delete_pool_scan_cron_core(&state.cron_job_store, &id).await
+}
+
+// ── 无 State 核心：宿主命令与 `stock.analysis` 接缝共用同一份实现 ──
+//
+// 同 `recommendation_cron.rs`：T2 化（#35 批 1a）后同一动作有宿主命令与插件命令桥
+// 两条入口，校验/默认值/响应形状必须只有一处（禁区 12）。
+
+/// 创建候选池扫描任务的入参 —— 宿主命令形参与接缝 JSON 的同一份形状（camelCase）。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct PoolCreateRequest {
+    pub cron_expression: Option<String>,
+    pub lookback_days: Option<u32>,
+    pub max_stocks: Option<usize>,
+    pub min_confidence: Option<u8>,
+    pub enabled: Option<bool>,
+    pub max_per_run: Option<usize>,
+    pub run_deadline_seconds: Option<u64>,
+}
+
+pub(crate) async fn create_pool_scan_cron_core(
+    store: &CronJobStore,
+    request: PoolCreateRequest,
+) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
     let defaults = PoolScanConfig::default();
     let config = PoolScanConfig {
-        lookback_days: lookback_days.unwrap_or(defaults.lookback_days),
-        max_stocks: max_stocks.unwrap_or(defaults.max_stocks),
-        min_confidence: min_confidence.unwrap_or(defaults.min_confidence),
+        lookback_days: request.lookback_days.unwrap_or(defaults.lookback_days),
+        max_stocks: request.max_stocks.unwrap_or(defaults.max_stocks),
+        min_confidence: request.min_confidence.unwrap_or(defaults.min_confidence),
         // None / 0 都落默认硬上限（0 语义在 PoolScanConfig 内归一）
-        max_per_run: max_per_run.unwrap_or(defaults.max_per_run),
-        run_deadline_seconds: run_deadline_seconds.unwrap_or(defaults.run_deadline_seconds),
+        max_per_run: request.max_per_run.unwrap_or(defaults.max_per_run),
+        run_deadline_seconds: request.run_deadline_seconds.unwrap_or(defaults.run_deadline_seconds),
     };
     if config.min_confidence > 100 {
         return Err("min_confidence 必须在 0-100 之间".to_string());
     }
 
-    let expr = cron_expression.unwrap_or_else(|| "0 17 * * *".to_string());
+    let expr = request.cron_expression.unwrap_or_else(|| "0 17 * * *".to_string());
     let prompt = config.to_json()?;
     let window_desc = if config.lookback_days == 0 {
         "全池（不限进池日期）".to_string()
@@ -648,20 +712,17 @@ pub async fn create_pool_scan_cron(
     let mut job = CronJob::new(&format!("候选池扫描（{window_desc}）"), &expr, &prompt, &desc)
         .with_id(id.clone())
         .with_task_type(POOL_SCAN_TASK_TYPE);
-    if !enabled.unwrap_or(true) {
+    if !request.enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
-    state.cron_job_store.add(job.clone()).await;
+    store.add(job.clone()).await;
     Ok(crate::commands::stock_analysis::CronJobResponse::from(&job))
 }
 
-/// 列出所有候选池扫描定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出候选池分析定时任务")]
-#[tauri::command]
-pub async fn list_pool_scan_crons(
-    state: State<'_, AppState>,
+pub(crate) async fn list_pool_scan_crons_core(
+    store: &CronJobStore,
 ) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
+    let jobs = store.list().await;
     Ok(jobs
         .iter()
         .filter(|j| j.task_type.as_deref() == Some(POOL_SCAN_TASK_TYPE))
@@ -669,18 +730,14 @@ pub async fn list_pool_scan_crons(
         .collect())
 }
 
-/// 启停候选池扫描定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关候选池分析定时任务")]
-#[tauri::command]
-pub async fn toggle_pool_scan_cron(
-    state: State<'_, AppState>,
-    id: String,
+pub(crate) async fn toggle_pool_scan_cron_core(
+    store: &CronJobStore,
+    id: &str,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .cron_job_store
+    store
         .set_status(
-            &id,
+            id,
             if enabled {
                 CronJobStatus::Active
             } else {
@@ -691,11 +748,11 @@ pub async fn toggle_pool_scan_cron(
     Ok(())
 }
 
-/// 删除候选池扫描定时任务
-#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除候选池分析定时任务")]
-#[tauri::command]
-pub async fn delete_pool_scan_cron(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
+pub(crate) async fn delete_pool_scan_cron_core(
+    store: &CronJobStore,
+    id: &str,
+) -> Result<(), String> {
+    store.remove(id).await;
     Ok(())
 }
 

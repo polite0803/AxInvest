@@ -403,7 +403,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 8 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 24 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -647,6 +647,173 @@ function stockManifest({ version, binaryName, sha256 }) {
             strategyName: { type: "string", description: "策略名（当前仅 ma_cross）" },
           },
           required: ["klines", "wfConfig", "desConfig", "strategyName"],
+        },
+      },
+      // ── 批 1a（#35）：十二股票 cron 配置命令，经 `stock.analysis` 接缝 ──
+      // 三条 create 回建好的任务、九条管理面回 `null`；配置归一与响应形状的权威在主壳
+      // `commands/recommendation_cron.rs` / `commands/pool_scan.rs` 的无 State 核心。
+      // ⚠ 九条写命令（三 create + 三 toggle + 三 delete）必须 `requiredPermission:
+      // "workspace-write"`（否则智能体面按 `Safe` 暴露、确认弹窗形同虚设）；三条 list
+      // 是读 op，宿主 `required_permission_for` 与清单都不加闸。
+      {
+        name: "stock_create_recommendation_cron",
+        description: "创建荐股定时任务（经宿主 stock.analysis 接缝写入调度器任务表）",
+        command: "worker://stock_create_recommendation_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string", description: "任务名" },
+            cronExpression: { type: "string", description: "cron 表达式（camelCase）" },
+            periods: {
+              type: "array",
+              items: { type: "string", enum: ["ultra_short", "short", "mid", "long"] },
+              description: "投资周期档位，不能为空",
+            },
+            minConfidence: { type: "integer", description: "最低置信度 0-100" },
+            topN: { type: "integer", description: "每次推送只数，必须大于 0" },
+          },
+          required: ["name", "cronExpression", "periods", "minConfidence", "topN"],
+        },
+      },
+      {
+        // 无参：接缝 provider 的 `require_no_params` 会拒非空入参。
+        name: "stock_list_recommendation_crons",
+        description: "列出荐股定时任务（经宿主 stock.analysis 接缝，只读，无参数）",
+        command: "worker://stock_list_recommendation_crons",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "stock_toggle_recommendation_cron",
+        description: "启停荐股定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_toggle_recommendation_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "任务 id" },
+            enabled: { type: "boolean", description: "true = 启用，false = 暂停" },
+          },
+          required: ["id", "enabled"],
+        },
+      },
+      {
+        name: "stock_delete_recommendation_cron",
+        description: "删除荐股定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_delete_recommendation_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { id: { type: "string", description: "任务 id" } },
+          required: ["id"],
+        },
+      },
+      {
+        // 三参可选：缺省 = 原链 / `0 16 * * 1-5` / 启用。
+        name: "stock_create_trend_screening_cron",
+        description: "创建趋势智选定时任务（经宿主 stock.analysis 接缝写入调度器任务表）",
+        command: "worker://stock_create_trend_screening_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            cronExpression: { type: "string", description: "cron 表达式，缺省 0 16 * * 1-5" },
+            enabled: { type: "boolean", description: "缺省 true" },
+            workflowId: {
+              type: "string",
+              description: "链 id：serenity-screening（原链，缺省）/ serenity-screening-fast（快速链）",
+            },
+          },
+        },
+      },
+      {
+        name: "stock_list_trend_screening_crons",
+        description: "列出趋势智选定时任务（经宿主 stock.analysis 接缝，只读，无参数）",
+        command: "worker://stock_list_trend_screening_crons",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "stock_toggle_trend_screening_cron",
+        description: "启停趋势智选定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_toggle_trend_screening_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "任务 id" },
+            enabled: { type: "boolean", description: "true = 启用，false = 暂停" },
+          },
+          required: ["id", "enabled"],
+        },
+      },
+      {
+        name: "stock_delete_trend_screening_cron",
+        description: "删除趋势智选定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_delete_trend_screening_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { id: { type: "string", description: "任务 id" } },
+          required: ["id"],
+        },
+      },
+      {
+        // 六参可选：缺省值在宿主无 State 核心内（`PoolScanConfig::default()`）。
+        name: "stock_create_pool_scan_cron",
+        description: "创建候选池扫描定时任务（经宿主 stock.analysis 接缝写入调度器任务表）",
+        command: "worker://stock_create_pool_scan_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            cronExpression: { type: "string", description: "cron 表达式，缺省 0 17 * * *" },
+            lookbackDays: { type: "integer", description: "进池窗口天数，0 = 全池" },
+            maxStocks: { type: "integer", description: "最多分析只数，0 = 不限" },
+            minConfidence: { type: "integer", description: "最低置信度 0-100" },
+            enabled: { type: "boolean", description: "缺省 true" },
+            maxPerRun: { type: "integer", description: "单次运行硬上限" },
+            runDeadlineSeconds: { type: "integer", description: "单次运行截止秒数" },
+          },
+        },
+      },
+      {
+        name: "stock_list_pool_scan_crons",
+        description: "列出候选池扫描定时任务（经宿主 stock.analysis 接缝，只读，无参数）",
+        command: "worker://stock_list_pool_scan_crons",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "stock_toggle_pool_scan_cron",
+        description: "启停候选池扫描定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_toggle_pool_scan_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "任务 id" },
+            enabled: { type: "boolean", description: "true = 启用，false = 暂停" },
+          },
+          required: ["id", "enabled"],
+        },
+      },
+      {
+        name: "stock_delete_pool_scan_cron",
+        description: "删除候选池扫描定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_delete_pool_scan_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { id: { type: "string", description: "任务 id" } },
+          required: ["id"],
         },
       },
     ],

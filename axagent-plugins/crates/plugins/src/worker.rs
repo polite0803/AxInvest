@@ -479,6 +479,20 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
         // `None`**（给读缝加闸会把只读插件无端拒掉，正反向锁在 `stock_analysis_*` 用例）。
         ("stock.analysis", "batch_upsert_mainlines") => Some(PluginPermission::Write),
+        // 批 1a（#35）：九个 cron 管理写 op 增删改宿主 `CronJobStore` ⇒ `Write`；
+        // 三个 list 仍是 `None`（同上：读缝不加闸）。
+        (
+            "stock.analysis",
+            "create_recommendation_cron"
+            | "toggle_recommendation_cron"
+            | "delete_recommendation_cron"
+            | "create_trend_screening_cron"
+            | "toggle_trend_screening_cron"
+            | "delete_trend_screening_cron"
+            | "create_pool_scan_cron"
+            | "toggle_pool_scan_cron"
+            | "delete_pool_scan_cron",
+        ) => Some(PluginPermission::Write),
         // `opc.store` 的写 op 一律要 `write`：blog 三件（发布 / 删除 / 创建）+ #36 批 2 的
         // 四条 id·枚举写 op（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）+
         // #36 批 3 的八条创建 / 流程写 op + #32 批 B 的项目三件（更新 / 删除 / 里程碑完成）
@@ -2756,6 +2770,175 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.des_integration(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── stock.analysis 接缝 · 批 1a（#35）：十二股票 cron 管理命令的管理面 ──
+            // 方向与上面四条同族（宿主 → 插件）。与试点批的唯一差别是**有写 op**：
+            // 3 create + 3 toggle + 3 delete 改宿主 `CronJobStore` ⇒ 权限表登记为 `Write`；
+            // 3 个 list 仍 `None`。入参同样嵌一层 `{"request": {...}}` 透传，形状权威
+            // 在主壳 `commands/recommendation_cron.rs` / `pool_scan.rs` 的无 State 核心。
+            "stock.analysis" if op == "create_recommendation_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_recommendation_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "list_recommendation_crons" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_recommendation_crons(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "toggle_recommendation_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.toggle_recommendation_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "delete_recommendation_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.delete_recommendation_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "create_trend_screening_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_trend_screening_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "list_trend_screening_crons" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_trend_screening_crons(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "toggle_trend_screening_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.toggle_trend_screening_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "delete_trend_screening_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.delete_trend_screening_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "create_pool_scan_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_pool_scan_cron(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "list_pool_scan_crons" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_pool_scan_crons(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "toggle_pool_scan_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.toggle_pool_scan_cron(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "delete_pool_scan_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.delete_pool_scan_cron(request)) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -10455,6 +10638,8 @@ mod tests {
         upsert_calls: Mutex<Vec<Value>>,
         industry_calls: Mutex<Vec<Value>>,
         factor_calls: Mutex<Vec<Value>>,
+        /// 批 1a：`list_pool_scan_crons`（读 op）收到的载荷序列 —— 读 op 必须能穿过权限闸。
+        cron_list_calls: Mutex<Vec<Value>>,
     }
 
     impl FixedStockAnalysisProvider {
@@ -10463,6 +10648,7 @@ mod tests {
                 upsert_calls: Mutex::new(Vec::new()),
                 industry_calls: Mutex::new(Vec::new()),
                 factor_calls: Mutex::new(Vec::new()),
+                cron_list_calls: Mutex::new(Vec::new()),
             }
         }
     }
@@ -10495,6 +10681,16 @@ mod tests {
                 "cutoffDate": "",
                 "windowRows": 0,
             }))
+        }
+
+        /// 批 1a：只覆盖一个**读** op。其余 cron op 吃默认实现（显式报未实现），
+        /// 正反向用例因此不需要为九条写 op 各写一个替身。
+        async fn list_pool_scan_crons(
+            &self,
+            input: Value,
+        ) -> axagent_harness::core_error::Result<Value> {
+            self.cron_list_calls.lock().push(input);
+            Ok(json!([]))
         }
     }
 
@@ -10794,6 +10990,92 @@ mod tests {
         assert_eq!(verdict.2, None, "读 op `stock_factor` 不得设权限闸");
         // 接缝维度参与判定：同名 op 换接缝不得再命中本条。
         assert_eq!(required_permission_for("opc.store", "batch_upsert_mainlines"), None);
+    }
+
+    /// 批 1a（#35）十二 cron op 的权限档：3 create + 3 toggle + 3 delete = `Write`，
+    /// 3 个 list 一条闸都不许加（同上面「给读缝加闸会把只读插件无端拒掉」的判据）。
+    ///
+    /// 九条写 op 在权限表里写在同一个 `|` 多分支里 —— 漏一条不会有编译错误，
+    /// 只会让那条命令对只读插件永久开放，因此逐条枚举而不是只抽查。
+    #[test]
+    fn stock_analysis_cron_ops_permissions_follow_read_write_split() {
+        let writes = [
+            "create_recommendation_cron",
+            "toggle_recommendation_cron",
+            "delete_recommendation_cron",
+            "create_trend_screening_cron",
+            "toggle_trend_screening_cron",
+            "delete_trend_screening_cron",
+            "create_pool_scan_cron",
+            "toggle_pool_scan_cron",
+            "delete_pool_scan_cron",
+        ];
+        let reads =
+            ["list_recommendation_crons", "list_trend_screening_crons", "list_pool_scan_crons"];
+        for op in writes {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                Some(PluginPermission::Write),
+                "写 op `{op}` 必须要求 write"
+            );
+            // 接缝维度同样参与判定：同名 op 换接缝不得命中。
+            assert_eq!(
+                required_permission_for("opc.store", op),
+                None,
+                "`{op}` 只属于 stock.analysis"
+            );
+        }
+        for op in reads {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                None,
+                "读 op `{op}` 不得设权限闸"
+            );
+        }
+    }
+
+    /// 正向（批 1a）：同一个无 `write` 权限的 peer 上，写 cron op 被拒且**零触达**，
+    /// 读 cron op 照常穿闸并拿到 provider 的返回值。
+    #[test]
+    fn stock_analysis_cron_write_denied_without_permission_while_list_passes() {
+        let provider = Arc::new(FixedStockAnalysisProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = stock_analysis_peer_with_permissions(provider, Vec::new());
+
+        let (denied, listed) =
+            with_watchdog(Duration::from_secs(2), "stock.analysis cron 权限闸", move || {
+                let denied = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.analysis",
+                        "op": "delete_pool_scan_cron",
+                        "args": { "request": { "id": "pool-1" } },
+                    }),
+                    &[],
+                );
+                let listed = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.analysis",
+                        "op": "list_pool_scan_crons",
+                        "args": { "request": {} },
+                    }),
+                    &[],
+                );
+                (denied, listed)
+            });
+
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 的删除命令必须被拒，实际 {denied:?}"
+        );
+        assert_eq!(
+            listed.kind,
+            axagent_plugin_proto::ResponseKind::Success,
+            "list 读 op 必须放行（无 write 也要能读），实际 {listed:?}"
+        );
+        assert_eq!(listed.value, Some(json!([])), "读 op 的返回值应原样回给插件");
+        assert_eq!(captured.cron_list_calls.lock().len(), 1, "读 op 应触达 provider 一次");
+        assert_eq!(captured.cron_list_calls.lock()[0], json!({}), "载荷应原样透传");
     }
 
     /// 正向：无 `write` 权限 ⇒ 写 op 在取 provider 之前被拒（零触达）；

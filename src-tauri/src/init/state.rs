@@ -1804,8 +1804,13 @@ pub async fn create_app_state_with_resource_dir(
     // 不得依赖 implementor ⇒ 接缝载荷用 `Value` 整块透传，转换点只有本 provider 一处。
     // 失败只 warn，不阻断启动（与 market.quote / jobs.store / analysis.record / opc.store 同策略）。
     {
+        // `cron_job_store` 与 `AppState` 持的是**同一个** `Arc`（下面按值移入）——
+        // 批 1a 的九个 cron 写 op 必须改到调度器看到的那份任务表。
         let provider: Arc<dyn axagent_harness::StockAnalysisProvider> =
-            Arc::new(crate::init::stock_analysis_service::HostStockAnalysis::new(sea_db.clone()));
+            Arc::new(crate::init::stock_analysis_service::HostStockAnalysis::new(
+                sea_db.clone(),
+                cron_job_store.clone(),
+            ));
         match axagent_harness::get_capability_registry().register_stock_analysis(provider) {
             Ok(_) => tracing::info!("stock.analysis 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("stock.analysis 注册失败: {e}"),

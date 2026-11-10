@@ -55,14 +55,27 @@ use axagent_analysis_engine::market_mainline::{BatchUpsertInput, batch_upsert_ma
 use axagent_analysis_engine::stock_factor::{fetch_stock_chg_1m, parse_stock_refs};
 // T2 试点批（#248）：pipeline 两行的形状权威在主壳 commands 层 —— 无 State 核心是
 // IPC 命令与本接缝的**同一份**列清单（第二份 `json!` 就是第二套形状，禁区 12）。
+use crate::commands::pool_scan::{
+    PoolCreateRequest, create_pool_scan_cron_core, delete_pool_scan_cron_core,
+    list_pool_scan_crons_core, toggle_pool_scan_cron_core,
+};
+use crate::commands::recommendation_cron::{
+    CronIdRequest, CronToggleRequest, RecoCreateRequest, TrendCreateRequest,
+    create_recommendation_cron_core, create_trend_screening_cron_core,
+    delete_recommendation_cron_core, delete_trend_screening_cron_core,
+    list_recommendation_crons_core, list_trend_screening_crons_core,
+    toggle_recommendation_cron_core, toggle_trend_screening_cron_core,
+};
 use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
 use axagent_dao::repo::stock_evolution_history as evo_hist;
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::stock_analysis::StockAnalysisProvider;
+use axagent_runtime_core::CronJobStore;
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 /// `stock_factor` op 的入参：**宽容形态原样**（与工具入参逐字相同）。
 ///
@@ -88,11 +101,44 @@ struct StockFactorRequest {
 pub struct HostStockAnalysis {
     /// 与 `AppState.harness.db()` **同一个**连接池句柄（Clone 是句柄语义，不是第二套连接）。
     db: DatabaseConnection,
+    /// 与 `AppState.cron_job_store` **同一个**实例（`Arc` 共享，不是第二份任务表）——
+    /// 定时任务的读改必须与调度器、宿主命令看到同一份状态，否则插件建的任务永不触发。
+    cron_job_store: Arc<CronJobStore>,
 }
 
 impl HostStockAnalysis {
-    pub fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+    pub fn new(db: DatabaseConnection, cron_job_store: Arc<CronJobStore>) -> Self {
+        Self { db, cron_job_store }
+    }
+
+    /// 无参 op 的入参闸：只收 `null` / `{}`。
+    fn require_no_params(op: &str, input: &Value) -> Result<()> {
+        if !input.is_null() && !input.as_object().is_some_and(|o| o.is_empty()) {
+            return Err(AxAgentError::Validation(format!(
+                "stock.analysis::{op} 不收参数（期望 {{}} 或缺省）"
+            )));
+        }
+        Ok(())
+    }
+
+    /// 核心错误（`String`）→ 接缝错误。核心与宿主命令共用，错误文案原样透出。
+    fn cron_err(op: &str, e: String) -> AxAgentError {
+        AxAgentError::Provider(format!("stock.analysis::{op} 失败: {e}"))
+    }
+
+    /// 响应序列化错误 → 接缝错误。
+    fn to_value(op: &str, value: &impl serde::Serialize) -> Result<Value> {
+        serde_json::to_value(value)
+            .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{op} 序列化失败: {e}")))
+    }
+
+    /// JSON 入参 → 请求结构（错误文案带 op 与期望形状）。
+    fn parse<T: serde::de::DeserializeOwned>(op: &str, expect: &str, input: Value) -> Result<T> {
+        serde_json::from_value(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::{op} 参数解析失败: {e}。期望 {expect}"
+            ))
+        })
     }
 }
 
@@ -256,5 +302,137 @@ impl StockAnalysisProvider for HostStockAnalysis {
         serde_json::to_value(&report).map_err(|e| {
             AxAgentError::Provider(format!("stock.analysis::des_integration 序列化失败: {e}"))
         })
+    }
+
+    // ── 定时任务配置 op（#35 批 1a）──────────────────────────────────────
+    //
+    // 每个 op 都是「解析入参 → 调命令侧无 State 核心 → 序列化出参」。核心是宿主命令
+    // 与接缝的**同一份**实现（校验 / 默认值 / 响应形状只有一处，禁区 12）。
+
+    /// 写 op：创建荐股定时任务。
+    async fn create_recommendation_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<RecoCreateRequest>(
+            "create_recommendation_cron",
+            "{name, cronExpression, periods[], minConfidence, topN}",
+            input,
+        )?;
+        let response = create_recommendation_cron_core(&self.cron_job_store, request)
+            .await
+            .map_err(|e| Self::cron_err("create_recommendation_cron", e))?;
+        Self::to_value("create_recommendation_cron", &response)
+    }
+
+    /// 读 op：列出荐股定时任务。
+    async fn list_recommendation_crons(&self, input: Value) -> Result<Value> {
+        Self::require_no_params("list_recommendation_crons", &input)?;
+        let response = list_recommendation_crons_core(&self.cron_job_store)
+            .await
+            .map_err(|e| Self::cron_err("list_recommendation_crons", e))?;
+        Self::to_value("list_recommendation_crons", &response)
+    }
+
+    /// 写 op：启停荐股定时任务。
+    async fn toggle_recommendation_cron(&self, input: Value) -> Result<Value> {
+        let request =
+            Self::parse::<CronToggleRequest>("toggle_recommendation_cron", "{id, enabled}", input)?;
+        toggle_recommendation_cron_core(&self.cron_job_store, &request.id, request.enabled)
+            .await
+            .map_err(|e| Self::cron_err("toggle_recommendation_cron", e))?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：删除荐股定时任务。
+    async fn delete_recommendation_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<CronIdRequest>("delete_recommendation_cron", "{id}", input)?;
+        delete_recommendation_cron_core(&self.cron_job_store, &request.id)
+            .await
+            .map_err(|e| Self::cron_err("delete_recommendation_cron", e))?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：创建趋势智选定任务（三参可选）。
+    async fn create_trend_screening_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<TrendCreateRequest>(
+            "create_trend_screening_cron",
+            "{cronExpression?, enabled?, workflowId?}（缺省 = 原链 / 0 16 * * 1-5 / 启用）",
+            input,
+        )?;
+        let response = create_trend_screening_cron_core(&self.cron_job_store, request)
+            .await
+            .map_err(|e| Self::cron_err("create_trend_screening_cron", e))?;
+        Self::to_value("create_trend_screening_cron", &response)
+    }
+
+    /// 读 op：列出趋势智选定时任务。
+    async fn list_trend_screening_crons(&self, input: Value) -> Result<Value> {
+        Self::require_no_params("list_trend_screening_crons", &input)?;
+        let response = list_trend_screening_crons_core(&self.cron_job_store)
+            .await
+            .map_err(|e| Self::cron_err("list_trend_screening_crons", e))?;
+        Self::to_value("list_trend_screening_crons", &response)
+    }
+
+    /// 写 op：启停趋势智选定时任务。
+    async fn toggle_trend_screening_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<CronToggleRequest>(
+            "toggle_trend_screening_cron",
+            "{id, enabled}",
+            input,
+        )?;
+        toggle_trend_screening_cron_core(&self.cron_job_store, &request.id, request.enabled)
+            .await
+            .map_err(|e| Self::cron_err("toggle_trend_screening_cron", e))?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：删除趋势智选定时任务。
+    async fn delete_trend_screening_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<CronIdRequest>("delete_trend_screening_cron", "{id}", input)?;
+        delete_trend_screening_cron_core(&self.cron_job_store, &request.id)
+            .await
+            .map_err(|e| Self::cron_err("delete_trend_screening_cron", e))?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：创建候选池扫设定时任务（六参可选，缺省值在核心内）。
+    async fn create_pool_scan_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<PoolCreateRequest>(
+            "create_pool_scan_cron",
+            "{cronExpression?, lookbackDays?, maxStocks?, minConfidence?, enabled?, \
+             maxPerRun?, runDeadlineSeconds?}",
+            input,
+        )?;
+        let response = create_pool_scan_cron_core(&self.cron_job_store, request)
+            .await
+            .map_err(|e| Self::cron_err("create_pool_scan_cron", e))?;
+        Self::to_value("create_pool_scan_cron", &response)
+    }
+
+    /// 读 op：列出候选池扫设定时任务。
+    async fn list_pool_scan_crons(&self, input: Value) -> Result<Value> {
+        Self::require_no_params("list_pool_scan_crons", &input)?;
+        let response = list_pool_scan_crons_core(&self.cron_job_store)
+            .await
+            .map_err(|e| Self::cron_err("list_pool_scan_crons", e))?;
+        Self::to_value("list_pool_scan_crons", &response)
+    }
+
+    /// 写 op：启停候选池扫设定时任务。
+    async fn toggle_pool_scan_cron(&self, input: Value) -> Result<Value> {
+        let request =
+            Self::parse::<CronToggleRequest>("toggle_pool_scan_cron", "{id, enabled}", input)?;
+        toggle_pool_scan_cron_core(&self.cron_job_store, &request.id, request.enabled)
+            .await
+            .map_err(|e| Self::cron_err("toggle_pool_scan_cron", e))?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：删除候选池扫设定时任务。
+    async fn delete_pool_scan_cron(&self, input: Value) -> Result<Value> {
+        let request = Self::parse::<CronIdRequest>("delete_pool_scan_cron", "{id}", input)?;
+        delete_pool_scan_cron_core(&self.cron_job_store, &request.id)
+            .await
+            .map_err(|e| Self::cron_err("delete_pool_scan_cron", e))?;
+        Ok(Value::Null)
     }
 }

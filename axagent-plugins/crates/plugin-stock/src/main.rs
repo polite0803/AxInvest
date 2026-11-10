@@ -73,6 +73,34 @@ const COMMAND_PIPELINE_RUN_DETAIL: &str = "stock_get_pipeline_run_detail";
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
 const COMMAND_DES_INTEGRATION: &str = "stock_wf_des_integration";
+// ── 批 1a（#35）：十二股票 cron 配置命令 ──
+// 与试点批同形态：入参是宿主命令参数的 camelCase 平铺 JSON，整块透传给
+// `stock.analysis` 接缝；配置归一 / desc 文案 / uuid / 响应形状的权威在主壳
+// `commands/recommendation_cron.rs` / `commands/pool_scan.rs` 的无 State 核心里。
+/// 创建荐股定时任务（宿主 `create_recommendation_cron`）。
+const COMMAND_CREATE_RECOMMENDATION_CRON: &str = "stock_create_recommendation_cron";
+/// 列出荐股定时任务（宿主 `list_recommendation_crons`）—— 读 op，无权限闸。
+const COMMAND_LIST_RECOMMENDATION_CRONS: &str = "stock_list_recommendation_crons";
+/// 启停荐股定时任务（宿主 `toggle_recommendation_cron`）。
+const COMMAND_TOGGLE_RECOMMENDATION_CRON: &str = "stock_toggle_recommendation_cron";
+/// 删除荐股定时任务（宿主 `delete_recommendation_cron`）。
+const COMMAND_DELETE_RECOMMENDATION_CRON: &str = "stock_delete_recommendation_cron";
+/// 创建趋势智选定任务（宿主 `create_trend_screening_cron`）。
+const COMMAND_CREATE_TREND_SCREENING_CRON: &str = "stock_create_trend_screening_cron";
+/// 列出趋势智选定任务（宿主 `list_trend_screening_crons`）—— 读 op。
+const COMMAND_LIST_TREND_SCREENING_CRONS: &str = "stock_list_trend_screening_crons";
+/// 启停趋势智选定任务（宿主 `toggle_trend_screening_cron`）。
+const COMMAND_TOGGLE_TREND_SCREENING_CRON: &str = "stock_toggle_trend_screening_cron";
+/// 删除趋势智选定任务（宿主 `delete_trend_screening_cron`）。
+const COMMAND_DELETE_TREND_SCREENING_CRON: &str = "stock_delete_trend_screening_cron";
+/// 创建候选池扫描定时任务（宿主 `create_pool_scan_cron`）。
+const COMMAND_CREATE_POOL_SCAN_CRON: &str = "stock_create_pool_scan_cron";
+/// 列出候选池扫描定时任务（宿主 `list_pool_scan_crons`）—— 读 op。
+const COMMAND_LIST_POOL_SCAN_CRONS: &str = "stock_list_pool_scan_crons";
+/// 启停候选池扫描定时任务（宿主 `toggle_pool_scan_cron`）。
+const COMMAND_TOGGLE_POOL_SCAN_CRON: &str = "stock_toggle_pool_scan_cron";
+/// 删除候选池扫描定时任务（宿主 `delete_pool_scan_cron`）。
+const COMMAND_DELETE_POOL_SCAN_CRON: &str = "stock_delete_pool_scan_cron";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
@@ -270,11 +298,28 @@ fn handle_command(
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
         },
-        other => CommandOutcome::Fault(CommandFault::for_frame(
-            &frame,
-            error_codes::PLUGIN_COMMAND_UNKNOWN,
-            format!("股票插件没有命令 `{other}` 的实现"),
-        )),
+        // ── 批 1a（#35）：十二股票 cron 配置命令，一律经 `stock.analysis` 接缝 ──
+        // 三条 create 回建好的任务、九条管理面回 `null`（与宿主命令的 `()` 一致）；
+        // 插件只透传入参，配置归一/响应形状的权威在宿主无 State 核心里。
+        // 十二段转发用表驱动（`cron_seam_op`）而非逐条复制 —— 每个臂的形态完全一致。
+        other => match cron_seam_op(other) {
+            Some(op) => match call_analysis_seam(
+                peer,
+                &request.call_chain,
+                op,
+                stock_analysis_request(&frame.input),
+            ) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            },
+            None => CommandOutcome::Fault(CommandFault::for_frame(
+                &frame,
+                error_codes::PLUGIN_COMMAND_UNKNOWN,
+                format!("股票插件没有命令 `{other}` 的实现"),
+            )),
+        },
     };
     outcome
         .into_frame_response()
@@ -667,6 +712,28 @@ fn stock_analysis_request(input: &Value) -> Value {
     input.clone()
 }
 
+/// 插件命令名 → `stock.analysis` 接缝 op 名（批 1a 的十二条 cron 配置命令）。
+///
+/// 表驱动而非十二段复制：每个臂的转发形态完全一致（透传入参、整块回出参），
+/// 只有 op 名不同。返回值是 `&'static str`，与宿主 `worker.rs` 的分派臂逐字对应。
+fn cron_seam_op(command: &str) -> Option<&'static str> {
+    Some(match command {
+        COMMAND_CREATE_RECOMMENDATION_CRON => "create_recommendation_cron",
+        COMMAND_LIST_RECOMMENDATION_CRONS => "list_recommendation_crons",
+        COMMAND_TOGGLE_RECOMMENDATION_CRON => "toggle_recommendation_cron",
+        COMMAND_DELETE_RECOMMENDATION_CRON => "delete_recommendation_cron",
+        COMMAND_CREATE_TREND_SCREENING_CRON => "create_trend_screening_cron",
+        COMMAND_LIST_TREND_SCREENING_CRONS => "list_trend_screening_crons",
+        COMMAND_TOGGLE_TREND_SCREENING_CRON => "toggle_trend_screening_cron",
+        COMMAND_DELETE_TREND_SCREENING_CRON => "delete_trend_screening_cron",
+        COMMAND_CREATE_POOL_SCAN_CRON => "create_pool_scan_cron",
+        COMMAND_LIST_POOL_SCAN_CRONS => "list_pool_scan_crons",
+        COMMAND_TOGGLE_POOL_SCAN_CRON => "toggle_pool_scan_cron",
+        COMMAND_DELETE_POOL_SCAN_CRON => "delete_pool_scan_cron",
+        _ => return None,
+    })
+}
+
 /// 调宿主 `stock.analysis` 接缝 —— 三个工具命令的唯一取数路径（E 批 #240）。
 ///
 /// 入参嵌一层 `{"request": {...}}`，与 `opc.store` 的 `*ListQuery` 同形：宿主
@@ -700,8 +767,8 @@ fn call_analysis_seam(
 #[cfg(test)]
 mod tests {
     use super::{
-        map_analysis_state_to_run_state, map_execution_state_to_run_state, stock_analysis_request,
-        task_run_row_from_analysis_record, task_run_row_from_execution,
+        cron_seam_op, map_analysis_state_to_run_state, map_execution_state_to_run_state,
+        stock_analysis_request, task_run_row_from_analysis_record, task_run_row_from_execution,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, is_plugin_task_run_state};
     use serde_json::{Value, json};
@@ -969,5 +1036,38 @@ mod tests {
             "`calls` 未声明 `{}`：三个 E 批命令会在宿主侧被拒。实际: {calls:?}",
             super::STOCK_ANALYSIS_SEAM
         );
+    }
+
+    /// 批 1a（#35）十二 cron 命令 → 接缝 op 的映射必须**逐条**正确且互不重复。
+    ///
+    /// 分派用表驱动（`cron_seam_op`），复制粘贴错一行不会有任何编译错误：命令照样
+    /// 回成功，只是打到了另一族的任务表上（例如 `delete_pool_scan_cron` 删掉荐股任务）。
+    /// 因此这里既锁「命令 → op」逐字对应，也锁「十二个 op 互不相同」。
+    #[test]
+    fn cron_command_whitelist_maps_each_command_to_its_own_op() {
+        let cases = [
+            ("stock_create_recommendation_cron", "create_recommendation_cron"),
+            ("stock_list_recommendation_crons", "list_recommendation_crons"),
+            ("stock_toggle_recommendation_cron", "toggle_recommendation_cron"),
+            ("stock_delete_recommendation_cron", "delete_recommendation_cron"),
+            ("stock_create_trend_screening_cron", "create_trend_screening_cron"),
+            ("stock_list_trend_screening_crons", "list_trend_screening_crons"),
+            ("stock_toggle_trend_screening_cron", "toggle_trend_screening_cron"),
+            ("stock_delete_trend_screening_cron", "delete_trend_screening_cron"),
+            ("stock_create_pool_scan_cron", "create_pool_scan_cron"),
+            ("stock_list_pool_scan_crons", "list_pool_scan_crons"),
+            ("stock_toggle_pool_scan_cron", "toggle_pool_scan_cron"),
+            ("stock_delete_pool_scan_cron", "delete_pool_scan_cron"),
+        ];
+        let mut ops: Vec<&str> = Vec::new();
+        for (command, expected) in cases {
+            let actual = cron_seam_op(command).unwrap_or_else(|| panic!("`{command}` 未映射"));
+            assert_eq!(actual, expected, "`{command}` 必须打到自己的 op");
+            ops.push(actual);
+        }
+        ops.sort_unstable();
+        ops.dedup();
+        assert_eq!(ops.len(), cases.len(), "十二个命令必须映射到十二个不同 op：{ops:?}");
+        assert_eq!(cron_seam_op("stock_unknown_cron"), None, "未知命令不得落到任何 op");
     }
 }

@@ -42,7 +42,7 @@ impl RecoCronConfig {
 // ── Tauri 命令：荐股定时任务 CRUD ──
 
 use axagent_agent_macro::agent_command;
-use axagent_runtime_core::{CronJob, CronJobStatus};
+use axagent_runtime_core::{CronJob, CronJobStatus, CronJobStore};
 use serde::Serialize;
 use tauri::State;
 
@@ -116,28 +116,11 @@ pub async fn create_recommendation_cron(
     min_confidence: u8,
     top_n: usize,
 ) -> Result<RecoCronJobResponse, String> {
-    if periods.is_empty() {
-        return Err("periods 不能为空".to_string());
-    }
-    if top_n == 0 {
-        return Err("top_n 必须大于 0".to_string());
-    }
-    // 前端 Slider 是 0-100，但 IPC 层不校验数字范围（u8 会把 300 静默截成 44），
-    // 会造出「用户以为阈值 300、实际按 44 过滤」的静默错配。
-    if min_confidence > 100 {
-        return Err("min_confidence 必须在 0-100 之间".to_string());
-    }
-    let config = RecoCronConfig { periods, min_confidence, top_n };
-    let prompt =
-        serde_json::to_string(&config).map_err(|e| format!("序列化荐股 cron 配置失败: {e}"))?;
-    let desc = format!("荐股定时推送 (置信度≥{}%, 前{}只)", min_confidence, top_n);
-    let job = CronJob::new(&name, &cron_expression, &prompt, &desc)
-        .with_task_type("stock-recommendation");
-    let id = state.cron_job_store.add(job).await;
-    // 重新读回以拿到完整字段（next_run_at 等）
-    let saved =
-        state.cron_job_store.get(&id).await.ok_or_else(|| "保存后未找到任务".to_string())?;
-    Ok(RecoCronJobResponse::from_job(&saved))
+    create_recommendation_cron_core(
+        &state.cron_job_store,
+        RecoCreateRequest { name, cron_expression, periods, min_confidence, top_n },
+    )
+    .await
 }
 
 /// 列出所有荐股定时任务
@@ -146,12 +129,7 @@ pub async fn create_recommendation_cron(
 pub async fn list_recommendation_crons(
     state: State<'_, AppState>,
 ) -> Result<Vec<RecoCronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
-    Ok(jobs
-        .iter()
-        .filter(|j| j.task_type.as_deref() == Some("stock-recommendation"))
-        .map(RecoCronJobResponse::from_job)
-        .collect())
+    list_recommendation_crons_core(&state.cron_job_store).await
 }
 
 /// 启停荐股定时任务
@@ -162,18 +140,7 @@ pub async fn toggle_recommendation_cron(
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .cron_job_store
-        .set_status(
-            &id,
-            if enabled {
-                CronJobStatus::Active
-            } else {
-                CronJobStatus::Paused
-            },
-        )
-        .await;
-    Ok(())
+    toggle_recommendation_cron_core(&state.cron_job_store, &id, enabled).await
 }
 
 /// 删除荐股定时任务
@@ -183,8 +150,7 @@ pub async fn delete_recommendation_cron(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
-    Ok(())
+    delete_recommendation_cron_core(&state.cron_job_store, &id).await
 }
 
 // ── Tauri 命令：趋势智选定时任务 CRUD ──
@@ -250,8 +216,156 @@ pub async fn create_trend_screening_cron(
     enabled: Option<bool>,
     workflow_id: Option<String>,
 ) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
-    let wf_id = resolve_trend_workflow_id(workflow_id.as_deref())?;
-    let expr = cron_expression.unwrap_or_else(|| "0 16 * * 1-5".to_string());
+    create_trend_screening_cron_core(
+        &state.cron_job_store,
+        TrendCreateRequest { cron_expression, enabled, workflow_id },
+    )
+    .await
+}
+
+/// 列出所有趋势智选定时任务
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出趋势智选定时任务")]
+#[tauri::command]
+pub async fn list_trend_screening_crons(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
+    list_trend_screening_crons_core(&state.cron_job_store).await
+}
+
+/// 启停趋势智选定时任务
+#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关趋势智选定时任务")]
+#[tauri::command]
+pub async fn toggle_trend_screening_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    toggle_trend_screening_cron_core(&state.cron_job_store, &id, enabled).await
+}
+
+/// 删除趋势智选定时任务
+#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除趋势智选定时任务")]
+#[tauri::command]
+pub async fn delete_trend_screening_cron(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    delete_trend_screening_cron_core(&state.cron_job_store, &id).await
+}
+
+// ── 无 State 核心：宿主命令与 `stock.analysis` 接缝共用同一份实现 ──
+//
+// T2 化（#35 批 1a）后同一动作有两条入口：宿主 Tauri 命令（双声明期保留）与插件
+// worker 经 `stock.analysis` 接缝的调用。形状与校验必须只有一处（禁区 12），所以
+// 命令体退化为「参数打包 + 调用核心」，接缝 provider 也调这里。核心只依赖
+// `CronJobStore`，不认识 `AppState`。
+
+/// 创建荐股定时任务的入参 —— 宿主命令形参与接缝 JSON 的同一份形状（camelCase）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecoCreateRequest {
+    pub name: String,
+    pub cron_expression: String,
+    pub periods: Vec<Period>,
+    pub min_confidence: u8,
+    pub top_n: usize,
+}
+
+/// 启停入参 —— 荐股 / 趋势智选 / 候选池三族同形，共用一份（禁区 12）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CronToggleRequest {
+    pub id: String,
+    pub enabled: bool,
+}
+
+/// 删除入参 —— 同上，三族同形。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CronIdRequest {
+    pub id: String,
+}
+
+/// 趋势智选创建入参：三字段都可选（缺省 = 原链 / `0 16 * * 1-5` / enabled）。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct TrendCreateRequest {
+    pub cron_expression: Option<String>,
+    pub enabled: Option<bool>,
+    pub workflow_id: Option<String>,
+}
+
+pub(crate) async fn create_recommendation_cron_core(
+    store: &CronJobStore,
+    request: RecoCreateRequest,
+) -> Result<RecoCronJobResponse, String> {
+    let RecoCreateRequest { name, cron_expression, periods, min_confidence, top_n } = request;
+    if periods.is_empty() {
+        return Err("periods 不能为空".to_string());
+    }
+    if top_n == 0 {
+        return Err("top_n 必须大于 0".to_string());
+    }
+    // 前端 Slider 是 0-100，但 IPC 层不校验数字范围（u8 会把 300 静默截成 44），
+    // 会造出「用户以为阈值 300、实际按 44 过滤」的静默错配。
+    if min_confidence > 100 {
+        return Err("min_confidence 必须在 0-100 之间".to_string());
+    }
+    let config = RecoCronConfig { periods, min_confidence, top_n };
+    let prompt =
+        serde_json::to_string(&config).map_err(|e| format!("序列化荐股 cron 配置失败: {e}"))?;
+    let desc = format!("荐股定时推送 (置信度≥{}%, 前{}只)", min_confidence, top_n);
+    let job = CronJob::new(&name, &cron_expression, &prompt, &desc)
+        .with_task_type("stock-recommendation");
+    let id = store.add(job).await;
+    // 重新读回以拿到完整字段（next_run_at 等）
+    let saved = store.get(&id).await.ok_or_else(|| "保存后未找到任务".to_string())?;
+    Ok(RecoCronJobResponse::from_job(&saved))
+}
+
+pub(crate) async fn list_recommendation_crons_core(
+    store: &CronJobStore,
+) -> Result<Vec<RecoCronJobResponse>, String> {
+    let jobs = store.list().await;
+    Ok(jobs
+        .iter()
+        .filter(|j| j.task_type.as_deref() == Some("stock-recommendation"))
+        .map(RecoCronJobResponse::from_job)
+        .collect())
+}
+
+pub(crate) async fn toggle_recommendation_cron_core(
+    store: &CronJobStore,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    store
+        .set_status(
+            id,
+            if enabled {
+                CronJobStatus::Active
+            } else {
+                CronJobStatus::Paused
+            },
+        )
+        .await;
+    Ok(())
+}
+
+pub(crate) async fn delete_recommendation_cron_core(
+    store: &CronJobStore,
+    id: &str,
+) -> Result<(), String> {
+    store.remove(id).await;
+    Ok(())
+}
+
+pub(crate) async fn create_trend_screening_cron_core(
+    store: &CronJobStore,
+    request: TrendCreateRequest,
+) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
+    let wf_id = resolve_trend_workflow_id(request.workflow_id.as_deref())?;
+    let expr = request.cron_expression.unwrap_or_else(|| "0 16 * * 1-5".to_string());
     let id = format!("trend-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
     // 名称/描述带上链名：定时任务列表里两链共用一个 task_type，日志与列表若都写「趋势智选」
     // 就无法判断这条记录跑的是哪条链。
@@ -277,20 +391,17 @@ pub async fn create_trend_screening_cron(
     .with_id(id.clone())
     .with_task_type(TREND_SCREENING_TASK_TYPE)
     .with_workflow_id(wf_id.to_string());
-    if !enabled.unwrap_or(true) {
+    if !request.enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
-    state.cron_job_store.add(job.clone()).await;
+    store.add(job.clone()).await;
     Ok(crate::commands::stock_analysis::CronJobResponse::from(&job))
 }
 
-/// 列出所有趋势智选定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出趋势智选定时任务")]
-#[tauri::command]
-pub async fn list_trend_screening_crons(
-    state: State<'_, AppState>,
+pub(crate) async fn list_trend_screening_crons_core(
+    store: &CronJobStore,
 ) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
+    let jobs = store.list().await;
     Ok(jobs
         .iter()
         .filter(|j| j.task_type.as_deref() == Some(TREND_SCREENING_TASK_TYPE))
@@ -298,18 +409,14 @@ pub async fn list_trend_screening_crons(
         .collect())
 }
 
-/// 启停趋势智选定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关趋势智选定时任务")]
-#[tauri::command]
-pub async fn toggle_trend_screening_cron(
-    state: State<'_, AppState>,
-    id: String,
+pub(crate) async fn toggle_trend_screening_cron_core(
+    store: &CronJobStore,
+    id: &str,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .cron_job_store
+    store
         .set_status(
-            &id,
+            id,
             if enabled {
                 CronJobStatus::Active
             } else {
@@ -320,14 +427,11 @@ pub async fn toggle_trend_screening_cron(
     Ok(())
 }
 
-/// 删除趋势智选定时任务
-#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除趋势智选定时任务")]
-#[tauri::command]
-pub async fn delete_trend_screening_cron(
-    state: State<'_, AppState>,
-    id: String,
+pub(crate) async fn delete_trend_screening_cron_core(
+    store: &CronJobStore,
+    id: &str,
 ) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
+    store.remove(id).await;
     Ok(())
 }
 

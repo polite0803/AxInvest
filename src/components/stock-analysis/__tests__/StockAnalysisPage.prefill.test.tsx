@@ -25,11 +25,15 @@ function installInvokeStub() {
     switch (command) {
       case "get_market_status":
         return Promise.resolve({ status: "closed" });
-      case "get_stock_quote": {
+      // 批 2b：`stock_get_quote` / `stock_get_kline` 是插件命名面，与宿主名同形回桩
+      // （`quoteCalls()` 只统计宿主名，它钉的是 store 那条拉取路径，不受本条影响）。
+      case "get_stock_quote":
+      case "stock_get_quote": {
         const code = String(args?.stockCode ?? "");
         return Promise.resolve(quoteFor(code, code === "600519" ? "贵州茅台" : code));
       }
       case "get_stock_kline":
+      case "stock_get_kline":
         return Promise.resolve([]);
       case "get_vendor_health_all":
         return Promise.resolve([]);

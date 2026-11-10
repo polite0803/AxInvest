@@ -32,7 +32,14 @@ use serde_json::{Value, json};
 /// 本插件提供的工具名（与宿主登记的工具名逐字一致）。
 const TOOL_NAME: &str = "get_stock_quote";
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致）。
+///
+/// 命令面（前端 `invokePluginCommand`）入参一律 camelCase（禁区 13），接缝面（宿主
+/// `worker.rs` 既有协议）是 snake_case —— 翻译点只有 `market_read_route` / `kline_seam_args`
+/// 两处。工具面（`tools()` 声明 + `exec_tool`）保持 snake_case `stock_code`，因为它的
+/// 入参形状与宿主 `stock_analysis_bridge.rs` 的 LLM 工具声明逐字同源，改它等于改智能体面。
 const COMMAND_GET_QUOTE: &str = "stock_get_quote";
+/// K 线命令（批 2b）：`market.quote` 的 `get_klines` 是多入参 op，不进单标的路由表。
+const COMMAND_GET_KLINE: &str = "stock_get_kline";
 /// 自然语言意图解析命令：跑 `axagent-stock-core` 的**本体**（不是测试夹具的子集词表）。
 const COMMAND_PARSE_INTENT: &str = "parse_analysis_intent";
 /// 证据质量驱动权重（B9-1）：纯函数，跑 `analysis-engine` 的权威实现。
@@ -194,10 +201,11 @@ fn handle_command(
     }
 
     let outcome = match frame.command.as_str() {
-        COMMAND_GET_QUOTE => match fetch_quote(&frame.input, &request.call_chain, peer) {
-            Ok((_stock_code, quote)) => {
-                CommandOutcome::Reply(CommandReply::for_frame(&frame, quote))
-            },
+        // K 线是四入参 op，套不进下方「单标的」行情路由表，单独一个臂。
+        // `stock_get_quote`（批 2b 起）不再走 `fetch_quote` —— 它与其余行情命令同形，
+        // 收进路由表后命令面入参改读 camelCase；`fetch_quote` 只服务工具面。
+        COMMAND_GET_KLINE => match fetch_kline(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
@@ -703,7 +711,9 @@ fn map_analysis_state_to_run_state(status: &str) -> &'static str {
 
 /// 取一条个股行情，返回 `(入参里的股票代码, 行情 JSON)`。
 ///
-/// 工具执行面与命令面共用的唯一实现（不写第二遍取数逻辑）。出站走宿主接缝：
+/// **工具面**（`exec_tool`）的唯一取数实现 —— 命令面 `stock_get_quote` 自批 2b 起改走
+/// `market_read_route`，因为两面的入参键不同档（工具面 = 宿主 LLM 工具声明的 snake_case）。
+/// 出站走宿主接缝：
 /// 凭证 / provider / 限流都在宿主侧，插件只传代码；`call_chain` 必须原样带上入站链，
 /// 否则宿主侧的环检测收不到这条边。
 fn fetch_quote(
@@ -760,13 +770,14 @@ struct MarketReadRoute {
     keys: Option<(&'static str, &'static str)>,
 }
 
-/// 插件命令名 → `market.quote` 路由（批 2a 十一条行情只读命令）。
+/// 插件命令名 → `market.quote` 路由（批 2a 十一条 + 批 2b 的 `stock_get_quote`，共十二条）。
 ///
-/// 表驱动而非十一段复制：转发形态完全一致，只有 op 与入参键不同；但 op 必须逐条写死
+/// 表驱动而非十二段复制：转发形态完全一致，只有 op 与入参键不同；但 op 必须逐条写死
 /// （不按 `stock_` 前缀机械剥离），否则改名时命令会静默打到相邻的数据面上。
 fn market_read_route(command: &str) -> Option<MarketReadRoute> {
     let stock = Some(("stockCode", "stock_code"));
     Some(match command {
+        COMMAND_GET_QUOTE => MarketReadRoute { op: "get_quote", keys: stock },
         COMMAND_GET_RESEARCH_REPORTS => MarketReadRoute { op: "get_research_reports", keys: stock },
         COMMAND_GET_CONCEPT_BLOCKS => MarketReadRoute { op: "get_concept_blocks", keys: stock },
         COMMAND_GET_ANNOUNCEMENTS => MarketReadRoute { op: "get_announcements", keys: stock },
@@ -818,6 +829,78 @@ fn fetch_market_read(
             (
                 error_codes::PLUGIN_CALL_FAILED.to_string(),
                 format!("行情接缝（{}）调用失败：{e}", route.op),
+            )
+        })?;
+
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "行情接缝返回了错误但没有说明".to_string()),
+        )),
+    }
+}
+
+/// K 线命令面入参 → 接缝 `get_klines` 载荷：命令面 camelCase 翻成接缝面 snake_case。
+///
+/// 拆成纯函数（不碰 `Peer`）是因为四条入参的翻译与拒绝判据需要单测钉住 —— 接缝调用
+/// 本身要子进程管道，测不到「缺 `period` 时报什么」。
+/// `adjType` 与宿主 `get_stock_kline` 的 `adj` 同档：`auto` 与缺省都落「未复权」，其余只
+/// 接受 `none` / `forward` / `backward`（`harness::AdjType` 的 serde 是小写变体名）。
+/// `as_of_date` 不开放 —— 宿主命令有该入参，但接缝 `get_klines` 没有 ⇒ 多开一条入参等于
+/// 承诺一条接缝给不了的通道。
+fn kline_seam_args(input: &Value) -> Result<Value, (String, String)> {
+    fn invalid(message: String) -> (String, String) {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), message)
+    }
+    fn required_str(input: &Value, key: &str) -> Result<String, (String, String)> {
+        input
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string)
+            .ok_or_else(|| invalid(format!("`{key}` 缺失或为空白")))
+    }
+
+    let mut args = serde_json::Map::new();
+    args.insert("stock_code".to_string(), json!(required_str(input, "stockCode")?));
+    args.insert("period".to_string(), json!(required_str(input, "period")?));
+    let Some(limit) = input.get("limit").and_then(Value::as_u64) else {
+        return Err(invalid("`limit` 必须是整数".to_string()));
+    };
+    args.insert("limit".to_string(), json!(limit));
+    let adj_type = match input.get("adjType") {
+        None | Some(Value::Null) => Value::Null,
+        Some(Value::String(raw)) => match raw.as_str() {
+            "auto" => Value::Null,
+            "none" | "forward" | "backward" => json!(raw),
+            other => {
+                return Err(invalid(format!(
+                    "`adjType` 只接受 auto / none / forward / backward，收到 `{other}`"
+                )));
+            },
+        },
+        Some(other) => return Err(invalid(format!("`adjType` 必须是字符串，收到 {other}"))),
+    };
+    args.insert("adj_type".to_string(), adj_type);
+    Ok(Value::Object(args))
+}
+
+/// 调宿主 `market.quote` 的 `get_klines` 取一段 K 线（批 2b）。
+///
+/// 与 `fetch_market_read` 同一纪律：凭证 / provider / 限流都在宿主侧，插件只传标的与档位。
+fn fetch_kline(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let args = kline_seam_args(input)?;
+    let reply =
+        peer.call_seam(MARKET_SEAM, "get_klines", args, call_chain.to_vec()).map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("行情接缝（get_klines）调用失败：{e}"),
             )
         })?;
 
@@ -885,11 +968,11 @@ fn call_analysis_seam(
 #[cfg(test)]
 mod tests {
     use super::{
-        cron_seam_op, map_analysis_state_to_run_state, map_execution_state_to_run_state,
-        market_read_route, stock_analysis_request, task_run_row_from_analysis_record,
-        task_run_row_from_execution,
+        cron_seam_op, kline_seam_args, map_analysis_state_to_run_state,
+        map_execution_state_to_run_state, market_read_route, stock_analysis_request,
+        task_run_row_from_analysis_record, task_run_row_from_execution,
     };
-    use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, is_plugin_task_run_state};
+    use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, error_codes, is_plugin_task_run_state};
     use serde_json::{Value, json};
 
     /// 引擎视图 → 行记录：键必须 camelCase，缺省端点必须**不出现**（不是 `null`）。
@@ -1199,6 +1282,7 @@ mod tests {
     fn market_read_commands_map_to_their_own_ops_and_keys() {
         let stock = Some(("stockCode", "stock_code"));
         let cases = [
+            ("stock_get_quote", "get_quote", stock),
             ("stock_get_research_reports", "get_research_reports", stock),
             ("stock_get_concept_blocks", "get_concept_blocks", stock),
             ("stock_get_announcements", "get_announcements", stock),
@@ -1224,12 +1308,67 @@ mod tests {
         }
         ops.sort_unstable();
         ops.dedup();
-        assert_eq!(ops.len(), cases.len(), "十一条命令必须映射到十一个不同 op：{ops:?}");
+        assert_eq!(ops.len(), cases.len(), "十二条命令必须映射到十二个不同 op：{ops:?}");
 
         assert!(market_read_route("stock_unknown_market_read").is_none(), "未知命令不得落到行情表");
         assert!(
             market_read_route("stock_list_recommendation_crons").is_none(),
             "cron 命令不得被行情表吞掉"
         );
+        assert!(
+            market_read_route("stock_get_kline").is_none(),
+            "K 线走独立分派臂，不得被单标的路由表吞掉"
+        );
+    }
+
+    #[test]
+    fn kline_seam_args_translates_camel_input_and_rejects_bad_arms() {
+        let full = kline_seam_args(&json!({
+            "stockCode": " 600519 ",
+            "period": "daily",
+            "limit": 250,
+            "adjType": "forward"
+        }))
+        .expect("完整入参应能翻成接缝载荷");
+        assert_eq!(full["stock_code"], "600519", "标的键要翻成 snake 并 trim");
+        assert_eq!(full["period"], "daily");
+        assert_eq!(full["limit"], 250);
+        assert_eq!(full["adj_type"], "forward");
+        // 命令面键不得泄漏到接缝载荷里。
+        assert!(full.get("stockCode").is_none() && full.get("adjType").is_none());
+
+        // `auto` / 缺省 / `null` 三档都落「未复权」= 接缝侧 `adj_type: null`。
+        for input in [
+            json!({ "stockCode": "600519", "period": "daily", "limit": 1, "adjType": "auto" }),
+            json!({ "stockCode": "600519", "period": "daily", "limit": 1, "adjType": Value::Null }),
+            json!({ "stockCode": "600519", "period": "daily", "limit": 1 }),
+        ] {
+            let args =
+                kline_seam_args(&input).unwrap_or_else(|e| panic!("{input} 应当合法：{e:?}"));
+            assert!(args["adj_type"].is_null(), "`{input}` 的 adj_type 必须落 null：{args}");
+        }
+
+        // 拒绝面：必填缺失 / 空白 / limit 非整数 / 复权档越界 —— 一律 INVALID_ARGS，不发帧。
+        let bad = [
+            json!({ "period": "daily", "limit": 1 }),
+            json!({ "stockCode": "  ", "period": "daily", "limit": 1 }),
+            json!({ "stockCode": "600519", "limit": 1 }),
+            json!({ "stockCode": "600519", "period": "daily" }),
+            json!({ "stockCode": "600519", "period": "daily", "limit": -1 }),
+            json!({ "stockCode": "600519", "period": "daily", "limit": "250" }),
+            json!({ "stockCode": "600519", "period": "daily", "limit": 1, "adjType": "qfq" }),
+            json!({ "stockCode": "600519", "period": "daily", "limit": 1, "adjType": 3 }),
+        ];
+        for input in bad {
+            let outcome = kline_seam_args(&input);
+            let Err((code, message)) = outcome else {
+                panic!("`{input}` 必须被拒在接缝之前，实际放行：{outcome:?}");
+            };
+            assert_eq!(
+                code,
+                error_codes::SEAM_CALL_INVALID_ARGS,
+                "`{input}` 的拒绝码不对：{message}"
+            );
+        }
     }
 }

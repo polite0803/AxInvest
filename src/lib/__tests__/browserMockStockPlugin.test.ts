@@ -35,6 +35,19 @@ describe("browserMock 覆盖股票插件命名命令（T2 试点批）", () => {
     await expect(handleCommand("stock_wf_des_integration", {})).resolves.toBeNull();
   });
 
+  // 批 2b：行情两条。`stock_get_quote` 的消费端（CompareView / WatchlistPanel）逐字段
+  // `?? 0` 兜底 ⇒ 空对象就是诚实空态，与宿主 `get_stock_quote` 的 default 兜底同形；
+  // `stock_get_kline` 的消费端（WfDesTab.fetchKlines）拿到就 `.sort` ⇒ 必须回数组。
+  it("stock_get_quote 返回对象 DTO 空态 {}", async () => {
+    await expect(handleCommand("stock_get_quote", { stockCode: "600519" })).resolves.toEqual({});
+  });
+
+  it("stock_get_kline 返回数组而不是 undefined（.sort 会当场 TypeError）", async () => {
+    await expect(
+      handleCommand("stock_get_kline", { stockCode: "600519", period: "daily", limit: 100 }),
+    ).resolves.toEqual([]);
+  });
+
   // 负控：这批命令名均不以 get_/list_ 开头，default 兜底对它们给 undefined
   // （或对 endsWith("s") 给 []）。用未登记探针锁住兜底规则本身仍在，
   // 避免上面四条因兜底被改而失去「显式 case 生效」的证明力。

@@ -79,7 +79,7 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
         .execute_plugin_command(
             &outcome.plugin_id,
             "stock_get_quote",
-            &json!({ "stock_code": "600519" }),
+            &json!({ "stockCode": "600519" }),
         )
         .expect("清单里声明的命令应能经 worker 通道执行");
 

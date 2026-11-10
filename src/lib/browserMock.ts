@@ -7202,6 +7202,16 @@ async function executeCommand<T>(
     case "stock_get_option_pcr":
       return null as unknown as T;
 
+    // ── 股票插件命名命令（插件命令桥 批 2b，#35 quote / kline 两条）──────────
+    // 与宿主 `get_stock_quote` / `get_stock_kline` 的浏览器形态同形：单对象 DTO 回 `{}`
+    // （消费端逐字段 `?? 0` 兜底），数组 DTO 回 `[]`（`WfDesTab` 拿到就 `.sort`，回
+    // undefined 直接 TypeError）。`stock_get_quote` 不以 `get_` 开头 ⇒ default 会兜成
+    // undefined，必须显式声明。
+    case "stock_get_quote":
+      return {} as unknown as T;
+    case "stock_get_kline":
+      return [] as unknown as T;
+
     // 暂停 / 恢复仅需成功 resolve（无返回体）。
     case "workflow_pause":
     case "workflow_resume":

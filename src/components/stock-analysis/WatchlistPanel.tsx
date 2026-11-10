@@ -3,6 +3,7 @@ import { List } from "@/components/common/AntdList";
 import { useStockJump } from "@/hooks/useStockJump";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Card, Dropdown, Empty, Input, Popconfirm, Select, Space, Spin, Tag } from "antd";
@@ -186,7 +187,10 @@ export function WatchlistPanel() {
     const snap: Record<string, QuoteSnapshot> = {};
     for (const item of groupItems) {
       try {
-        const q = await invoke("get_stock_quote", { stockCode: item.stockCode }) as Record<string, unknown>;
+        // 批 2b：逐票行情改走股票插件命令桥（宿主 `get_stock_quote` 双声明期保留）。
+        const q = await invokePluginCommand<Record<string, unknown>>("stock_get_quote", {
+          stockCode: item.stockCode,
+        });
         snap[item.stockCode] = {
           price: (q?.price as number) ?? 0,
           changePct: (q?.changePct as number) ?? 0,

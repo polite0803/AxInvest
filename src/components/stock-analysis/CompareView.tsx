@@ -1,7 +1,6 @@
 import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import i18n from "@/i18n";
 import { ensureECharts } from "@/lib/echartsInstance";
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { StockQuote } from "@/types";
 import { SwapOutlined } from "@ant-design/icons";
@@ -59,8 +58,8 @@ export function CompareView() {
     setLoading(true);
     try {
       const [q1, q2, f1, f2] = await Promise.all([
-        invoke<StockQuote>("get_stock_quote", { stockCode: code1 }),
-        invoke<StockQuote>("get_stock_quote", { stockCode: code2 }),
+        invokePluginCommand<StockQuote>("stock_get_quote", { stockCode: code1 }),
+        invokePluginCommand<StockQuote>("stock_get_quote", { stockCode: code2 }),
         invokePluginCommand<Record<string, unknown>[]>("stock_get_financials", { stockCode: code1 })
           .then(parseFin),
         invokePluginCommand<Record<string, unknown>[]>("stock_get_financials", { stockCode: code2 })

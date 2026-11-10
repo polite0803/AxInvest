@@ -430,13 +430,36 @@ function stockManifest({ version, binaryName, sha256 }) {
     // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
     commands: [
       {
+        // 批 2b：入参键由 `stock_code` 改 camelCase `stockCode`（禁区 13 既存偏离收口）。
+        // 接缝面的 snake_case 翻译点在插件 `market_read_route`，不在清单；宿主 LLM 工具面
+        // （`stock_analysis_bridge.rs` 的 `stock_get_quote`）仍声明 `stock_code`，两条面各有调用方。
         name: "stock_get_quote",
-        description: "获取 A 股个股实时行情（经宿主 market.quote 取数）",
+        description: "获取 A 股个股实时行情（经宿主 market.quote 接缝，只读）",
         command: "worker://stock_get_quote",
         inputSchema: {
           type: "object",
-          properties: { stock_code: { type: "string", description: "6 位股票代码，如 600519" } },
-          required: ["stock_code"],
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        // 批 2b：K 线走 `market.quote` 已实现的 `get_klines` op。
+        // 不开放 `asOfDate` —— 宿主 `get_stock_kline` 有该入参，但接缝没有，多写一个键就是
+        // 承诺一条取不到数的通道；`adjType` 与宿主 `adj` 同档（auto 与缺省都落未复权）。
+        name: "stock_get_kline",
+        description: "获取 A 股 K 线序列（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_kline",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "6 位股票代码，如 600519" },
+            period: { type: "string", description: "周期，如 daily / weekly / 60min" },
+            limit: { type: "integer", minimum: 1, description: "取多少根，宿主缺省 100" },
+            adjType: { type: "string", description: "复权档：none / forward / backward；auto 与缺省=未复权" },
+          },
+          required: ["stockCode", "period", "limit"],
         },
       },
       {

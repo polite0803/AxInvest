@@ -91,9 +91,14 @@ fn describe_declares_the_tool_seam_and_its_outbound_call() {
     assert!(caps.contains(&("tool.set", "exec")), "必须声明 tool.set 的执行面：{caps:?}");
     assert_eq!(
         declaration.calls,
-        vec!["market.quote".to_string(), "workflow.run".to_string(), "analysis.record".to_string(),],
+        vec![
+            "market.quote".to_string(),
+            "workflow.run".to_string(),
+            "analysis.record".to_string(),
+            "stock.analysis".to_string(),
+        ],
         "出站接缝必须逐条声明，否则宿主 handle_call_seam 直接拒调\
-         （行情 + 工作流任务源 + 单股分析记录）"
+         （行情 + 工作流任务源 + 单股分析记录 + 股票域数据面）"
     );
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
@@ -302,7 +307,7 @@ fn command_frame_runs_stock_get_quote_through_the_host_seam() {
         &CommandFrame::new(
             PLUGIN_ID,
             "stock_get_quote",
-            serde_json::json!({ "stock_code": "600519" }),
+            serde_json::json!({ "stockCode": "600519" }),
             5_000,
         )
         .to_frame_request()
@@ -310,11 +315,18 @@ fn command_frame_runs_stock_get_quote_through_the_host_seam() {
         .with_id("req-command"),
     );
 
-    // 命令面与工具面共用同一条出站路径：worker 仍要回调宿主 market.quote 取数。
+    // 命令面与工具面共用同一条出站接缝，但**入参键不同档**：命令面收 camelCase `stockCode`
+    // （禁区 13），出站载荷必须已翻成接缝面的 snake_case `stock_code`。
     let call = worker.recv_request();
     assert_eq!(call.op, ops::CALL_SEAM);
     assert_eq!(call.args["seam"], "market.quote");
     assert_eq!(call.args["op"], "get_quote");
+    assert_eq!(
+        call.args["args"]["stock_code"], "600519",
+        "接缝载荷键必须是 snake_case：{:#?}",
+        call.args
+    );
+    assert!(call.args["args"].get("stockCode").is_none(), "命令面键不得泄漏进接缝载荷");
     worker.send_response(
         &FrameResponse::success(serde_json::json!({ "code": "600519", "price": 1500.25 }))
             .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
@@ -328,6 +340,56 @@ fn command_frame_runs_stock_get_quote_through_the_host_seam() {
     assert_eq!(reply["plugin_id"], PLUGIN_ID, "回执必须回填宿主绑定的身份");
     assert_eq!(reply["command"], "stock_get_quote");
     assert_eq!(reply["value"]["price"], 1500.25, "行情必须原样透出：{reply:?}");
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+/// K 线命令（批 2b）：四入参全部翻成接缝面的 snake_case 后一次性出站。
+///
+/// 只钉「命令名 → op + 载荷键」这一段：`limit` / `adj_type` 的取值判据在
+/// `main.rs` 的 `kline_seam_args` 单测里逐条钉，本帧测试不重复数值校验。
+#[test]
+fn command_frame_runs_stock_get_kline_with_translated_args() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "stock_get_kline",
+            serde_json::json!({
+                "stockCode": "600519",
+                "period": "daily",
+                "limit": 250,
+                "adjType": "forward"
+            }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-kline"),
+    );
+
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "market.quote");
+    assert_eq!(call.args["op"], "get_klines", "K 线命令必须打自己的 op");
+    assert_eq!(call.args["args"]["stock_code"], "600519");
+    assert_eq!(call.args["args"]["period"], "daily");
+    assert_eq!(call.args["args"]["limit"], 250);
+    assert_eq!(call.args["args"]["adj_type"], "forward");
+
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!([{ "date": "2026-01-05", "close": 1500.0 }]))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["command"], "stock_get_kline");
+    assert_eq!(reply["value"][0]["date"], "2026-01-05", "K 线数组必须原样透出：{reply:?}");
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);

@@ -4,7 +4,8 @@
 //   - WalkForward：基于历史 K 线的滚动窗回测（确定性）
 //   - DES：基于 Agent 的市场模拟（种子化随机）
 //
-// K 线数据自动从 `get_stock_kline` 拉取（与股票分析工作流同源），用户无需手动粘贴。
+// K 线数据自动从插件命令 `stock_get_kline` 拉取（经宿主 market.quote 接缝，与股票分析
+// 工作流的取数面同源），用户无需手动粘贴。
 // 参考价默认取最新收盘价 × 100（单位：分），用户可覆盖。
 
 import {
@@ -28,7 +29,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { QuantMetricsCard } from "@/components/quant/charts/QuantMetricsCard";
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { KLine } from "@/types";
 import type { Bar, MetricsReport, WfDesFold, WfDesReport, WfDesRequest } from "@/types/quant";
@@ -101,12 +101,14 @@ export function WfDesTab() {
     setKlineLoading(true);
     setKlineError(null);
     try {
-      const data = await invoke<KLine[]>("get_stock_kline", {
+      // 批 2b：K 线取数改走股票插件命令桥（宿主 `get_stock_kline` 双声明期保留）。
+      // 该调用点本来就不传 `asOfDate`（quant 不走时间旅行），而接缝 `get_klines` 也没有
+      // as-of 通道 ⇒ 换命令名不改变取数语义；`adj` → `adjType` 是同档位的键名收敛。
+      const data = await invokePluginCommand<KLine[]>("stock_get_kline", {
         stockCode: code,
         period: "daily",
         limit: draft.klineLimit,
-        // 不传 asOfDate：quant 模块不走时间旅行
-        adj: "forward",
+        adjType: "forward",
       });
       // 按日期升序（WalkForward 要求 klines 已排序）
       data.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

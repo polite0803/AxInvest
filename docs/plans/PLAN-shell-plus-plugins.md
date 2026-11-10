@@ -7737,3 +7737,71 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 - `cargo check -p axagent --all-targets` EXIT=0（41.88s；`build.rs` 对注册表的复算结果与盘上一致，未产生新行）。
 - `npm run test:run -- src/lib/__tests__/browserMockStockPlugin.test.ts`：6 passed（首轮撞既有环境坑 —— vitest worker 60 s 启动超时、`no tests` 退出 1，重跑即过；该形态与本批改动无关，见任务 #141）。
 - **未做**：① `src/stores/feature/stockAnalysisStore.ts:2300` 的 `get_earnings_calendar` 仍走宿主 —— 该文件带着另一并行批的未提交改动（20/20），本批不碰，留待该批落地后一并切换；② 11 条宿主命令按 §143.2 保留，双声明期结束条件 = 插件默认安装/启用成为产品形态后，再按 `agency_experts` 消费面逐条改指；③ 智能体命令索引端到端未跑（需运行实例；本批以静态面 + 真 worker 清单握手覆盖）。
+
+## 144. `#35` 批 2b：`stock_get_quote` 收进表驱动路由 + 新增 `stock_get_kline`（命令面键名收口 camelCase；2026-11-10）
+
+### 144.1 刀口与映射
+
+| 插件命令 | 分派形态 | 接缝 op | 命令面入参（camelCase） | 接缝载荷（snake_case） |
+|---|---|---|---|---|
+| `stock_get_quote` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:780`） | `market.quote / get_quote` | `stockCode` | `stock_code` |
+| `stock_get_kline` | 独立分派臂（`axagent-plugins/crates/plugin-stock/src/main.rs:207` → `fetch_kline` 同文件 `:893`） | `market.quote / get_klines` | `stockCode` / `period` / `limit` / `adjType` | `stock_code` / `period` / `limit` / `adj_type` |
+
+`get_klines` 是四入参 op，套不进「单标的（+ 可选 as-of）」的 `MarketReadRoute` 形状 ⇒ 单独一条分派臂，入参翻译落在纯函数 `kline_seam_args`（`axagent-plugins/crates/plugin-stock/src/main.rs:852`）。拆纯函数的理由是判据可达：接缝调用本身要子进程管道，测不到「缺 `period` 报什么」，而翻译 + 8 条拒绝面（缺 `stockCode` / 全空白 / 缺 `period` / 缺 `limit` / `limit:-1` / `limit:"250"` / `adjType:"qfq"` / `adjType:3`）需要逐条钉成 `SEAM_CALL_INVALID_ARGS`。路由表测试追加负控 `market_read_route("stock_get_kline").is_none()`，钉住「K 线不得被单标的路由表吞掉」—— 这条负控是本批唯一能机械区分「两臂」与「误合并成一臂」的断言。
+
+### 144.2 三面键名分档（本批裁定，后续批次照此口径）
+
+| 面 | 键名档 | 判据 |
+|---|---|---|
+| 命令面（`PluginManifest.commands[].inputSchema` + 命令帧 `input` + 前端 `invokePluginCommand`） | **camelCase** | 禁区 13。`stock_get_quote` 原读 `stock_code` 是既存偏离，本批收口；新增的 `stock_get_kline` 一开始就按 camelCase 声明 |
+| 接缝面（宿主 `axagent-plugins/crates/plugins/src/worker.rs` 既有协议、`MarketDataProvider` 形参） | snake_case | 宿主侧协议既定 ⇒ 插件负责翻译，不改宿主签名 |
+| 工具面（`tools()` 声明 + `exec_tool`，即 `get_stock_quote`） | snake_case，**本批不动** | 与宿主 `src-tauri/src/commands/stock_analysis_bridge.rs:57` 的 LLM 工具声明逐字同源（那里 `stock_code`）⇒ 改它等于改智能体提示里的工具契约，不是命令面收口 |
+
+翻译点因此只有两处（路由表的 `keys` 与 `kline_seam_args`），其余通道原样透传，不存在「第三条需要记的规则」。
+
+`adjType` 三档对齐 `axagent-core/crates/harness/src/market_data.rs:81` 的 `AdjType`（`#[serde(rename_all = "lowercase")]` ⇒ 合法串只有 `none` / `forward` / `backward`）；`auto` 与缺省与显式 `null` 一律落 `adj_type: null` —— 宿主 `get_stock_kline` 把 `auto` 映射成 `AdjType::None`，而 `worker.rs` 的 `deserialize_optional_arg` 对 `Value::Null` 等价「不传」。**`asOfDate` 不开放给该命令**：宿主命令有该入参，但接缝 `get_klines` 没有 ⇒ 多开一条入参等于承诺一条接缝给不了的通道（与批 2a 的 as-of 纪律同）。`WfDesTab` 本来就不传 as-of（quant 不走时间旅行）⇒ 换命令名不改取数语义，这点在切换点的注释里钉了一句。
+
+⚠ **遗留同名歧义（登记，不在本批处理）**：宿主 LLM 工具 `stock_get_quote`（snake 入参，走 `dispatch_stock_command`）与插件命名命令 `stock_get_quote`（camel 入参，走 `PluginManager::execute_plugin_command`）同名不同形。两条派发口不同 ⇒ 运行期不冲突、`prepare_llm_call` 的重名去重也只作用于结构化 `tools` 数组，但智能体命令索引 `[plugin]` 段与 bridge 工具集同屏时，LLM 可能按错的形状填参。收口方向属双声明期末尾（§143.2），本批只登记不处理。
+
+### 144.3 前端切换与 mock / 测试同步
+
+- 3 个调用点切 `invokePluginCommand`：`src/components/stock-analysis/CompareView.tsx:61` 与 `:62`（两条 quote；该文件 `invoke` 变未用 ⇒ 删 import）、`src/components/stock-analysis/WatchlistPanel.tsx:191`（逐票行情；同文件其余 `invoke` 仍在用，import 保留）、`src/components/quant/tabs/WfDesTab.tsx:107`（K 线，`adj` → `adjType`）。
+- `src/lib/browserMock.ts` 补两条显式 case（`stock_get_quote` → `{}`、`stock_get_kline` → `[]`）：`stock_get_*` 既不匹配 default 的 `list_` 前缀、也不以 `s` 结尾、更不以 `get_` 开头 ⇒ 不显式声明会兜成 `undefined`，消费端 `.sort` / 逐字段读直接踩空。
+- 3 个既有组件测试的 invoke mock **双面登记**（宿主名 + 插件名回同一形状）：`invokePluginCommand` 在非 Tauri 分支直接 `invoke(name, input)`，mock 只认宿主名时组件会**静默**拿到 `undefined` —— 那是假绿而不是失败。`StockAnalysisPage.prefill.test.tsx` 的 `quoteCalls()` 仍只统计宿主名（它锁的是「宿主退化」这件事，不该被插件名稀释）。
+- `src/lib/__tests__/browserMockStockPlugin.test.ts` 补两条正控（`{}` / `[]` 各一，后者注释写明 `.sort` 对 `undefined` 抛 TypeError）。i18n 零新增（无 UI 文案）。
+
+### 144.4 读数级联：命令面零变化，两条前端体量锚属并行陈旧
+
+第五道门判定档（工作树口径，耗时 610.3 s，遍历 6106 文件）与 §143.4 逐字对齐 —— `commandTotal` 1499 / `registryFileLines` 1566 / `commandNameSetParity` 1499 / `commandModules` 165 / `unassignedModules` 0 / `stockBoundaryCommands` 283 / `stockAuditDomainCommands` 288 / `workflowAuditDomainCommands` 83 / `opcBoundaryCommands` 112 / `opcAuditDomainCommands` 91 全 PASS，`l1ForeignStock` 3 / `l1ForeignOpc` 3 / `k1RsFileCount` 2050 / `k1PubTraitCount` 330 / `remoteSeamCount` 13 / `capacityRegister` 23 全 PASS。插件命名命令不进 `parseRegistry` 口径（该口径只数 `src-tauri/src/register_commands.rs` 的宿主条目）⇒ **本批无需回写 `scripts/capability-register.json`**。
+
+同一轮另有两条锚 FAIL，判归并行陈旧，本批不回写：
+
+| 锚 | 登记 | 实测 | 差 | 归因（实测，非推定） |
+|---|---|---|---|---|
+| `frontendFileCaliber` | 87540 | 91848 | +4308 | `git diff HEAD --numstat -- src` 的未提交净增实测是 **−1891**（并行批在大删）⇒ 登记值在本批之前就已陈旧数千行，腐烂主体不是本批 |
+| `frontendDirCaliber`（`components/stock-analysis`） | 66157 | 66195 | +38 | 本批该目录 5 文件净 **+14**；该目录 `git diff HEAD` 合计净 +19（25 个文件在改），未跟踪文件 0 ⇒ 余量属并行批 |
+
+（登记值只能在安静窗口按当轮实测一次性回写。现在写 91848 / 66195 等于把他人未提交行数钉进棘轮 —— 与 `--update-baseline` 的并行期陷阱同型。）
+
+### 144.5 验收（逐条实测退出码）与如实未做
+
+Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）：
+
+- `cargo fmt -p axagent-plugin-stock --check` EXIT=0。
+- `cargo check -p axagent-plugin-stock --all-targets` EXIT=0（13.50 s）。
+- `cargo test -p axagent-plugin-stock` EXIT=0：**lib 13 passed + protocol 13 passed**。首轮 protocol 红 1 条，`describe_declares_the_tool_seam_and_its_outbound_call` 断 `calls` 恰为 3 条而实际 4 条 —— **HEAD 既存红**（`git show HEAD:` 复核：声明侧早已含 `STOCK_ANALYSIS_SEAM`，测试侧仍写三条；lib 侧那条用 `contains` 所以从不报）。真因是 E 批 #240 落笔时没同步这条逐条断言，本批把它订正为四条并补措辞「+ 股票域数据面」。
+- `cargo test -p axagent-plugins --test e2e_stock_tool_test --test e2e_stock_bundle_install_test` EXIT=0（各 1 passed）：命令帧入参改 camelCase 后两条端到端仍绿，说明宿主派发口对接缝载荷的读法没被这次改名波及。
+
+清单握手：`node scripts/build-plugin-bundle.mjs --selftest` EXIT=0、`--check` EXIT=0（三条自证全过：bundle 页 entry 在白名单内 / 2 条任务源声明自洽 / describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致，`sha256 80583a98…`；生成的 `dist/plugins/stock/plugin.json` 含 `stock_get_kline` 两条引用。`dist/` 未入库 ⇒ 无产物提交）。
+
+前端：`npm run typecheck` EXIT=0（`check-tsc` 列出 1543 个源文件，非空跑）；`npx dprint check <本批 9 个文件>` EXIT=0；`npm run test:run -- src/lib/__tests__/browserMockStockPlugin.test.ts` EXIT=0（**8 passed**，比 §143.5 的 6 passed 多出的正是本批两条正控）。
+
+**未做 / 未跑**：
+
+① 3 个组件测试（`ScreenerToWorkspace.integration` / `StockAnalysisPage.prefill` / `StockAnalysisPage.density`）**本机本轮跑不了**，且已归因到环境而不是本批：vitest worker 的 60 s 启动握手超时，`--pool=threads --no-file-parallelism`（wrapper 默认）与 `--pool=forks`、单文件与四文件并发四种组合全同型失败；三条判据把它钉成环境问题 —— a) 同目录一个本批**完全没碰**的 `src/components/stock-analysis/__tests__/AnalysisHistoryButton.loadAll.test.tsx` 同样 60.11 s 超时；b) 这批里唯一不需要 DOM 的 `browserMockStockPlugin.test.ts` 加 `--environment=node` 后 8 passed；c) SMB 本身吞吐正常（15 KB 读 63 ms、`node` 子进程派生 109 ms，`C:` 剩 132 G）。⇒ 卡的是 jsdom 冷启动超出 vitest 硬编码预算（任务 #141 同族的恶化形态，本轮无解决手段）。这三条 mock 双面登记的作用只是防假绿，其代码面已由 typecheck + 上面的正控覆盖。
+② `src/stores/feature/stockAnalysisStore.ts:1080` / `:1130` 两处行情调用仍走宿主 `get_stock_quote` / `get_stock_kline`。实测该文件现况确认它们是**宿主** `invoke` 而非插件命令面 ⇒ 本批的命令面改名对它零影响；该文件带另一并行批的未提交改动，本批不碰，留待交回后切换。
+③ 宿主 `get_stock_quote` / `get_stock_kline` 按 §143.2 双声明期保留，收口条件不变。
+④ §144.2 末登记的「同名不同形」歧义未处理，属双声明期末尾工作。
+⑤ 智能体命令索引端到端未跑（需运行实例）；本轮以清单握手 + 真 worker 协议测试覆盖。
+⑥ 文档行号引用门（`node scripts/check-doc-refs.mjs --selftest` EXIT=0，243 条断言全过；判定档 EXIT=1）**唯一一条基线外新增判红不属本批**：快照文档 `AUDIT-industry-label-removal-2026-09-14.md` 里一处指向 `RiskRoomMiniBar.tsx` 的引用报「仓内不存在该文件」。归属实测：该 AUDIT 文档工作树干净（`git status` 零条目），而 `src/components/office/panels/` 下那批面板文件是**另一并行批已暂存的删除**（状态列 `D `，`git cat-file -e HEAD:` 证明它们仍在 HEAD）⇒ 判红来自那次删除，修法由删除方决定（订正快照引用或回退删除），本批不代改他人的暂存条目。本批 §144 新增的 `文件:行号` 连写引用共 **10 条**（`main.rs` 3 + `market_data.rs` 1 + `stock_analysis_bridge.rs` 1 + 前端 3 + `README.md` 1 + `stockAnalysisStore.ts` 1），另有多处以「同文件 `:893`」形态书写的简写不被门扫 —— 10 条全部未进任何判红桶，段对齐与新鲜度均通过。（本节刻意不写「文件名 + 行号」的连写形式 —— 门会把它当新引用扫，指到已删文件即自造判红。）
+⑦ `axagent-plugins/crates/README.md:11` 的 plugin-stock 命令举例仍只列 `stock_get_quote` / `parse_analysis_intent`（非穷举表述，本批不改写他人文档；要收口应整段重写为「见清单 `scripts/build-plugin-bundle.mjs`」）。

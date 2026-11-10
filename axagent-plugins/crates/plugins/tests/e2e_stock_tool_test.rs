@@ -98,7 +98,7 @@ fn host_loads_stock_worker_and_executes_the_tool_through_market_quote() {
         .execute_command(&CommandFrame::new(
             "plugin.stock",
             "stock_get_quote",
-            json!({ "stock_code": "000001" }),
+            json!({ "stockCode": "000001" }),
             5_000,
         ))
         .expect("命令帧全链路应成功");

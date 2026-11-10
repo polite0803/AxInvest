@@ -1603,6 +1603,13 @@ function opcManifest({ version, binaryName, sha256 }) {
         command: "worker://opc_get_dashboard",
         inputSchema: { type: "object", properties: {} },
       },
+      {
+        // 看板总览：走宿主 `dashboard_summary` op（整表聚合，与上面「首页现算」不同口径）。
+        name: "opc_get_dashboard_summary",
+        description: "获取 OPC 看板总览（收入合计 / 发票 / 项目 / 客户计数 + KPI 与收入趋势明细）",
+        command: "worker://opc_get_dashboard_summary",
+        inputSchema: { type: "object", properties: {} },
+      },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };

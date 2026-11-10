@@ -4,6 +4,7 @@ import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { cssVar } from "@/lib/cssVar";
 import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import type { LandingPageSummaryView } from "@/types/opc";
 import {
@@ -54,13 +55,33 @@ async function fetchPluginRows<T>(command: string): Promise<T[]> {
   return JSON.parse(raw) as T[];
 }
 
+/**
+ * OPC 看板汇总（#36：宿主命令 `opc_get_dashboard_summary` 已迁入 OPC 插件，改走
+ * `invokePluginCommand` 通道）。字段一律 camelCase —— 与插件命令出参契约逐字一致
+ * （Rust 侧 `#[serde(rename_all = "camelCase")]`，禁区 13）。
+ */
 interface DashboardSummary {
-  total_revenue: number;
-  total_invoices: number;
-  active_projects: number;
-  total_customers: number;
-  recent_kpis: Array<{ name: string; value: number; unit: string; period: string }>;
-  revenue_trend?: Array<{ amount: number; recorded_at: number }>;
+  totalRevenue: number;
+  totalInvoices: number;
+  activeProjects: number;
+  totalCustomers: number;
+  recentKpis: Array<{
+    id: string;
+    domainPackId: string;
+    name: string;
+    value: number;
+    unit: string;
+    period: string;
+    recordedAt: number;
+  }>;
+  revenueTrend?: Array<{
+    id: string;
+    amount: number;
+    currency: string;
+    category: string;
+    description: string;
+    recordedAt: number;
+  }>;
 }
 
 interface ContentMediaKpis {
@@ -111,7 +132,7 @@ export function DashboardTab() {
   useEffect(() => {
     (async () => {
       try {
-        const data = await invoke<DashboardSummary>("opc_get_dashboard_summary");
+        const data = await invokePluginCommand<DashboardSummary>("opc_get_dashboard_summary", {});
         setSummary(data);
       } catch (e) {
         message.error(t("opc.common.loadFailed", { error: String(e) }));
@@ -208,14 +229,14 @@ export function DashboardTab() {
   useEffect(() => {
     if (!summary) { return; }
 
-    if (revenueChartRef.current && summary.revenue_trend) {
+    if (revenueChartRef.current && summary.revenueTrend) {
       revenueChartInstance.current = ensureECharts(revenueChartRef.current, isDark);
       revenueChartInstance.current.setOption({
         tooltip: { trigger: "axis" },
         grid: { left: 50, right: 20, top: 20, bottom: 30 },
         xAxis: {
           type: "category",
-          data: summary.revenue_trend.map((item) => formatTs(item.recorded_at)),
+          data: summary.revenueTrend.map((item) => formatTs(item.recordedAt)),
           axisLabel: { color: cssVar("--muted") },
         },
         yAxis: {
@@ -226,7 +247,7 @@ export function DashboardTab() {
           {
             name: t("opc.dashboard.totalRevenue"),
             type: "line",
-            data: summary.revenue_trend.map((item) => item.amount),
+            data: summary.revenueTrend.map((item) => item.amount),
             smooth: true,
             areaStyle: { opacity: 0.3 },
             lineStyle: { color: cssVar("--green") },
@@ -268,7 +289,7 @@ export function DashboardTab() {
           <Card size="small" className="h-full">
             <Statistic
               title={t("opc.dashboard.totalRevenue")}
-              value={summary.total_revenue}
+              value={summary.totalRevenue}
               prefix="¥"
               precision={2}
               valueStyle={{ color: "var(--green)" }}
@@ -279,7 +300,7 @@ export function DashboardTab() {
           <Card size="small" className="h-full">
             <Statistic
               title={t("opc.dashboard.totalInvoices")}
-              value={summary.total_invoices}
+              value={summary.totalInvoices}
               prefix={<FileTextOutlined />}
             />
           </Card>
@@ -288,7 +309,7 @@ export function DashboardTab() {
           <Card size="small" className="h-full">
             <Statistic
               title={t("opc.dashboard.activeCustomers")}
-              value={summary.total_customers}
+              value={summary.totalCustomers}
               prefix={<TeamOutlined />}
             />
           </Card>
@@ -297,7 +318,7 @@ export function DashboardTab() {
           <Card size="small" className="h-full">
             <Statistic
               title={t("opc.dashboard.activeProjects")}
-              value={summary.active_projects}
+              value={summary.activeProjects}
               prefix={<ProjectOutlined />}
             />
           </Card>
@@ -305,7 +326,7 @@ export function DashboardTab() {
       </Row>
 
       {/* 收入趋势图 */}
-      {summary.revenue_trend && (
+      {summary.revenueTrend && (
         <Row gutter={[16, 16]}>
           <Col xs={24}>
             <Card title={t("opc.dashboard.revenueTrend")} size="small">
@@ -400,9 +421,9 @@ export function DashboardTab() {
       <Row gutter={16}>
         <Col xs={24} lg={12}>
           <Card title={t("opc.dashboard.kpiTitle")} size="small">
-            {summary.recent_kpis.length === 0 ? <Empty description={t("opc.dashboard.noKpi")} /> : (
+            {summary.recentKpis.length === 0 ? <Empty description={t("opc.dashboard.noKpi")} /> : (
               <Timeline
-                items={summary.recent_kpis.slice(0, 5).map((kpi) => ({
+                items={summary.recentKpis.slice(0, 5).map((kpi) => ({
                   color: "blue",
                   children: (
                     <>

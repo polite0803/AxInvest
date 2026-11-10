@@ -3099,6 +3099,19 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // 看板总览：零入参。宿主按整表聚合（不是列表页加总），见 provider 侧注释。
+            "opc.store" if op == "dashboard_summary" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.dashboard_summary()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(summary) => to_value("DashboardSummaryView", &summary),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // `opc.store` 的写 op：入参只有 `id`（**不带正文**，也不接受正文），出参是契约的
             // 两态枚举。三处判据都跟着 `jobs.store` 的 `remove`：
             // ① `deserialize_arg` 只认 `id` 这一个键，缺键落 `SEAM_CALL_INVALID_ARGS`；

@@ -568,6 +568,23 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::mark_contact_read 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 看板总览（`dashboard_summary` op）—— **读 op**，不设权限闸。
+    ///
+    /// 与迁移前宿主命令 `opc_get_dashboard_summary`（内部调
+    /// `DefaultAnalyticsService::get_dashboard_summary_overview`）**同一口径**：票据 / 客户 /
+    /// 项目三张表的计数与收入合计由宿主按整表一次算全，并带 `recent_kpis` / `revenue_trend`
+    /// 两段明细。
+    ///
+    /// 为什么不复用 `list_*` 让调用方自己加总：那些 op 是「一页行」，调用方一旦给分页
+    /// `limit` 就会**静默少计**（`plugin-opc` 的 `opc_get_dashboard` 就是「三张表各取
+    /// `limit: 100` 现算」，超出这一页的行不计入）—— 要「与宿主同数」的看板必须走本 op。
+    /// `opc_get_dashboard` 本身**不动**：智能体工具 `opc_dashboard` 消费它的六个键。
+    async fn dashboard_summary(&self) -> Result<DashboardSummaryView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::dashboard_summary 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────
@@ -809,6 +826,38 @@ pub struct KpiSummaryView {
     pub unit: String,
     pub period: String,
     pub recorded_at: i64,
+}
+
+/// 收入记录摘要视图（`dashboard_summary` op 的 `revenueTrend` 行）。
+///
+/// 与 `KpiSummaryView` 同一裁法：`created_at` 不过线 —— 看板按 `recorded_at` 排序与展示，
+/// 建行时刻对调用方没有独立意义（多带一列只会催生第二份口径）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevenueRecordView {
+    pub id: String,
+    pub amount: f64,
+    pub currency: String,
+    pub category: String,
+    pub description: String,
+    pub recorded_at: i64,
+}
+
+/// 看板总览（`dashboard_summary` op 的出参）。
+///
+/// 与迁移前宿主命令 `opc_get_dashboard_summary` 的 `DashboardSummary` **逐字段同形**，
+/// 只把两张明细表的行换成接缝视图（`KpiRecord` / `RevenueRecord` 的 `created_at` 不过线）。
+/// 四个计数字段由宿主按**整表**算，不是列表页 limit 的加总（判据见 trait 的
+/// [`OpcStoreProvider::dashboard_summary`]）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardSummaryView {
+    pub total_revenue: f64,
+    pub total_invoices: u32,
+    pub active_projects: u32,
+    pub total_customers: u32,
+    pub recent_kpis: Vec<KpiSummaryView>,
+    pub revenue_trend: Vec<RevenueRecordView>,
 }
 
 /// 内容资产摘要视图（`body` 不过线）。

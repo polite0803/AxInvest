@@ -6857,6 +6857,22 @@ async function executeCommand<T>(
       } as unknown as T;
     }
 
+    // ── OPC 看板汇总（#36：宿主命令 `opc_get_dashboard_summary` 已迁入 OPC 插件）──
+    // ⚠ 必须显式登记：default 兜底只对 `list_*` / 以 `s` 结尾 / `get_*` 三类返回占位值，
+    // 本命令名三者都不命中 ⇒ 兜底给 `undefined`，而 `DashboardTab` 直接读
+    // `recentKpis.length` ⇒ 浏览器模式整页崩。故这里给**零值完整形状**。
+    case "opc_get_dashboard_summary":
+      // camelCase，与插件命令出参契约逐字一致（`revenueTrend` 可选但显式给空数组：
+      // 消费端用 `summary.revenueTrend && ...` 判存在，给 `[]` 与真机「无趋势数据」同形）。
+      return {
+        totalRevenue: 0,
+        totalInvoices: 0,
+        activeProjects: 0,
+        totalCustomers: 0,
+        recentKpis: [],
+        revenueTrend: [],
+      } as unknown as T;
+
     case "kb_connect_vault":
       return { success: true, vault_id: (args as { vault_id?: string })?.vault_id ?? "" } as T;
     case "kb_disconnect_vault":

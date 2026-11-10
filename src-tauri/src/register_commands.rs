@@ -755,7 +755,6 @@ macro_rules! register_all_commands {
             commands::opc::opc_find_customer_by_email,
             commands::opc::opc_get_content_asset,
             commands::opc::opc_get_customer,
-            commands::opc::opc_get_dashboard_summary,
             commands::opc::opc_get_investment_advice,
             commands::opc::opc_get_invoice,
             commands::opc::opc_get_publish_schedule,

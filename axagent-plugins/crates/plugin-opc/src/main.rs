@@ -81,6 +81,8 @@ const OPC_STORE_LIST_CONTACTS: &str = "list_contacts";
 const OPC_STORE_LIST_KPIS: &str = "list_kpis";
 const OPC_STORE_LIST_CONTENT_ASSETS: &str = "list_content_assets";
 const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
+/// 看板总览（零入参，宿主整表聚合；与 `opc_get_dashboard` 的「首页现算」不同口径）。
+const OPC_STORE_DASHBOARD_SUMMARY: &str = "dashboard_summary";
 
 /// #36 批 2 的四条写 op（同样要 `write`）：发票状态变更 / 内容资产更新 / 内容资产删除 /
 /// 发布计划取消。出参一律是契约的外部标记枚举（`{"transitioned": …}` / `{"updated": …}` /
@@ -151,6 +153,9 @@ const COMMAND_LIST_KPIS: &str = "opc_list_kpis";
 const COMMAND_LIST_CONTENT_ASSETS: &str = "opc_list_content_assets";
 const COMMAND_LIST_PUBLISH_SCHEDULES: &str = "opc_list_publish_schedules";
 const COMMAND_GET_DASHBOARD: &str = "opc_get_dashboard";
+/// 看板总览命令。宿主同名 Tauri 命令已随 #267 删除 —— 本条是看板唯一通道，
+/// 出参与迁移前逐字段同形（camelCase）。
+const COMMAND_GET_DASHBOARD_SUMMARY: &str = "opc_get_dashboard_summary";
 
 /// #36 批 2 的四条写命令（清单 `commands[].name` 必须逐字一致）。
 const COMMAND_TRANSITION_INVOICE: &str = "opc_transition_invoice";
@@ -561,6 +566,13 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
         },
+        // 看板总览：走宿主整表聚合 op（与上面「首页现算」不同口径，两者不能互换）。
+        COMMAND_GET_DASHBOARD_SUMMARY => match dashboard_summary(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
         other => CommandOutcome::Fault(CommandFault::for_frame(
             &frame,
             error_codes::PLUGIN_COMMAND_UNKNOWN,
@@ -934,6 +946,18 @@ fn dashboard(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (Str
         "totalCustomers": customer_rows.len(),
         "totalProjects": project_rows.len(),
     }))
+}
+
+/// `opc_get_dashboard_summary`：看板总览（零入参）。
+///
+/// 与 [`dashboard`] 的区别：`dashboard` 由本进程组合三次 `limit: 100` 列表查询现算
+/// （智能体工具 `opc_dashboard` 消费它的六键），超出首页的行不计入；本命令走宿主
+/// `dashboard_summary` op，宿主按**整表**聚合，出参与迁移前宿主命令逐字段同形。
+fn dashboard_summary(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_DASHBOARD_SUMMARY, json!({}), call_chain)
 }
 
 // ── #36 批 2：四条写命令 ────────────────────────────────────────────────

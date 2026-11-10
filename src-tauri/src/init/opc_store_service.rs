@@ -49,18 +49,18 @@ use axagent_company_runtime::opc::{
     DefaultCustomerService, DefaultInvoiceService, DefaultProjectService, DefaultSiteService,
     Invoice, InvoiceFilter, InvoiceService, InvoiceStatus, KpiRecord, LandingPage, MilestoneStatus,
     Project, ProjectFilter, ProjectService, ProjectStatus, PublishSchedule, PublishScheduleService,
-    SiteService,
+    RevenueRecord, SiteService,
 };
 use axagent_dao::repo::opc_blog_post::{BlogPostListRow, count_blog_posts, list_blog_posts};
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::opc_store::{
     BlogPostListOutcome, BlogPostView, ContactSummaryView, ContentAssetSummaryView,
-    CreateBlogPostInput, CustomerListQuery, CustomerSummaryView, InvoiceListQuery,
-    InvoiceSummaryView, KpiListQuery, KpiSummaryView, LandingPageSummaryView,
+    CreateBlogPostInput, CustomerListQuery, CustomerSummaryView, DashboardSummaryView,
+    InvoiceListQuery, InvoiceSummaryView, KpiListQuery, KpiSummaryView, LandingPageSummaryView,
     OPC_BLOG_POST_CONTENT_MAX_BYTES, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
     OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, ProjectListQuery, ProjectSummaryView,
-    PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome,
+    PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome, RevenueRecordView,
 };
 use tokio::sync::RwLock;
 
@@ -339,6 +339,26 @@ impl OpcStoreProvider for HostOpcStore {
             AxAgentError::Provider(format!("opc.store::list_publish_schedules 取发布计划失败: {e}"))
         })?;
         Ok(rows.into_iter().map(publish_schedule_summary_view).collect())
+    }
+
+    /// 看板总览（读 op，不设权限闸）。
+    ///
+    /// 与迁移前宿主命令 `opc_get_dashboard_summary` 同一口径：直接调域服务的
+    /// `get_dashboard_summary_overview`（整表聚合，无 limit）。**不要**改用 `list_*` 自行加总 ——
+    /// 那些 op 是「一页行」，带 `limit` 会静默少计。
+    async fn dashboard_summary(&self) -> Result<DashboardSummaryView> {
+        let svc = DefaultAnalyticsService::new(self.db.clone());
+        let summary = svc.get_dashboard_summary_overview().await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::dashboard_summary 取看板总览失败: {e}"))
+        })?;
+        Ok(DashboardSummaryView {
+            total_revenue: summary.total_revenue,
+            total_invoices: summary.total_invoices,
+            active_projects: summary.active_projects,
+            total_customers: summary.total_customers,
+            recent_kpis: summary.recent_kpis.into_iter().map(kpi_summary_view).collect(),
+            revenue_trend: summary.revenue_trend.into_iter().map(revenue_record_view).collect(),
+        })
     }
 
     // ── 写 op（#36 批 2：id / 枚举形状）────────────────────────────────
@@ -982,6 +1002,17 @@ fn kpi_summary_view(k: KpiRecord) -> KpiSummaryView {
         unit: k.unit,
         period: k.period,
         recorded_at: k.recorded_at,
+    }
+}
+
+fn revenue_record_view(r: RevenueRecord) -> RevenueRecordView {
+    RevenueRecordView {
+        id: r.id,
+        amount: r.amount,
+        currency: r.currency,
+        category: r.category,
+        description: r.description,
+        recorded_at: r.recorded_at,
     }
 }
 

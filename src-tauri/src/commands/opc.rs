@@ -12,10 +12,10 @@ use tauri::State;
 
 use axagent_company_runtime::opc::{
     AnalyticsService, ContentAsset, ContentAssetService, CreateKpiInput, Customer, CustomerService,
-    DashboardSummary, DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService,
-    DefaultInvoiceService, DefaultSiteService, FinanceService, InvestmentAdvice, Invoice,
-    InvoiceService, KpiRecord, PublishSchedule, PublishScheduleService, RevenueRecord,
-    UpdateInvoiceInput, UpdatePublishScheduleInput,
+    DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService,
+    DefaultSiteService, FinanceService, InvestmentAdvice, Invoice, InvoiceService, KpiRecord,
+    PublishSchedule, PublishScheduleService, RevenueRecord, UpdateInvoiceInput,
+    UpdatePublishScheduleInput,
 };
 
 use axagent_company_runtime::opc::capability_pack::{
@@ -154,24 +154,10 @@ pub async fn opc_list_revenue(
     })
 }
 
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取看板摘要")]
-#[tauri::command]
-pub async fn opc_get_dashboard_summary(
-    state: State<'_, AppState>,
-) -> Result<DashboardSummary, String> {
-    let svc = DefaultAnalyticsService::new(state.harness.db().clone());
-    // 走**显式跨域包**总览：本命令的唯一调用方是前端 `OpcPage` 的 dashboard 页签
-    // （`src/pages/opc/components/DashboardTab.tsx`，组件不接收域包参数），
-    // 语义上就是「所有域包的概览」。域包范围内的摘要走
-    // `opc_get_capability_pack_dashboard`。用两个显式命名的函数而不是
-    // `Option<domain_pack_id>` 一个函数混两用：后者会让「忘传 = 跨域包」成为默认行为。
-    svc.get_dashboard_summary_overview().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// `opc_get_dashboard_summary` 已随 #267 删除：插件侧同名命令走 `opc.store` 的
+// `dashboard_summary` 读 op（宿主按整表聚合，见 `init/opc_store_service.rs`），宿主侧
+// 唯一消费方 `DashboardTab.tsx` 已切 `invokePluginCommand`。域包范围内的摘要仍走
+// `opc_get_capability_pack_dashboard`，不受本条删除影响。
 
 // ── Finance Commands ────────────────────────────────────────────────
 //

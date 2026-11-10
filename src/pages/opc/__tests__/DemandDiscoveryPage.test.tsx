@@ -21,6 +21,9 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+  // 交付环五条命令已改走 invokePluginCommand：浏览器模式（isTauri=false）直接派发给
+  // browserMock 同名处理器，测试里等价于 invokeMock 收到原命令名 ⇒ 与本文其余断言同形。
+  isTauri: () => false,
 }));
 
 const MOCK_PLATFORMS = [
@@ -102,7 +105,7 @@ const MOCK_DELIVERY_SUMMARY = {
 /** 默认 mock 里追加交付环命令（挂载时 loadInvoices 就会调用） */
 function withDeliveryMocks(impl: (cmd: string) => Promise<unknown>) {
   return (cmd: string) => {
-    if (cmd === "opc_list_invoices") {
+    if (cmd === "opc_list_delivery_invoices") {
       return Promise.resolve(MOCK_INVOICES);
     }
     if (cmd === "opc_get_delivery_summary") {

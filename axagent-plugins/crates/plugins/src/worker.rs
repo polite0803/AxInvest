@@ -523,7 +523,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "complete_milestone"
             | "publish_landing_page"
             | "delete_landing_page"
-            | "mark_contact_read",
+            | "mark_contact_read"
+            // #264 批 1：交付域三条写 op（开票 / 状态机 / 删除）；两条读 op
+            // （`list_delivery_invoices` / `delivery_summary`）仍 `None`。
+            | "create_invoice_from_lead"
+            | "update_delivery_invoice_status"
+            | "delete_delivery_invoice",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -3618,6 +3623,101 @@ impl HostPeer {
                 };
                 match result {
                     Ok(rows) => to_value("Vec<PublishScheduleSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 1：交付域五 op（三写两读）──────────────────────────
+            //
+            // 与域包发票 op（`list_invoices` / `transition_invoice` / `delete_invoice`）
+            // **同名不同义**：这里只碰 `lead_id IS NOT NULL` 的交付来源行。
+            // 入参一律散标量（`status` / `lead_id` / `invoice_id` / `id`），`input` 用契约 DTO
+            // 原样透传 —— 三个写 op 已在 `required_permission_for` 登记 `Write`。
+            "opc.store" if op == "list_delivery_invoices" => {
+                let status: Option<String> = match deserialize_optional_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_delivery_invoices(status)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DeliveryInvoiceDto>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_invoice_from_lead" => {
+                let lead_id: String = match deserialize_arg(&args, "lead_id", seam) {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let input: Option<axagent_harness::types::opc_demand::CreateInvoiceFromLeadInput> =
+                    match deserialize_optional_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(
+                    provider.create_invoice_from_lead(lead_id, input.unwrap_or_default()),
+                ) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(invoice) => to_value("DeliveryInvoiceDto", &invoice),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "update_delivery_invoice_status" => {
+                let invoice_id: String = match deserialize_arg(&args, "invoice_id", seam) {
+                    Ok(invoice_id) => invoice_id,
+                    Err(response) => return response,
+                };
+                let status: String = match deserialize_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.update_delivery_invoice_status(invoice_id, status))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(invoice) => to_value("DeliveryInvoiceDto", &invoice),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "delete_delivery_invoice" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_delivery_invoice(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "delivery_summary" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delivery_summary()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(summary) => to_value("DeliverySummary", &summary),
                     Err(e) => seam_provider_error(e),
                 }
             },

@@ -1610,6 +1610,68 @@ function opcManifest({ version, binaryName, sha256 }) {
         command: "worker://opc_get_dashboard_summary",
         inputSchema: { type: "object", properties: {} },
       },
+      // ── #264 批 1：交付域五命令（两读三写）──
+      // 与域包发票命令同名不同义：交付账本只列 `lead_id IS NOT NULL` 的来源行。
+      // 属性名一律 camelCase（命令面）。两条读命令缺键即「不过滤」故不写 `required`；
+      // 三条写命令把必填 id 列进 `required`，缺键在宿主侧就会被拒。
+      {
+        name: "opc_list_delivery_invoices",
+        description: "列出交付发票（won 线索开票账本，可按状态过滤）",
+        command: "worker://opc_list_delivery_invoices",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "状态过滤（draft / sent / paid）" },
+          },
+        },
+      },
+      {
+        name: "opc_create_invoice_from_lead",
+        description: "把 won 线索开成交付发票（宿主幂等：已有发票直接返回）",
+        command: "worker://opc_create_invoice_from_lead",
+        inputSchema: {
+          type: "object",
+          properties: {
+            leadId: { type: "string", description: "需求线索 id（必须为 won 状态）" },
+            input: {
+              type: "object",
+              description: "缺省字段从线索元数据自动填充（title / amount / currency / notes）",
+            },
+          },
+          required: ["leadId"],
+        },
+      },
+      {
+        name: "opc_update_invoice_status",
+        description: "推进交付发票状态机（draft → sent → paid，逆向报错）",
+        command: "worker://opc_update_invoice_status",
+        inputSchema: {
+          type: "object",
+          properties: {
+            invoiceId: { type: "string", description: "交付发票 id" },
+            status: { type: "string", description: "目标状态（draft / sent / paid）" },
+          },
+          required: ["invoiceId", "status"],
+        },
+      },
+      {
+        name: "opc_delete_delivery_invoice",
+        description: "删除交付发票（作废用删除代替，不可逆）",
+        command: "worker://opc_delete_delivery_invoice",
+        inputSchema: {
+          type: "object",
+          properties: {
+            invoiceId: { type: "string", description: "交付发票 id" },
+          },
+          required: ["invoiceId"],
+        },
+      },
+      {
+        name: "opc_get_delivery_summary",
+        description: "交付汇总（won 数 / 发票数 / 回款按币种 / 转化率）",
+        command: "worker://opc_get_delivery_summary",
+        inputSchema: { type: "object", properties: {} },
+      },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };

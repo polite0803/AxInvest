@@ -126,6 +126,13 @@ const OPC_STORE_PUBLISH_LANDING_PAGE: &str = "publish_landing_page";
 const OPC_STORE_DELETE_LANDING_PAGE: &str = "delete_landing_page";
 const OPC_STORE_MARK_CONTACT_READ: &str = "mark_contact_read";
 
+/// #264 批 1：交付域五 op（三写两读）。
+const OPC_STORE_LIST_DELIVERY_INVOICES: &str = "list_delivery_invoices";
+const OPC_STORE_CREATE_INVOICE_FROM_LEAD: &str = "create_invoice_from_lead";
+const OPC_STORE_UPDATE_DELIVERY_INVOICE_STATUS: &str = "update_delivery_invoice_status";
+const OPC_STORE_DELETE_DELIVERY_INVOICE: &str = "delete_delivery_invoice";
+const OPC_STORE_DELIVERY_SUMMARY: &str = "delivery_summary";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -195,6 +202,18 @@ const COMMAND_COMPLETE_MILESTONE: &str = "opc_complete_milestone";
 const COMMAND_PUBLISH_LANDING_PAGE: &str = "opc_publish_landing_page";
 const COMMAND_DELETE_LANDING_PAGE: &str = "opc_delete_landing_page";
 const COMMAND_MARK_CONTACT_READ: &str = "opc_mark_contact_read";
+
+/// #264 批 1：交付域五命令（清单 `commands[].name` 必须逐字一致）。宿主同名 Tauri 命令
+/// 随本批删除 —— 本组是这五个交付面的唯一通道。
+///
+/// ⚠ 与域包发票命令（`opc_list_invoices` / `opc_delete_invoice`）**同名不同义**：
+/// 交付账本只列 `lead_id IS NOT NULL` 的交付来源行（迁移前的宿主模块头对此有说明，
+/// 该模块已随本批删除）。
+const COMMAND_LIST_DELIVERY_INVOICES: &str = "opc_list_delivery_invoices";
+const COMMAND_CREATE_INVOICE_FROM_LEAD: &str = "opc_create_invoice_from_lead";
+const COMMAND_UPDATE_INVOICE_STATUS: &str = "opc_update_invoice_status";
+const COMMAND_DELETE_DELIVERY_INVOICE: &str = "opc_delete_delivery_invoice";
+const COMMAND_GET_DELIVERY_SUMMARY: &str = "opc_get_delivery_summary";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -508,6 +527,45 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // ── #264 批 1：交付域五命令（三写两读；删除成功无载荷出 Null）──
+        COMMAND_LIST_DELIVERY_INVOICES => {
+            match list_delivery_invoices(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CREATE_INVOICE_FROM_LEAD => {
+            match create_invoice_from_lead(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_UPDATE_INVOICE_STATUS => {
+            match update_invoice_status(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_DELETE_DELIVERY_INVOICE => {
+            match delete_delivery_invoice(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_DELIVERY_SUMMARY => match get_delivery_summary(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         COMMAND_CREATE_PROJECT => match create_project(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -1338,6 +1396,90 @@ fn mark_contact_read(
     const OP: &str = "opc_mark_contact_read";
     let id = require_str(input, OP, "id")?;
     call_opc_store(peer, OPC_STORE_MARK_CONTACT_READ, json!({ "id": id }), call_chain)
+}
+
+// ── #264 批 1：交付域五命令 ────────────────────────────────────────────────
+//
+// 与域包发票命令**同名不同义**：这里只碰 `lead_id IS NOT NULL` 的交付来源行。
+// 命令面入参 camelCase、接缝面 snake_case（三面键名分档）；出参一律宿主原样回帧
+// （视图字段由契约 DTO 的 `serde(rename_all = "camelCase")` 决定，本层零改写）。
+
+/// `opc_list_delivery_invoices`：交付发票列表（只读 op）。
+///
+/// `status` 可选；缺键 / `null` 不转发（宿主按「不过滤」处理）。
+fn list_delivery_invoices(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_delivery_invoices";
+    let mut args = serde_json::Map::new();
+    match input.get("status") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(status)) => {
+            args.insert("status".to_string(), Value::String(status.clone()));
+        },
+        Some(_) => return Err(invalid_shape(format!("{OP} 的 `status` 必须是字符串"))),
+    }
+    call_opc_store(peer, OPC_STORE_LIST_DELIVERY_INVOICES, Value::Object(args), call_chain)
+}
+
+/// `opc_create_invoice_from_lead`：won 线索开票（写 op，宿主侧幂等 + 状态前置校验）。
+fn create_invoice_from_lead(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_invoice_from_lead";
+    let lead_id = require_str(input, OP, "leadId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("lead_id".to_string(), Value::String(lead_id.to_string()));
+    // 可选 `input` 对象原样透传（`CreateInvoiceFromLeadInput` 是 camelCase 契约 DTO，
+    // 缺省字段由宿主实现体从线索元数据补齐）。
+    match input.get("input") {
+        None | Some(Value::Null) => {},
+        Some(value @ Value::Object(_)) => {
+            args.insert("input".to_string(), value.clone());
+        },
+        Some(_) => return Err(invalid_shape(format!("{OP} 的 `input` 必须是对象"))),
+    }
+    call_opc_store(peer, OPC_STORE_CREATE_INVOICE_FROM_LEAD, Value::Object(args), call_chain)
+}
+
+/// `opc_update_invoice_status`：推进交付发票状态机（写 op）。
+fn update_invoice_status(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_invoice_status";
+    let invoice_id = require_str(input, OP, "invoiceId")?;
+    let status = require_str(input, OP, "status")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_DELIVERY_INVOICE_STATUS,
+        json!({ "invoice_id": invoice_id, "status": status }),
+        call_chain,
+    )
+}
+
+/// `opc_delete_delivery_invoice`：删除交付发票（写 op，硬删）。
+fn delete_delivery_invoice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_delivery_invoice";
+    let id = require_str(input, OP, "invoiceId")?;
+    call_opc_store(peer, OPC_STORE_DELETE_DELIVERY_INVOICE, json!({ "id": id }), call_chain)
+}
+
+/// `opc_get_delivery_summary`：交付汇总（只读 op，零入参）。
+fn get_delivery_summary(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_DELIVERY_SUMMARY, json!({}), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

@@ -52,6 +52,7 @@ use axagent_company_runtime::opc::{
     RevenueRecord, SiteService,
 };
 use axagent_dao::repo::opc_blog_post::{BlogPostListRow, count_blog_posts, list_blog_posts};
+use axagent_dao::repo::{opc_delivery, opc_demand};
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::opc_store::{
@@ -62,6 +63,10 @@ use axagent_harness::opc_store::{
     OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, ProjectListQuery, ProjectSummaryView,
     PublishBlogPostOutcome, PublishScheduleSummaryView, RemoveBlogPostOutcome, RevenueRecordView,
 };
+use axagent_harness::types::opc_demand::{
+    CreateInvoiceFromLeadInput, DeliveryInvoiceDto, DeliverySummary,
+};
+use axagent_harness::util_fns::now_ts;
 use tokio::sync::RwLock;
 
 /// `opc.store` 的宿主实现。
@@ -359,6 +364,127 @@ impl OpcStoreProvider for HostOpcStore {
             recent_kpis: summary.recent_kpis.into_iter().map(kpi_summary_view).collect(),
             revenue_trend: summary.revenue_trend.into_iter().map(revenue_record_view).collect(),
         })
+    }
+
+    // ── 交付域五 op（#264 批 1）────────────────────────────────────────
+    //
+    // 与迁移前宿主命令模块（`src-tauri/src/commands/opc_delivery.rs`，#264 批 1 已删除）
+    // 逐句同源：底层只调 dao
+    // （`repo::opc_delivery` / `repo::opc_demand`），本层不写 SQL。
+    // 交付账本只列 `lead_id IS NOT NULL` 的交付来源行 —— 这条过滤在 dao 的
+    // `list_invoices` 里，本层不重复（域包发票与交付发票共用 `opc_invoices` 表）。
+
+    async fn list_delivery_invoices(
+        &self,
+        status: Option<String>,
+    ) -> Result<Vec<DeliveryInvoiceDto>> {
+        opc_delivery::list_invoices(&self.db, status).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_delivery_invoices 取交付发票失败: {e}"))
+        })
+    }
+
+    async fn create_invoice_from_lead(
+        &self,
+        lead_id: String,
+        input: CreateInvoiceFromLeadInput,
+    ) -> Result<DeliveryInvoiceDto> {
+        let lead = opc_demand::get_lead(&self.db, &lead_id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_invoice_from_lead 取线索失败: {e}"))
+        })?;
+        if lead.status != "won" {
+            return Err(AxAgentError::Validation(format!(
+                "仅 won 线索可开票，当前状态: {}（线索 {lead_id}）",
+                lead.status
+            )));
+        }
+
+        // 幂等：已有发票直接返回，不重复开
+        let existing =
+            opc_delivery::list_invoices_by_lead(&self.db, &lead_id).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::create_invoice_from_lead 查重失败: {e}"))
+            })?;
+        if let Some(inv) = existing.first() {
+            return Ok(inv.clone());
+        }
+
+        let amount = input.amount.or(lead.budget_max).or(lead.budget_min).unwrap_or(0.0);
+        let filled = CreateInvoiceFromLeadInput {
+            title: input.title.or(Some(lead.title.clone())),
+            amount: Some(amount),
+            currency: Some(
+                input
+                    .currency
+                    .or_else(|| {
+                        if lead.budget_currency.is_empty() {
+                            None
+                        } else {
+                            Some(lead.budget_currency.clone())
+                        }
+                    })
+                    .unwrap_or_else(|| "CNY".to_string()),
+            ),
+            notes: input.notes,
+        };
+
+        opc_delivery::create_invoice(
+            &self.db,
+            &lead_id,
+            lead.linked_workflow_id.clone(),
+            &filled,
+            now_ts(),
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_invoice_from_lead 开票失败: {e}"))
+        })
+    }
+
+    async fn update_delivery_invoice_status(
+        &self,
+        invoice_id: String,
+        status: String,
+    ) -> Result<DeliveryInvoiceDto> {
+        // 枚举串在 IO 之前校验：非法值不该换来一次主键查询（同 transition_invoice）。
+        if !matches!(status.as_str(), "draft" | "sent" | "paid") {
+            return Err(AxAgentError::Validation(format!(
+                "非法发票状态: {status}（合法值 draft/sent/paid）"
+            )));
+        }
+        opc_delivery::update_invoice_status(&self.db, &invoice_id, &status, now_ts()).await.map_err(
+            |e| {
+                AxAgentError::Provider(format!(
+                    "opc.store::update_delivery_invoice_status 推进失败: {e}"
+                ))
+            },
+        )
+    }
+
+    async fn delete_delivery_invoice(&self, id: String) -> Result<()> {
+        require_id(&id, "delete_delivery_invoice")?;
+        opc_delivery::delete_invoice(&self.db, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::delete_delivery_invoice 删除失败: {e}"))
+        })
+    }
+
+    async fn delivery_summary(&self) -> Result<DeliverySummary> {
+        // 线索侧统计：个人公司量级（几十~几百条）全量拉取无压力，不值得上聚合 SQL
+        // （与迁移前宿主命令同一判断）。
+        let leads = opc_demand::list_leads(&self.db, 10_000, None, None).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::delivery_summary 取线索失败: {e}"))
+        })?;
+        let won_leads = leads.iter().filter(|l| l.status == "won").count() as u32;
+        let active_leads = leads.iter().filter(|l| l.status != "lost").count() as u32;
+
+        let mut summary =
+            opc_delivery::delivery_summary(&self.db, won_leads, active_leads).await.map_err(
+                |e| AxAgentError::Provider(format!("opc.store::delivery_summary 汇总失败: {e}")),
+            )?;
+
+        // 空库兜底：发票表为零时给 0 转化率而非 NaN（active=0 时 dao 已处理）。
+        if summary.active_leads == 0 {
+            summary.conversion_rate = 0.0;
+        }
+        Ok(summary)
     }
 
     // ── 写 op（#36 批 2：id / 枚举形状）────────────────────────────────

@@ -585,6 +585,75 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::dashboard_summary 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 交付域五 op（#264 批 1）────────────────────────────────────────────
+    //
+    // 与域包发票（`list_invoices` / `transition_invoice` / `delete_invoice`）**同名不同义**：
+    // 这五个 op 只碰 `lead_id IS NOT NULL` 的交付来源行（won 线索开票 → 状态机 → 汇总），
+    // 迁移前的宿主命令原名带 `delivery` 前缀正是为此（该模块已随 #264 批 1 删除）。
+    //
+    // op 名与宿主命令名**刻意不同形**：命令面叫 `opc_get_delivery_summary`，
+    // op 叫 `delivery_summary` —— 接缝面 snake_case + 去前缀（同 `dashboard_summary` 先例）。
+
+    /// 交付发票列表（`list_delivery_invoices` op）—— 读 op，不设权限闸。
+    ///
+    /// `status` 为 `None` 时不过滤；非法状态按「不过滤」处理（与迁移前宿主命令一致：
+    /// 该命令把 `Option<String>` 原样透传 dao）。
+    async fn list_delivery_invoices(
+        &self,
+        _status: Option<String>,
+    ) -> Result<Vec<crate::types::opc_demand::DeliveryInvoiceDto>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_delivery_invoices 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// won 线索开票（`create_invoice_from_lead` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 幂等由宿主实现保证：该线索已有发票时直接返回最早一张，不重复开票。
+    /// 前置校验（线索必须 `won`）也在宿主侧 —— 插件只透传入参。
+    async fn create_invoice_from_lead(
+        &self,
+        _lead_id: String,
+        _input: crate::types::opc_demand::CreateInvoiceFromLeadInput,
+    ) -> Result<crate::types::opc_demand::DeliveryInvoiceDto> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_invoice_from_lead 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 推进交付发票状态机（`update_delivery_invoice_status` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 合法迁移 `draft → sent → paid`；同状态幂等、逆向报错（宿主实现体）。
+    async fn update_delivery_invoice_status(
+        &self,
+        _invoice_id: String,
+        _status: String,
+    ) -> Result<crate::types::opc_demand::DeliveryInvoiceDto> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_delivery_invoice_status 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 删除交付发票（`delete_delivery_invoice` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 硬删，成功无载荷；缺行 ⇒ `Err(Provider)`。
+    async fn delete_delivery_invoice(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_delivery_invoice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 交付汇总（`delivery_summary` op）—— 读 op，不设权限闸。
+    ///
+    /// won 数 / 发票数 / 回款（按币种分组）/ 转化率一次算全；空库时转化率给 `0.0`
+    /// （宿主实现体的口径，与迁移前宿主命令逐字段同形）。
+    async fn delivery_summary(&self) -> Result<crate::types::opc_demand::DeliverySummary> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delivery_summary 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

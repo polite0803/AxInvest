@@ -102,7 +102,6 @@ pub mod multi_agent_setup;
 pub mod narrative;
 pub mod nl_to_cron;
 pub mod onboarding;
-pub mod opc_delivery;
 pub mod opc_demand_capability;
 pub mod opc_demand_discovery;
 pub mod opc_demand_implement;

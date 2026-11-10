@@ -3,6 +3,7 @@
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import { openExternal } from "@/lib/openExternal";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
   CapabilityMatchItem,
   DeliveryInvoice,
@@ -108,6 +109,15 @@ const VERDICT_COLOR: Record<string, string> = {
 
 /** 订阅扫描默认 cron（与后端 DEFAULT_SCAN_CRON 一致：每 6 小时） */
 const DEFAULT_SCAN_CRON = "0 */6 * * *";
+
+// 交付环五条命令（#264 批 1）：宿主 `opc_delivery.rs` 已整文件删除，插件命令是唯一通道
+// （经 `invokePluginCommand`：真机走 `plugin_execute_command` 并解析回执 JSON，浏览器模式
+// 直接派发到 `browserMock` 同名分支）。入参 camelCase，出参 = 接缝视图 json。
+const LIST_DELIVERY_INVOICES_COMMAND = "opc_list_delivery_invoices";
+const GET_DELIVERY_SUMMARY_COMMAND = "opc_get_delivery_summary";
+const CREATE_INVOICE_FROM_LEAD_COMMAND = "opc_create_invoice_from_lead";
+const UPDATE_INVOICE_STATUS_COMMAND = "opc_update_invoice_status";
+const DELETE_DELIVERY_INVOICE_COMMAND = "opc_delete_delivery_invoice";
 
 /** 商业价值分 → 文字颜色（≥80 极高 / ≥60 高 / ≥40 中 / 其余低） */
 function scoreColor(
@@ -331,8 +341,8 @@ export function DemandDiscoveryPage() {
   const loadInvoices = useCallback(async () => {
     try {
       const [rows, summary] = await Promise.all([
-        invoke<DeliveryInvoice[]>("opc_list_delivery_invoices"),
-        invoke<DeliverySummary>("opc_get_delivery_summary"),
+        invokePluginCommand<DeliveryInvoice[]>(LIST_DELIVERY_INVOICES_COMMAND, {}),
+        invokePluginCommand<DeliverySummary>(GET_DELIVERY_SUMMARY_COMMAND, {}),
       ]);
       setInvoices(rows ?? []);
       setDeliverySummary(summary);
@@ -345,7 +355,7 @@ export function DemandDiscoveryPage() {
   const createInvoice = useCallback(
     async (row: DemandLead) => {
       try {
-        await invoke<DeliveryInvoice>("opc_create_invoice_from_lead", { leadId: row.id });
+        await invokePluginCommand(CREATE_INVOICE_FROM_LEAD_COMMAND, { leadId: row.id });
         message.success(t("opc.demand.invoiceCreated"));
         void loadInvoices();
       } catch (e) {
@@ -359,7 +369,7 @@ export function DemandDiscoveryPage() {
   const advanceInvoice = useCallback(
     async (inv: DeliveryInvoice, status: "draft" | "sent" | "paid") => {
       try {
-        await invoke<DeliveryInvoice>("opc_update_invoice_status", {
+        await invokePluginCommand(UPDATE_INVOICE_STATUS_COMMAND, {
           invoiceId: inv.id,
           status,
         });
@@ -375,7 +385,7 @@ export function DemandDiscoveryPage() {
   const removeInvoice = useCallback(
     async (inv: DeliveryInvoice) => {
       try {
-        await invoke("opc_delete_delivery_invoice", { invoiceId: inv.id });
+        await invokePluginCommand(DELETE_DELIVERY_INVOICE_COMMAND, { invoiceId: inv.id });
         void loadInvoices();
       } catch (e) {
         message.error(t("opc.demand.invoiceFailed", { error: String(e) }));

@@ -420,7 +420,6 @@
     "docs/features/quant-backtest.md::axagent-quant/crates/market-sim/src/oracle.rs → DriftOracle",
     "docs/features/reflection-evolution.md::axagent-ai/crates/trajectory/src/skill_evolution.rs → SkillEvolutionEngine",
     "docs/features/reflection-evolution.md::axagent-ai/crates/trajectory/src/skill_evolution.rs → evolve_generation",
-    "docs/features/reflection-evolution.md::src-tauri/src/commands/stock_analysis.rs → list_batch_reflection_crons",
     "docs/features/reflection-evolution.md::src-tauri/src/commands/stock_analysis.rs → run_reflection_workflow",
     "docs/features/reflection-evolution.md::src-tauri/src/commands/stock_workflow/reflection.rs → horizon_results_json",
     "docs/features/reflection-evolution.md::src-tauri/src/init/services.rs → dueOnly",

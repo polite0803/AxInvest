@@ -6115,53 +6115,6 @@ pub async fn create_watchlist_scan_cron(
     Ok(CronJobResponse::from(&job))
 }
 
-/// 列出所有自选股扫描定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出自选股扫描定时任务")]
-#[tauri::command]
-pub async fn list_watchlist_scan_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
-    Ok(jobs
-        .iter()
-        .filter(|j| j.task_type.as_deref() == Some("watchlist-scan"))
-        .map(CronJobResponse::from)
-        .collect())
-}
-
-/// 启停自选股扫描定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关自选股扫描定时任务")]
-#[tauri::command]
-pub async fn toggle_watchlist_scan_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    state
-        .cron_job_store
-        .set_status(
-            &id,
-            if enabled {
-                CronJobStatus::Active
-            } else {
-                CronJobStatus::Paused
-            },
-        )
-        .await;
-    Ok(())
-}
-
-/// 删除自选股扫描定时任务
-#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除自选股扫描定时任务")]
-#[tauri::command]
-pub async fn delete_watchlist_scan_cron(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
-    Ok(())
-}
-
 /// 创建决策校验+反思复盘定时任务
 ///
 /// [2026-09-13 语义修正] 该任务**不再**自己扫描 30 天前的分析做 win/loss 判定，
@@ -6469,53 +6422,6 @@ pub async fn create_batch_reflection_cron(
     }
     state.cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
-}
-
-/// 列出所有批量反思定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出批量反思定时任务")]
-#[tauri::command]
-pub async fn list_batch_reflection_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
-    Ok(jobs
-        .iter()
-        .filter(|j| j.task_type.as_deref() == Some("batch-reflection"))
-        .map(CronJobResponse::from)
-        .collect())
-}
-
-/// 启停批量反思定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关批量反思定时任务")]
-#[tauri::command]
-pub async fn toggle_batch_reflection_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    state
-        .cron_job_store
-        .set_status(
-            &id,
-            if enabled {
-                CronJobStatus::Active
-            } else {
-                CronJobStatus::Paused
-            },
-        )
-        .await;
-    Ok(())
-}
-
-/// 删除批量反思定时任务
-#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除批量反思定时任务")]
-#[tauri::command]
-pub async fn delete_batch_reflection_cron(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
-    Ok(())
 }
 
 /// 查询反思复盘记录列表

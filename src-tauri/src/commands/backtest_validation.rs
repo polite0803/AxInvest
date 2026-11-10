@@ -1470,53 +1470,6 @@ pub async fn create_decision_backtest_cron(
     Ok(crate::commands::stock_analysis::CronJobResponse::from(&job))
 }
 
-/// 列出所有决策回测定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "列出决策回测定时任务")]
-#[tauri::command]
-pub async fn list_decision_backtest_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
-    Ok(jobs
-        .iter()
-        .filter(|j| j.task_type.as_deref() == Some(DECISION_BACKTEST_TASK_TYPE))
-        .map(crate::commands::stock_analysis::CronJobResponse::from)
-        .collect())
-}
-
-/// 启停决策回测定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关决策回测定时任务")]
-#[tauri::command]
-pub async fn toggle_decision_backtest_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    state
-        .cron_job_store
-        .set_status(
-            &id,
-            if enabled {
-                axagent_runtime_core::CronJobStatus::Active
-            } else {
-                axagent_runtime_core::CronJobStatus::Paused
-            },
-        )
-        .await;
-    Ok(())
-}
-
-/// 删除决策回测定时任务
-#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除决策回测定时任务")]
-#[tauri::command]
-pub async fn delete_decision_backtest_cron(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -104,9 +104,6 @@ Agent 模块清单见 `axagent-quant/crates/market-sim/src/agent/mod.rs:3-12`，
 | `serenity_validation_summary` | `src-tauri/src/commands/backtest_validation.rs:1000` |
 | `compute_validation_report` | `src-tauri/src/commands/backtest_validation.rs:1078` |
 | `create_decision_backtest_cron` | `src-tauri/src/commands/backtest_validation.rs:1424` |
-| `list_decision_backtest_crons` | `src-tauri/src/commands/backtest_validation.rs:1476` |
-| `toggle_decision_backtest_cron` | `src-tauri/src/commands/backtest_validation.rs:1490` |
-| `delete_decision_backtest_cron` | `src-tauri/src/commands/backtest_validation.rs:1512` |
 
 `run_decision_backtest` 只是薄壳，实体逻辑在同文件 `run_decision_backtest_inner`（`src-tauri/src/commands/backtest_validation.rs:194`）。
 

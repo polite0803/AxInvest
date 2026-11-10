@@ -74,7 +74,7 @@
 
 ## 关键代码入口
 
-- 后端命令：`src-tauri/src/commands/stock_workflow/reflection.rs:366`（`run_reflection_workflow`）、`src-tauri/src/commands/stock_analysis.rs:6411`（`create_batch_reflection_cron`）、`:6454`（`list_batch_reflection_crons`）。
+- 后端命令：`src-tauri/src/commands/stock_workflow/reflection.rs:366`（`run_reflection_workflow`）、`src-tauri/src/commands/stock_analysis.rs:6387`（`create_batch_reflection_cron`）。
 - 引擎/业务层：`src-tauri/src/commands/stock_workflow/reflection.rs:2946`（建点）、`:4782`（`horizon_results_json`）、`:1489`（代际血缘）、`src-tauri/src/commands/evolution_engine.rs:517`、`axagent-quant/crates/analysis-engine/src/node_evolution.rs:103`。
 - 前端：`src/components/stock-analysis/`（反思看板与执行层反思分栏）；具体组件按工作流页挂载。
 - 数据表/迁移：`stock_reflections`、`strategy_performance`（DAO 调用在 `reflection.rs`，实体与迁移在 `axagent-core/crates/entities/` + `axagent-infra/crates/migration/`）。

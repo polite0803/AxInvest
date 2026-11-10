@@ -7,9 +7,9 @@ import { PageContextProvider } from "@/components/shared/PageContextProvider";
 import { useIpcHealth } from "@/hooks/useIpcHealth";
 import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub } from "@/lib/devtoolsSubTabs";
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
+import { useDomainPageRoutes } from "@/lib/domainPageRegistry";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
 import { workspaceTabPath } from "@/lib/workspaceTabs";
-import { LazyDemandDiscoveryPage, LazyOpcPage, OPC_DOMAIN_ROUTES } from "@/pages/opc/routes";
 
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense } from "react";
@@ -137,6 +137,8 @@ function redirectToDevTools(sub?: DevToolsSub) {
 
 export const ContentArea = memo(function ContentArea() {
   const { ipcHealthy } = useIpcHealth();
+  // 域贡献的页面路由（注册表投影）：宿主不认识任何具体域组件，也不点名有哪些域
+  const contributedPages = useDomainPageRoutes();
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -260,27 +262,15 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          <Route
-            path={`${BUILTIN_PAGE_PATH["automation-operations"]}/:tab`}
-            element={
-              <PageContextProvider page="automation-operations">
-                <SafeLazyPage Page={LazyOpcPage} />
-              </PageContextProvider>
-            }
-          />
-          <Route
-            path={BUILTIN_PAGE_PATH["automation-operations"]}
-            element={
-              <PageContextProvider page="automation-operations">
-                <SafeLazyPage Page={LazyOpcPage} />
-              </PageContextProvider>
-            }
-          />
-          {/* ── AxInvest 能力包页（OPC 能力包，路径 /opc/domain/:id，按能力域归位） ── */}
-          {OPC_DOMAIN_ROUTES.map(([pageKey, Page]) => (
+          {
+            /* ── 域贡献的页面路由（注册表投影）：宿主不 import 任何域页面组件 ──
+              覆盖 OPC 主页（/opc、/opc/:tab）、14 个能力包页（/opc/domain/:id）与需求发现页。
+              域侧增删页面改 `src/pages/<域>/routes.tsx`，本文件不动（#36 迁出期解耦点）。 */
+          }
+          {contributedPages.map(({ id, path, pageKey, Page }) => (
             <Route
-              key={pageKey}
-              path={BUILTIN_PAGE_PATH[pageKey]}
+              key={id}
+              path={path}
               element={
                 <PageContextProvider page={pageKey}>
                   <SafeLazyPage Page={Page} />
@@ -290,14 +280,6 @@ export const ContentArea = memo(function ContentArea() {
           ))}
           {/* ── 旧链兼容：/opc/industry/:packId → /opc/domain/:packId ── */}
           <Route path="/opc/industry/:packId" element={<LegacyIndustryPathRedirect />} />
-          <Route
-            path={BUILTIN_PAGE_PATH["demand-discovery"]}
-            element={
-              <PageContextProvider page="demand-discovery">
-                <SafeLazyPage Page={LazyDemandDiscoveryPage} />
-              </PageContextProvider>
-            }
-          />
           <Route path={BUILTIN_PAGE_PATH.memory} element={<Navigate to="/knowledge/memory" replace />} />
           <Route
             path={BUILTIN_PAGE_PATH.link}

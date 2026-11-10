@@ -48,12 +48,12 @@ App.tsx:388  <GlobalTabBar />           ← 仅 /chat **且 activeTab==="chat"**
 
 | 轴 | 载体 | 组织方式 | 项数 | 权威源 |
 |---|---|---|---|---|
-| **业务轴** | 侧栏 `Sidebar` | 按 8 个能力域分组，项=域聚合入口/行业包 | **18** | `navRegistry.tsx:48-193` + `domainMeta.ts:109-137` |
+| **业务轴** | 侧栏 `Sidebar` | 按 8 个能力域分组，项=域聚合入口/行业包 | **18** | `navRegistry.tsx:46-163`（宿主项）+ `src/pages/opc/routes.tsx`（域项载体，2026-11-10 起）+ `domainMeta.ts:205-217` |
 | **功能轴** | 工作台 `WorkspaceSwitcher` | 扁平工具列 | **8** | `WorkspaceSwitcher.tsx:14-23` |
 
 **两轴零交集**（除 chat）：
 
-- `NAV_ITEM_DOMAIN_MAP`（`domainMeta.ts:109-137`）里**没有任何**工作台功能 key（dashboard/workflow/terminal/files/knowledge/multiAgent/devtools），只有 `chat: "general"`。
+- `NAV_ITEM_DOMAIN_MAP`（`domainMeta.ts:205-217`）里**没有任何**工作台功能 key（dashboard/workflow/terminal/files/knowledge/multiAgent/devtools），只有 `chat: "general"`。
 - 侧栏 18 项的 `path` **没有一条**指向 `/dashboard`、`/workflow`、`/terminal`、`/files`、`/knowledge`、`/multi-agent`、`/devtools`（`navRegistry.tsx` 全量核对）。
 
 ### 1.3 对照：仓库里已有一套「成熟的 Tab」
@@ -91,7 +91,7 @@ App.tsx:388  <GlobalTabBar />           ← 仅 /chat **且 activeTab==="chat"**
 - **证据**
   - `ContentArea.tsx:356-361`：`/devtools`、`/devtools/trace-explorer`、`/devtools/benchmark`、`/devtools/tool-recommender`、`/devtools/fine-tune`、`/devtools/rl-training` **六条路由全部** `redirectToChat("devtools")`。
   - `DevToolsPage.tsx:58` 用 `defaultActiveKey="trace-explorer"`，**全文不读 `location` / `searchParams`**（已 grep 确认零匹配）。
-- **后果**：打开 `/devtools/benchmark` 永远落在「追踪浏览器」。6 个 `BUILTIN_PAGE_PATH` key（`pageRegistry.ts:76-81`）+ 6 条路由 = **零有效出口的死路径**。
+- **后果**：打开 `/devtools/benchmark` 永远落在「追踪浏览器」。6 个 `BUILTIN_PAGE_PATH` key（`pageRegistry.ts:68-73`）+ 6 条路由 = **零有效出口的死路径**。
 - **根因归类**：**悬空解析** —— 上游解析了子路径语义，下游没有任何消费端比对。
 - **fix**：`?ws=devtools&sub=<key>`，`DevToolsPage` 受控读 `sub`；或短期直接删掉这 5 条无消费者的路由（若确认无外部链接引用）。
 

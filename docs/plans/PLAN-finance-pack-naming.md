@@ -91,7 +91,7 @@
 ## 6. 阶段 D — 记录不处理（另案）
 
 - `src/i18n/locales/zh-CN.json:3833` `nav.invest`、`:6739-6744` `sidebar.sectionInvest*` 全仓零引用，属旧侧栏分组死键 —— 死键清理应走统一的 i18n 瘦身，不夹带进本计划。
-- `src/components/stock-workspace/views/BacktestView.tsx:25` 跳 `BUILTIN_PAGE_PATH["replay-workbench"]`，该键不在 `src/lib/pageRegistry.ts:30-83` ⇒ 解析为 `undefined`，按钮为坏链。独立缺陷，建议另开。
+- `src/components/stock-workspace/views/BacktestView.tsx:25` 跳 `BUILTIN_PAGE_PATH["replay-workbench"]`，该键不在 `src/lib/pageRegistry.ts:30-74` ⇒ 解析为 `undefined`，按钮为坏链。独立缺陷，建议另开。
 - 域包动作 `fi-financial` 前端 key（`DomainPages.tsx:700`）与后端 key（`fi-financial-report`，`opc_capability_pack_actions.rs:370`）不一致 ⇒ 走 `DomainTabContent.tsx:134-147` 的通用兜底 persona。与阶段 C 同族（key 对齐），届时一并处理。
 
 ## 7. 验证门禁

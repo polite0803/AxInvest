@@ -22,11 +22,11 @@
 | 模型 | 表现 | 证据 |
 |---|---|---|
 | Chat-first | `dashboard` / `workflow` / `terminal` / `files` / `knowledge` / `multiAgent` 重定向到 chat 内 tab | `src/components/layout/ContentArea.tsx:272-279` |
-| Workspace-first | `/invest`、`/opc`、`/tasks`、`/settings`、`/wiki` 是独立页面 | `src/components/layout/ContentArea.tsx:217-366` |
+| Workspace-first | `/invest`、`/opc`、`/tasks`、`/settings`、`/wiki` 是独立页面 | `src/components/layout/ContentArea.tsx:150-357` |
 
 黏合层是 query + store 双向同步，`ChatPage` 需要 `syncingRef` 防循环（`src/pages/ChatPage.tsx:221-268`）。
 
-可达性缺口：侧栏 19 项（`src/lib/navRegistry.tsx:48-205`），`pageRegistry` 约 48 条路由。差额页面无稳定入口：
+可达性缺口：侧栏 19 项（`src/lib/navRegistry.tsx:46-163`），`pageRegistry` 约 48 条路由。差额页面无稳定入口：
 
 | 页面 | 现状入口 |
 |---|---|

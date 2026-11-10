@@ -14,9 +14,9 @@
 
 | 环节 | 执行内核 | cron 分支 | CRUD 命令 | 缺什么 |
 |---|---|---|---|---|
-| 智能荐股 | `recommender::run_recommendation_scan`（四档共享池扫描→逐档落 `reco_picks`） | `services.rs:2240` `stock-recommendation` | `create_recommendation_cron` | 无自动建任务；不判交易日 |
-| 趋势智选 | `serenity-screening` / `-fast` 工作流，产物落 `reco_picks`（style='serenity'，`serenity.rs:1318`） | `services.rs:2947` `workflow_id` 兜底分支 | `create_trend_screening_cron`（`recommendation_cron.rs:247`，默认 `0 16 * * 1-5`） | 无自动建任务 |
-| 候选池逐只分析 | `run_pool_scan`（`pool_scan.rs:172`，读近 N 天 reco_picks 含 serenity，串行 `run_single_stock_analysis`） | `services.rs:2556` `pool-scan` | `create_pool_scan_cron`（默认 `0 17 * * *`） | 无自动建任务；不判交易日；**无「尚未分析」筛选**（按 confidence 截断 max_stocks=10，未分析的积压被静默挡掉） |
+| 智能荐股 | `recommender::run_recommendation_scan`（四档共享池扫描→逐档落 `reco_picks`） | `services.rs:2240` `stock-recommendation` | `stock_create_recommendation_cron`（插件命令，经 `stock.analysis` 接缝；宿主 wrapper 已随 #35 批 1b 退役） | 无自动建任务；不判交易日 |
+| 趋势智选 | `serenity-screening` / `-fast` 工作流，产物落 `reco_picks`（style='serenity'，`serenity.rs:1318`） | `services.rs:2947` `workflow_id` 兜底分支 | `stock_create_trend_screening_cron`（插件命令；默认 `0 16 * * 1-5`） | 无自动建任务 |
+| 候选池逐只分析 | `run_pool_scan`（`pool_scan.rs:172`，读近 N 天 reco_picks 含 serenity，串行 `run_single_stock_analysis`） | `services.rs:2556` `pool-scan` | `stock_create_pool_scan_cron`（插件命令；默认 `0 17 * * *`） | 无自动建任务；不判交易日；**无「尚未分析」筛选**（按 confidence 截断 max_stocks=10，未分析的积压被静默挡掉） |
 | 四周期到期反思 | `run_batch_reflection_inner` + `BatchReflectionConfig{period, dueOnly, maxCount}`（`reflection.rs:1648`，due_only=按 2/5/28/90 天间隔判到期） | `services.rs:2674` `batch-reflection` | 有 | 无自动建任务；另有 6h 兜底服务不限周期（保留不动） |
 
 **关键前置缺陷（P0）**：`crates/runtime/src/cron/scheduler.rs:47` `should_run_now` 用 `chrono::Utc::now()` 匹配 cron 字段 ⇒ 写 `0 0 * * *` 实际在**北京时间 08:00** 跑。前端所有默认表达式（`0 16 * * 1-5`、`0 17 * * *`）都是按北京时间写的，即**现存定时任务全部晚 8 小时触发**。本项目仅 Windows 桌面单机、用户在东八区 ⇒ 修调度器为本地时区匹配是唯一能让「00:00 = 00:00」成立的口径（备选：种子表达式按 UTC-8 反写，但会和前端展示/用户手写语义永久分裂，否决）。
@@ -56,7 +56,7 @@
    - ⚠ **判据字段选型（实施前核验项）**：`stock_analyses.analysis_date` 在批量路径写的是 **UTC 日**（`core.rs:1858`），与本地日的边界在 08:00——02:00（本地）跑的任务其 UTC 日还是「昨天」，直接用 `analysis_date = 今天` 判会错配；须核验表内是否有毫秒时间戳列可作「>= 本地今日 00:00」比较，没有则以 `analysis_date ∈ {UTC今日, UTC昨日}` 两值并集判据，并补「本地 02:00 写入 ⇒ 同轮再查判为已分析」的单测锁住边界。
    - 排除 replay / ab_test 记录（`analysis_kind != 'live'`），历史回放的分析不算「当日已分析」。
 3. **池内去重**：同一 code 多条 pick（四档各一排、荐股与趋势智选撞车）只分析一次，取 confidence 最高的一条带 `period` 入队（沿用现有 seen-set 逻辑）。
-4. **依次全量，不截断**：`max_stocks=0` 语义改为「不限」（现 `create_pool_scan_cron` 拒绝 0，放开）；种子任务 `minConfidence:50`，其余按第 1 层全池。现默认 10 会把「排在 10 名之后、尚未分析」的候选静默挡掉，与诉求直接冲突。
+4. **依次全量，不截断**：`max_stocks=0` 语义改为「不限」（现 `stock_create_pool_scan_cron` 拒绝 0，放开）；种子任务 `minConfidence:50`，其余按第 1 层全池。现默认 10 会把「排在 10 名之后、尚未分析」的候选静默挡掉，与诉求直接冲突。
 5. **失败可见性**：`PoolScanOutcome` 增加 `skipped_analyzed_today` 计数与逐只 skip 明细；空池、全跳过、截断三种缺席各报各的，不混成一个读数。
 
 **边界声明（全池口径的三个已知后果，均已实证，须让用户知情）**：

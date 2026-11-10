@@ -77,7 +77,7 @@
 > 改读**同一份**模板变量 `serenity_stop_mult`/`serenity_target_mult`/`serenity_entry_range`
 > （此前工作流路径硬编码 0.80/1.30/±5%，面板调了不生效），并 `info!` 声明档位；
 > 面板加 `serenityPanel.tierScopeHint`（× 11 语言）明示「只服务中线，短/超短不适用」；
-> `create_trend_screening_cron` **刻意不增 `periods`**（不支持的档不做入口）。
+> `stock_create_trend_screening_cron` **刻意不增 `periods`**（不支持的档不做入口）。
 > 策略包按裁定**全删**：3 份 `strategy_pack.rs`（1356 行）+ 18 个 YAML + `StrategyPackSettings.tsx`
 > + 7 个命令 + 11 语言 i18n 块；注册表由 `build.rs` 自动重算（`register_commands.rs` 归零，未手改）。
 >
@@ -300,7 +300,7 @@
 
 ### Phase 6 serenity 周期口径显式化 + 策略包接线或删
 
-- serenity：`strategies/serenity.rs:22-29` 明确「只做中长线」是**产品定位**还是**实现偷懒**？若是定位 ⇒ `stock_workflow/serenity.rs:1361,1384` 的硬编码 `"mid"` 改为常量声明 + 面板明示「趋势智选仅服务中线」，`holdingDays` 由 `Period::default_holding_days` 推导而非 `unwrap_or(20)`（20 ≠ 28，是口径矛盾）；若可支持四档 ⇒ `run_serenity_screening`（`:883-890`）与 `create_trend_screening_cron`（`recommendation_cron.rs:247-252`）增 `periods: Vec<Period>`（照抄荐股 cron `:30-34` 形态），前端 `SerenityScreeningPanel.tsx:970-980` 传参 + 四档 Tab；止损/目标按档分档（当前 `:184-197` Mid/Long 共用一组）；
+- serenity：`strategies/serenity.rs:22-29` 明确「只做中长线」是**产品定位**还是**实现偷懒**？若是定位 ⇒ `stock_workflow/serenity.rs:1361,1384` 的硬编码 `"mid"` 改为常量声明 + 面板明示「趋势智选仅服务中线」，`holdingDays` 由 `Period::default_holding_days` 推导而非 `unwrap_or(20)`（20 ≠ 28，是口径矛盾）；若可支持四档 ⇒ `run_serenity_screening`（`:883-890`）与 `stock_create_trend_screening_cron`（入参 `TrendCreateRequest`，`recommendation_cron.rs:227`；核心 `create_trend_screening_cron_core` `:298`）增 `periods: Vec<Period>`（照抄荐股 cron `:30-34` 形态），前端 `SerenityScreeningPanel.tsx:970-980` 传参 + 四档 Tab；止损/目标按档分档（当前 `:184-197` Mid/Long 共用一组）；
 - **bump** `seed_serenity.rs:104`（53 → 54）、`seed_serenity_fast.rs:117`；
 - 策略包：6 个周期 YAML（`agency_experts/stock-analysis/strategy_packs/*.yaml`）二选一——(a) 接线：新增 `apply_strategy_pack` 命令，把 `template_vars_for`（`strategy_pack.rs:195-239`）产出的变量经 `mod.rs:1386 force_variable_value` 写入模板变量并 bump 版本；(b) 删除：连同 `StrategyPackRegistry` 死代码一起摘除，设置面板只保留现有逐周期参数（`StockAnalysisConfigPanel.tsx:584-606,669-673` 已经在做同一件事）。**倾向 (b)**：它想表达的 per-period 参数已被硬编码取代（`strategies/trend.rs:3-5,17-18` 注释自述），接线等于复活一条已废弃口径。
 

@@ -29,14 +29,14 @@
     {
       "id": "commandTotal",
       "label": "Tauri 命令总数（parseRegistry 逐行条目）",
-      "value": 1509,
+      "value": 1500,
       "check": "registryCommandCount",
       "hard": true,
-      "planNumber": "1509",
+      "planNumber": "1500",
       "planMustAppear": true,
-      "planPinned": [{ "line": 366, "mustContain": ["1509", "165", "`register_commands.rs` 共"] }],
+      "planPinned": [{ "line": 366, "mustContain": ["1500", "165", "`register_commands.rs` 共"] }],
       "planOld": [],
-      "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 1542→1541**。原本挂在 `planOld` 上的 1541 条目随本批**移除**：它不是「旧读数」了，若留着会与现值钉句自相矛盾；1542 转为历史读数，**不设 planOld** —— 它大量出现在 §0.12.4 漂移列举段与 §15 各节的历史陈述里，加 planOld 只会逼着到处补 alsoAt（同一事实的两种写法不该受两套监管）。**2026-11-05 B8-1b 新增宿主 `plugin_list_task_sources` ⇒ 1541→1542**（1541 随之转历史读数，同不设 planOld：它只出现在 §15 记账段的本批对照行里，是「上一批的现值」而非漂移旧值）。**2026-11-06 对账批（`3fe49c950`，#36 第 4 批）删宿主 `opc_list_blog_posts` ⇒ 1542→1541**；1542 同不设 planOld —— 它在 PLAN 里成批出现在 §15 / §108 / §115.6 的记账段（都是「当时多少」而非「现在多少」），加 planOld 只会逼出满屏 alsoAt。**2026-11-08 对账批实测 1541→1540**：`7cb13bde5`（#36 博客写面切插件通道）删宿主三命令 −3，`376b4d766`（#216 任务卡片投影）加 `plugin_list_task_cards` / `task_card_host_cards` +2 ⇒ 净 −1；同批 `--dump-readings` 的 defined 1540 / 已注册名 1540 / 未注册 0 三方一致，不是产物滞后。**2026-11-09 #32 批 C 删宿主六个已插件化 OPC 命令**（`opc_create_invoice` / `opc_transition_invoice` / `opc_create_customer` / `opc_update_customer` / `opc_delete_customer` / `opc_list_customers`）⇒ 1540→1534；同批把 `planOld` 上的 1534 条目**移除**（它重新成为现值，留着会与现钉句自相矛盾，先例 = 1541 同批移除）；1534 上一次作为旧读数的那组成对值在 §0.12.4 漂移段，本批把新的一对 1540/1534 追加进该段，不为其设新 planOld。**2026-11-09 D-3/D-1/D-2 收口批删宿主十条 OPC 命令**（D-3 三条项目命令 `opc_create_project` / `opc_list_projects` / `opc_add_milestone` + D-1 七条内容资产/发布计划命令 `opc_create_content_asset` / `opc_list_content_assets` / `opc_update_content_asset` / `opc_delete_content_asset` / `opc_create_publish_schedule` / `opc_list_publish_schedules` / `opc_delete_publish_schedule`，均已插件化；`opc_get_content_asset` / `opc_get_publish_schedule` / `opc_update_publish_schedule` / `opc_process_due_schedules` 因前端正文回填 / 挂期处理仍留宿主）⇒ **1534→1524**；1534 同不设 planOld（成对值已追加进 §0.12.4 漂移段）。**2026-11-09 D-4 收口批删宿主六条落地页/联系人命令**（`opc_create_landing_page` / `opc_list_landing_pages` / `opc_publish_landing_page` / `opc_delete_landing_page` / `opc_list_contacts` / `opc_mark_contact_read`，均已插件化）⇒ **1524→1518**；1524 同不设 planOld（成对值追加进 §0.12.4 漂移段）。**2026-11-10 #35 批 1 死命令退役批删 9 条零调用 cron 命令**（`stock_analysis.rs` 的 `list_/toggle_/delete_watchlist_scan_cron` + `list_/toggle_/delete_batch_reflection_cron`，`backtest_validation.rs` 的 `list_/toggle_/delete_decision_backtest_cron`；`git grep` 复核零代码引用、仅文档）⇒ **1518→1509**；1509 同不设 planOld（成对值已追加进 §0.12.4 漂移段）。"
+      "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 1542→1541**。原本挂在 `planOld` 上的 1541 条目随本批**移除**：它不是「旧读数」了，若留着会与现值钉句自相矛盾；1542 转为历史读数，**不设 planOld** —— 它大量出现在 §0.12.4 漂移列举段与 §15 各节的历史陈述里，加 planOld 只会逼着到处补 alsoAt（同一事实的两种写法不该受两套监管）。**2026-11-05 B8-1b 新增宿主 `plugin_list_task_sources` ⇒ 1541→1542**（1541 随之转历史读数，同不设 planOld：它只出现在 §15 记账段的本批对照行里，是「上一批的现值」而非漂移旧值）。**2026-11-06 对账批（`3fe49c950`，#36 第 4 批）删宿主 `opc_list_blog_posts` ⇒ 1542→1541**；1542 同不设 planOld —— 它在 PLAN 里成批出现在 §15 / §108 / §115.6 的记账段（都是「当时多少」而非「现在多少」），加 planOld 只会逼出满屏 alsoAt。**2026-11-08 对账批实测 1541→1540**：`7cb13bde5`（#36 博客写面切插件通道）删宿主三命令 −3，`376b4d766`（#216 任务卡片投影）加 `plugin_list_task_cards` / `task_card_host_cards` +2 ⇒ 净 −1；同批 `--dump-readings` 的 defined 1540 / 已注册名 1540 / 未注册 0 三方一致，不是产物滞后。**2026-11-09 #32 批 C 删宿主六个已插件化 OPC 命令**（`opc_create_invoice` / `opc_transition_invoice` / `opc_create_customer` / `opc_update_customer` / `opc_delete_customer` / `opc_list_customers`）⇒ 1540→1534；同批把 `planOld` 上的 1534 条目**移除**（它重新成为现值，留着会与现钉句自相矛盾，先例 = 1541 同批移除）；1534 上一次作为旧读数的那组成对值在 §0.12.4 漂移段，本批把新的一对 1540/1534 追加进该段，不为其设新 planOld。**2026-11-09 D-3/D-1/D-2 收口批删宿主十条 OPC 命令**（D-3 三条项目命令 `opc_create_project` / `opc_list_projects` / `opc_add_milestone` + D-1 七条内容资产/发布计划命令 `opc_create_content_asset` / `opc_list_content_assets` / `opc_update_content_asset` / `opc_delete_content_asset` / `opc_create_publish_schedule` / `opc_list_publish_schedules` / `opc_delete_publish_schedule`，均已插件化；`opc_get_content_asset` / `opc_get_publish_schedule` / `opc_update_publish_schedule` / `opc_process_due_schedules` 因前端正文回填 / 挂期处理仍留宿主）⇒ **1534→1524**；1534 同不设 planOld（成对值已追加进 §0.12.4 漂移段）。**2026-11-09 D-4 收口批删宿主六条落地页/联系人命令**（`opc_create_landing_page` / `opc_list_landing_pages` / `opc_publish_landing_page` / `opc_delete_landing_page` / `opc_list_contacts` / `opc_mark_contact_read`，均已插件化）⇒ **1524→1518**；1524 同不设 planOld（成对值追加进 §0.12.4 漂移段）。**2026-11-10 #35 批 1 死命令退役批删 9 条零调用 cron 命令**（`stock_analysis.rs` 的 `list_/toggle_/delete_watchlist_scan_cron` + `list_/toggle_/delete_batch_reflection_cron`，`backtest_validation.rs` 的 `list_/toggle_/delete_decision_backtest_cron`；`git grep` 复核零代码引用、仅文档）⇒ **1518→1509**；1509 同不设 planOld（成对值已追加进 §0.12.4 漂移段）。**2026-11-10 #35 批 1b：1509→1500（−9）** = 退役 pool_scan / recommendation / trend_screening 三族的 create / list / toggle 宿主 wrapper（`commands/pool_scan.rs` 3 + `commands/recommendation_cron.rs` 6），判据 = 前端零 `invoke`（唯一命中是 3 条 dev mock，已同批删）+ Rust 侧只有定义 + 插件命令权限投影逐条等阶（create/toggle `workspace-write`→Caution、list 未声明→Safe）；三条 `delete_*` 保留（档位不等价，PLAN §141）；1500 同不设 planOld（成对值已追加进 §0.12.4 漂移段）。"
     },
     {
       "id": "commandModules",
@@ -60,47 +60,47 @@
     {
       "id": "registryFileLines",
       "label": "register_commands.rs 行数（口径 = split(\"\\n\").length，含末行空元素）",
-      "value": 1576,
+      "value": 1567,
       "check": "registryFileLineCount",
       "hard": false,
       "planMustAppear": false,
-      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。**2026-11-06 第二轮对账**：主 crate `cargo check -p axagent --lib` 后从盘上量 = **1608**，且 `git status` 对 `src-tauri/src/register_commands.rs` 无输出（产物与 HEAD 逐字相同 ⇒ 不是本次构建改写了它）⇒ 1609 是上一批「B9-2 −1 与 B8-1b +1」两笔相互抵掉后没回灌的滞后值。本条 `hard:false`（只报告，不参与退出码），但对账批的原则是**软锚点也不留过期值**：漂移一旦无人回读，下一批就分不清「产物滞后」与「真漂移」。**2026-11-08 对账批：1608 → 1607（−1）** = `7cb13bde5` 删三条博客写面命令（−3 行）+ `376b4d766` 加两条任务卡片命令（+2 行），净 −1；与 `commandTotal` 1541→1540 精确配对。**2026-11-09 #32 批 C：1607 → 1601（−6）** = 删六条 OPC 宿主命令各少 1 行注册，与 `commandTotal` 1540→1534 精确配对。**2026-11-09 D-3/D-1 收口批：1601 → 1591（−10）** = 删十条 OPC 宿主命令（D-3 三条项目命令 + D-1 七条内容资产/发布计划命令）各少 1 行注册，与 `commandTotal` 1534→1524 精确配对。**2026-11-09 D-4 收口批：1591 → 1585（−6）** = 删六条落地页/联系人宿主命令各少 1 行注册，与 `commandTotal` 1524→1518 精确配对。**2026-11-10 #35 批 1：1585 → 1576（−9）** = 删 9 条死命令各少 1 行注册，与 `commandTotal` 1518→1509 精确配对。"
+      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。**2026-11-06 第二轮对账**：主 crate `cargo check -p axagent --lib` 后从盘上量 = **1608**，且 `git status` 对 `src-tauri/src/register_commands.rs` 无输出（产物与 HEAD 逐字相同 ⇒ 不是本次构建改写了它）⇒ 1609 是上一批「B9-2 −1 与 B8-1b +1」两笔相互抵掉后没回灌的滞后值。本条 `hard:false`（只报告，不参与退出码），但对账批的原则是**软锚点也不留过期值**：漂移一旦无人回读，下一批就分不清「产物滞后」与「真漂移」。**2026-11-08 对账批：1608 → 1607（−1）** = `7cb13bde5` 删三条博客写面命令（−3 行）+ `376b4d766` 加两条任务卡片命令（+2 行），净 −1；与 `commandTotal` 1541→1540 精确配对。**2026-11-09 #32 批 C：1607 → 1601（−6）** = 删六条 OPC 宿主命令各少 1 行注册，与 `commandTotal` 1540→1534 精确配对。**2026-11-09 D-3/D-1 收口批：1601 → 1591（−10）** = 删十条 OPC 宿主命令（D-3 三条项目命令 + D-1 七条内容资产/发布计划命令）各少 1 行注册，与 `commandTotal` 1534→1524 精确配对。**2026-11-09 D-4 收口批：1591 → 1585（−6）** = 删六条落地页/联系人宿主命令各少 1 行注册，与 `commandTotal` 1524→1518 精确配对。**2026-11-10 #35 批 1：1585 → 1576（−9）** = 删 9 条死命令各少 1 行注册，与 `commandTotal` 1518→1509 精确配对。**2026-11-10 #35 批 1b：1576 → 1567（−9）** = 退役 9 条 cron 宿主 wrapper 各少 1 行注册，与 `commandTotal` 1509→1500 精确配对。"
     },
     {
       "id": "commandNameSetParity",
       "label": "不变量：契约 A 名集合数 == 产物条目数 == 登记值",
-      "value": 1509,
+      "value": 1500,
       "check": "commandNameSetCount",
       "hard": true,
       "planMustAppear": false,
-      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1，B8-1b 加 `plugin_list_task_sources` 回升 1；**2026-11-06 对账批 `3fe49c950` 删 `opc_list_blog_posts` ⇒ 三方 1541/1541/1541**）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。**2026-11-08 对账批：三方同时 1540/1540/1540**（−3 博客写面宿主命令 + 2 任务卡片宿主命令，归因见 `commandTotal`）。**2026-11-09 #32 批 C：三方同时 1534/1534/1534**（−6 = 六个已插件化 OPC 宿主命令，归因见 `commandTotal`）。**2026-11-09 D-3/D-1/D-2 收口批：三方同时 1524/1524/1524**（−10 = D-3 三条项目命令 + D-1 七条内容资产/发布计划命令，归因见 `commandTotal`）。**2026-11-09 D-4 收口批：三方同时 1518/1518/1518**（−6 = 六条落地页/联系人命令，归因见 `commandTotal`）。**2026-11-10 #35 批 1：三方同时 1509/1509/1509**（−9 = watchlist / batch-reflection / decision-backtest 三族 cron 命令，归因见 `commandTotal`）。"
+      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1，B8-1b 加 `plugin_list_task_sources` 回升 1；**2026-11-06 对账批 `3fe49c950` 删 `opc_list_blog_posts` ⇒ 三方 1541/1541/1541**）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。**2026-11-08 对账批：三方同时 1540/1540/1540**（−3 博客写面宿主命令 + 2 任务卡片宿主命令，归因见 `commandTotal`）。**2026-11-09 #32 批 C：三方同时 1534/1534/1534**（−6 = 六个已插件化 OPC 宿主命令，归因见 `commandTotal`）。**2026-11-09 D-3/D-1/D-2 收口批：三方同时 1524/1524/1524**（−10 = D-3 三条项目命令 + D-1 七条内容资产/发布计划命令，归因见 `commandTotal`）。**2026-11-09 D-4 收口批：三方同时 1518/1518/1518**（−6 = 六条落地页/联系人命令，归因见 `commandTotal`）。**2026-11-10 #35 批 1：三方同时 1509/1509/1509**（−9 = watchlist / batch-reflection / decision-backtest 三族 cron 命令，归因见 `commandTotal`）。**2026-11-10 #35 批 1b：三方同时 1500/1500/1500**（−9 = pool_scan / recommendation / trend_screening 三族宿主 wrapper 退役，归因见 `commandTotal`）。"
     },
     {
       "id": "stockBoundaryCommands",
       "label": "股票命令数（插件边界口径 cmdRe，逐 entry 计数）",
-      "value": 293,
+      "value": 284,
       "value2": 20,
       "value2Label": "模块",
       "check": "registryBoundaryCount",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "293",
+      "planNumber": "284",
       "planMustAppear": true,
       "planPinned": [{ "line": 529, "mustContain": ["两个数都是真的", "边界口径"] }],
-      "note": "定案判据口径（PLAN:515 明写 P6.1/P6.2 一律用边界口径）；与审计域口径 306 并存合法、不是漂移。**2026-11-10 #35 批 1：302→293（−9）** = 删 9 条股票 cron 死命令（`stock_analysis` 6 + `backtest_validation` 3），模块数 20 不动。"
+      "note": "定案判据口径（PLAN:515 明写 P6.1/P6.2 一律用边界口径）；与审计域口径 306 并存合法、不是漂移。**2026-11-10 #35 批 1：302→293（−9）** = 删 9 条股票 cron 死命令（`stock_analysis` 6 + `backtest_validation` 3），模块数 20 不动。**2026-11-10 #35 批 1b：293→284（−9）** = 退役三族 cron 宿主 wrapper（`pool_scan.rs` 3 + `recommendation_cron.rs` 6，create/list/toggle 各 3），全在 `stock_*` 模块 ⇒ 模块数 20 不动。"
     },
     {
       "id": "stockAuditDomainCommands",
       "label": "股票命令数（审计 19 域口径「股票分析与管线」）",
-      "value": 298,
+      "value": 289,
       "value2": 19,
       "value2Label": "模块",
       "check": "registryDomainCount",
       "domainName": "股票分析与管线",
       "hard": true,
-      "planNumber": "298",
+      "planNumber": "289",
       "planMustAppear": true,
-      "note": "并行口径（PLAN:501/515 已裁定两者皆真）⇒ 本门把两个数都钉住，任一变化都必须同批改表。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 305→304**（同批 `stockBoundaryCommands` 303→302）。**2026-11-10 #35 批 1：304→298（−6）** = 删 `stock_analysis.rs` 六条 cron 死命令；另 3 条 `backtest_validation.rs` 命令不在本审计域（归「量化与仿真」）⇒ 只降 6，模块数 19 不动。"
+      "note": "并行口径（PLAN:501/515 已裁定两者皆真）⇒ 本门把两个数都钉住，任一变化都必须同批改表。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 305→304**（同批 `stockBoundaryCommands` 303→302）。**2026-11-10 #35 批 1：304→298（−6）** = 删 `stock_analysis.rs` 六条 cron 死命令；另 3 条 `backtest_validation.rs` 命令不在本审计域（归「量化与仿真」）⇒ 只降 6，模块数 19 不动。**2026-11-10 #35 批 1b：298→289（−9）** = 同上 9 条 cron 宿主 wrapper，全部计入本审计域 ⇒ 模块数 19 不动。"
     },
     {
       "id": "workflowAuditDomainCommands",

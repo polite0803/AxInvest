@@ -7497,11 +7497,19 @@ async function executeCommand<T>(
     case "create_daily_summary_task":
     case "create_stock_cron":
     case "create_watchlist_scan_cron":
-    case "create_pool_scan_cron":
-    case "create_trend_screening_cron":
     case "create_batch_reflection_cron":
     case "create_decision_backtest_cron":
-    case "create_recommendation_cron":
+    // ── 股票插件命名命令（插件命令桥 批 1a / 批 1b）────────────────────────
+    // 三族 create 的前端调用方（`investTaskDefs.ts` 的 `command` 字段）已切到
+    // `stock_*` 插件命名命令；#35 批 1b 又退役了对应的 3 条宿主 create wrapper
+    // （另 6 条 list/toggle 前端本来就不调），所以这里只剩插件命名 case。浏览器
+    // 模式没有插件安装根与命令桥 ⇒ 此处 mock 镜像「闸门放行后的执行形态」（创建类
+    // 不消费返回值）。
+    // ⚠ 必须逐条显式声明：这批命令名既不以 `get_` / `list_` 开头、也不以 s 结尾，
+    // default 兜底只给 undefined 且会打「未 mock」告警，前端切名后功能静默降级。
+    case "stock_create_pool_scan_cron":
+    case "stock_create_trend_screening_cron":
+    case "stock_create_recommendation_cron":
     case "pause_scheduled_task":
     case "resume_scheduled_task":
     case "delete_scheduled_task":

@@ -596,58 +596,12 @@ async fn analyze_candidate_queue(
     }
 }
 
-// ── Tauri 命令：候选池扫描 cron CRUD ──
-
-/// 创建候选池扫描定时任务
-///
-/// - 配置以 JSON 写入 `CronJob.prompt`，由 executor 在 `pool-scan` 分支解析
-/// - task_type = `pool-scan`，不绑定 workflow
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "创建候选池分析定时任务")]
-#[tauri::command]
-pub async fn create_pool_scan_cron(
-    state: State<'_, AppState>,
-    cron_expression: Option<String>,
-    lookback_days: Option<u32>,
-    max_stocks: Option<usize>,
-    min_confidence: Option<u8>,
-    enabled: Option<bool>,
-    max_per_run: Option<usize>,
-    run_deadline_seconds: Option<u64>,
-) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
-    create_pool_scan_cron_core(
-        &state.cron_job_store,
-        PoolCreateRequest {
-            cron_expression,
-            lookback_days,
-            max_stocks,
-            min_confidence,
-            enabled,
-            max_per_run,
-            run_deadline_seconds,
-        },
-    )
-    .await
-}
-
-/// 列出所有候选池扫描定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出候选池分析定时任务")]
-#[tauri::command]
-pub async fn list_pool_scan_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
-    list_pool_scan_crons_core(&state.cron_job_store).await
-}
-
-/// 启停候选池扫描定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关候选池分析定时任务")]
-#[tauri::command]
-pub async fn toggle_pool_scan_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    toggle_pool_scan_cron_core(&state.cron_job_store, &id, enabled).await
-}
+// ── Tauri 命令：候选池扫描 cron 删除 ──
+//
+// create / list / toggle 三条宿主命令已在 #35 批 1b 退役：前端与智能体的对应动作
+// 只走插件命令 `stock_{create,list,toggle}_pool_scan_cron`（档位等价：Caution /
+// Safe / Caution）。delete 保留宿主版 —— 它是 `Dangerous`，而插件清单的写档位
+// 只到 `workspace-write`（投影为 Caution），删掉会让智能体删除动作变松。
 
 /// 删除候选池扫描定时任务
 #[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除候选池分析定时任务")]
@@ -656,12 +610,13 @@ pub async fn delete_pool_scan_cron(state: State<'_, AppState>, id: String) -> Re
     delete_pool_scan_cron_core(&state.cron_job_store, &id).await
 }
 
-// ── 无 State 核心：宿主命令与 `stock.analysis` 接缝共用同一份实现 ──
+// ── 无 State 核心：`stock.analysis` 接缝的唯一实现 ──
 //
-// 同 `recommendation_cron.rs`：T2 化（#35 批 1a）后同一动作有宿主命令与插件命令桥
-// 两条入口，校验/默认值/响应形状必须只有一处（禁区 12）。
+// 同 `recommendation_cron.rs`：T2 化（#35 批 1a / 1b）后 create / list / toggle 的
+// 插件命令经接缝落到这里，宿主同名命令已退役；delete 的宿主命令仍保留并复用同一份
+// 核心。校验/默认值/响应形状必须只有一处（禁区 12）。
 
-/// 创建候选池扫描任务的入参 —— 宿主命令形参与接缝 JSON 的同一份形状（camelCase）。
+/// 创建候选池扫描任务的入参 —— `create_pool_scan_cron` 接缝 JSON 的形状（camelCase）。
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct PoolCreateRequest {

@@ -102,46 +102,14 @@ impl RecoCronJobResponse {
     }
 }
 
-/// 创建荐股定时任务
-///
-/// - 配置以 JSON 写入 `CronJob.prompt`，由 `run_recommendation_cron` 在执行时解析
-/// - task_type = "stock-recommendation"，不绑定 workflow
-#[agent_command(domain = "general", safety = Caution, call_mode = StateOnly, description =  "创建荐股定时任务")]
-#[tauri::command]
-pub async fn create_recommendation_cron(
-    state: State<'_, AppState>,
-    name: String,
-    cron_expression: String,
-    periods: Vec<Period>,
-    min_confidence: u8,
-    top_n: usize,
-) -> Result<RecoCronJobResponse, String> {
-    create_recommendation_cron_core(
-        &state.cron_job_store,
-        RecoCreateRequest { name, cron_expression, periods, min_confidence, top_n },
-    )
-    .await
-}
-
-/// 列出所有荐股定时任务
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "列出荐股定时任务")]
-#[tauri::command]
-pub async fn list_recommendation_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<RecoCronJobResponse>, String> {
-    list_recommendation_crons_core(&state.cron_job_store).await
-}
-
-/// 启停荐股定时任务
-#[agent_command(domain = "general", safety = Caution, call_mode = StateOnly, description =  "启停荐股定时任务")]
-#[tauri::command]
-pub async fn toggle_recommendation_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    toggle_recommendation_cron_core(&state.cron_job_store, &id, enabled).await
-}
+// ── Tauri 命令：荐股 cron 删除 ──
+//
+// create / list / toggle 三条宿主命令已在 #35 批 1b 退役：前端与智能体的对应动作
+// 只走插件命令 `stock_{create,list,toggle}_recommendation_cron`（档位等价：Caution /
+// Safe / Caution）。delete 三族本批一并暂留（PLAN §141.2-④）：pool_scan /
+// trend_screening 的宿主版是 `Dangerous`，与插件清单 `workspace-write`（投影 Caution）
+// 不等价，删掉会放松智能体删除面。本条的 `Caution` 虽与插件等阶，但与
+// `delete_trend_screening_cron` 同文件同族、共享核心 ⇒ 留给权限档位对齐批一次处置。
 
 /// 删除荐股定时任务
 #[agent_command(domain = "general", safety = Caution, call_mode = StateOnly, description =  "删除荐股定时任务")]
@@ -153,7 +121,7 @@ pub async fn delete_recommendation_cron(
     delete_recommendation_cron_core(&state.cron_job_store, &id).await
 }
 
-// ── Tauri 命令：趋势智选定时任务 CRUD ──
+// ── 趋势智选定任务：链白名单与配置辅助（命令见上方 cron 删除簇）──
 //
 // [2026-09-13 新增] 用户诉求「定时启动智能荐股**和趋势智选**创建候选股票池」。
 // 「智能荐股」已有 `stock-recommendation` 分支；「趋势智选」= `serenity-screening`
@@ -207,41 +175,10 @@ fn resolve_trend_workflow_id(requested: Option<&str>) -> Result<&'static str, St
     }
 }
 
-/// 创建趋势智选定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "创建趋势智选定时任务")]
-#[tauri::command]
-pub async fn create_trend_screening_cron(
-    state: State<'_, AppState>,
-    cron_expression: Option<String>,
-    enabled: Option<bool>,
-    workflow_id: Option<String>,
-) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
-    create_trend_screening_cron_core(
-        &state.cron_job_store,
-        TrendCreateRequest { cron_expression, enabled, workflow_id },
-    )
-    .await
-}
-
-/// 列出所有趋势智选定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出趋势智选定时任务")]
-#[tauri::command]
-pub async fn list_trend_screening_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
-    list_trend_screening_crons_core(&state.cron_job_store).await
-}
-
-/// 启停趋势智选定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关趋势智选定时任务")]
-#[tauri::command]
-pub async fn toggle_trend_screening_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    toggle_trend_screening_cron_core(&state.cron_job_store, &id, enabled).await
-}
+// ── Tauri 命令：趋势智选 cron 删除 ──
+//
+// create / list / toggle 已随 #35 批 1b 退役（插件命令档位等价：Caution / Safe /
+// Caution），delete 因档位不等价暂留，理由同荐股族。
 
 /// 删除趋势智选定时任务
 #[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除趋势智选定时任务")]
@@ -253,14 +190,13 @@ pub async fn delete_trend_screening_cron(
     delete_trend_screening_cron_core(&state.cron_job_store, &id).await
 }
 
-// ── 无 State 核心：宿主命令与 `stock.analysis` 接缝共用同一份实现 ──
+// ── 无 State 核心：`stock.analysis` 接缝的唯一实现 ──
 //
-// T2 化（#35 批 1a）后同一动作有两条入口：宿主 Tauri 命令（双声明期保留）与插件
-// worker 经 `stock.analysis` 接缝的调用。形状与校验必须只有一处（禁区 12），所以
-// 命令体退化为「参数打包 + 调用核心」，接缝 provider 也调这里。核心只依赖
-// `CronJobStore`，不认识 `AppState`。
+// T2 化（#35 批 1a / 1b）后，create / list / toggle 的插件命令经 `stock.analysis`
+// 接缝落到这里，宿主侧同名命令已退役；delete 的宿主命令仍保留并复用同一份核心。
+// 形状与校验必须只有一处（禁区 12）。核心只依赖 `CronJobStore`，不认识 `AppState`。
 
-/// 创建荐股定时任务的入参 —— 宿主命令形参与接缝 JSON 的同一份形状（camelCase）。
+/// 创建荐股定时任务的入参 —— `create_recommendation_cron` 接缝 JSON 的形状（camelCase）。
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecoCreateRequest {

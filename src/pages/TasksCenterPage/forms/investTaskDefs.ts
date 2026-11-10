@@ -95,7 +95,7 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       // 工作日 17:00：晚于趋势智选 16:00，避免同时抢 astock 配额
       cronExpression: "0 17 * * 1-5",
     },
-    // 批 1a：切到插件命名命令（stock_ 前缀）；宿主命令 create_pool_scan_cron 双声明期保留。
+    // 批 1a：切到插件命名命令（stock_ 前缀）；宿主 wrapper 已在 #35 批 1b 退役，此处是唯一入口。
     command: "stock_create_pool_scan_cron",
     pluginCommand: true,
     buildArgs: (v) => ({
@@ -114,7 +114,7 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       chain: "serenity-screening",
       cronExpression: "0 16 * * 1-5",
     },
-    // 批 1a：插件命名命令，宿主 create_trend_screening_cron 双声明期保留
+    // 批 1a：插件命名命令；宿主 wrapper 已在 #35 批 1b 退役，此处是唯一入口
     command: "stock_create_trend_screening_cron",
     pluginCommand: true,
     buildArgs: (v) => ({
@@ -176,7 +176,7 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       topN: 5,
       cronExpression: "30 15 * * *",
     },
-    // 批 1a：插件命名命令，宿主 create_recommendation_cron 双声明期保留
+    // 批 1a：插件命名命令；宿主 wrapper 已在 #35 批 1b 退役，此处是唯一入口
     command: "stock_create_recommendation_cron",
     pluginCommand: true,
     buildArgs: (v) => ({

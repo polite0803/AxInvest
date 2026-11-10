@@ -363,7 +363,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | 面 | 事实（全部指到行号） |
 |---|---|
 | 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowMarketplace.tsx:186`；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
-| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1499 条 / 165 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
+| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1492 条 / 165 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
 | 引擎 | `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs` 7366 行；构造点 `src-tauri/src/init/state.rs:745`；句柄在 **`app_state.rs:345` `pub work_engine: Arc<WorkEngine>`** |
 | 节点 | `NodeExecutorTrait`（`node_executor_trait.rs:224`）实现者 **33** 个，`rt-workflow/src/work_engine/dispatcher.rs:80-109` `init_builtin` 注册 26 个 + `engine/mod.rs:1214-1231` pending 补齐 |
 
@@ -511,8 +511,8 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 
 | 度量 | 股票业务 | OPC 业务 |
 |---|---|---|
-| Tauri 命令条数 / 命令模块数（**插件边界口径**） | **283 条 / 20 模块**（`stock_analysis` 164、`stock_workflow` 24、`paper` 20；**2026-11-10 #35 批 1 −9** = 删 9 条零调用 cron 死命令：`stock_analysis` 6 + `backtest_validation` 3；**同日 #35 批 1b 再 −9（293→284）** = 退役 pool_scan / recommendation / trend_screening 三族 create/list/toggle 宿主 wrapper（`pool_scan.rs` 3 + `recommendation_cron.rs` 6），模块数 20 不动；**同日 #35 批 1c 再 −1（284→283）** = 退役 `delete_recommendation_cron`（与插件版真等阶，§142），模块数 20 不动。⚠ 本行原记 `stock_analysis` 165 是笔误：`parseRegistry` 在 `3331a3f5c` 与 `f80083767` 两棵树上的实测均为 164，本批按实测订正） | **112 条 / 13 模块**（`opc` 31、`opc_capability_pack_actions` 20、`_runtime` 14；2026-11-06 对账批 −1 = `3fe49c950` 删宿主 `opc_list_blog_posts`，`opc` 模块 57→56）**2026-11-08 #226 批 1 再 −3（137→134）** = `7cb13bde5` 删 `opc_create_blog_post` / `opc_delete_blog_post` / `opc_publish_blog_post` 三命令（博客写面切插件通道）⇒ `opc` 模块 56→53；同批 `376b4d766` 补 2 条任务卡片命令，故全局净 −1（两数不矛盾）；模块数 13 不动。**2026-11-09 #32 批 C 再 −6（134→128）** = 删宿主六个已插件化 OPC 命令（invoice 2 + customer 4：`opc_create_invoice` / `opc_transition_invoice` / `opc_create_customer` / `opc_update_customer` / `opc_delete_customer` / `opc_list_customers`），全在 `opc` 模块 ⇒ `opc` 模块 53→47；13 模块不动。**2026-11-09 D-3/D-1 收口批再 −10（128→118）** = 删宿主十条 OPC 命令（D-3 三条项目命令 `opc_create_project` / `opc_list_projects` / `opc_add_milestone` + D-1 七条内容资产/发布计划命令 `opc_create_content_asset` / `opc_list_content_assets` / `opc_update_content_asset` / `opc_delete_content_asset` / `opc_create_publish_schedule` / `opc_list_publish_schedules` / `opc_delete_publish_schedule`，已全部插件化），全在 `opc` 模块 ⇒ `opc` 37；13 模块不动。**2026-11-09 D-4 收口批再 −6（118→112）** = 删宿主六条落地页/联系人命令 `opc_create_landing_page` / `opc_list_landing_pages` / `opc_publish_landing_page` / `opc_delete_landing_page` / `opc_list_contacts` / `opc_mark_contact_read`（已全部插件化），全在 `opc` 模块 ⇒ `opc` 31；13 模块不动。 |
-| — 同一注册表在**审计 19 域口径**下的读数 | 288 条 / 19 模块（域「股票分析与管线」；**2026-11-10 #35 批 1 −6** = 删 `stock_analysis` 六条 cron 死命令，另 3 条 `backtest_validation` 归「量化与仿真」域 ⇒ 本域只降 6；**同日 #35 批 1b 再 −9（298→289）** = 同上三族 create/list/toggle 宿主 wrapper，全部计入本域，模块数 19 不动；**同日 #35 批 1c 再 −1（289→288）** = `delete_recommendation_cron`，模块数 19 不动） | **97 条 / 10 模块**（域「OPC 公司运行时」；2026-11-06 对账批 −1 = `3fe49c950` 删宿主 `opc_list_blog_posts`；2026-11-08 对账批 116→113 当时未同步本行、属本批补账；2026-11-09 #32 批 C 113→107 = 同上六个已插件化 OPC 宿主命令；**同日 D-3/D-1 收口批 107→97** = 同批边界口径那十条宿主 OPC 命令，模块数 10 不动） |
+| Tauri 命令条数 / 命令模块数（**插件边界口径**） | **283 条 / 20 模块**（`stock_analysis` 164、`stock_workflow` 24、`paper` 20；**2026-11-10 #35 批 1 −9** = 删 9 条零调用 cron 死命令：`stock_analysis` 6 + `backtest_validation` 3；**同日 #35 批 1b 再 −9（293→284）** = 退役 pool_scan / recommendation / trend_screening 三族 create/list/toggle 宿主 wrapper（`pool_scan.rs` 3 + `recommendation_cron.rs` 6），模块数 20 不动；**同日 #35 批 1c 再 −1（284→283）** = 退役 `delete_recommendation_cron`（与插件版真等阶，§142），模块数 20 不动。⚠ 本行原记 `stock_analysis` 165 是笔误：`parseRegistry` 在 `3331a3f5c` 与 `f80083767` 两棵树上的实测均为 164，本批按实测订正） | **105 条 / 13 模块**（`opc` 24、`opc_capability_pack_actions` 20、`_runtime` 14；2026-11-06 对账批 −1 = `3fe49c950` 删宿主 `opc_list_blog_posts`，`opc` 模块 57→56）**2026-11-08 #226 批 1 再 −3（137→134）** = `7cb13bde5` 删 `opc_create_blog_post` / `opc_delete_blog_post` / `opc_publish_blog_post` 三命令（博客写面切插件通道）⇒ `opc` 模块 56→53；同批 `376b4d766` 补 2 条任务卡片命令，故全局净 −1（两数不矛盾）；模块数 13 不动。**2026-11-09 #32 批 C 再 −6（134→128）** = 删宿主六个已插件化 OPC 命令（invoice 2 + customer 4：`opc_create_invoice` / `opc_transition_invoice` / `opc_create_customer` / `opc_update_customer` / `opc_delete_customer` / `opc_list_customers`），全在 `opc` 模块 ⇒ `opc` 模块 53→47；13 模块不动。**2026-11-09 D-3/D-1 收口批再 −10（128→118）** = 删宿主十条 OPC 命令（D-3 三条项目命令 `opc_create_project` / `opc_list_projects` / `opc_add_milestone` + D-1 七条内容资产/发布计划命令 `opc_create_content_asset` / `opc_list_content_assets` / `opc_update_content_asset` / `opc_delete_content_asset` / `opc_create_publish_schedule` / `opc_list_publish_schedules` / `opc_delete_publish_schedule`，已全部插件化），全在 `opc` 模块 ⇒ `opc` 37；13 模块不动。**2026-11-09 D-4 收口批再 −6（118→112）** = 删宿主六条落地页/联系人命令 `opc_create_landing_page` / `opc_list_landing_pages` / `opc_publish_landing_page` / `opc_delete_landing_page` / `opc_list_contacts` / `opc_mark_contact_read`（已全部插件化），全在 `opc` 模块 ⇒ `opc` 31；13 模块不动。**2026-11-10 #266 再 −7（112→105）** = 删宿主七条双声明 OPC 命令（项目四条 `opc_get_project` / `opc_update_project` / `opc_delete_project` / `opc_complete_milestone` + `opc_list_kpis` / `opc_get_financial_report` / `opc_process_due_schedules`），全在 `opc` 模块 ⇒ `opc` 24；13 模块不动。 |
+| — 同一注册表在**审计 19 域口径**下的读数 | 288 条 / 19 模块（域「股票分析与管线」；**2026-11-10 #35 批 1 −6** = 删 `stock_analysis` 六条 cron 死命令，另 3 条 `backtest_validation` 归「量化与仿真」域 ⇒ 本域只降 6；**同日 #35 批 1b 再 −9（298→289）** = 同上三族 create/list/toggle 宿主 wrapper，全部计入本域，模块数 19 不动；**同日 #35 批 1c 再 −1（289→288）** = `delete_recommendation_cron`，模块数 19 不动） | **84 条 / 10 模块**（域「OPC 公司运行时」；2026-11-06 对账批 −1 = `3fe49c950` 删宿主 `opc_list_blog_posts`；2026-11-08 对账批 116→113 当时未同步本行、属本批补账；2026-11-09 #32 批 C 113→107 = 同上六个已插件化 OPC 宿主命令；**同日 D-3/D-1 收口批 107→97** = 同批边界口径那十条宿主 OPC 命令，模块数 10 不动；**2026-11-09 D-4 收口批再 −6（97→91）**，本行当时漏记、随 #266 补账；**2026-11-10 #266 再 −7（91→84）** = 删宿主七条双声明 OPC 命令，模块数 10 不动） |
 | **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **3 处 / 3 文件**（**2026-11-09 #240 E 批实测：6/6 → 3/3** —— `tools/src/tools/{industry_constituents,market_mainline,stock_factor}.rs` 三个工具的域 crate 直连改为「工具发插件命名命令 → 插件转发宿主 `stock.analysis` 接缝」：工具侧走 `plugin_bridge::call_plugin_command`（fail-closed，桥缺失即报错而非回退直连），插件侧 `plugin-stock` 转发到 harness 的 `StockAnalysisProvider` 三方法（`industry_constituents` / `batch_upsert_mainlines` / `stock_factor`），宿主实现 `init/stock_analysis_service.rs` 的 `HostStockAnalysis` ⇒ 待改写 3→0 处 / 3→0 文件 + H 桶 3/3 不动；`--dump-readings` 实测 `l1.STOCK hits=3 files=3`。剩余 3 处全是宿主持有白名单：`commands/gateway.rs` 的 `HttpPollingStreamer::new`、`init/monitor_emitter.rs` 的 `MonitorEventEmitter`、`init/browser_fetcher.rs` 的 `BrowserHttpFetch`（域 trait 的宿主侧实现，按「宿主持有」不参与归零）。前批：**2026-11-09 #35 批 R 实测：22/13 → 6/6** —— 15 处改经 `crate::init::stock_domain_state::stock_*` 门面（evolution_proposal 7 / screenshot_diagnosis 3 / market_sim_service 2 / decision_gates 1 / _shared_reco_pool 1 / daily_snapshot_store 1）+ `tools/tools/finance.rs` 1 处把 `risk` 模块上收 `axagent_harness::risk` ⇒ 待改写 19→3 处 / 10→3 文件 + H 桶 3/3 不动；逐条见登记表 `l1ForeignStock` 的 note；**2026-11-09 域门面批 2 实测：44/14 → 22/13** —— `init/services.rs` 的 22 处股票 crate 调用全部改经 `crate::init::stock_domain_state::stock_*` 门面（`stock_domain_state.rs` 新增 9 行 `pub use`：analysis-engine 6 + astock-data 3；`lib.rs` 的 `pub use` 转发扩到 16 名，lib.rs 不在 `ownedRe` ⇒ 只作离线 bin 的 `axagent_lib::stock_*` 转发、不计阻塞）⇒ 待改写 41→19 处 / 11→10 文件 + H 桶 3 处 / 3 文件，合计 44→22 = 本批 −22、文件 14→13。前批：2026-11-06 对账批：`84d8c357b` 把 48 处股票 crate 直连改指 `axagent_company_runtime::` ⇒ 这 48 处的账整体从股票侧迁到 OPC 侧，股票剩 54；**2026-11-08 stock-core 搬家批读数不变**：`factors` / `costs` / `hit_outcome` 迁入 `axagent-plugins/crates/stock-core`，宿主 3 处改指 `axagent_stock_core::`；同批把 `stock-core` 补进 `crates` / `useRe` 枚举（两份脚本同改），**不补会假降到 51**）；**2026-11-08 域门面批实测 44 处 / 14 文件**：两支离线 bin 共 8 处（`bin/axagent-validate-backfill.rs` 7 + `bin/axagent-batch-rerun.rs` 1）与 `init/services.rs` 的 2 处 as-of 导入改经 `axagent_lib::stock_*` 门面（转发点 `init/stock_domain_state.rs`，`ownedRe` 命中 ⇒ 不计阻塞）⇒ 待改写 51→41 处 / 13→11 文件 + H 桶 3 处 / 3 文件；合计 54→44 = 本批 −10，文件 16→14 | **48 处 / 3 文件**（`tools/src/tools/opc.rs` 41 + `commands/fleet/mod.rs` 4 + `init/state.rs` 3；原记 0 处是因为它们当时记在股票名下。**2026-11-08 `#36` 批 1 实测 24 处 / 4 文件**：待改写 21 处 / 1 文件（`tools/src/tools/opc.rs`；9 个只读工具改走插件命令桥 ⇒ 41→21）+ H 桶 3 处 / 3 文件（`init/state.rs` + `commands/conversations/{mod,compress}.rs` 的 `LocalCapabilityPackRegistry` 装配位，`#221` 起入白名单）；`commands/fleet/mod.rs` 那 4 处已随 `#221` trait 化清零 ⇒ 48→24 = 本批 −20 + `#221` −4）。**2026-11-08 `#36` 批 2 实测 18 处 / 4 文件**：四条 id/枚举形态写工具（发票状态变更 / 内容资产更新 / 内容资产删除 / 发布计划取消）改走插件命令桥 ⇒ 待改写 21→15 处（`tools/src/tools/opc.rs` 的命中行 21→18，其中 3 行是退役注释、审计不计 ⇒ 计入 15 处）+ H 桶 3 处 / 3 文件不动 ⇒ 24→18 = 本批 −6）。**2026-11-08 `#36` 批 3 实测 3 处 / 3 文件**：剩余 9 个工具（8 条写命令 + 1 条财务报表）改走插件命名命令 ⇒ `tools/src/tools/opc.rs` 的待改写直连清零（行内 3 处 `axagent_company_runtime::opc` 全是退役/历史注释，审计剥注释不计）；仅剩 H 桶 3 处 / 3 文件 ⇒ 18→3 = 本批 −15，文件数 4→3。至此 OPC 侧「主壳反向阻塞」**待改写 = 0 处 / 0 文件**，剩余 3 处全是宿主持有（`#221` 白名单） |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **0 处 / 0 文件**（**2026-11-09 #240 E 批实测：29/9 → 0/0** —— 本批把最后 3 处 `tools/src/tools/{industry_constituents,market_mainline,stock_factor}.rs` 也改走插件命名命令（不再直连 `axagent_analysis_engine::*`），加上此前 `#36` 批 1–3 已清的 `tools/src/tools/opc.rs` 21 处，两侧跨包口同时清零；`node scripts/audit-l1-blockers.mjs` 实测「Rust 跨包口」两列均 `0 处 / 0 文件`。原 29 处 / 9 文件全是 OPC 面文件在调股票 crate（分布见 §104，不只是 `tools/src/tools/opc.rs` 一处），`#36` 三批把 `tools/src/tools/opc.rs` 压到 0，本批再清掉最后 3 个 tools 文件的直连 ⇒ 跨包口归零） | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | **488 处 / 44 文件**（**2026-11-09 域门面批 2：+9** = `stock_domain_state.rs` 再增 9 行 `pub use` 门面：`axagent_analysis_engine::{alert_mapping, conditional_order_bridge, cross_stock_aggregator, monitor, recommender, serenity_hit_rate_backtest}` 6 行 + `axagent_astock_data::{daily_snapshot, health_check, realtime_quote}` 3 行；上批 2026-11-08 域门面批复测：+5 = `init/stock_domain_state.rs` 新增的 5 行 `pub use` 门面；本批前 474 处 / 44 文件 = 2026-11-08 实测重读，仅 +1 = 把 `stock-core` 补进域 crate 枚举后 `plugin-stock → stock-core` 那行新显形 ⇒ 473→474。⚠ 上一登记 456 / 41 与搬家前实测 473 / 44 的历史差额**不是本批造成、未逐条归因**，本行只声明现值取自脚本，不许当成某批的交付账） | 16 处 / 2 文件 |
@@ -715,7 +715,7 @@ CLI 通道保留给既有"外部 CLI 插件"品类，但必须补 `input_schema`
 
 ### 0.12.4 第五道门 `check-capability-register.mjs` → **建**
 
-**判据**：今天这轮自查就抓出 **15 处数字漂移 + 2 套并行口径**（1534/1541、工作流 124/83、股票 304/306、前端 60 757/85 009），**2026-11-01 本批再记三对漂移（旧/新）：命令 1541/1542、`.rs` 文件 2005/2004、`pub trait` 316/315**；**2026-11-02 `#75` 再记一对：命令 1542/1543（新增 `plugin_list_pages`）**；**2026-11-09 #32 批 C 再记一对：命令 1540/1534（删宿主六个已插件化 OPC 命令）**；**同日 D-3/D-1/D-2 收口批再记两对：命令 1534/1524、registry 行 1601/1591（删宿主十条 OPC 命令：D-3 三条项目命令 + D-1 七条内容资产/发布计划命令）**；**同日 D-4 收口批再记两对：命令 1524/1518、registry 行 1591/1585（删宿主六条落地页/联系人命令）**；**2026-11-10 #35 批 1 再记两对：命令 1518/1509、registry 行 1585/1576（删 9 条零调用 cron 死命令）**；**同日 #35 批 1b 再记两对：命令 1509/1500、registry 行 1576/1567（退役 pool_scan / recommendation / trend_screening 三族 create/list/toggle 宿主 wrapper）**；**同日 #35 批 1c 再记两对：命令 1500/1499、registry 行 1567/1566（退役 `delete_recommendation_cron`）**——本段是这些旧读数的唯一合法出现处，写在别处由第五道门判红。
+**判据**：今天这轮自查就抓出 **15 处数字漂移 + 2 套并行口径**（1534/1541、工作流 124/83、股票 304/306、前端 60 757/85 009），**2026-11-01 本批再记三对漂移（旧/新）：命令 1541/1542、`.rs` 文件 2005/2004、`pub trait` 316/315**；**2026-11-02 `#75` 再记一对：命令 1542/1543（新增 `plugin_list_pages`）**；**2026-11-09 #32 批 C 再记一对：命令 1540/1534（删宿主六个已插件化 OPC 命令）**；**同日 D-3/D-1/D-2 收口批再记两对：命令 1534/1524、registry 行 1601/1591（删宿主十条 OPC 命令：D-3 三条项目命令 + D-1 七条内容资产/发布计划命令）**；**同日 D-4 收口批再记两对：命令 1524/1518、registry 行 1591/1585（删宿主六条落地页/联系人命令）**；**2026-11-10 #35 批 1 再记两对：命令 1518/1509、registry 行 1585/1576（删 9 条零调用 cron 死命令）**；**同日 #35 批 1b 再记两对：命令 1509/1500、registry 行 1576/1567（退役 pool_scan / recommendation / trend_screening 三族 create/list/toggle 宿主 wrapper）**；**同日 #35 批 1c 再记两对：命令 1500/1499、registry 行 1567/1566（退役 `delete_recommendation_cron`）**；**2026-11-10 #266 再记两对：命令 1499/1492、registry 行 1566/1559（删宿主七条双声明 OPC 命令）**——本段是这些旧读数的唯一合法出现处，写在别处由第五道门判红。
 全靠人工复扫才发现 —— 没有机器对账，这些数字**一定会再漂**，而它们是 P5/P6 全部判据的分母。
 **成本（可复用件已在）**：`scripts/audit-capability-inventory.mjs` + `scripts/audit-l1-blockers.mjs` + 共享规则 `scripts/lib/command-domains.mjs` 都已落地，
 第五道门只需「复跑两份 audit → 与 §0.7 登记表逐行 diff → 条数变化未显式改表即红」。
@@ -7893,3 +7893,68 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 - 提交 `f057d9900`（3 文件 / +52 −13）。
 
 **未做**：① 浏览器内实际点开 `/invest` 验证（无运行实例）。② 第二批 2 处（`RECO_STYLE_*` / `HORIZON_T_SUFFIX`）需等 `src/lib/stock-analysis-utils.ts` 的并行改动交回后再动，本轮不碰。
+
+## 147. `#36` 双声明清剿刀（A 子刀）：删七条 OPC 宿主死壳（2026-11-10）
+
+### 147.1 刀口与穷举取证
+
+删掉 `src-tauri/src/commands/opc.rs` 里七条**与插件命令同名同义**的宿主命令，各自位置改留一段交代注释（`:94` 四条项目命令、`:136` `opc_list_kpis`、`:178` `opc_get_financial_report`、`:1005` `opc_process_due_schedules`）：
+
+| 删除的宿主命令 | 插件侧对应（`axagent-plugins/crates/plugin-opc/src/main.rs`） | 原 safety |
+|---|---|---|
+| `opc_get_project` | `COMMAND_GET_PROJECT`（`:182`） | Safe |
+| `opc_update_project` | `COMMAND_UPDATE_PROJECT`（`:183`） | Caution |
+| `opc_delete_project` | `COMMAND_DELETE_PROJECT`（`:184`） | Dangerous |
+| `opc_complete_milestone` | `COMMAND_COMPLETE_MILESTONE`（`:185`） | Caution |
+| `opc_list_kpis` | `COMMAND_LIST_KPIS`（`:150`） | Safe |
+| `opc_get_financial_report` | `COMMAND_GET_FINANCIAL_REPORT`（`:168`） | Safe |
+| `opc_process_due_schedules` | `COMMAND_PROCESS_DUE_SCHEDULES`（`:171`） | Caution（Manual） |
+
+**交集是机械算出来的，不是凭记忆挑的**：插件清单声明的 35 条 `opc_*` 命令 ∩ `register_commands.rs` 里注册的 98 条 `opc_*` 命令 = **恰这 7 条**（`comm -12` 对两份排序表求交，零多余零遗漏）。
+
+**交叉消费面全部为零（逐面实测）**：
+
+| 面 | 读数 | 判据 |
+|---|---|---|
+| 前端 `src/**` | 0 处 | `git grep -E 'opc_(get_project\|update_project\|…)' -- src` 零命中（命令名不出现，`invoke` 更不会有） |
+| `axagent-runtime/crates/tools` | 0 处直连 | 三个相关工具（KPI / 财务报表 / 到期处理）都走 `call_opc_command` → `plugin_command_bridge.execute("opc", …)`，桥未注入即 **fail-closed 报错、不回落宿主直连**（`axagent-runtime/crates/tools/src/tools/opc.rs:46`） |
+| `src-tauri/agency_experts/**` | 0 处 | 专家 SKILL 未把命令名当字符串要 |
+| 宿主内部转调 | 0 处 | 七条函数在 `src-tauri/` 内除自身定义外无第二处引用（含 `commands::opc::` 限定与 `super::` 形态） |
+| `docs/**` | 0 处 | 文档引用门不受影响 |
+
+权限档位**不因删除而放宽**：插件侧这七条的 `requiredPermission` 早已按 `OPC_WRITE_COMMANDS` 集合分档（`scripts/build-plugin-bundle.mjs:1066`，写命令 `workspace-write`、读命令 `read-only`），本批未改分档。
+
+### 147.2 B 子刀判**不可切**（原计划：`DashboardTab` 切插件聚合命令）
+
+原任务设想「前端切 `opc_get_dashboard` → 删宿主 `opc_get_dashboard_summary`」。取证后**推翻**这个前提：
+
+| 项 | 宿主 `opc_get_dashboard_summary` | 插件 `opc_get_dashboard` |
+|---|---|---|
+| 取数口径 | `DefaultAnalyticsService::get_dashboard_summary_overview` → `load_dashboard(None)`（`axagent-quant/crates/company-runtime/src/opc/analytics.rs:554`）：**五张表全量读 + 内存聚合**，无 limit | `dashboard()`（`axagent-plugins/crates/plugin-opc/src/main.rs:888`）：三张表各 `limit: 100` 后现算 |
+| 出参键 | `DashboardSummary`：`total_revenue` / `total_invoices` / `active_projects` / `total_customers` / `recent_kpis` / `revenue_trend` | 只有 `totalRevenue` / `pendingInvoices` / `activeProjects` / `activeCustomers` / `totalCustomers` / `totalProjects` |
+| 前端消费 | `src/pages/opc/components/DashboardTab.tsx` 用 `totalRevenue`（`:270`）/ `totalInvoices`（`:281`）/ `activeProjects`（`:299`）/ `revenueTrend`（`:311`） | **缺** `totalInvoices` / `recentKpis` / `revenueTrend` |
+
+⇒ 直接切 = 两个字段消失 + 数值被 100 行截断，属**静默功能退化**，不做。正解是先给 `opc.store` 加一个总览 op（宿主 provider 直接返回完整 `DashboardSummary`），已立 **#267**；在那之前宿主 `opc_get_dashboard_summary` 必须保留。
+
+同批另一条 `opc_find_customer_by_email` 判**不删**：它是宿主独有（插件无同名命令）、且带 `#[agent_command]` 即 LLM 工具面可见 ⇒ 删除是**能力削减**而不是去重，需产品口径裁定，不在本刀。
+
+### 147.3 读数级联（产物重生成后的实测值）
+
+| 锚 | 旧 | 新 | 配对 |
+|---|---|---|---|
+| `commandTotal` | 1499 | **1492** | −7 |
+| `commandNameSetParity` | 1499 | **1492** | 契约 A 三方 1492/1492/1492 全等（已定义未注册 0 / 孤儿 0） |
+| `registryFileLines` | 1566 | **1559** | −7，与 `commandTotal` 精确配对；产物 diff 实测 **0 增 / 7 删**，无格式抖动 |
+| `opcBoundaryCommands` | 112 | **105** | `opc` 模块 31→24，13 模块不动 |
+| `opcAuditDomainCommands` | 91 | **84** | 同因，10 模块不动 |
+
+PLAN 同批回写四处：`:366`（1492 条 / 165 模块）、`:514`（105 条 / 13 模块）、`:515`（84 条 / 10 模块，顺带补记上一批漏记的 97→91）、`:718` 漂移列举段（追加 `1499/1492` 与 `1566/1559` 两对）。`planNumber` 与 `planPinned.mustContain` 同步改，满足「锚点内部自洽」硬判据。
+
+### 147.4 验收（逐条实测退出码）与如实未做
+
+- `cargo check -p axagent --all-targets` EXIT=0（**24m 21s**，零告警；`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）。⚠ 首轮 **EXIT=101**：`opc_get_investment_advice` 仍在调 `DefaultFinanceService` 的两个方法，而它们由 `FinanceService` trait 提供 —— 我按「符号名出现次数 = 1」判该 import 无用，**该方法对 trait 失效**（trait 方法调用点不写 trait 名）。恢复后二轮转绿；同法复核时 `Project` 的「3 次」其实全在被删函数里，二轮告警浮出后才清掉。教训：删 Rust import 不能只数符号名。
+- `cargo fmt -p axagent --check` EXIT=0。
+- `node scripts/check-capability-register.mjs` EXIT=1，但**五条命令面锚全 PASS**；唯二硬失败是 `frontendFileCaliber`（登记 87540 / 实测 91932，+4392）与 `frontendDirCaliber`（登记 66157 / 实测 66221，+64）—— 与本批**无因果**（本批零前端文件改动），归因同 §144.4 的并行批未提交改动，按同一口径留到安静窗口一次性回写，不在此处把他人未提交行数钉进棘轮。
+- 软锚 `feForeignReverse`（STOCK 33/27）与实测 14/13 的差额仍是存量腐烂（#241 起的批累积），本批不动，随 #263 第二批的联合收口一次回写。
+
+**未做**：① 浏览器内点开 OPC 项目/KPI/财务报表页验证（无运行实例）；本轮以 `--all-targets` 编译 + 插件侧既有协议测试覆盖（那七条命令的插件实现在 #32 批 A/B 已测）。② `DashboardTab` 切换（转 #267）。③ `opc_find_customer_by_email` 退役（需产品裁定）。④ 第五道门的两条体量锚按 §144.4 口径继续挂红，不属本批。

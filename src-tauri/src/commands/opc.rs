@@ -13,10 +13,9 @@ use tauri::State;
 use axagent_company_runtime::opc::{
     AnalyticsService, ContentAsset, ContentAssetService, CreateKpiInput, Customer, CustomerService,
     DashboardSummary, DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService,
-    DefaultInvoiceService, DefaultProjectService, DefaultSiteService, FinanceService,
-    FinancialReport, InvestmentAdvice, Invoice, InvoiceService, KpiRecord, Project, ProjectService,
-    PublishSchedule, PublishScheduleService, RevenueRecord, UpdateInvoiceInput, UpdateProjectInput,
-    UpdatePublishScheduleInput,
+    DefaultInvoiceService, DefaultSiteService, FinanceService, InvestmentAdvice, Invoice,
+    InvoiceService, KpiRecord, PublishSchedule, PublishScheduleService, RevenueRecord,
+    UpdateInvoiceInput, UpdatePublishScheduleInput,
 };
 
 use axagent_company_runtime::opc::capability_pack::{
@@ -92,61 +91,14 @@ pub async fn opc_find_customer_by_email(
 // 带走了本文件唯一的轨迹记录点（`record_opc_success`）：插件进程不持 trajectory 存储，
 // 该记录在插件通道上不可达；要恢复须在宿主分派层另开记录位，不在本刀范围。
 
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取项目")]
-#[tauri::command]
-pub async fn opc_get_project(state: State<'_, AppState>, id: String) -> Result<Project, String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    svc.get_project(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "更新项目")]
-#[tauri::command]
-pub async fn opc_update_project(
-    state: State<'_, AppState>,
-    id: String,
-    input: UpdateProjectInput,
-) -> Result<Project, String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    svc.update_project(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除项目")]
-#[tauri::command]
-pub async fn opc_delete_project(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    svc.delete_project(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "完成项目里程碑")]
-#[tauri::command]
-pub async fn opc_complete_milestone(
-    state: State<'_, AppState>,
-    project_id: String,
-    milestone_id: String,
-) -> Result<Project, String> {
-    let svc = DefaultProjectService::new(state.harness.db().clone());
-    svc.complete_milestone(&project_id, &milestone_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// ── Project Commands（本段四条已随 #266 删除）────────────────────────
+//
+// `opc_get_project` / `opc_update_project` / `opc_delete_project` /
+// `opc_complete_milestone` 四条宿主命令已删：插件 `axagent-plugins/crates/plugin-opc`
+// 逐条声明同名命令并走 `opc.store` 接缝（`#32` 批 B 实现），本文件侧经穷举取证确认
+// 零消费 —— 前端 `src/**` 0 处、`axagent-runtime/crates/tools` 0 处（tools 侧改走
+// `call_opc_command` → 插件命令桥，fail-closed 不回落直连）、`agency_experts` 0 处、
+// 宿主内部 0 处转调。
 
 // ── Site / Landing Page Commands ────────────────────────────────────
 //
@@ -181,26 +133,10 @@ pub async fn opc_record_kpi(
     })
 }
 
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出 KPI 记录")]
-#[tauri::command]
-pub async fn opc_list_kpis(
-    state: State<'_, AppState>,
-    period: Option<String>,
-    limit: Option<u32>,
-) -> Result<Vec<KpiRecord>, String> {
-    let svc = DefaultAnalyticsService::new(state.harness.db().clone());
-    // 走**显式跨域包**读（`list_kpis_all` 而非 `list_kpis`）：本命令不带域包参数，
-    // 语义就是「全部 KPI 记录」（与它在 `register_commands.rs` 里的注册名一致）。
-    // 域包范围内的读取走域包链路（`opc_get_capability_pack_dashboard` →
-    // `capability_pack_kpi_service::compute_kpis` → `OpcDataService::latest_kpi`）。
-    // 每行返回值都带 `domain_pack_id`，调用方自行分组即可，不必让它去猜一个域包。
-    svc.list_kpis_all(period, limit).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// `opc_list_kpis` 已随 #266 删除：插件侧同名命令走 `opc.store` 的 KPI 列表读 op
+// （`axagent-plugins/crates/plugin-opc`），宿主本文件侧零消费；`axagent-runtime/crates/tools`
+// 的 KPI 工具改走 `call_opc_command` 插件命令桥（fail-closed，不回落直连）。
+// 域包范围内的 KPI 仍走 `opc_get_capability_pack_dashboard` 链路，不受本条删除影响。
 
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出收入记录")]
 #[tauri::command]
@@ -238,21 +174,10 @@ pub async fn opc_get_dashboard_summary(
 }
 
 // ── Finance Commands ────────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取财务报告")]
-#[tauri::command]
-pub async fn opc_get_financial_report(
-    state: State<'_, AppState>,
-    period: String,
-) -> Result<FinancialReport, String> {
-    let svc = DefaultFinanceService::new(state.harness.db().clone());
-    svc.get_financial_report(&period).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+//
+// `opc_get_financial_report` 已随 #266 删除：插件侧同名命令走 `opc.store` 只读接缝
+// （`axagent-plugins/crates/plugin-opc`），宿主侧零消费（`axagent-runtime/crates/tools`
+// 的财务报表工具走 `call_opc_command` 插件命令桥）。
 
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取投资建议")]
 #[tauri::command]
@@ -1077,17 +1002,6 @@ pub async fn opc_update_publish_schedule(
     })
 }
 
-/// 处理到期的发布计划
-#[agent_command(domain = "automation", safety = Caution, call_mode = Manual, description = "处理到期发布计划")]
-#[tauri::command]
-pub async fn opc_process_due_schedules(
-    state: State<'_, AppState>,
-) -> Result<Vec<PublishSchedule>, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.process_due_schedules().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// `opc_process_due_schedules` 已随 #266 删除：插件侧同名命令（写 op，`axagent-plugins/crates/plugin-opc`）
+// 是唯一通道；宿主侧零消费 —— `axagent-runtime/crates/tools` 的到期处理工具走
+// `call_opc_command` 插件命令桥（fail-closed，不回落直连）。

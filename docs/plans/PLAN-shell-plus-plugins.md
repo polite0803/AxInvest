@@ -7735,4 +7735,5 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 - `cargo test -p axagent-plugin-stock --bins market_read_commands` EXIT=0（1 passed / 11 filtered）。
 - `node scripts/build-plugin-bundle.mjs --check` EXIT=0：构建 `axagent-plugin-stock` 后真起 worker，三条自证全过 —— 「1 个 bundle 页的 entry 均存在且在白名单内」「2 个任务源声明自洽」「describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致」（sha256 `c01bf4b6…`）。
 - `cargo check -p axagent --all-targets` EXIT=0（41.88s；`build.rs` 对注册表的复算结果与盘上一致，未产生新行）。
-- **未做**：① `src/stores/feature/stockAnalysisStore.ts:2300` 的 `get_earnings_calendar` 仍走宿主 —— 该文件带着另一并行批的未提交改动（20/20），本批不碰，留待该批落地后一并切换；② 11 条宿主命令按 §143.2 保留，双声明期结束条件 = 插件默认安装/启用成为产品形态后，再按 `agency_experts` 消费面逐条改指；③ 智能体命令索引端到端未跑（本机 vitest 环境限制，仍以静态面 + 清单握手覆盖）。
+- `npm run test:run -- src/lib/__tests__/browserMockStockPlugin.test.ts`：6 passed（首轮撞既有环境坑 —— vitest worker 60 s 启动超时、`no tests` 退出 1，重跑即过；该形态与本批改动无关，见任务 #141）。
+- **未做**：① `src/stores/feature/stockAnalysisStore.ts:2300` 的 `get_earnings_calendar` 仍走宿主 —— 该文件带着另一并行批的未提交改动（20/20），本批不碰，留待该批落地后一并切换；② 11 条宿主命令按 §143.2 保留，双声明期结束条件 = 插件默认安装/启用成为产品形态后，再按 `agency_experts` 消费面逐条改指；③ 智能体命令索引端到端未跑（需运行实例；本批以静态面 + 真 worker 清单握手覆盖）。

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { resolveContributedPageKey } from "@/lib/domainPageRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import type { PageKey } from "@/types";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -24,6 +25,11 @@ const pathToPageKey = (path: string): PageKey => {
   const l1 = `/${path.slice(1).split("/")[0]}`;
   if (l1 in pathToPageKeyMap) {
     return pathToPageKeyMap[l1];
+  }
+  // 宿主表未命中 → 问域侧注册表（域页面的 path/pageKey 由域模块自己声明）
+  const contributed = resolveContributedPageKey(path);
+  if (contributed !== undefined) {
+    return contributed as PageKey;
   }
   const key = path.slice(1);
   if (key in pageKeyToPath) {

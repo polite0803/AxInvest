@@ -1,46 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ! 内置侧栏导航项的唯一权威来源
+// ! 侧栏导航项的宿主侧权威来源（宿主项 + 域贡献投影）
 //
-// 所有内置导航项集中在此声明，Sidebar 与 DomainHubPage（域聚合页）共同复用，
-// 禁止在别处重复定义导航项数组。
-// 导航以「能力域」为组织轴：每个导航项通过 NAV_ITEM_DOMAIN_MAP（见 domainMeta）
-// 归入唯一标准域。
+// **宿主内置项**在此声明；**域页面项**由 `src/pages/<域>/routes.tsx` 的 `nav` 字段声明，
+// 经 `domainPageRegistry` 投影后由 `getNavItems()` / `navItemsByDomain()` 合并。
+// Sidebar、AppHeader、DomainHubPage 一律经本文件取「全量导航项」，禁止在别处另拼数组。
+// 宿主项按「能力域」组织：通过 NAV_ITEM_DOMAIN_MAP（见 domainMeta）归入唯一标准域；
+// 域贡献项自带 `domain` 字段，不经该表。
 //
 // 图标一律用 @ant-design/icons 本地组件（确定性渲染），
 // 禁止用 Iconify 运行时图标——名字无效或网络不通时渲染空白且无报错（09-06 事故）。
 
 import { domainForNavKey } from "@/lib/domainMeta";
+import { type ContributedNavEntry, getContributedNavItems } from "@/lib/domainPageRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import type { CapabilityDomain } from "@/types/capability";
 import {
-  AimOutlined,
   ApartmentOutlined,
   ApiOutlined,
-  AppstoreFilled,
-  BgColorsOutlined,
-  BookFilled,
   BookOutlined,
-  CalculatorFilled,
-  CarryOutFilled,
-  CodeFilled,
   CodeOutlined,
   DatabaseOutlined,
   DollarCircleFilled,
-  EnvironmentFilled,
   FileTextOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
   MessageFilled,
   NodeIndexOutlined,
-  PlaySquareFilled,
-  RiseOutlined,
-  RobotFilled,
-  SafetyCertificateFilled,
   ScheduleOutlined,
   ShopOutlined,
-  ShoppingFilled,
   TeamOutlined,
-  VideoCameraFilled,
 } from "@ant-design/icons";
 
 const navIcon = (Icon: React.ComponentType<{ style?: React.CSSProperties }>) => <Icon style={{ fontSize: 17 }} />;
@@ -54,7 +42,7 @@ export interface NavItem {
   pluginName?: string;
 }
 
-/** 内置导航项 */
+/** 宿主内置导航项（域页面项由域模块贡献，见 `getNavItems`） */
 export const builtinNavItems: NavItem[] = [
   // ── 通用域（general） ──
   // 侧栏首项语义 = 「回到工作台」：navigate("/chat") 不带 ?ws=，由 WorkspaceHub 解析为
@@ -84,134 +72,10 @@ export const builtinNavItems: NavItem[] = [
     path: BUILTIN_PAGE_PATH["finance-investment"],
     isPlugin: false,
   },
-  // ── 金融域（finance）：OPC 投顾经营域包 ──
-  {
-    key: "finance-analysis",
-    icon: navIcon(TeamOutlined),
-    labelKey: "nav.financeAnalysis",
-    path: BUILTIN_PAGE_PATH["finance-analysis"],
-    isPlugin: false,
-  },
-  // ── 金融域（finance）：财务会计行业包 ──
-  {
-    key: "finance-accounting",
-    icon: navIcon(CalculatorFilled),
-    labelKey: "nav.financeAccounting",
-    path: BUILTIN_PAGE_PATH["finance-accounting"],
-    isPlugin: false,
-  },
-  // ── 自动化域（automation）：OPC 需求发现 ──
-  {
-    key: "demand-discovery",
-    icon: navIcon(AimOutlined),
-    labelKey: "opc.demand.pageTitle",
-    path: BUILTIN_PAGE_PATH["demand-discovery"],
-    isPlugin: false,
-  },
-  // ── 自动化域（automation）：OPC 一人公司管理面板 ──
-  {
-    key: "automation-operations",
-    icon: navIcon(AppstoreFilled),
-    labelKey: "nav.automationOperations",
-    path: BUILTIN_PAGE_PATH["automation-operations"],
-    isPlugin: false,
-  },
-  // ── 自动化域（automation）：销售增长行业包 ──
-  {
-    key: "automation-sales",
-    icon: navIcon(RiseOutlined),
-    labelKey: "nav.automationSales",
-    path: BUILTIN_PAGE_PATH["automation-sales"],
-    isPlugin: false,
-  },
-  // ── 自动化域（automation）：项目管理行业包 ──
-  {
-    key: "automation-projects",
-    icon: navIcon(CarryOutFilled),
-    labelKey: "nav.automationProjects",
-    path: BUILTIN_PAGE_PATH["automation-projects"],
-    isPlugin: false,
-  },
-  // ── 自动化域（automation）：行业咨询包 ──
-  {
-    key: "automation-consulting",
-    icon: navIcon(TeamOutlined),
-    labelKey: "nav.automationConsulting",
-    path: BUILTIN_PAGE_PATH["automation-consulting"],
-    isPlugin: false,
-  },
-  // ── 自动化域（automation）：电商运营行业包 ──
-  {
-    key: "automation-ecommerce",
-    icon: navIcon(ShoppingFilled),
-    labelKey: "nav.automationEcommerce",
-    path: BUILTIN_PAGE_PATH["automation-ecommerce"],
-    isPlugin: false,
-  },
-  // ── 运维域（devops）：软件开发行业包 ──
-  {
-    key: "devops-software",
-    icon: navIcon(CodeFilled),
-    labelKey: "nav.devopsSoftware",
-    path: BUILTIN_PAGE_PATH["devops-software"],
-    isPlugin: false,
-  },
-  // ── 运维域（devops）：安全运维行业包 ──
-  {
-    key: "devops-security",
-    icon: navIcon(SafetyCertificateFilled),
-    labelKey: "nav.devopsSecurity",
-    path: BUILTIN_PAGE_PATH["devops-security"],
-    isPlugin: false,
-  },
-  // ── 数据分析域（data_analysis）：地理空间行业包 ──
-  {
-    key: "data-geospatial",
-    icon: navIcon(EnvironmentFilled),
-    labelKey: "nav.dataGeospatial",
-    path: BUILTIN_PAGE_PATH["data-geospatial"],
-    isPlugin: false,
-  },
-  // ── 数据分析域（data_analysis）：AI 研究行业包 ──
-  {
-    key: "data-ai-research",
-    icon: navIcon(RobotFilled),
-    labelKey: "nav.dataAiResearch",
-    path: BUILTIN_PAGE_PATH["data-ai-research"],
-    isPlugin: false,
-  },
-  // ── 内容创作域（content_creation）：内容媒体行业包 ──
-  {
-    key: "content-media",
-    icon: navIcon(VideoCameraFilled),
-    labelKey: "nav.contentMedia",
-    path: BUILTIN_PAGE_PATH["content-media"],
-    isPlugin: false,
-  },
-  // ── 内容创作域（content_creation）：视觉设计行业包 ──
-  {
-    key: "content-design",
-    icon: navIcon(BgColorsOutlined),
-    labelKey: "nav.contentDesign",
-    path: BUILTIN_PAGE_PATH["content-design"],
-    isPlugin: false,
-  },
-  // ── 内容创作域（content_creation）：教育内容行业包 ──
-  {
-    key: "content-education",
-    icon: navIcon(BookFilled),
-    labelKey: "nav.contentEducation",
-    path: BUILTIN_PAGE_PATH["content-education"],
-    isPlugin: false,
-  },
-  // ── AI 媒体域（ai_media）：游戏开发行业包 ──
-  {
-    key: "ai-media-game",
-    icon: navIcon(PlaySquareFilled),
-    labelKey: "nav.aiMediaGame",
-    path: BUILTIN_PAGE_PATH["ai-media-game"],
-    isPlugin: false,
-  },
+  // ── 金融域（finance）：OPC 投顾经营域包 / 财务会计行业包，自动化、运维、数据分析、
+  // 内容创作、AI 媒体域的全部行业包，以及 OPC 经营面板与需求发现页 ——
+  // 一律由 `src/pages/opc/routes.tsx` 的 `NAV_PAGE_DECLARATIONS` 贡献（#36 导航声明权半），
+  // 宿主不再持有它们的 key / labelKey / icon / path。
   // ── 2026-10-28：补齐“有路由、无入口”的页面（阶段 1 可达性） ──
   // 这批页面此前只能靠 chat 内 tab、页面内跳转或深链到达。
   // 阶段 1 先补入口、沿用旧路径；阶段 2 再随 Shell 重构一次性切到 /chat/*、/knowledge/*。
@@ -297,7 +161,22 @@ export const builtinNavItems: NavItem[] = [
   },
 ];
 
-/** 按标准域过滤内置导航项 */
+/** 域贡献项 → 宿主渲染用的导航项（`path` 由所属路由派生）。 */
+export function navItemFromContribution(
+  entry: ContributedNavEntry,
+): NavItem {
+  return { key: entry.key, icon: entry.icon, labelKey: entry.labelKey, path: entry.path, isPlugin: false };
+}
+
+/** 全量导航项 = 宿主内置 + 域贡献（侧栏 / 页面标题共用）。 */
+export function getNavItems(): NavItem[] {
+  return [...builtinNavItems, ...getContributedNavItems().map(navItemFromContribution)];
+}
+
+/** 按标准域过滤导航项（宿主项查归域表，域贡献项自带 domain）。 */
 export function navItemsByDomain(domain: CapabilityDomain): NavItem[] {
-  return builtinNavItems.filter((n) => domainForNavKey(n.key) === domain);
+  return [
+    ...builtinNavItems.filter((n) => domainForNavKey(n.key) === domain),
+    ...getContributedNavItems().filter((n) => n.domain === domain).map(navItemFromContribution),
+  ];
 }

@@ -201,33 +201,12 @@ export const CAPABILITY_DOMAIN_OPTIONS: readonly {
 // 将侧栏内置导航项（NavItem.key）按业务本质归入唯一标准域。
 // 这是「导航以域为标准」的权威归域来源。
 
-/** 导航项 key → 标准域 id */
+/** 导航项 key → 标准域 id（只登记**宿主**导航项；域贡献项自带 `domain` 字段） */
 export const NAV_ITEM_DOMAIN_MAP: Readonly<Record<string, CapabilityDomain>> = {
   // 通用域
   chat: "general",
   // 金融域
   "finance-investment": "finance",
-  "finance-analysis": "finance",
-  "finance-accounting": "finance",
-  // 自动化域
-  "demand-discovery": "automation",
-  "automation-operations": "automation",
-  "automation-sales": "automation",
-  "automation-projects": "automation",
-  "automation-consulting": "automation",
-  "automation-ecommerce": "automation",
-  // 运维域
-  "devops-software": "devops",
-  "devops-security": "devops",
-  // 数据分析域
-  "data-geospatial": "data_analysis",
-  "data-ai-research": "data_analysis",
-  // 内容创作域
-  "content-media": "content_creation",
-  "content-design": "content_creation",
-  "content-education": "content_creation",
-  // AI 媒体域
-  "ai-media-game": "ai_media",
   // 通信域
   "communication-message": "communication",
 };

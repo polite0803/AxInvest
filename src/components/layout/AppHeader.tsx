@@ -3,7 +3,7 @@
 import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
 import { NAV_GROUPS } from "@/lib/navGroups";
-import { builtinNavItems } from "@/lib/navRegistry";
+import { getNavItems } from "@/lib/navRegistry";
 import { useAgentPanelStore, useOnboardingStore } from "@/stores";
 import { theme } from "antd";
 import { ArrowLeft, Bot, HelpCircle } from "lucide-react";
@@ -21,7 +21,7 @@ function resolvePageLabel(pathname: string): string | null {
   if (pathname === "/invest" || pathname.startsWith("/invest/")) {
     return null;
   }
-  const item = builtinNavItems
+  const item = getNavItems()
     .filter((entry) => pathname === entry.path || pathname.startsWith(`${entry.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
   if (item) {

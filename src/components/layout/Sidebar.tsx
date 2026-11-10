@@ -4,9 +4,10 @@ import { Icon } from "@/components/common/Icon";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
+import { getContributedNavItems, resolveContributedPageKey } from "@/lib/domainPageRegistry";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { NAV_GROUPS } from "@/lib/navGroups";
-import { builtinNavItems, type NavItem } from "@/lib/navRegistry";
+import { getNavItems, type NavItem, navItemFromContribution } from "@/lib/navRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
@@ -39,6 +40,11 @@ function pathToPageKey(path: string): PageKey {
   const l1 = `/${path.slice(1).split("/")[0]}`;
   if (l1 in pathToPageKeyMap) {
     return pathToPageKeyMap[l1];
+  }
+  // 宿主表未命中 → 问域侧注册表（域页面的 path/pageKey 由域模块自己声明）
+  const contributed = resolveContributedPageKey(path);
+  if (contributed !== undefined) {
+    return contributed as PageKey;
   }
   const key = path.slice(1);
   if (key in pageKeyToPath) {
@@ -271,16 +277,27 @@ export function Sidebar() {
   const sections = useMemo<SidebarSection[]>(() => {
     // 2026-10-28：侧栏改为「产品导航组」轴（`navGroups.ts`），不再按 8 个能力域分组。
     // 能力域仍是协议概念（DomainHubPage / 工具域过滤用），两轴解耦。
-    const byKey = new Map(builtinNavItems.map((item) => [item.key, item]));
-    return NAV_GROUPS.map((group) => ({
-      key: group.key,
-      labelKey: group.labelKey,
-      color: group.color,
-      path: group.path,
-      items: group.itemKeys
+    // 2026-11-10（#36）：域贡献项按自身 `group` 归组，宿主本表只留产品组骨架。
+    const byKey = new Map(getNavItems().map((item) => [item.key, item]));
+    const contributed = getContributedNavItems();
+    return NAV_GROUPS.map((group) => {
+      const hostItems = group.itemKeys
         .map((key) => byKey.get(key))
-        .filter((item): item is NavItem => Boolean(item)),
-    })).filter((section) => section.items.length > 0);
+        .filter((item): item is NavItem => Boolean(item));
+      const domainItems = contributed
+        .filter((entry) => entry.group === group.key)
+        .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0))
+        .map(navItemFromContribution);
+      const items = [...hostItems, ...domainItems];
+      return {
+        key: group.key,
+        labelKey: group.labelKey,
+        color: group.color,
+        // 组标题路径：宿主显式声明优先，否则回落到组内首项（域组的路径由域声明）
+        path: group.path ?? items[0]?.path,
+        items,
+      };
+    }).filter((section) => section.items.length > 0);
   }, []);
 
   // 动态固定页面已移至设置/扩展分组管理，不再在侧栏加载和渲染

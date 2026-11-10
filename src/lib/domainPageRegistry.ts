@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { type ComponentType, type LazyExoticComponent, useSyncExternalStore } from "react";
+import type { CapabilityDomain } from "@/types/capability";
+import { type ComponentType, type LazyExoticComponent, type ReactNode, useSyncExternalStore } from "react";
 
 /**
- * 域页面路由注册表 —— 宿主内容区不再静态 import 任何域页面组件。
+ * 域页面路由 + 导航注册表 —— 宿主内容区/侧栏不再知道任何域页面。
  *
  * 为什么要有这张表（#36 迁出期）：宿主布局此前从 `@/pages/opc/routes` 直接点名字 import
  * `LazyOpcPage` / `OPC_DOMAIN_ROUTES`，等于「主壳知道 OPC 有哪些页面、各是什么组件」——
  * 域内每加一页都要改宿主文件，且宿主永远摘不掉对域目录的依赖。
  * 改为「域模块只导出一张路由表，本表装载后登记，宿主只渲染注册表投影」后，
  * 域侧增删页面宿主零改动，域整棵迁出仓库时本表的 glob 命中变空即自然退役（不留兼容分支）。
+ *
+ * 2026-11-10（#36 导航声明权半）：**path / pageKey / 侧栏入口** 也一并归域声明。
+ * 此前域模块仍从宿主 `BUILTIN_PAGE_PATH` 取 path，等于「宿主给域页面命名」；
+ * 现在 path 是域模块里的字面量，宿主 `pageRegistry` 只留宿主自己的页面。
+ * 宿主侧三个消费面（`pageRegistry` 反查、`navRegistry`、`navGroups` 分组）全部改成
+ * 「读本表投影」，域目录整棵删除后宿主无需再改一行（这是本批的验收判据）。
  *
  * 为什么用 glob 而不是宿主侧列一份域清单：列清单等于把「有哪些域」这件事放回宿主掌握，
  * 与上面那条迁出判据正相反；glob 是本机制唯一不需要宿主点名域名的装载口。
@@ -29,33 +36,59 @@ import { type ComponentType, type LazyExoticComponent, useSyncExternalStore } fr
 export interface ContributedPageRoute {
   /** 全局唯一 id：既是 React key，也是覆盖判据（同 id 重复注册 = 替换，不追加） */
   readonly id: string;
-  /** URL 路径，可含 `:param` 段 */
+  /** URL 路径，可含 `:param` 段。**由域自己声明**（宿主不再有这张表） */
   readonly path: string;
-  /**
-   * `PageContextProvider` 的 page key —— 域页面一律挂在宿主页面上下文里
-   * （agent 面板按它取上下文）。
-   * 路径本身仍归宿主 `pageRegistry` 掌握 —— 本表只负责「哪个组件填哪条路由」。
-   */
+  /** `PageContextProvider` 的 page key —— agent 面板按它取上下文 */
   readonly pageKey: string;
   readonly Page: LazyExoticComponent<ComponentType>;
+  /**
+   * 侧栏 / 域聚合页入口。挂在哪条路由上，入口就指向哪条 path。
+   * 同一页面的多段路由（如 `/opc` 与 `/opc/:tab`）只在**主路由**上挂一次。
+   */
+  readonly nav?: ContributedNavItem;
+}
+
+/** 一条域贡献的导航项（侧栏 + 域聚合页共用）。 */
+export interface ContributedNavItem {
+  /** 导航项 key（稳定标识；同 key 覆盖） */
+  readonly key: string;
+  readonly labelKey: string;
+  readonly icon: ReactNode;
+  /** 能力域轴的归域（`domainMeta` 的 8 个业务域之一） */
+  readonly domain: CapabilityDomain;
+  /** 产品导航组 key（`navGroups.NAV_GROUPS`）；组不存在则该项不出现在侧栏 */
+  readonly group: string;
+  /** 组内排序提示（缺省按声明顺序）；域聚合页始终按声明顺序 */
+  readonly groupOrder?: number;
+}
+
+/** 已登记导航项（`path` 由所在路由派生，域侧只写一次路径）。 */
+export interface ContributedNavEntry extends ContributedNavItem {
+  readonly path: string;
 }
 
 const byId = new Map<string, ContributedPageRoute>();
+const navByKey = new Map<string, ContributedNavEntry>();
 let snapshot: readonly ContributedPageRoute[] = [];
+let navSnapshot: readonly ContributedNavEntry[] = [];
 const listeners = new Set<() => void>();
 
 function publish(): void {
   // 必须是新数组引用：useSyncExternalStore 按引用比较快照，原地改会让订阅者看不到更新
   snapshot = [...byId.values()];
+  navSnapshot = [...navByKey.values()];
   for (const listener of listeners) {
     listener();
   }
 }
 
-/** 域模块在自身加载时调用（幂等：同 id 覆盖）。 */
+/** 域模块在自身加载时调用（幂等：同 id / 同 nav.key 覆盖）。 */
 export function contributeDomainPages(routes: readonly ContributedPageRoute[]): void {
   for (const route of routes) {
     byId.set(route.id, route);
+    if (route.nav) {
+      navByKey.set(route.nav.key, { ...route.nav, path: route.path });
+    }
   }
   publish();
 }
@@ -74,6 +107,46 @@ export function subscribeDomainPageRoutes(listener: () => void): () => void {
 
 export function useDomainPageRoutes(): readonly ContributedPageRoute[] {
   return useSyncExternalStore(subscribeDomainPageRoutes, getDomainPageRoutes, getDomainPageRoutes);
+}
+
+/** 非响应式读口：登记只发生在模块求值期，首帧前已就绪（侧栏/标题/反查都走这里）。 */
+export function getContributedNavItems(): readonly ContributedNavEntry[] {
+  return navSnapshot;
+}
+
+/**
+ * pathname → pageKey 的域侧反查（宿主 `pathToPageKey` 在查完自己的表后调用）。
+ *
+ * 判据与宿主一致：先精确、再参数段路由（`/opc/:tab` 这类单段通配）、最后按 L1 段
+ * 兜底（`/opc/domains/finance` 归到 `/opc` 的 pageKey）—— 少了最后一条，域聚合页会
+ * 因为「宿主表里已经没有 /opc」而回落到 chat，侧栏高亮与页面上下文一起错位。
+ */
+export function resolveContributedPageKey(pathname: string): string | undefined {
+  let paramMatch: string | undefined;
+  for (const route of snapshot) {
+    if (route.path === pathname) {
+      return route.pageKey;
+    }
+    if (paramMatch === undefined && route.path.includes(":")) {
+      const pattern = route.path
+        .split("/")
+        .map((seg) => (seg.startsWith(":") ? "[^/]+" : seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+        .join("/");
+      if (new RegExp(`^${pattern}/?$`).test(pathname)) {
+        paramMatch = route.pageKey;
+      }
+    }
+  }
+  if (paramMatch !== undefined) {
+    return paramMatch;
+  }
+  const l1 = `/${pathname.slice(1).split("/")[0]}`;
+  for (const route of snapshot) {
+    if (route.path === l1) {
+      return route.pageKey;
+    }
+  }
+  return undefined;
 }
 
 /** 域路由模块的装载契约：`src/pages/<域>/routes.tsx` 必须导出常量 `DOMAIN_PAGES`。 */

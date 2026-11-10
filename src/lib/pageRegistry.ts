@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * Unified page registry — 内置路由路径的单一真相源（single source of truth）。
+ * Unified page registry — **宿主自有**内置路由路径的单一真相源。
  *
- * 所有内置页面的路径在此集中声明。以下位置必须从此处 import，禁止散写硬编码：
- *   - ContentArea 的 <Route path=...> 字面量
- *   - Sidebar 的 builtinNavItems / pathToPageKey
- *   - usePageRouting 的 path→key 映射
+ * 所有宿主页面路径在此集中声明。以下位置必须从此处 import，禁止散写硬编码：
+ *   - ContentArea 的 <Route path=...>
+ *   - Sidebar 的 pathToPageKey / usePageRouting 的 path→key 映射
  *
- * 新增内置页面时：
+ * 域页面（`src/pages/<域>/**`）的 path / pageKey 由域自己的 `routes.tsx` 声明，
+ * 经 `domainPageRegistry` 投影 —— **不登记在本表**（2026-11-10 #36 导航声明权半：
+ * 登记在这里等于主壳继续给域页面命名，域整棵迁出时还要回来改宿主）。
+ *
+ * 新增**宿主**内置页面时：
  *   1. 在 BUILTIN_PAGE_PATH 增加 key→path；
  *   2. 在 ContentArea 增加对应 <Route path={BUILTIN_PAGE_PATH.xxx}> 与懒加载组件；
  *   3. 在 Sidebar builtinNavItems 增加导航项（path 引用本表）。
@@ -29,27 +32,12 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   // ── 能力域聚合入口（2026-10-28 起并入 OPC）──
   // `domainMeta.path` 仍是跨端协议值（须与后端 nav_path 一致），
   // 但不再注册为顶级路由；统一由 `/opc/domains/:domainId` 承载。
+  // 该路由与 /opc、/opc/:tab、/demand-discovery、14 个能力包页一律由
+  // `src/pages/opc/routes.tsx` 声明（#36 迁出期），宿主表不再登记。
 
   // ── AxInvest 本地业务页（2026-09-01 上游合并时路由被覆盖，09-06 按能力域恢复） ──
   "finance-investment": "/invest",
   investReplay: "/invest/replay",
-  "automation-operations": "/opc",
-  // 能力包页（DomainPages.tsx 固定组件，路径 /opc/domain/:packId；
-  // 2026-09-15 由 /opc/industry/:packId 迁移而来，旧链在 ContentArea 里重定向）
-  "finance-analysis": "/opc/domain/finance-invest",
-  "finance-accounting": "/opc/domain/accounting",
-  "automation-sales": "/opc/domain/sales-growth",
-  "automation-projects": "/opc/domain/project-management",
-  "automation-consulting": "/opc/domain/consulting",
-  "automation-ecommerce": "/opc/domain/ecommerce",
-  "devops-software": "/opc/domain/software-dev",
-  "devops-security": "/opc/domain/security",
-  "data-geospatial": "/opc/domain/geospatial",
-  "data-ai-research": "/opc/domain/ai-research",
-  "content-media": "/opc/domain/content-media",
-  "content-design": "/opc/domain/design",
-  "content-education": "/opc/domain/education",
-  "ai-media-game": "/opc/domain/game-dev",
 
   // ── 通用功能（general 域） ──
   chat: "/chat",
@@ -65,7 +53,6 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   knowledgeWiki: "/knowledge/wiki",
   knowledgeLearning: "/knowledge/learning",
   memory: "/memory",
-  "demand-discovery": "/demand-discovery",
   link: "/link",
   settings: "/settings",
   "tasks-center": "/tasks",

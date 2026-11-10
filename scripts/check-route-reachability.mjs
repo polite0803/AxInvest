@@ -11,7 +11,9 @@
 //
 // 本门只做静态文本提取，不解析 TSX：
 //   - 路由：`ContentArea.tsx` 的 `<Route path=…>` + `pageRegistry` + `domainMeta`
-//   - 入口：`navRegistry`、`CommandPalette`、全仓 `navigate("…")` / `to="…"` / `href="…"`
+//     + `src/pages/<域>/routes.tsx` 的对象字面量（#36 起域页面 path 由域声明）
+//   - 入口：`navRegistry`、`CommandPalette`、域路由声明里带 `group` 的项、
+//     全仓 `navigate("…")` / `to="…"` / `href="…"`
 //
 // 用法：
 //   node scripts/check-route-reachability.mjs            # 报告模式，总是 exit 0
@@ -128,20 +130,89 @@ export function parseDomainPaths(src) {
   return map;
 }
 
-/** `DOMAIN_ROUTES` 的 `["pageKey", LazyX]` 列表。 */
-function parseDomainRouteKeys(src) {
-  const block = src.match(/DOMAIN_ROUTES[^=]*=\s*\[([\s\S]*?)\];/);
-  if (!block) { return []; }
-  const keys = [];
-  const re = /\[\s*"([A-Za-z0-9_-]+)"\s*,/g;
-  for (const m of block[1].matchAll(re)) { keys.push(m[1]); }
-  return keys;
+/**
+ * 域路由模块（`src/pages/<域>/routes.tsx`）→ `{ routes, entries }`。
+ *
+ * 为什么必须单独解析：2026-11-10（#36 导航声明权半）起，域页面的 path **由域模块
+ * 字面量声明**，宿主 `ContentArea` 只渲染 `contributedPages.map(...)`。
+ * `parseRoutes` 认的是 `path="…"` / `path={BUILTIN_PAGE_PATH.…}` 这些 JSX 形态，
+ * 对 `path: "/opc/domain/…"` 的对象字面量**一条都匹配不上** ⇒ 域路由对门禁
+ * 完全不可见（实测：17 个 `/opc/*` 键被误报成「有键无路由」的孤儿）。
+ *
+ * 判据：扫描模块内所有对象字面量 ——
+ *   - 含 `path: "…"` ⇒ 一条路由；
+ *   - 同时含 `group: "…"` ⇒ 该路由**带有侧栏入口**（`ContributedNavItem.group` 必填，
+ *     同页子路由 `EXTRA_ROUTES` 不写 group）。这条以「声明契约」为判据，不按常量名认，
+ *     域内换组织方式（改数组名 / 合并声明）不会让入口面静默掉成 0。
+ */
+export function parseDomainRoutes(src) {
+  const routes = new Map();
+  const entries = new Set();
+  for (const obj of collectObjectLiterals(src)) {
+    // 判据只认**代码**：字符串里出现的 `path: "/x"`（文案 / 提示语）不算声明。
+    const code = blankStrings(obj);
+    const pathAt = /\bpath:\s*"/.exec(code);
+    if (!pathAt) { continue; }
+    const start = pathAt.index + pathAt[0].length;
+    const path = obj.slice(start, obj.indexOf('"', start));
+    if (!path.startsWith("/")) { continue; }
+    const hasNav = /\bgroup:\s*"/.test(code);
+    if (!routes.has(path)) { routes.set(path, hasNav ? "domainNav" : "domainSub"); }
+    if (hasNav) { entries.add(path); }
+  }
+  return { routes, entries };
+}
+
+/** 把字符串 / 模板串的**内容**替换成空格（保留引号与换行），用于「只认代码」的判据。 */
+function blankStrings(src) {
+  let out = "";
+  let state = "code";
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (state === "code") {
+      out += c;
+      if (c === '"') { state = "dq"; } else if (c === "'") { state = "sq"; } else if (c === "`") { state = "tpl"; }
+      continue;
+    }
+    if (c === "\\") { out += "  "; i++; continue; }
+    if ((state === "dq" && c === '"') || (state === "sq" && c === "'") || (state === "tpl" && c === "`")) {
+      state = "code";
+      out += c;
+      continue;
+    }
+    out += c === "\n" ? "\n" : " ";
+  }
+  return out;
+}
+
+/** 扫出源码里所有配平的 `{ … }` 片段（跳过字符串 / 模板串 / 注释内的花括号）。 */
+function collectObjectLiterals(src) {
+  const out = [];
+  const stack = [];
+  let state = "code";
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (state !== "code") {
+      if (c === "\\") { i++; continue; }
+      if ((state === "dq" && c === '"') || (state === "sq" && c === "'") || (state === "tpl" && c === "`")) {
+        state = "code";
+      }
+      continue;
+    }
+    if (c === '"') { state = "dq"; continue; }
+    if (c === "'") { state = "sq"; continue; }
+    if (c === "`") { state = "tpl"; continue; }
+    if (c === "{") { stack.push(i); continue; }
+    if (c === "}" && stack.length > 0) {
+      out.push(src.slice(stack.pop(), i + 1));
+    }
+  }
+  return out;
 }
 
 /** 从 `ContentArea.tsx` 提取路由模式。 */
 export function parseRoutes(src, registry, domainPaths) {
   const routes = new Map(); // pattern -> source
-  const domainRouteKeys = parseDomainRouteKeys(src);
   const routeRe = /<Route\b([\s\S]*?)\/?>/g;
 
   for (const m of src.matchAll(routeRe)) {
@@ -186,13 +257,8 @@ export function parseRoutes(src, registry, domainPaths) {
       for (const [id, p] of domainPaths) { routes.set(p, tag + "domain:" + id); }
       continue;
     }
-    if (/\bpath=\{BUILTIN_PAGE_PATH\[pageKey\]\}/.test(attrs)) {
-      for (const key of domainRouteKeys) {
-        const base = registry.get(key);
-        if (base) { routes.set(base, tag + "domainRoutes:" + key); }
-      }
-      continue;
-    }
+    // `path={path}` 的注册表投影（域路由）在 parseRoutes 里**解析不出具体路径** ——
+    // 它们由 `parseDomainRoutes` 读域模块补齐后并入 routes；展开点是否存在由 main() 单独把守。
   }
   return routes;
 }
@@ -499,6 +565,24 @@ function main() {
   const domainPaths = parseDomainPaths(stripComments(read("src/lib/domainMeta.ts")));
   const contentArea = stripComments(read("src/components/layout/ContentArea.tsx"));
   const routes = parseRoutes(contentArea, registry, domainPaths);
+
+  // 域页面路由（2026-11-10 #36 导航声明权半）：path 由 `src/pages/<域>/routes.tsx`
+  // 字面量声明，宿主只渲染 `contributedPages.map(...)`。这些路由与入口都从这里补齐 ——
+  // 少了这一步，域路由既不被查可达性，其 pageKey 对应的旧键还会被误报成孤儿。
+  const domainEntries = new Set();
+  const domainRouteFiles = walk(join(ROOT, "src/pages"), [], { includeTests: false })
+    .filter((f) => f.endsWith("routes.tsx"));
+  for (const file of domainRouteFiles) {
+    const { routes: domainRoutes, entries } = parseDomainRoutes(stripComments(readFileSync(file, "utf8")));
+    for (const [path, source] of domainRoutes) {
+      if (!routes.has(path)) { routes.set(path, `${source}:${relative(ROOT, file)}`); }
+    }
+    for (const path of entries) { domainEntries.add(path); }
+  }
+  // 域路由是靠宿主那一行投影渲染的：投影没了，路由文件还在也一页都不会出。
+  if (domainRouteFiles.length > 0 && !contentArea.includes("contributedPages.map")) {
+    routes.set("__domain-projection__", "missing");
+  }
   // `.map()` 展开的 devtools 子路由：`parseRoutes` 抓不到。
   //
   // ⚠ 刻意**只**把它们当作「孤儿键检查的消费证据」，**不**加进 `routes`：
@@ -515,7 +599,7 @@ function main() {
   // ⚠ 入口抽取**排除测试**（includeTests: false）：测试里的 `navigate("/x")` 不是用户入口。
   const inline = parseInlineEntries(walk(join(ROOT, "src"), [], { includeTests: false }));
 
-  const entries = new Set([...navEntries, ...commandPalette, ...inline]);
+  const entries = new Set([...navEntries, ...commandPalette, ...inline, ...domainEntries]);
   // 侧栏域分组标题可点击（`Sidebar.tsx` 的 `domainPath`），
   // 2026-10-28 起指向 `/opc/domains/:id`，因此按 id 展开。
   for (const id of domainPaths.keys()) { entries.add(`/opc/domains/${id}`); }
@@ -536,9 +620,17 @@ function main() {
   const compat = [];
   const redirects = [];
   const inlineOnly = [];
-  const strongEntries = new Set([...navEntries, ...commandPalette, ...domainPaths.values()]);
+  const strongEntries = new Set([...navEntries, ...commandPalette, ...domainPaths.values(), ...domainEntries]);
 
   const compatDomainPaths = new Set(domainPaths.values());
+
+  // 域路由投影缺失：这不是「某条路由不可达」，而是「整片域路由不会渲染」，单列一条。
+  if (routes.delete("__domain-projection__")) {
+    unreachable.push({
+      route: "(域路由投影)",
+      source: "ContentArea 缺 contributedPages.map：域路由文件存在但一页都不会渲染",
+    });
+  }
 
   for (const [route, source] of routes) {
     if (INTERNAL_ROUTES.has(route)) { internal.push({ route, source }); continue; }
@@ -778,17 +870,14 @@ function selftest() {
 
   // ── 路由抽取自证：`parseRoutes` 此前零覆盖 ──
   const routeSrc = stripComments([
-    "const DOMAIN_ROUTES = [",
-    '  ["finance-investment", LazyInvest],',
-    "];",
     "export function R() {",
     "  return (<Routes>",
     '    <Route path="/opc/domains/:domainId" element={<X />} />',
     "    <Route path={BUILTIN_PAGE_PATH.chat} element={<X />} />",
     "    <Route path={`${BUILTIN_PAGE_PATH.investReplay}/x`} element={<X />} />",
     '    <Route path="/legacy" element={<Navigate to="/new" replace />} />',
-    "    {DOMAIN_ROUTES.map(([pageKey, Page]) => (",
-    "      <Route key={pageKey} path={BUILTIN_PAGE_PATH[pageKey]} element={<Page />} />",
+    "    {contributedPages.map(({ id, path, pageKey, Page }) => (",
+    "      <Route key={id} path={path} element={<Page />} />",
     "    ))}",
     "    <Route path=\"*\" element={<NotFound />} />",
     "  </Routes>);",
@@ -803,8 +892,37 @@ function selftest() {
   check("抽路由：字面量 path 被抓出", parsed.has("/opc/domains/:domainId"));
   check("抽路由：`BUILTIN_PAGE_PATH.chat` 成员引用被抓出", parsed.has("/chat"));
   check("抽路由：模板串拼接被抓出", parsed.has("/invest/replay/x"));
-  check("抽路由：DOMAIN_ROUTES 展开被抓出", parsed.has("/invest"));
   check("抽路由：`*` 兜底被抓出", parsed.has("*"));
+  // 域路由映射形态对 parseRoutes **不可见**（这是设计）：具体 path 由 parseDomainRoutes 补。
+  check("抽路由：注册表投影不产出假路由", !parsed.has("/invest"));
+
+  // ── 域路由抽取自证（2026-11-10 #36 导航声明权半）──
+  // 域页面的 path / 入口由 `src/pages/<域>/routes.tsx` 的对象字面量声明，宿主只渲染投影。
+  const domainSrc = stripComments([
+    "const NAV = [",
+    '  // { path: "/ghost", group: "x" },  ← 注释里的声明不得算数',
+    '  { id: "a", path: "/opc", group: "opc", labelKey: "x", Page: A },',
+    '  { id: "b", path: "/opc/domain/finance", group: "packs", labelKey: "y", Page: B },',
+    // 字符串里出现 path 文本也不得算声明
+    '  { id: "c", note: \'path: "/ghost2", group: "x"\', Page: C },',
+    "];",
+    "const EXTRA = [",
+    '  { id: "d", path: "/opc/:tab", pageKey: "a", Page: A },',
+    "];",
+  ].join("\n"));
+  const domainParsed = parseDomainRoutes(domainSrc);
+  check(
+    "域路由：带 group 的声明既成路由又成入口",
+    domainParsed.routes.has("/opc") && domainParsed.entries.has("/opc")
+      && domainParsed.routes.has("/opc/domain/finance") && domainParsed.entries.has("/opc/domain/finance"),
+  );
+  check(
+    "域路由：只写 path 的同页子路由成路由但**不**算入口",
+    domainParsed.routes.has("/opc/:tab") && !domainParsed.entries.has("/opc/:tab"),
+  );
+  check("域路由：注释里的声明不算数", !domainParsed.routes.has("/ghost"));
+  check("域路由：字符串里的 path 文本不算声明", !domainParsed.routes.has("/ghost2"));
+  check("域路由：负控 —— 空源码不得凭空产出路由", parseDomainRoutes("const X = 1;").routes.size === 0);
   // 重定向路由必须被标记（main() 靠 `redirect:` 前缀把它们从「必须有入口」里分出）。
   check(
     "抽路由：重定向路由被打上 redirect: 标记",

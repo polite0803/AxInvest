@@ -14,8 +14,9 @@
  * 用户找不到入口；同时 8 个域里有 4 个只挂 1–2 项。产品导航与能力域是两条轴，
  * 混用会让「域」既当协议又当菜单。
  *
- * 新增一项时：在 `navRegistry.builtinNavItems` 加 item，再把 key 放进对应组的
- * `itemKeys`；`check-route-reachability` 会校验每条路由仍有入口。
+ * 新增一项时：宿主项在 `navRegistry.builtinNavItems` 加 item 并把 key 放进对应组的
+ * `itemKeys`；域页面项由域模块自带 `group`（见 `src/pages/<域>/routes.tsx`），不写进
+ * 本表的 `itemKeys`。`check-route-reachability` 会校验每条路由仍有入口。
  */
 
 export interface NavGroup {
@@ -25,29 +26,14 @@ export interface NavGroup {
   labelKey: string;
   /** 组标题圆点色（纯呈现） */
   color: string;
-  /** 组标题点击路径；缺省表示不可点 */
+  /** 组标题点击路径；缺省表示不可点（组内首项有 path 时由 Sidebar 回落到它） */
   path?: string;
-  /** 组内导航项 key，顺序即渲染顺序 */
+  /** 组内**宿主**导航项 key，顺序即渲染顺序；域贡献项按自身 groupOrder 追加在后 */
   itemKeys: readonly string[];
 }
 
-/** OPC 行业包（14 个），单独成组以免挤占经营面板入口。 */
-const PACK_ITEM_KEYS = [
-  "finance-analysis",
-  "finance-accounting",
-  "automation-sales",
-  "automation-projects",
-  "automation-consulting",
-  "automation-ecommerce",
-  "devops-software",
-  "devops-security",
-  "data-geospatial",
-  "data-ai-research",
-  "content-media",
-  "content-design",
-  "content-education",
-  "ai-media-game",
-] as const;
+/** OPC 行业包（14 个）与 OPC 经营面板/需求发现页的导航项由 OPC 域模块贡献（#36）；
+ *  本表只保留产品导航组骨架，域贡献项通过各自声明的 `group` 归入 `opc` / `packs` 组。 */
 
 export const NAV_GROUPS: readonly NavGroup[] = [
   {
@@ -82,15 +68,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     key: "opc",
     labelKey: "nav.automationOperations",
     color: "#722ed1",
-    path: "/opc",
-    itemKeys: ["automation-operations", "demand-discovery"],
+    itemKeys: [],
   },
   {
     key: "packs",
     // `opc.nav.market` = “能力包”，避免与工作台组的“市场”重名，也不新增 11 语言文案。
     labelKey: "opc.nav.market",
     color: "#fa8c16",
-    itemKeys: PACK_ITEM_KEYS,
+    itemKeys: [],
   },
   {
     key: "tasks",

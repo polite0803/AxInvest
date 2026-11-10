@@ -40,7 +40,6 @@ const LazyLearningGraphPage = lazy(() =>
 const LazyDynamicPageViewer = lazy(() =>
   import("@/pages/DynamicPageViewer").then((m) => ({ default: m.DynamicPageViewer }))
 );
-const LazyDomainHubPage = lazy(() => import("@/pages/DomainHubPage").then((m) => ({ default: m.DomainHubPage })));
 const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage })));
 const LazyReplayWorkbenchPage = lazy(() =>
   import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
@@ -150,16 +149,11 @@ export const ContentArea = memo(function ContentArea() {
         <Routes>
           <Route path="/" element={<Navigate to={DEFAULT_HOME} replace />} />
 
-          {/* ── 能力域聚合页：2026-10-28 并入 OPC，统一由 /opc/domains/:domainId 承载 ── */}
-          <Route
-            path="/opc/domains/:domainId"
-            element={
-              <PageContextProvider page="automation-operations">
-                <SafeLazyPage Page={LazyDomainHubPage} />
-              </PageContextProvider>
-            }
-          />
-          {/* 旧顶级域路径 → 新路径（保留一个版本） */}
+          {
+            /* ── 能力域聚合页（`/opc/domains/:domainId`）：由 OPC 域路由表贡献 ──
+              2026-11-10 #36 导航声明权半：path / pageKey 一并归域，宿主不再登记这条路由。
+              旧顶级域路径 → 新路径（保留一个版本） */
+          }
           {CAPABILITY_DOMAIN_META.map((domain) => (
             <Route
               key={domain.id}

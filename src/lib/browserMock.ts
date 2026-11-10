@@ -7212,6 +7212,24 @@ async function executeCommand<T>(
     case "stock_get_kline":
       return [] as unknown as T;
 
+    // ── 股票插件命名命令（插件命令桥 批 2c，#262 全市场榜单/盘面四条）────────
+    // 消费端形状：HotStocksPanel / IndustryRankingPanel / SectorHeatmapPanel /
+    // DragonTigerPanel 均按数组使用（`.slice` / `Array.isArray`）⇒ 回 `[]`；
+    // NorthBoundPanel 按单对象 DTO 逐字段 `?? 0` 消费 ⇒ 回 `{}`（全空被面板
+    // 自身判成「无数据」空态，与宿主 `get_north_bound_flow` 落 default 的
+    // `get_` 兜底同形）。
+    // ⚠ 逐条显式声明，不依赖 default 兜底：`stock_get_industry_ranking` /
+    // `stock_get_market_dragon_tiger` / `stock_get_north_bound_flow` 三条既不以
+    // `get_` 开头、也不以 s 结尾，兜底给 undefined ⇒ 前端切名后浏览器模式
+    // 静默变 connectionFailed；`stock_get_hot_stocks` 虽以 s 结尾看似能被
+    // 兜成 `[]`，仍显式登记（兜底规则一旦收紧不受牵连，先例同 2b 段注释）。
+    case "stock_get_hot_stocks":
+    case "stock_get_industry_ranking":
+    case "stock_get_market_dragon_tiger":
+      return [] as unknown as T;
+    case "stock_get_north_bound_flow":
+      return {} as unknown as T;
+
     // 暂停 / 恢复仅需成功 resolve（无返回体）。
     case "workflow_pause":
     case "workflow_resume":

@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Table, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -62,7 +62,7 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
         setEmptyKind("backendOffline");
         return;
       }
-      const data = await invoke<HotStock[]>("get_hot_stocks");
+      const data = await invokePluginCommand<HotStock[]>("stock_get_hot_stocks", {});
       if (Array.isArray(data) && data.length > 0) {
         setStocks(data);
       } else {

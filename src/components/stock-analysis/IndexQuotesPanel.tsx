@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { IndexQuote } from "@/types";
 import type { DataOutcome, DataStatus } from "@/types/stock-analysis";
 import { Button, Card, Spin, Table } from "antd";
@@ -64,7 +64,7 @@ export function IndexQuotesPanel() {
     setLoading(true);
     setEmptyKind(null);
     try {
-      apply(await invoke<unknown>("get_index_quotes"));
+      apply(await invokePluginCommand<unknown>("stock_get_index_quotes", {}));
     } catch {
       setQuotes([]);
       setDetail(null);

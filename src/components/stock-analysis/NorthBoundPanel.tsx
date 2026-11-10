@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Button, Card, Spin, Statistic } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -40,7 +40,10 @@ export function NorthBoundPanel() {
         setLoading(false);
         return;
       }
-      const f = await invoke("get_north_bound_flow") as Record<string, unknown>;
+      const f = await invokePluginCommand<Record<string, unknown>>(
+        "stock_get_north_bound_flow",
+        {},
+      );
       if (!f) {
         setFlow(null);
         setEmptyKind("noData");
@@ -88,7 +91,10 @@ export function NorthBoundPanel() {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke<Record<string, unknown>>("get_north_bound_flow");
+        return invokePluginCommand<Record<string, unknown>>(
+          "stock_get_north_bound_flow",
+          {},
+        );
       })
       .then((f) => {
         if (cancelled) { return; }

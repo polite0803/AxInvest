@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// 呈现层门（2026-10-28）：`get_index_quotes` 的四态必须在 UI 上**各占一句**。
+// 呈现层门（2026-10-28）：`stock_get_index_quotes` 的四态必须在 UI 上**各占一句**。
 //
 // 立门理由：改前后端在三条通道全挂时也返回裸 `[]`，面板一律显示「暂无指数数据」——
 // 「今天没行情」与「取数通道故障」在屏幕上长得一模一样。这里锁住：
@@ -53,6 +53,8 @@ describe("IndexQuotesPanel 四态呈现", () => {
     invokeMock.mockResolvedValue({ status: "ok", data: [QUOTE] });
     renderPanel();
     await waitFor(() => expect(screen.getByText("上证指数")).toBeTruthy());
+    // 命令名钉桩：本面板走插件命令桥（非宿主同名命令），改回宿主名不该静默绿。
+    expect(invokeMock.mock.calls[0]?.[0]).toBe("stock_get_index_quotes");
     expect(screen.queryByText("暂无指数数据")).toBeNull();
   });
 

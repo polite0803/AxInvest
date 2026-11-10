@@ -1,7 +1,7 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
 import { formatYi } from "@/lib/format";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useState } from "react";
@@ -51,7 +51,10 @@ export function IndustryRankingPanel() {
         setLoading(false);
         return;
       }
-      const data = await invoke("get_industry_ranking") as Record<string, unknown>[];
+      const data = await invokePluginCommand<Record<string, unknown>[]>(
+        "stock_get_industry_ranking",
+        {},
+      );
       if (!Array.isArray(data)) { throw new Error("bad data"); }
       const list: IndustryRow[] = data.slice(0, 20).map((e, i) => {
         const r = e as Record<string, unknown>;
@@ -103,7 +106,10 @@ export function IndustryRankingPanel() {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke("get_industry_ranking") as Promise<Record<string, unknown>[]>;
+        return invokePluginCommand<Record<string, unknown>[]>(
+          "stock_get_industry_ranking",
+          {},
+        );
       })
       .then((data) => {
         if (cancelled || !data) { return; }

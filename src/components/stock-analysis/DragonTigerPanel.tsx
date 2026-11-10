@@ -1,7 +1,7 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
 import { formatYi } from "@/lib/format";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
@@ -55,7 +55,10 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
         setLoading(false);
         return;
       }
-      const data = await invoke("get_market_dragon_tiger") as Record<string, unknown>[];
+      const data = await invokePluginCommand<Record<string, unknown>[]>(
+        "stock_get_market_dragon_tiger",
+        {},
+      );
       if (!Array.isArray(data)) { throw new Error("bad data"); }
       const list: DragonTigerEntry[] = data.slice(0, 30).map((e) => ({
         code: String((e as Record<string, unknown>).stockCode ?? (e as Record<string, unknown>).stock_code ?? ""),
@@ -101,7 +104,10 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke("get_market_dragon_tiger") as Promise<Record<string, unknown>[]>;
+        return invokePluginCommand<Record<string, unknown>[]>(
+          "stock_get_market_dragon_tiger",
+          {},
+        );
       })
       .then((data) => {
         if (cancelled || !data) { return; }

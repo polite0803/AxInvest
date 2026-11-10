@@ -1,5 +1,5 @@
 import { List } from "@/components/common/AntdList";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useState } from "react";
@@ -47,7 +47,10 @@ export function SectorHeatmapPanel() {
         setLoading(false);
         return;
       }
-      const list = await invoke("get_industry_ranking") as Record<string, unknown>[];
+      const list = await invokePluginCommand<Record<string, unknown>[]>(
+        "stock_get_industry_ranking",
+        {},
+      );
       if (!Array.isArray(list)) { throw new Error("bad data"); }
       const next: SectorEntry[] = list.slice(0, 25).map((e) => {
         const r = e as Record<string, unknown>;
@@ -93,7 +96,10 @@ export function SectorHeatmapPanel() {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke("get_industry_ranking") as Promise<Record<string, unknown>[]>;
+        return invokePluginCommand<Record<string, unknown>[]>(
+          "stock_get_industry_ranking",
+          {},
+        );
       })
       .then((list) => {
         if (cancelled || !list) { return; }

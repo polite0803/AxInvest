@@ -48,6 +48,26 @@ describe("browserMock 覆盖股票插件命名命令（T2 试点批）", () => {
     ).resolves.toEqual([]);
   });
 
+  // 批 2c：全市场榜单/盘面四条（#262）。数组消费端（HotStocks / IndustryRanking /
+  // SectorHeatmap / DragonTiger 四个面板的 `.slice` / Array.isArray）回 []，
+  // 单对象 DTO 消费端（NorthBoundPanel 逐字段 `?? 0`）回 {}。
+  // 三条不以 s 结尾的若删显式 case，default 兜底给 undefined（负控已锁此规则）。
+  it("stock_get_hot_stocks 返回数组（HotStocksPanel Array.isArray 消费；不以显式 case 依赖 endsWith(s) 兜底）", async () => {
+    await expect(handleCommand("stock_get_hot_stocks", {})).resolves.toEqual([]);
+  });
+
+  it("stock_get_industry_ranking 返回数组（default 兜底只会给 undefined，消费端 .slice 当场 TypeError）", async () => {
+    await expect(handleCommand("stock_get_industry_ranking", {})).resolves.toEqual([]);
+  });
+
+  it("stock_get_market_dragon_tiger 返回数组（同上，DragonTigerPanel .slice 消费）", async () => {
+    await expect(handleCommand("stock_get_market_dragon_tiger", {})).resolves.toEqual([]);
+  });
+
+  it("stock_get_north_bound_flow 返回对象 DTO 空态 {}（NorthBoundPanel 单对象消费，全 0 自判无数据）", async () => {
+    await expect(handleCommand("stock_get_north_bound_flow", {})).resolves.toEqual({});
+  });
+
   // 负控：这批命令名均不以 get_/list_ 开头，default 兜底对它们给 undefined
   // （或对 endsWith("s") 给 []）。用未登记探针锁住兜底规则本身仍在，
   // 避免上面四条因兜底被改而失去「显式 case 生效」的证明力。

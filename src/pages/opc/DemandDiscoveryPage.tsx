@@ -119,6 +119,17 @@ const CREATE_INVOICE_FROM_LEAD_COMMAND = "opc_create_invoice_from_lead";
 const UPDATE_INVOICE_STATUS_COMMAND = "opc_update_invoice_status";
 const DELETE_DELIVERY_INVOICE_COMMAND = "opc_delete_delivery_invoice";
 
+// 需求发现八条命令（#264 批 2）：宿主 `opc_demand_discovery.rs` 已整文件删除，
+// 插件命令是唯一通道。三读五写，写面在插件清单里声明 `write` 权限。
+const LIST_PLATFORMS_COMMAND = "opc_list_platforms";
+const SAVE_PLATFORM_COMMAND = "opc_save_platform";
+const DELETE_PLATFORM_COMMAND = "opc_delete_platform";
+const LIST_LEADS_COMMAND = "opc_list_leads";
+const GET_SCAN_POLICY_COMMAND = "opc_get_scan_policy";
+const SAVE_SCAN_POLICY_COMMAND = "opc_save_scan_policy";
+const DISCOVER_AND_EVALUATE_LEADS_COMMAND = "opc_discover_and_evaluate_leads";
+const CREATE_LEAD_COMMAND = "opc_create_lead";
+
 /** 商业价值分 → 文字颜色（≥80 极高 / ≥60 高 / ≥40 中 / 其余低） */
 function scoreColor(
   score: number,
@@ -283,7 +294,7 @@ export function DemandDiscoveryPage() {
   const loadLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await invoke<DemandLead[]>("opc_list_leads", {
+      const rows = await invokePluginCommand<DemandLead[]>(LIST_LEADS_COMMAND, {
         limit: 200,
         minScore: minScore > 0 ? minScore : null,
         status: statusFilter ?? null,
@@ -298,7 +309,7 @@ export function DemandDiscoveryPage() {
 
   const loadPlatforms = useCallback(async () => {
     try {
-      const rows = await invoke<DemandPlatform[]>("opc_list_platforms");
+      const rows = await invokePluginCommand<DemandPlatform[]>(LIST_PLATFORMS_COMMAND, {});
       setPlatforms(rows ?? []);
     } catch (e) {
       message.error(t("opc.demand.loadFailed", { error: String(e) }));
@@ -317,7 +328,7 @@ export function DemandDiscoveryPage() {
   /** 加载扫描策略（增强项 9：并发/限流/重试/去重窗口） */
   const loadScanPolicy = useCallback(async () => {
     try {
-      setScanPolicy(await invoke<ScanPolicy>("opc_get_scan_policy"));
+      setScanPolicy(await invokePluginCommand<ScanPolicy>(GET_SCAN_POLICY_COMMAND, {}));
     } catch (e) {
       message.error(t("opc.demand.policyLoadFailed", { error: String(e) }));
     }
@@ -327,7 +338,9 @@ export function DemandDiscoveryPage() {
     if (!scanPolicy) { return; }
     setPolicySaving(true);
     try {
-      const saved = await invoke<ScanPolicy>("opc_save_scan_policy", { policy: scanPolicy });
+      const saved = await invokePluginCommand<ScanPolicy>(SAVE_SCAN_POLICY_COMMAND, {
+        policy: scanPolicy,
+      });
       setScanPolicy(saved);
       message.success(t("opc.demand.policySaved"));
     } catch (e) {
@@ -410,9 +423,10 @@ export function DemandDiscoveryPage() {
     }
     setScanning(true);
     try {
-      const result = await invoke<DiscoverLeadsSummary>("opc_discover_and_evaluate_leads", {
-        query: kw,
-      });
+      const result = await invokePluginCommand<DiscoverLeadsSummary>(
+        DISCOVER_AND_EVALUATE_LEADS_COMMAND,
+        { query: kw },
+      );
       setSummary(result);
       await loadLeads();
       await loadPlatforms();
@@ -572,7 +586,7 @@ export function DemandDiscoveryPage() {
     };
     setSaving(true);
     try {
-      await invoke<DemandPlatform>("opc_save_platform", { input });
+      await invokePluginCommand<DemandPlatform>(SAVE_PLATFORM_COMMAND, { input });
       message.success(t("opc.demand.platformSaved"));
       setModalOpen(false);
       await loadPlatforms();
@@ -593,7 +607,7 @@ export function DemandDiscoveryPage() {
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
-            await invoke<void>("opc_delete_platform", { id: row.id });
+            await invokePluginCommand<void>(DELETE_PLATFORM_COMMAND, { id: row.id });
             message.success(t("opc.demand.platformDeleted"));
             await loadPlatforms();
           } catch (e) {
@@ -608,7 +622,7 @@ export function DemandDiscoveryPage() {
   const togglePlatform = useCallback(
     async (row: DemandPlatform, enabled: boolean) => {
       try {
-        await invoke<DemandPlatform>("opc_save_platform", {
+        await invokePluginCommand<DemandPlatform>(SAVE_PLATFORM_COMMAND, {
           input: { id: row.id, enabled },
         });
         await loadPlatforms();
@@ -641,7 +655,7 @@ export function DemandDiscoveryPage() {
     };
     setLeadSaving(true);
     try {
-      await invoke<DemandLead>("opc_create_lead", { input });
+      await invokePluginCommand<DemandLead>(CREATE_LEAD_COMMAND, { input });
       message.success(t("opc.demand.leadCreated"));
       setLeadModalOpen(false);
       await loadLeads();

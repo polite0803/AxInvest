@@ -6399,7 +6399,8 @@ async function executeCommand<T>(
 
     case "opc_list_leads": {
       // #201 C5（采纳）：后端是顶层三个形参 limit / min_score / status
-      // （commands/opc_demand_discovery.rs:62-66），调用方按 camel 传参
+      // （插件命令 `opc_list_leads` → 接缝 `opc.store::list_leads`，形参在宿主
+      // `init/opc_store_service.rs`），调用方按 camel 传参
       // （src/pages/opc/DemandDiscoveryPage.tsx:276-280）⇒ 只改键形，不动路径。
       // 改前 minScore 恒 undefined ⇒ typeof 判据恒 false ⇒ 「按商业价值分过滤」
       // 在 dev mock 里**完全不生效**（滑条拖到最高照样列出全部线索，与真机口径相反）。
@@ -6520,7 +6521,7 @@ async function executeCommand<T>(
         .filter((k) => text.includes(k)).length;
       const painScore = Math.min(100, 40 + painHits * 12);
       // #201 C5（采纳）：调用方形状是对的（src/pages/opc/DemandDiscoveryPage.tsx:634 传 { input }，
-      // 后端 commands/opc_demand_discovery.rs:152 收 input: SaveDemandLeadInput）⇒ 只改键形。
+      // 后端接缝 `opc.store::create_lead` 收 input: SaveDemandLeadInput）⇒ 只改键形。
       // 改前这 7 个 camel 读点（两个分支展开成 12 处访问）在 snake 化后的 input 上恒 undefined ⇒
       // 预算三态恒 null、budgetScore 恒 40（中性）、confidence 恒 0.4，且补录表单里填的
       // 币种 / 联系人 / 邮箱 / 电话 / 来源链接**全部丢失**（列表上这几列永远是空）。

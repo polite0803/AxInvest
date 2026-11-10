@@ -654,6 +654,98 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::delivery_summary 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 需求发现八 op（#264 批 2）──────────────────────────────────────────
+    //
+    // 整模块迁移：`commands::opc_demand_discovery` 的八条宿主命令。平台 CRUD 三条、
+    // 扫描执行一条、线索列表一条、扫描策略读/写两条、手动补录一条。
+    // 迁移后宿主不再有该模块（该 `.rs` 整文件删除）。
+
+    /// 平台配置列表（`list_platforms` op）—— 读 op，不设权限闸。
+    ///
+    /// 表空时由宿主实现填充内置默认平台（与迁移前命令同源：`seed_default_platforms_if_empty`）。
+    async fn list_platforms(&self) -> Result<Vec<crate::types::opc_demand::DemandPlatform>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_platforms 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 保存平台配置（`save_platform` op）—— 写 op，要 `write` 权限。
+    async fn save_platform(
+        &self,
+        _input: crate::types::opc_demand::SaveDemandPlatformInput,
+    ) -> Result<crate::types::opc_demand::DemandPlatform> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::save_platform 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除平台配置（`delete_platform` op）—— 写 op，要 `write` 权限。
+    async fn delete_platform(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_platform 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 线索列表（`list_leads` op）—— 读 op，不设权限闸。
+    ///
+    /// `limit` 缺省 100、宿主实现再钳到 500 上限；`min_score` / `status` 为 `None` 时不过滤
+    /// （与迁移前宿主命令逐字同形）。
+    async fn list_leads(
+        &self,
+        _limit: Option<u64>,
+        _min_score: Option<f64>,
+        _status: Option<String>,
+    ) -> Result<Vec<crate::types::opc_demand::DemandLeadDto>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_leads 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 读扫描策略（`get_scan_policy` op）—— 读 op，不设权限闸。
+    ///
+    /// 设置表缺键时返回 [`crate::types::opc_demand::ScanPolicy::default`]。
+    async fn get_scan_policy(&self) -> Result<crate::types::opc_demand::ScanPolicy> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_scan_policy 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 存扫描策略（`save_scan_policy` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 宿主实现先做范围钳制（`normalized()`）再落库，回写入参归一后的值。
+    async fn save_scan_policy(
+        &self,
+        _policy: crate::types::opc_demand::ScanPolicy,
+    ) -> Result<crate::types::opc_demand::ScanPolicy> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::save_scan_policy 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 扫描并评估需求线索（`discover_and_evaluate_leads` op）—— 写 op（落库），要 `write` 权限。
+    ///
+    /// `query` 为空由宿主实现拒（`INVALID_INPUT`），与迁移前命令同判据。
+    async fn discover_and_evaluate_leads(
+        &self,
+        _query: String,
+    ) -> Result<crate::types::opc_demand::DiscoverLeadsSummary> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::discover_and_evaluate_leads 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 手动补录线索（`create_lead` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 复用扫描管线的归一化/评分/去重；去重命中返回既有生效行而非报错。
+    async fn create_lead(
+        &self,
+        _input: crate::types::opc_demand::SaveDemandLeadInput,
+    ) -> Result<crate::types::opc_demand::DemandLeadDto> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_lead 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

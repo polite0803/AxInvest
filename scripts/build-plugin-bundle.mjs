@@ -1672,6 +1672,90 @@ function opcManifest({ version, binaryName, sha256 }) {
         command: "worker://opc_get_delivery_summary",
         inputSchema: { type: "object", properties: {} },
       },
+      // ── #264 批 2：需求发现八命令（五写三读）──
+      // 属性名 camelCase（命令面）。三条写命令把必填对象/字符串列进 `required`；
+      // 两条读命令零入参，`list_leads` 三个过滤项均可缺省（缺键即不过滤）。
+      {
+        name: "opc_list_platforms",
+        description: "列出需求平台配置（表空时自动填充内置默认平台）",
+        command: "worker://opc_list_platforms",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_save_platform",
+        description: "保存（新增或更新）需求平台配置",
+        command: "worker://opc_save_platform",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: { type: "object", description: "平台配置（字段同 DemandPlatform）" },
+          },
+          required: ["input"],
+        },
+      },
+      {
+        name: "opc_delete_platform",
+        description: "删除需求平台配置",
+        command: "worker://opc_delete_platform",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "平台标识" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_list_leads",
+        description: "列出需求线索（按商业价值分降序，可按状态过滤）",
+        command: "worker://opc_list_leads",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", description: "返回条数上限（缺省 100，宿主钳到 500）" },
+            minScore: { type: "number", description: "最低商业价值分（缺省不过滤）" },
+            status: { type: "string", description: "生命周期状态过滤（new / evaluated / ...）" },
+          },
+        },
+      },
+      {
+        name: "opc_get_scan_policy",
+        description: "读取需求扫描策略（缺键时返回默认策略）",
+        command: "worker://opc_get_scan_policy",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_save_scan_policy",
+        description: "保存需求扫描策略（宿主侧做范围钳制）",
+        command: "worker://opc_save_scan_policy",
+        inputSchema: {
+          type: "object",
+          properties: {
+            policy: { type: "object", description: "扫描策略（字段同 ScanPolicy，可缺省字段）" },
+          },
+          required: ["policy"],
+        },
+      },
+      {
+        name: "opc_discover_and_evaluate_leads",
+        description: "扫描并评估需求线索（并发扫描 → 评估 → 去重入库）",
+        command: "worker://opc_discover_and_evaluate_leads",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string", description: "扫描检索词（不能为空）" } },
+          required: ["query"],
+        },
+      },
+      {
+        name: "opc_create_lead",
+        description: "手动补录一条需求线索（窗口内去重返回既有行）",
+        command: "worker://opc_create_lead",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: { type: "object", description: "线索字段（title / description 必填）" },
+          },
+          required: ["input"],
+        },
+      },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };

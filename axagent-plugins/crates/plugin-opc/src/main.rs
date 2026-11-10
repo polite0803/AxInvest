@@ -133,6 +133,16 @@ const OPC_STORE_UPDATE_DELIVERY_INVOICE_STATUS: &str = "update_delivery_invoice_
 const OPC_STORE_DELETE_DELIVERY_INVOICE: &str = "delete_delivery_invoice";
 const OPC_STORE_DELIVERY_SUMMARY: &str = "delivery_summary";
 
+/// #264 批 2：需求发现八 op（五写三读）。
+const OPC_STORE_LIST_PLATFORMS: &str = "list_platforms";
+const OPC_STORE_SAVE_PLATFORM: &str = "save_platform";
+const OPC_STORE_DELETE_PLATFORM: &str = "delete_platform";
+const OPC_STORE_LIST_LEADS: &str = "list_leads";
+const OPC_STORE_GET_SCAN_POLICY: &str = "get_scan_policy";
+const OPC_STORE_SAVE_SCAN_POLICY: &str = "save_scan_policy";
+const OPC_STORE_DISCOVER_AND_EVALUATE_LEADS: &str = "discover_and_evaluate_leads";
+const OPC_STORE_CREATE_LEAD: &str = "create_lead";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -214,6 +224,17 @@ const COMMAND_CREATE_INVOICE_FROM_LEAD: &str = "opc_create_invoice_from_lead";
 const COMMAND_UPDATE_INVOICE_STATUS: &str = "opc_update_invoice_status";
 const COMMAND_DELETE_DELIVERY_INVOICE: &str = "opc_delete_delivery_invoice";
 const COMMAND_GET_DELIVERY_SUMMARY: &str = "opc_get_delivery_summary";
+
+/// #264 批 2：需求发现八命令（清单 `commands[].name` 必须逐字一致）。宿主同名 Tauri 命令
+/// 随本批删除（模块 `commands::opc_demand_discovery` 整文件移除）。
+const COMMAND_LIST_PLATFORMS: &str = "opc_list_platforms";
+const COMMAND_SAVE_PLATFORM: &str = "opc_save_platform";
+const COMMAND_DELETE_PLATFORM: &str = "opc_delete_platform";
+const COMMAND_LIST_LEADS: &str = "opc_list_leads";
+const COMMAND_GET_SCAN_POLICY: &str = "opc_get_scan_policy";
+const COMMAND_SAVE_SCAN_POLICY: &str = "opc_save_scan_policy";
+const COMMAND_DISCOVER_AND_EVALUATE_LEADS: &str = "opc_discover_and_evaluate_leads";
+const COMMAND_CREATE_LEAD: &str = "opc_create_lead";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -562,6 +583,59 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             }
         },
         COMMAND_GET_DELIVERY_SUMMARY => match get_delivery_summary(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // ── #264 批 2：需求发现八命令（五写三读；删除平台成功无载荷出 Null）──
+        COMMAND_LIST_PLATFORMS => match list_platforms(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_SAVE_PLATFORM => match save_platform(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_DELETE_PLATFORM => match delete_platform(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LIST_LEADS => match list_leads(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_SCAN_POLICY => match get_scan_policy(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_SAVE_SCAN_POLICY => {
+            match save_scan_policy(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_DISCOVER_AND_EVALUATE_LEADS => {
+            match discover_and_evaluate_leads(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CREATE_LEAD => match create_lead(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -1482,6 +1556,116 @@ fn get_delivery_summary(
     call_opc_store(peer, OPC_STORE_DELIVERY_SUMMARY, json!({}), call_chain)
 }
 
+// ── #264 批 2：需求发现八命令 ───────────────────────────────────────────
+//
+// 三面键名分档同既有批：命令面 camelCase（`minScore` / `input`），接缝面 snake_case
+// （`min_score`）。命令层只做形状判（缺键/类型不对即拒），业务校验（空串、非法枚举）
+// 一律在宿主实现体 —— 与迁移前的 Tauri 命令分层一致。
+
+/// `opc_list_platforms`：列出需求平台配置（只读 op，零入参）。
+fn list_platforms(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_LIST_PLATFORMS, json!({}), call_chain)
+}
+
+/// `opc_save_platform`：保存平台配置（写 op，`input` 必填对象）。
+fn save_platform(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_save_platform";
+    let payload = require_object(input, OP, "input")?;
+    call_opc_store(peer, OPC_STORE_SAVE_PLATFORM, json!({ "input": payload }), call_chain)
+}
+
+/// `opc_delete_platform`：删除平台配置（写 op，硬删，成功无载荷）。
+fn delete_platform(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_platform";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_DELETE_PLATFORM, json!({ "id": id }), call_chain)
+}
+
+/// `opc_list_leads`：线索列表（只读 op，三个可选过滤项）。
+fn list_leads(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_leads";
+    let mut args = serde_json::Map::new();
+    match input.get("limit") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.as_u64().is_some() => {
+            args.insert("limit".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `limit` 必须是非负整数（形状判在命令层）")));
+        },
+    }
+    // 命令面 `minScore` ⇒ 接缝面 `min_score`（三面键名分档）。
+    match input.get("minScore") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.as_f64().is_some() => {
+            args.insert("min_score".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `minScore` 必须是数值（形状判在命令层）")));
+        },
+    }
+    copy_optional_strings(input, OP, &mut args, &["status"])?;
+    call_opc_store(peer, OPC_STORE_LIST_LEADS, Value::Object(args), call_chain)
+}
+
+/// `opc_get_scan_policy`：读扫描策略（只读 op，零入参）。
+fn get_scan_policy(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_GET_SCAN_POLICY, json!({}), call_chain)
+}
+
+/// `opc_save_scan_policy`：存扫描策略（写 op，`policy` 必填对象；范围钳制在宿主侧）。
+fn save_scan_policy(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_save_scan_policy";
+    let policy = require_object(input, OP, "policy")?;
+    call_opc_store(peer, OPC_STORE_SAVE_SCAN_POLICY, json!({ "policy": policy }), call_chain)
+}
+
+/// `opc_discover_and_evaluate_leads`：扫描并评估需求线索（写 op，落库）。
+fn discover_and_evaluate_leads(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_discover_and_evaluate_leads";
+    let query = require_str(input, OP, "query")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_DISCOVER_AND_EVALUATE_LEADS,
+        json!({ "query": query }),
+        call_chain,
+    )
+}
+
+/// `opc_create_lead`：手动补录线索（写 op，`input` 必填对象）。
+fn create_lead(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_lead";
+    let payload = require_object(input, OP, "input")?;
+    call_opc_store(peer, OPC_STORE_CREATE_LEAD, json!({ "input": payload }), call_chain)
+}
+
 /// `opc_create_project`：创建项目（写 op）。
 fn create_project(
     input: &Value,
@@ -1634,6 +1818,18 @@ fn process_due_schedules(
     peer: &mut WorkerPeer,
 ) -> Result<Value, (String, String)> {
     call_opc_store(peer, OPC_STORE_PROCESS_DUE_SCHEDULES, json!({}), call_chain)
+}
+
+/// 必需的对象字段（对象内部形状由宿主 serde 判）。
+fn require_object<'a>(
+    input: &'a Value,
+    op: &str,
+    key: &str,
+) -> Result<&'a Value, (String, String)> {
+    match input.get(key) {
+        Some(value @ Value::Object(_)) => Ok(value),
+        _ => Err(invalid_shape(format!("{op} 需要对象字段 `{key}`（形状判在命令层）"))),
+    }
 }
 
 /// 必需字符串字段。

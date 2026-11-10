@@ -915,7 +915,148 @@ impl OpcStoreProvider for HostOpcStore {
             AxAgentError::Provider(format!("opc.store::mark_contact_read 标记失败: {e}"))
         })
     }
+
+    // ── 需求发现八 op（#264 批 2）──────────────────────────────────────
+    //
+    // 实现体与迁移前 `commands::opc_demand_discovery` 逐句同源（该模块已整文件删除）：
+    // 平台 CRUD 走 `dao::repo::opc_demand`，扫描/评估/策略复用 `axagent_tools` 的
+    // `opc_demand_scan` 与 `marketplace_scanner` —— 不在此处新写一份扫描逻辑。
+
+    async fn list_platforms(&self) -> Result<Vec<DemandPlatform>> {
+        opc_demand::seed_default_platforms_if_empty(&self.db).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_platforms 种默认平台失败: {e}"))
+        })?;
+        opc_demand::list_platforms(&self.db).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_platforms 取平台失败: {e}"))
+        })
+    }
+
+    async fn save_platform(&self, input: SaveDemandPlatformInput) -> Result<DemandPlatform> {
+        opc_demand::save_platform(&self.db, input)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::save_platform 保存失败: {e}")))
+    }
+
+    async fn delete_platform(&self, id: String) -> Result<()> {
+        require_id(&id, "delete_platform")?;
+        opc_demand::delete_platform(&self.db, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::delete_platform 删除失败: {e}"))
+        })
+    }
+
+    async fn list_leads(
+        &self,
+        limit: Option<u64>,
+        min_score: Option<f64>,
+        status: Option<String>,
+    ) -> Result<Vec<DemandLeadDto>> {
+        opc_demand::list_leads(&self.db, limit.unwrap_or(100).min(500), min_score, status)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::list_leads 取线索失败: {e}")))
+    }
+
+    async fn get_scan_policy(&self) -> Result<ScanPolicy> {
+        opc_demand_scan::load_scan_policy(&self.db).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_scan_policy 读策略失败: {e}"))
+        })
+    }
+
+    async fn save_scan_policy(&self, policy: ScanPolicy) -> Result<ScanPolicy> {
+        let normalized = policy.normalized();
+        let json = serde_json::to_string(&normalized).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::save_scan_policy 序列化失败: {e}"))
+        })?;
+        axagent_dao::repo::settings::set_setting(&self.db, SCAN_POLICY_SETTING_KEY, &json)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::save_scan_policy 写入失败: {e}"))
+            })?;
+        tracing::info!(
+            concurrency = normalized.concurrency,
+            rate_limit = normalized.rate_limit_per_min,
+            retry_max = normalized.retry_max,
+            dedup_window_hours = normalized.dedup_window_hours,
+            "[opc_demand] 扫描策略已保存"
+        );
+        Ok(normalized)
+    }
+
+    async fn discover_and_evaluate_leads(&self, query: String) -> Result<DiscoverLeadsSummary> {
+        let query = query.trim().to_string();
+        if query.is_empty() {
+            return Err(AxAgentError::Validation("query 不能为空".into()));
+        }
+        opc_demand_scan::run_discovery_scan(&self.db, &query, &[]).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::discover_and_evaluate_leads 扫描失败: {e}"))
+        })
+    }
+
+    async fn create_lead(&self, input: SaveDemandLeadInput) -> Result<DemandLeadDto> {
+        let title = input.title.trim().to_string();
+        let description = input.description.trim().to_string();
+        if title.is_empty() || description.is_empty() {
+            return Err(AxAgentError::Validation("title 与 description 不能为空".into()));
+        }
+
+        let policy = opc_demand_scan::load_scan_policy(&self.db).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::create_lead 读策略失败: {e}"))
+        })?;
+
+        // URL 清洗：空串归一为 None（否则 new_from_raw 会存出 Some("")）
+        let source_url =
+            input.source_url.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+        let raw = RawLead {
+            platform: MANUAL_PLATFORM.to_string(),
+            title,
+            description,
+            url: source_url.clone().unwrap_or_default(),
+            price_text: None, // 手动预算走结构化字段，不走价格文本解析
+            contact: input.contact_name.clone(),
+            contact_email: input.contact_email.clone(),
+            contact_phone: input.contact_phone.clone(),
+            snapshot: serde_json::json!({ "source": "manual" }),
+        };
+        let mut lead = DemandLead::new_from_raw(raw);
+        // 手动填写的预算覆盖自动解析（用户没填的字段保留自动提取结果）
+        if input.budget_min.is_some() || input.budget_max.is_some() {
+            lead.budget_min = input.budget_min;
+            lead.budget_max = input.budget_max;
+        }
+        if let Some(currency) =
+            input.budget_currency.as_deref().map(str::trim).filter(|c| !c.is_empty())
+        {
+            lead.budget_currency = currency.to_string();
+        }
+        lead.source_url = source_url;
+
+        let evaluation = evaluate_lead(&lead);
+        let evaluated = EvaluatedDemandLead { lead, evaluation };
+        opc_demand::create_manual_lead(
+            &self.db,
+            opc_demand_scan::evaluated_to_row(&evaluated),
+            policy.dedup_window_secs(),
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("opc.store::create_lead 补录失败: {e}")))
+    }
 }
+
+/// 手动补录平台的固定 platform 标识（与扫描器内置平台标识不冲突）
+const MANUAL_PLATFORM: &str = "manual";
+
+// ── #264 批 2 需求发现八 op 的依赖 ────────────────────────────────────────
+//
+// 同下面两段：放在 `impl` 之后以保持 `impl OpcStoreProvider for HostOpcStore` 行号不动
+// （该行被登记表钉住）。模块级 `use` 在任意 item 位置都生效。
+use axagent_harness::types::opc_demand::{
+    DemandLeadDto, DemandPlatform, DiscoverLeadsSummary, SCAN_POLICY_SETTING_KEY,
+    SaveDemandLeadInput, SaveDemandPlatformInput, ScanPolicy,
+};
+use axagent_tools::tools::marketplace_scanner::{
+    DemandLead, EvaluatedDemandLead, RawLead, evaluate_lead,
+};
+use axagent_tools::tools::opc_demand_scan;
 
 // ── #36 批 2 写 op 的依赖 ─────────────────────────────────────────────────
 //

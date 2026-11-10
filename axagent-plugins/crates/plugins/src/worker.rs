@@ -528,7 +528,14 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             // （`list_delivery_invoices` / `delivery_summary`）仍 `None`。
             | "create_invoice_from_lead"
             | "update_delivery_invoice_status"
-            | "delete_delivery_invoice",
+            | "delete_delivery_invoice"
+            // #264 批 2：需求发现五条写 op（平台存/删、策略存、扫描落库、补录线索）；
+            // 三条读 op（`list_platforms` / `list_leads` / `get_scan_policy`）仍 `None`。
+            | "save_platform"
+            | "delete_platform"
+            | "save_scan_policy"
+            | "discover_and_evaluate_leads"
+            | "create_lead",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -3718,6 +3725,141 @@ impl HostPeer {
                 };
                 match result {
                     Ok(summary) => to_value("DeliverySummary", &summary),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── 需求发现八 op（#264 批 2）──
+            "opc.store" if op == "list_platforms" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_platforms()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DemandPlatform>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "save_platform" => {
+                let input: axagent_harness::types::opc_demand::SaveDemandPlatformInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.save_platform(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(platform) => to_value("DemandPlatform", &platform),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "delete_platform" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_platform(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_leads" => {
+                let limit: Option<u64> = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let min_score: Option<f64> =
+                    match deserialize_optional_arg(&args, "min_score", seam) {
+                        Ok(min_score) => min_score,
+                        Err(response) => return response,
+                    };
+                let status: Option<String> = match deserialize_optional_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_leads(limit, min_score, status))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DemandLeadDto>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_scan_policy" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_scan_policy()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(policy) => to_value("ScanPolicy", &policy),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "save_scan_policy" => {
+                let policy: axagent_harness::types::opc_demand::ScanPolicy =
+                    match deserialize_arg(&args, "policy", seam) {
+                        Ok(policy) => policy,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.save_scan_policy(policy)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(policy) => to_value("ScanPolicy", &policy),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "discover_and_evaluate_leads" => {
+                let query: String = match deserialize_arg(&args, "query", seam) {
+                    Ok(query) => query,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.discover_and_evaluate_leads(query))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(summary) => to_value("DiscoverLeadsSummary", &summary),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "create_lead" => {
+                let input: axagent_harness::types::opc_demand::SaveDemandLeadInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_lead(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(lead) => to_value("DemandLeadDto", &lead),
                     Err(e) => seam_provider_error(e),
                 }
             },

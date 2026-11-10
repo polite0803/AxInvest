@@ -43,7 +43,6 @@
         "src-tauri/src/commands/narrative.rs": 3,
         "src-tauri/src/commands/opc.rs": 14,
         "src-tauri/src/commands/opc_capability_pack_actions.rs": 2,
-        "src-tauri/src/commands/opc_demand_discovery.rs": 2,
         "src-tauri/src/commands/opc_demand_subscription.rs": 3,
         "src-tauri/src/commands/opc_setup/capability_pack_agents.rs": 3,
         "src-tauri/src/commands/opc_setup/domain_agents.rs": 3,

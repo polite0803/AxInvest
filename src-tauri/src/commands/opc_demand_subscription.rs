@@ -5,14 +5,14 @@
 //! 把「发现」从手动单关键词点按钮升级为**订阅词表驱动的定时扫描**：
 //!
 //! - 订阅 CRUD：`opc_list_subscriptions` / `opc_save_subscription` / `opc_delete_subscription`
-//! - 批量扫描：`opc_run_subscription_scan`（挑出到期订阅 → 复用 [`run_discovery_for_query`]
+//! - 批量扫描：`opc_run_subscription_scan`（挑出到期订阅 → 复用 [`run_discovery_scan`]
 //!   → 按 `min_score` 过滤高价值命中 → 推进到期时间）
 //! - 定时任务装配：`opc_ensure_demand_scan_job`（幂等创建/更新
 //!   `task_type = "opc_demand_scan"` 的 CronJob，带 delivery 推送配置）
 //!
 //! ## 设计决策
 //!
-//! - **扫描逻辑不复制**：直接复用 `commands::opc_demand_discovery::run_discovery_for_query`，
+//! - **扫描逻辑不复制**：直接复用 `axagent_tools::tools::opc_demand_scan::run_discovery_scan`，
 //!   避免扫描器装配与去重入库规则在两处漂移（AGENTS.md 禁区 12）。
 //! - **推送门槛 vs 入库门槛**：线索无论分数都会入库，`min_score` 只决定
 //!   是否计入高价值命中并触发推送 —— 低分线索仍然留在库里供人工翻查。
@@ -23,7 +23,6 @@
 
 use crate::AppState;
 use crate::commands::error_code::common as common_err;
-use crate::commands::opc_demand_discovery::run_discovery_for_query;
 use crate::commands::scheduled_task::{ScheduledTaskDto, cron_to_dto, validate_cron_expression};
 use axagent_harness::cron_delivery::{CronDeliveryChannel, CronDeliveryConfig};
 use axagent_harness::types::{
@@ -31,6 +30,7 @@ use axagent_harness::types::{
 };
 use axagent_harness::util_fns::now_ts;
 use axagent_runtime_core::{CronJob, CronJobStatus};
+use axagent_tools::tools::opc_demand_scan::run_discovery_scan;
 use tauri::State;
 
 /// `opc_demand_scan` 定时任务的 task_type 标识（scheduler 分支键）
@@ -178,12 +178,20 @@ struct SubscriptionScanOutcome {
     refreshed: u32,
 }
 
+/// 扫描错误 → 命令层错误 JSON 串（与迁移前 `opc_demand_discovery::err` 逐字同源）
+fn discovery_err(e: axagent_harness::core_error::AxAgentError) -> String {
+    String::from(crate::commands::error::ErrorResponse::from_error(
+        e,
+        crate::commands::error::ErrorCategory::Unrecoverable,
+    ))
+}
+
 /// 扫描单个订阅词并推进其到期时间
 async fn scan_one_subscription(
     db: &sea_orm::DatabaseConnection,
     sub: &DemandSubscription,
 ) -> SubscriptionScanOutcome {
-    match run_discovery_for_query(db, &sub.keyword, &sub.platforms).await {
+    match run_discovery_scan(db, &sub.keyword, &sub.platforms).await.map_err(discovery_err) {
         Ok(result) => {
             let hits: Vec<_> = result
                 .round_leads

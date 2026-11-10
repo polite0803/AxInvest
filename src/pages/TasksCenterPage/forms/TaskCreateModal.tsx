@@ -2,6 +2,7 @@
 
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke, logIpcError } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import type { ScheduledTask, TaskConfig } from "@/types";
 import {
@@ -176,7 +177,13 @@ function TaskCreateModalImpl({ open, editing, onClose, onSaved }: TaskCreateModa
     const def = getInvestKindDef(investKind);
     setSaving(true);
     try {
-      await invoke(def.command, def.buildArgs(values));
+      const args = def.buildArgs(values);
+      // 双声明期路由按定义逐条声明，不按命令名前缀猜（见 `InvestKindDef.pluginCommand`）。
+      if (def.pluginCommand) {
+        await invokePluginCommand(def.command, args);
+      } else {
+        await invoke(def.command, args);
+      }
       message.success(t("tasksCenter.create.createdOk"));
       onSaved();
       onClose();

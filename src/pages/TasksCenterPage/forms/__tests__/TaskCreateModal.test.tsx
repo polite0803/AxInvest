@@ -9,6 +9,8 @@ import { TaskCreateModal } from "../TaskCreateModal";
 // ── mocks ───────────────────────────────────────────────────────────────────
 vi.mock("@/lib/invoke", () => ({
   invoke: vi.fn(),
+  // 投资三类的插件命名命令（批 1a）经 `invokePluginCommand` 走浏览器分支 ⇒ 需要该导出
+  isTauri: () => false,
   logIpcError: () => (e: unknown) => {
     console.warn("[ipc]", e);
   },

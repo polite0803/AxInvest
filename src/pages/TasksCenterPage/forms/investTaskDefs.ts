@@ -32,6 +32,13 @@ export interface InvestKindDef {
   /** 专用创建命令名 */
   command: string;
   /**
+   * 该命令是否为**插件命名命令**（T2 命令桥）：`true` 时提交走
+   * `invokePluginCommand`（按清单反查启用插件 ⇒ `plugin_execute_command`），
+   * 缺省走宿主 Tauri 命令。双声明期两套命令并存，路由必须逐条显式声明 ——
+   * 按名字猜（如 `stock_` 前缀）会在改名 / 换插件时静默失效。
+   */
+  pluginCommand?: boolean;
+  /**
    * 由表单值构造命令参数。Tauri v2 命令宏默认 camelCase，
    * 故这里的键必须与 Rust 参数名的 camelCase 形态逐字一致。
    */
@@ -88,7 +95,9 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       // 工作日 17:00：晚于趋势智选 16:00，避免同时抢 astock 配额
       cronExpression: "0 17 * * 1-5",
     },
-    command: "create_pool_scan_cron",
+    // 批 1a：切到插件命名命令（stock_ 前缀）；宿主命令 create_pool_scan_cron 双声明期保留。
+    command: "stock_create_pool_scan_cron",
+    pluginCommand: true,
     buildArgs: (v) => ({
       cronExpression: v.cronExpression,
       enabled: true,
@@ -105,7 +114,9 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       chain: "serenity-screening",
       cronExpression: "0 16 * * 1-5",
     },
-    command: "create_trend_screening_cron",
+    // 批 1a：插件命名命令，宿主 create_trend_screening_cron 双声明期保留
+    command: "stock_create_trend_screening_cron",
+    pluginCommand: true,
     buildArgs: (v) => ({
       cronExpression: v.cronExpression,
       enabled: true,
@@ -165,7 +176,9 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       topN: 5,
       cronExpression: "30 15 * * *",
     },
-    command: "create_recommendation_cron",
+    // 批 1a：插件命名命令，宿主 create_recommendation_cron 双声明期保留
+    command: "stock_create_recommendation_cron",
+    pluginCommand: true,
     buildArgs: (v) => ({
       name: v.name,
       cronExpression: v.cronExpression,

@@ -21,7 +21,7 @@ import { isNextRunStale } from "../model";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
-vi.mock("@/lib/invoke", () => ({ invoke: invokeMock }));
+vi.mock("@/lib/invoke", () => ({ invoke: invokeMock, isTauri: () => false }));
 vi.mock("@/i18n", () => ({ default: { t: (k: string) => k } }));
 // 插件源适配器在模块层引用 `PluginSchemaCard`（详情槽）；本文件只验取数与映射，
 // 桩掉卡片免得牵出动态 UI 渲染链与 store（那会要求 mock `listen` 等一长串 IPC 面）。

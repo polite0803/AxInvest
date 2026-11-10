@@ -29,6 +29,7 @@ import { useTranslation } from "react-i18next";
 
 import { QuantMetricsCard } from "@/components/quant/charts/QuantMetricsCard";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { KLine } from "@/types";
 import type { Bar, MetricsReport, WfDesFold, WfDesReport, WfDesRequest } from "@/types/quant";
 import type { ColumnsType } from "antd/es/table";
@@ -184,7 +185,9 @@ export function WfDesTab() {
       };
 
       // 4. 调用后端（#248 T2 试点批：插件命名命令，原 wf_des_integration，双声明期宿主命令保留）
-      const result = await invoke<WfDesReport>("stock_wf_des_integration", { request: req });
+      const result = await invokePluginCommand<WfDesReport>("stock_wf_des_integration", {
+        request: req,
+      });
       setReport(result);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

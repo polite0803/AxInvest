@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import i18n from "@/i18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { PipelineRun } from "@/types/pipeline";
 import { createElement } from "react";
 import { PipelineRunDetailDrawer } from "../jobs/PipelineRunDetailDrawer";
@@ -20,7 +20,9 @@ export const pipelineAdapter: TaskSourceAdapter = {
 
   async list(): Promise<UnifiedRun[]> {
     // #248 T2 试点批：插件命名命令（原 get_pipeline_history，双声明期宿主命令保留）
-    const rows = await invoke<PipelineRun[]>("stock_get_pipeline_history", { limit: 50 });
+    const rows = await invokePluginCommand<PipelineRun[]>("stock_get_pipeline_history", {
+      limit: 50,
+    });
     if (!Array.isArray(rows)) {
       return [];
     }

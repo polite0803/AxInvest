@@ -43,7 +43,6 @@ pub mod crash_report;
 pub mod dashboard;
 pub mod db_config;
 pub mod decision_gates;
-pub mod demand_discovery;
 pub mod demand_llm_refine;
 pub mod dependency_metrics;
 #[cfg(not(mobile))]

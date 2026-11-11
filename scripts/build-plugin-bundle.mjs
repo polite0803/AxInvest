@@ -1035,7 +1035,9 @@ function stockManifest({ version, binaryName, sha256 }) {
 // （插件整体获得该声明），属安全面变更，另立评审。
 const OPC_WRITE_COMMANDS = new Set([
   "opc_add_milestone",
+  "opc_analyze_capability_gaps",
   "opc_cancel_publish_schedule",
+  "opc_close_capability_gap",
   "opc_complete_milestone",
   "opc_create_blog_post",
   "opc_create_content_asset",
@@ -1052,6 +1054,7 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_delete_project",
   "opc_mark_contact_read",
   "opc_process_due_schedules",
+  "opc_proactive_evaluate_leads",
   "opc_publish_blog_post",
   "opc_publish_landing_page",
   "opc_transition_invoice",
@@ -1892,6 +1895,45 @@ function opcManifest({ version, binaryName, sha256 }) {
           properties: { deliveryId: { type: "string", description: "交付记录 ID" } },
           required: ["deliveryId"],
         },
+      },
+      // ── #264 批 6：能力发现面五命令（scan / proactive / analyze 零入参；
+      // list 的 status 可选；close 只收 gapId）──
+      {
+        name: "opc_scan_capabilities",
+        description: "扫描系统能力清单（工具/技能/MCP/工作流/智能体，读 op）",
+        command: "worker://opc_scan_capabilities",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_proactive_evaluate_leads",
+        description: "按配置的领域关键词主动扫描、评估并入库需求线索（写 op）",
+        command: "worker://opc_proactive_evaluate_leads",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_list_capability_gaps",
+        description: "列出能力缺口记录（读 op；status 可选过滤）",
+        command: "worker://opc_list_capability_gaps",
+        inputSchema: {
+          type: "object",
+          properties: { status: { type: "string", description: "缺口状态（如 open/resolved）" } },
+        },
+      },
+      {
+        name: "opc_close_capability_gap",
+        description: "关闭能力缺口（状态置 resolved 并落关闭时间，写 op）",
+        command: "worker://opc_close_capability_gap",
+        inputSchema: {
+          type: "object",
+          properties: { gapId: { type: "string", description: "能力缺口 ID" } },
+          required: ["gapId"],
+        },
+      },
+      {
+        name: "opc_analyze_capability_gaps",
+        description: "主动分析能力缺口：统计高频缺失关键词并自动创建 Top 5 缺口行（写 op）",
+        command: "worker://opc_analyze_capability_gaps",
+        inputSchema: { type: "object", properties: {} },
       },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },

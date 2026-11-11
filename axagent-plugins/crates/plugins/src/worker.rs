@@ -546,7 +546,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "execute_demand_workflow"
             | "update_delivery"
             | "retry_delivery"
-            | "cancel_delivery",
+            | "cancel_delivery"
+            // #264 批 6：发现面三条写 op（扫描落库 / 关闭缺口 / 分析自动建行）——
+            // 都改库；两条读 op（`scan_capabilities` / `list_capability_gaps`）仍 `None`。
+            | "proactive_evaluate_leads"
+            | "close_capability_gap"
+            | "analyze_capability_gaps",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -4116,6 +4121,80 @@ impl HostPeer {
                 };
                 match result {
                     Ok(row) => to_value("DeliveryRecordView", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 6：能力发现面五 op ──
+            // 能力清单扫描：零入参读 op（权限仍 `None`）。
+            "opc.store" if op == "scan_capabilities" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.scan_capabilities()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(inventory) => to_value("CapabilityInventory", &inventory),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 主动评估入库：零入参写 op（逐领域关键词扫描落库）。
+            "opc.store" if op == "proactive_evaluate_leads" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.proactive_evaluate_leads()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(summary) => to_value("ProactiveScanSummary", &summary),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 能力缺口列表：`status` 可选过滤。
+            "opc.store" if op == "list_capability_gaps" => {
+                let status: Option<String> = match deserialize_optional_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_capability_gaps(status)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<CapabilityGapView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 关闭能力缺口：入参只有 `gap_id`。
+            "opc.store" if op == "close_capability_gap" => {
+                let gap_id: String = match deserialize_arg(&args, "gap_id", seam) {
+                    Ok(gap_id) => gap_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.close_capability_gap(gap_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("CapabilityGapView", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 主动分析缺口：零入参写 op（Top 5 高频缺失自动建行）。
+            "opc.store" if op == "analyze_capability_gaps" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.analyze_capability_gaps()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(summary) => to_value("AnalyzeGapsSummary", &summary),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -12877,9 +12956,9 @@ mod tests {
 
     /// `opc.store` 的权限表**逐条枚举锁**（全量写 op + 全量读 op + 两侧的反向锁）：
     /// blog 三件 + #36 批 2 四条 + #36 批 3 八条 + D-4 三条 + #32 批 A·B 六条 +
-    /// #264 批 1 三条 + 批 2 五条 + 批 3 三条 ⇒ `Write`；读 op（列表 / 报表 / 详情 /
-    /// 策略 / 摘要）⇒ **必须仍是 `None`**；表外 op 与近似接缝名 ⇒ `None`
-    /// （不许被通配符或前缀匹配接住）。
+    /// #264 批 1 三条 + 批 2 五条 + 批 3 三条 + 批 6 三条 ⇒ `Write`；读 op（列表 /
+    /// 报表 / 详情 / 策略 / 摘要 / 能力清单 / 缺口列表）⇒ **必须仍是 `None`**；
+    /// 表外 op 与近似接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
     /// 这条承诺唯一的机械防线就是本用例 —— 多登记一条会把只读插件（今天
@@ -12926,6 +13005,9 @@ mod tests {
             "update_delivery",
             "retry_delivery",
             "cancel_delivery",
+            "proactive_evaluate_leads",
+            "close_capability_gap",
+            "analyze_capability_gaps",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -12949,6 +13031,8 @@ mod tests {
             "list_domains",
             "list_deliveries",
             "get_delivery",
+            "scan_capabilities",
+            "list_capability_gaps",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

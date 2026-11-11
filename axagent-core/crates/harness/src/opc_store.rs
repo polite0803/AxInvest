@@ -902,6 +902,60 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::cancel_delivery 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 能力发现面五 op（#264 批 6；迁移前 `commands::demand_discovery` 发现段命令体）──
+
+    /// 扫描系统能力清单（`scan_capabilities` op）—— 读 op，不设权限闸。
+    ///
+    /// 复用上游能力发现索引（`capability_indexer`）的能力护照按载体分组组装
+    /// [`crate::capability::CapabilityInventory`]；系统专用护照（`is_system_only`）不进清单。
+    async fn scan_capabilities(&self) -> Result<crate::capability::CapabilityInventory> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::scan_capabilities 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 主动评估入库（`proactive_evaluate_leads` op）—— 写 op（逐领域关键词扫描落库）。
+    ///
+    /// 关键词从需求发现工作流配置（`domain_*` 变量）提取，配置为空用默认种子；逐关键词
+    /// 调扫描核心并聚合统计（与订阅定时扫描 / 工作流工具节点同源）。迁移前命令的
+    /// `min_score` 历史遗留参数不进接缝（A 链路全量入库，阈值过滤由订阅推送侧承担）。
+    async fn proactive_evaluate_leads(&self) -> Result<ProactiveScanSummary> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::proactive_evaluate_leads 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出能力缺口记录（`list_capability_gaps` op）—— 读 op。
+    ///
+    /// `status` 可选过滤，按创建时间降序（迁移前同序）。
+    async fn list_capability_gaps(
+        &self,
+        _status: Option<String>,
+    ) -> Result<Vec<CapabilityGapView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_capability_gaps 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 关闭能力缺口（`close_capability_gap` op）—— 写 op（resolved + 关闭时间）。
+    ///
+    /// 缺行报 NotFound（迁移前 close 命令同语义：id 由调用方持有，读到不存在是异常输入）。
+    async fn close_capability_gap(&self, _gap_id: String) -> Result<CapabilityGapView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::close_capability_gap 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 主动分析能力缺口（`analyze_capability_gaps` op）—— 写 op（Top 5 高频缺失自动建行）。
+    ///
+    /// 统计未转化需求中未被现有能力覆盖的高频关键词（频率 ≥2），Top 5 自动创建
+    /// `proactive` 缺口行；其余读数为统计投影（与迁移前命令逐字段同义）。
+    async fn analyze_capability_gaps(&self) -> Result<AnalyzeGapsSummary> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::analyze_capability_gaps 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────
@@ -969,6 +1023,92 @@ pub struct DeliveryRecordView {
     pub metadata: serde_json::Map<String, serde_json::Value>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+// ── 能力发现面出参（#264 批 6；同样放在 trait 之后）────────────────────────
+
+/// 主动扫描聚合统计（`proactive_evaluate_leads` 出参）。
+///
+/// 与迁移前命令的 `json!` 动态出参逐键同义（`total_scanned` → `totalScanned` 等）；
+/// `query_stats` 保留逐关键词明细，扫描失败的关键词降级 `error` 文本（迁移前同判据）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProactiveScanSummary {
+    pub total_queries: usize,
+    pub total_scanned: u32,
+    pub total_saved: u32,
+    pub high_value_count: u32,
+    pub query_stats: Vec<QueryStat>,
+}
+
+/// 逐关键词扫描明细。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryStat {
+    pub query: String,
+    pub scanned: u32,
+    pub saved: u32,
+    /// 扫描成功时的刷新数（去重命中更新既有行）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refreshed: Option<u32>,
+    /// 扫描失败时的错误文本；有值时 scanned / saved 恒 0（迁移前同形）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 能力缺口记录（`list_capability_gaps` / `close_capability_gap` 出参）。
+///
+/// 与迁移前命令直出的 `opc_capability_gap::Model` 逐字段同义，键名按全站 DTO 规范
+/// camelCase。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityGapView {
+    pub id: String,
+    /// 关联线索（被动缺口有值；主动分析创建的行恒 None）。
+    pub lead_id: Option<String>,
+    pub title: String,
+    pub description: String,
+    pub missing_capability: String,
+    /// capability / proactive
+    pub gap_type: String,
+    pub suggested_action: String,
+    pub priority: i32,
+    /// open / resolved
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub closed_at: Option<i64>,
+}
+
+/// 主动缺口分析统计（`analyze_capability_gaps` 出参）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyzeGapsSummary {
+    pub total_leads_analyzed: usize,
+    pub total_capabilities: usize,
+    pub missing_keywords_count: usize,
+    pub top_missing_keywords: Vec<TopMissingKeyword>,
+    pub domain_coverage: Vec<DomainCoverage>,
+    /// Top 5 高频缺失自动创建的缺口行（创建失败的关键词不计入，迁移前同判据）。
+    pub auto_created_gaps: Vec<String>,
+}
+
+/// 高频缺失关键词（频率 ≥2 且未被现有能力覆盖）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopMissingKeyword {
+    pub keyword: String,
+    pub frequency: usize,
+    pub total_score: f64,
+}
+
+/// 领域覆盖读数（配置关键词 × 现有能力库 × 未转化需求量）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainCoverage {
+    pub domain: String,
+    pub covered: bool,
+    pub demand_count: usize,
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

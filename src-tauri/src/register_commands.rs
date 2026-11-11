@@ -262,11 +262,6 @@ macro_rules! register_all_commands {
             commands::decision_gates::get_decision_gates,
             commands::decision_gates::set_decision_gate,
             commands::decision_gates::set_decision_gates,
-            commands::demand_discovery::opc_analyze_capability_gaps,
-            commands::demand_discovery::opc_close_capability_gap,
-            commands::demand_discovery::opc_list_capability_gaps,
-            commands::demand_discovery::opc_proactive_evaluate_and_save_leads,
-            commands::demand_discovery::opc_scan_capabilities,
             commands::dependency_metrics::get_dependency_metrics,
             #[cfg(not(mobile))]
             commands::desktop::apply_startup_settings,

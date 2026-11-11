@@ -1391,6 +1391,260 @@ impl OpcStoreProvider for HostOpcStore {
         let now = chrono::Utc::now().timestamp();
         opc_delivery::cancel_delivery(&self.db, &delivery_id, now).await
     }
+
+    // ── #264 批 6：能力发现面五 op（迁移前 `commands::demand_discovery` 发现段命令体）──
+
+    /// 与迁移前 `opc_scan_capabilities` 命令逐句同源：遍历能力索引护照按载体分组
+    /// 组装清单，系统专用护照（`is_system_only`）不进业务清单。
+    async fn scan_capabilities(&self) -> Result<axagent_harness::capability::CapabilityInventory> {
+        use axagent_company_runtime::opc::capability::CapabilitySource;
+        use axagent_harness::CapabilityKind;
+
+        let pipeline = self.demand_pipeline("scan_capabilities")?;
+        let now = chrono::Utc::now().timestamp();
+
+        let mut tools: Vec<_> = Vec::new();
+        let mut skills: Vec<_> = Vec::new();
+        let mut mcp_tools: Vec<_> = Vec::new();
+        let mut workflows: Vec<_> = Vec::new();
+        let mut agents: Vec<_> = Vec::new();
+
+        // 从上游能力索引读取全部护照，按类型分组（来源与 kind 保持一致）
+        let ids = pipeline.capability_indexer.list_capability_ids().await;
+        for id in ids {
+            if let Some(p) = pipeline.capability_indexer.get_passport(&id).await {
+                if p.visibility.is_system_only() {
+                    continue;
+                }
+                let source = match p.kind {
+                    CapabilityKind::Skill => CapabilitySource::Skill,
+                    CapabilityKind::Workflow => CapabilitySource::Workflow,
+                    CapabilityKind::Tool if p.capability_id.starts_with("mcp:") => {
+                        CapabilitySource::McpTool
+                    },
+                    CapabilityKind::Tool => CapabilitySource::Tool,
+                    CapabilityKind::Agent => CapabilitySource::Agent,
+                    _ => continue,
+                };
+                let entry = passport_to_entry(&p, source.clone());
+                match source {
+                    CapabilitySource::Tool => tools.push(entry),
+                    CapabilitySource::Skill => skills.push(entry),
+                    CapabilitySource::McpTool => mcp_tools.push(entry),
+                    CapabilitySource::Workflow => workflows.push(entry),
+                    CapabilitySource::Agent => agents.push(entry),
+                }
+            }
+        }
+
+        let mut inv = axagent_harness::capability::CapabilityInventory {
+            tools,
+            skills,
+            mcp_tools,
+            workflows,
+            agents,
+            scanned_at: now,
+            total_count: 0,
+        };
+        inv.recalc_count();
+        Ok(inv)
+    }
+
+    /// 与迁移前 `opc_proactive_evaluate_and_save_leads` + `run_proactive_scan_pipeline`
+    /// 逐句同源：关键词提取已下沉 dao（`extract_demand_discovery_queries`），逐关键词
+    /// 调扫描核心并聚合统计。单关键词失败不中断整轮（warn 后记入 query_stats.error）。
+    async fn proactive_evaluate_leads(&self) -> Result<ProactiveScanSummary> {
+        let queries = wf_template_repo::extract_demand_discovery_queries(&self.db).await?;
+
+        let mut total_scanned = 0u32;
+        let mut total_saved = 0u32;
+        let mut high_value_count = 0u32;
+        let mut query_stats = Vec::new();
+        for query in &queries {
+            match run_discovery_scan(&self.db, query, &[]).await {
+                Ok(summary) => {
+                    total_scanned += summary.total_scanned;
+                    total_saved += summary.total_saved;
+                    high_value_count += summary.high_value_count;
+                    query_stats.push(QueryStat {
+                        query: query.clone(),
+                        scanned: summary.total_scanned,
+                        saved: summary.total_saved,
+                        refreshed: Some(summary.total_refreshed),
+                        error: None,
+                    });
+                },
+                Err(e) => {
+                    tracing::warn!("[proactive_scan] 关键词 '{query}' 扫描失败: {e}");
+                    query_stats.push(QueryStat {
+                        query: query.clone(),
+                        scanned: 0,
+                        saved: 0,
+                        refreshed: None,
+                        error: Some(e.to_string()),
+                    });
+                },
+            }
+        }
+
+        Ok(ProactiveScanSummary {
+            total_queries: queries.len(),
+            total_scanned,
+            total_saved,
+            high_value_count,
+            query_stats,
+        })
+    }
+
+    /// 与迁移前 `opc_list_capability_gaps` 命令逐句同源：状态过滤 + 创建时间降序。
+    async fn list_capability_gaps(&self, status: Option<String>) -> Result<Vec<CapabilityGapView>> {
+        opc_capability_gap::list_gaps(&self.db, status).await
+    }
+
+    /// 与迁移前 `opc_close_capability_gap` 命令逐句同源：缺行报 NotFound。
+    async fn close_capability_gap(&self, gap_id: String) -> Result<CapabilityGapView> {
+        let now = chrono::Utc::now().timestamp();
+        opc_capability_gap::close_gap(&self.db, &gap_id, now).await
+    }
+
+    /// 与迁移前 `opc_analyze_capability_gaps` 命令逐句同源：统计未转化需求中未被
+    /// 现有能力覆盖的高频关键词（频率 ≥2），Top 5 自动创建 `proactive` 缺口行。
+    async fn analyze_capability_gaps(&self) -> Result<AnalyzeGapsSummary> {
+        use std::collections::HashMap;
+
+        let pipeline = self.demand_pipeline("analyze_capability_gaps")?;
+        let now = chrono::Utc::now().timestamp();
+
+        // 1) 扫描现有能力库（复用上游能力索引的能力护照）
+        let mut capability_keywords: Vec<String> = Vec::new();
+        for id in pipeline.capability_indexer.list_capability_ids().await {
+            if let Some(p) = pipeline.capability_indexer.get_passport(&id).await {
+                if p.visibility.is_system_only() {
+                    continue;
+                }
+                capability_keywords.push(
+                    format!("{} {} {}", p.name, p.description, p.kind.as_str()).to_lowercase(),
+                );
+            }
+        }
+
+        // 2) 统计高价值需求中的高频关键词（读 A 链路 opc_demand_leads；won/lost 为
+        //    销售终态，不参与统计）
+        let all_leads = opc_demand::list_leads(&self.db, 10_000, Some(50.0), None).await.map_err(
+            |e| AxAgentError::Provider(format!("opc.store::analyze_capability_gaps {e}")),
+        )?;
+        let leads: Vec<_> =
+            all_leads.iter().filter(|l| l.status != "won" && l.status != "lost").collect();
+
+        let mut keyword_freq: HashMap<String, (usize, f64)> = HashMap::new(); // (出现次数, 累计评分)
+        for lead in &leads {
+            let text = format!("{} {}", lead.title, lead.description).to_lowercase();
+            let score = lead.commercial_value_score;
+
+            // 简单分词：按空格和常见标点
+            for word in
+                text.split(|c: char| c.is_whitespace() || "，。！？、；：\"'（）【】".contains(c))
+            {
+                let trimmed = word.trim();
+                if trimmed.len() >= 2 && trimmed.len() <= 10 {
+                    let entry = keyword_freq.entry(trimmed.to_string()).or_insert((0, 0.0));
+                    entry.0 += 1;
+                    entry.1 += score;
+                }
+            }
+        }
+
+        // 3) 识别未被现有能力覆盖的高频关键词
+        let mut missing_keywords: Vec<(String, usize, f64)> = Vec::new();
+        for (keyword, (freq, total_score)) in &keyword_freq {
+            let covered = capability_keywords.iter().any(|ck| ck.contains(keyword));
+            if !covered && *freq >= 2 {
+                missing_keywords.push((keyword.clone(), *freq, *total_score));
+            }
+        }
+
+        // 按频率排序（降序）
+        missing_keywords.sort_by_key(|a| std::cmp::Reverse(a.1));
+
+        // 4) 基于配置的领域关键词分析覆盖情况
+        let domain_queries = wf_template_repo::extract_demand_discovery_queries(&self.db).await?;
+        let mut domain_coverage = Vec::new();
+        for domain_kw in &domain_queries {
+            let domain_kw_lower = domain_kw.to_lowercase();
+            let covered = capability_keywords.iter().any(|ck| ck.contains(&domain_kw_lower));
+            let demand_count = leads
+                .iter()
+                .filter(|l| {
+                    let text = format!("{} {}", l.title, l.description).to_lowercase();
+                    text.contains(&domain_kw_lower)
+                })
+                .count();
+
+            domain_coverage.push(DomainCoverage {
+                domain: domain_kw.clone(),
+                covered,
+                demand_count,
+            });
+        }
+
+        // 5) 自动创建高优先级缺口（Top 5 高频缺失；单条失败不中断整轮）
+        let mut auto_created: Vec<String> = Vec::new();
+        if missing_keywords.len() >= 2 {
+            for (keyword, freq, _) in missing_keywords.iter().take(5) {
+                let gap_id = format!("gap-auto-{}", uuid::Uuid::new_v4().simple());
+                let priority = if *freq >= 5 {
+                    1
+                } else if *freq >= 3 {
+                    2
+                } else {
+                    3
+                };
+
+                let view = CapabilityGapView {
+                    id: gap_id,
+                    lead_id: None,
+                    title: format!("[主动分析] 高频缺失能力: {keyword}"),
+                    description: format!(
+                        "关键词 '{keyword}' 在 {freq} 条高价值需求中出现，但现有能力库未覆盖。建议新增对应能力。"
+                    ),
+                    missing_capability: keyword.clone(),
+                    gap_type: "proactive".to_string(),
+                    suggested_action: format!(
+                        "针对 '{keyword}' 领域新增工具/技能/工作流模板，或扫描市场平台获取该领域需求详情"
+                    ),
+                    priority,
+                    status: "open".to_string(),
+                    created_at: now,
+                    updated_at: now,
+                    closed_at: None,
+                };
+                match opc_capability_gap::insert_gap(&self.db, &view).await {
+                    Ok(()) => auto_created.push(keyword.clone()),
+                    Err(e) => {
+                        tracing::warn!("[analyze_capability_gaps] 自动建缺口 '{keyword}' 失败: {e}")
+                    },
+                }
+            }
+        }
+
+        // 6) 返回分析结果
+        Ok(AnalyzeGapsSummary {
+            total_leads_analyzed: leads.len(),
+            total_capabilities: capability_keywords.len(),
+            missing_keywords_count: missing_keywords.len(),
+            top_missing_keywords: missing_keywords
+                .iter()
+                .take(10)
+                .map(|(k, f, s)| TopMissingKeyword {
+                    keyword: k.clone(),
+                    frequency: *f,
+                    total_score: *s,
+                })
+                .collect(),
+            domain_coverage,
+            auto_created_gaps: auto_created,
+        })
+    }
 }
 
 // ── #264 批 4 领域工作流三 op 的依赖（同样放在 impl 之后，理由同上）──────────
@@ -1931,6 +2185,43 @@ fn publish_schedule_summary_view(s: PublishSchedule) -> PublishScheduleSummaryVi
         status: s.status,
         scheduled_at: s.scheduled_at,
         published_at: s.published_at,
+    }
+}
+
+// ── #264 批 6：能力发现面五 op 的依赖 ─────────────────────────────────────
+//
+// 同前几批的理由：`impl OpcStoreProvider for HostOpcStore` 行被登记表钉住，use 列表
+// 不再往上加名字；本块依赖集中在 impl 之后声明。`extract_domain_queries` / 缺口
+// CRUD 已下沉 dao（`repo::workflow_template` / `repo::opc_capability_gap`），扫描核心
+// 复用 `axagent_tools::opc_demand_scan`（与订阅定时扫描同源），能力护照复用
+// `demand_pipeline.capability_indexer`（缺装配回 Provider 错，fail-closed）。
+use axagent_dao::repo::{opc_capability_gap, workflow_template as wf_template_repo};
+use axagent_harness::opc_store::{
+    AnalyzeGapsSummary, CapabilityGapView, DomainCoverage, ProactiveScanSummary, QueryStat,
+    TopMissingKeyword,
+};
+use axagent_tools::tools::opc_demand_scan::run_discovery_scan;
+
+/// 能力护照 → 清单条目的载体分组（与迁移前 `opc_scan_capabilities` 命令体逐句同源）。
+fn passport_to_entry(
+    p: &axagent_harness::CapabilityPassportDto,
+    source: axagent_company_runtime::opc::capability::CapabilitySource,
+) -> axagent_harness::capability::CapabilityEntry {
+    use axagent_harness::capability::CapabilityEntry;
+    CapabilityEntry {
+        id: p.capability_id.clone(),
+        name: p.name.clone(),
+        description: p.description.clone(),
+        source,
+        source_id: p.capability_id.clone(),
+        capability_type: p.kind.as_str().to_string(),
+        applicable_scenarios: Vec::new(),
+        example_deliverables: Vec::new(),
+        metadata: serde_json::json!({
+            "enabled": p.enabled,
+            "domain": p.domain.as_str(),
+            "sub_category": p.sub_category,
+        }),
     }
 }
 

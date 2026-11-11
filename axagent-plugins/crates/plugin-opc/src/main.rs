@@ -163,6 +163,14 @@ const OPC_STORE_UPDATE_DELIVERY: &str = "update_delivery";
 const OPC_STORE_RETRY_DELIVERY: &str = "retry_delivery";
 const OPC_STORE_CANCEL_DELIVERY: &str = "cancel_delivery";
 
+/// #264 批 6：能力发现面五 op —— proactive / close / analyze 三写（都要 `write`），
+/// scan_capabilities / list_capability_gaps 两读（不登记权限闸）。
+const OPC_STORE_SCAN_CAPABILITIES: &str = "scan_capabilities";
+const OPC_STORE_PROACTIVE_EVALUATE_LEADS: &str = "proactive_evaluate_leads";
+const OPC_STORE_LIST_CAPABILITY_GAPS: &str = "list_capability_gaps";
+const OPC_STORE_CLOSE_CAPABILITY_GAP: &str = "close_capability_gap";
+const OPC_STORE_ANALYZE_CAPABILITY_GAPS: &str = "analyze_capability_gaps";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -279,6 +287,15 @@ const COMMAND_GET_DELIVERY: &str = "opc_get_delivery";
 const COMMAND_UPDATE_DELIVERY: &str = "opc_update_delivery";
 const COMMAND_RETRY_DELIVERY: &str = "opc_retry_delivery";
 const COMMAND_CANCEL_DELIVERY: &str = "opc_cancel_delivery";
+
+/// #264 批 6：能力发现面五命令（清单 `commands[].name` 必须逐字一致）。宿主同名 Tauri
+/// 命令随本批删除（`commands::demand_discovery` 整文件退役；需求发现 cron 兜底轮留在
+/// 宿主 `init::services`，与插件命令面无关）。
+const COMMAND_SCAN_CAPABILITIES: &str = "opc_scan_capabilities";
+const COMMAND_PROACTIVE_EVALUATE_LEADS: &str = "opc_proactive_evaluate_leads";
+const COMMAND_LIST_CAPABILITY_GAPS: &str = "opc_list_capability_gaps";
+const COMMAND_CLOSE_CAPABILITY_GAP: &str = "opc_close_capability_gap";
+const COMMAND_ANALYZE_CAPABILITY_GAPS: &str = "opc_analyze_capability_gaps";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -771,6 +788,46 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
+        },
+        // #264 批 6：能力发现面五命令。scan / proactive / analyze 零入参；list 的
+        // `status` 可选；close 只收 `gapId`。
+        COMMAND_SCAN_CAPABILITIES => match scan_capabilities(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_PROACTIVE_EVALUATE_LEADS => {
+            match proactive_evaluate_leads(&request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_CAPABILITY_GAPS => {
+            match list_capability_gaps(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CLOSE_CAPABILITY_GAP => {
+            match close_capability_gap(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_ANALYZE_CAPABILITY_GAPS => {
+            match analyze_capability_gaps(&request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
         },
         COMMAND_CREATE_PROJECT => match create_project(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -2023,6 +2080,55 @@ fn cancel_delivery(
         json!({ "delivery_id": delivery_id }),
         call_chain,
     )
+}
+
+/// `opc_scan_capabilities`：扫描系统能力清单（读 op，零入参）。
+fn scan_capabilities(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_SCAN_CAPABILITIES, json!({}), call_chain)
+}
+
+/// `opc_proactive_evaluate_leads`：主动评估入库（写 op，零入参 —— 关键词由宿主从
+/// 配置提取，前端不再传 minScore 历史遗留参数）。
+fn proactive_evaluate_leads(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_PROACTIVE_EVALUATE_LEADS, json!({}), call_chain)
+}
+
+/// `opc_list_capability_gaps`：列出能力缺口（读 op，`status` 可选）。
+fn list_capability_gaps(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_capability_gaps";
+    let mut args = serde_json::Map::new();
+    copy_optional_strings(input, OP, &mut args, &["status"])?;
+    call_opc_store(peer, OPC_STORE_LIST_CAPABILITY_GAPS, Value::Object(args), call_chain)
+}
+
+/// `opc_close_capability_gap`：关闭能力缺口（写 op，`gapId` 必填）。
+fn close_capability_gap(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_close_capability_gap";
+    let gap_id = require_str(input, OP, "gapId")?;
+    call_opc_store(peer, OPC_STORE_CLOSE_CAPABILITY_GAP, json!({ "gap_id": gap_id }), call_chain)
+}
+
+/// `opc_analyze_capability_gaps`：主动分析能力缺口（写 op，零入参 —— Top 5 高频缺失
+/// 自动建缺口行）。
+fn analyze_capability_gaps(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_ANALYZE_CAPABILITY_GAPS, json!({}), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

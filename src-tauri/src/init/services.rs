@@ -5450,8 +5450,7 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
             interval.tick().await;
             let started = axagent_runtime_core::cron_job::now_millis();
             let outcome =
-                crate::commands::demand_discovery::run_demand_discovery_cron(&db, None, Some(&app))
-                    .await;
+                run_demand_discovery_cron(&db, None, Some(&app)).await;
 
             let (success, output, error) = match outcome {
                 Ok(summary) => {
@@ -5481,6 +5480,115 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
         }
     });
     tracing::info!("[startup] 需求发现定时任务已启动（每 12 小时）");
+}
+
+// ── #264 批 6：需求发现 cron 执行体（原 `commands::demand_discovery` 尾部两函数，
+//    随发现面五命令迁 T2 一并搬入宿主 wiring 层 —— 桌面通知依赖 AppHandle，插件
+//    侧够不着；调用方仅下方 start_demand_discovery_cron，故改私有） ──────────
+
+/// OPC 需求发现 cron 执行体：扫描 → 评估 → 去重入库 → 高价值通知。
+///
+/// `query` 为 None 或空字符串时，自动从配置中提取领域关键词进行主动扫描。
+/// 入库与去重统一走 A 链路 `run_discovery_scan`（订阅定时扫描同源，无第二份实现）。
+async fn run_demand_discovery_cron(
+    db: &sea_orm::DatabaseConnection,
+    query: Option<&str>,
+    app_handle: Option<&tauri::AppHandle>,
+) -> Result<String, String> {
+    // 1) 确定查询关键词列表
+    let queries: Vec<String> = match query {
+        Some(q) if !q.trim().is_empty() => vec![q.to_string()],
+        _ => axagent_dao::repo::workflow_template::extract_demand_discovery_queries(db)
+            .await
+            .map_err(|e| e.to_string())?,
+    };
+
+    // 2) 逐关键词扫描入库（去重规则与订阅/工作流同源）
+    let mut high_value_leads: Vec<(String, f64, String)> = Vec::new();
+    for q in &queries {
+        if let Ok(summary) =
+            axagent_tools::tools::opc_demand_scan::run_discovery_scan(db, q, &[]).await
+        {
+            for lead in &summary.leads {
+                high_value_leads.push((
+                    lead.id.clone(),
+                    lead.commercial_value_score,
+                    lead.title.clone(),
+                ));
+            }
+        }
+    }
+    let high_value_count = high_value_leads.len() as u32;
+
+    // 3) 发送高价值需求通知
+    if high_value_count > 0 {
+        send_high_value_notification(app_handle, &high_value_leads).await;
+    }
+
+    Ok(format!("主动需求发现完成: {} 个关键词, 高价值 {} 条", queries.len(), high_value_count))
+}
+
+/// 发送高价值需求通知：Tauri 桌面通知 + 日志记录。
+async fn send_high_value_notification(
+    app_handle: Option<&tauri::AppHandle>,
+    high_value_leads: &[(String, f64, String)],
+) {
+    // 移动端无桌面通知通道，app_handle 仅用于桌面端，避免 unused 警告
+    #[cfg(mobile)]
+    let _ = app_handle;
+
+    if high_value_leads.is_empty() {
+        return;
+    }
+
+    // count / titles 均只用于下方 `not(mobile)` 的桌面通知 body ⇒ 一并纳入非 mobile编译，
+    // 否则 Android(mobile) 下为未使用变量触发 `unused_variables` 警告。
+    #[cfg(not(mobile))]
+    let count = high_value_leads.len();
+    #[cfg(not(mobile))]
+    let titles: Vec<String> = high_value_leads
+        .iter()
+        .take(3)
+        .map(|(_, score, title)| format!("{} (评分: {:.1})", title, score))
+        .collect();
+
+    #[allow(unused_variables)]
+    #[cfg(not(mobile))]
+    let body = if count > 3 {
+        format!("{} 条高价值需求: {} ...等", count, titles.join(", "))
+    } else {
+        format!("{} 条高价值需求: {}", count, titles.join(", "))
+    };
+
+    // 发送 Tauri 桌面通知（仅桌面端；移动端无桌面通知通道，仅靠下方日志记录）
+    #[cfg(not(mobile))]
+    if let Some(app) = app_handle {
+        if let Err(e) = crate::commands::desktop::send_desktop_notification(
+            app.clone(),
+            "🔔 OPC 需求发现：发现高价值需求".to_string(),
+            body.clone(),
+        )
+        .await
+        {
+            tracing::warn!("[DemandDiscovery] 桌面通知发送失败: {}", e);
+        }
+    }
+
+    // 同时通过日志记录，便于排查。
+    // ⚠ 这里必须直接取 `high_value_leads.len()` 而非上面的 `count` —— 后者被
+    // `#[cfg(not(mobile))]` 门控，在 Android(mobile) 下不存在（曾导致 E0425 编译失败）。
+    tracing::info!(
+        "[DemandDiscovery] 高价值需求通知: 发现 {} 条高价值需求",
+        high_value_leads.len()
+    );
+    for (id, score, title) in high_value_leads {
+        tracing::info!(
+            "[DemandDiscovery] 高价值需求详情: id={}, score={:.1}, title={}",
+            id,
+            score,
+            title
+        );
+    }
 }
 
 /// 启动每日快照采集（交易日收盘后一次）：为回放（as-of）模式积累当日快照。

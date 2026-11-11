@@ -1463,6 +1463,80 @@ impl Default for SessionBudget {
     }
 }
 
+// ── 能力集清单 DTO（#264 批 6 自 company-runtime 上收）──────────────────────
+//
+// 定义需求发现使用的能力清单聚合结构（`CapabilityInventory` / `CapabilityEntry`）。
+// 能力来源统一复用上游能力发现索引（`capability_indexer` 的能力护照），由接缝
+// 实现层组装。company-runtime 侧以 `pub use` 引用本定义，不再有第二份拷贝。
+
+/// 能力条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source: crate::capability_pack_registry::CapabilityCarrier,
+    pub source_id: String,
+    pub capability_type: String,
+    pub applicable_scenarios: Vec<String>,
+    pub example_deliverables: Vec<String>,
+    pub metadata: serde_json::Value,
+}
+
+/// 能力清单聚合
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityInventory {
+    pub tools: Vec<CapabilityEntry>,
+    pub skills: Vec<CapabilityEntry>,
+    pub mcp_tools: Vec<CapabilityEntry>,
+    pub workflows: Vec<CapabilityEntry>,
+    pub agents: Vec<CapabilityEntry>,
+    pub scanned_at: i64,
+    pub total_count: usize,
+}
+
+impl CapabilityInventory {
+    pub fn new() -> Self {
+        let now = chrono::Utc::now().timestamp();
+        Self {
+            tools: Vec::new(),
+            skills: Vec::new(),
+            mcp_tools: Vec::new(),
+            workflows: Vec::new(),
+            agents: Vec::new(),
+            scanned_at: now,
+            total_count: 0,
+        }
+    }
+
+    pub fn recalc_count(&mut self) {
+        self.total_count = self.tools.len()
+            + self.skills.len()
+            + self.mcp_tools.len()
+            + self.workflows.len()
+            + self.agents.len();
+    }
+
+    /// 全部条目展平为一个列表（供 Agent 注入 context）
+    pub fn all_entries(&self) -> Vec<&CapabilityEntry> {
+        let mut v: Vec<&CapabilityEntry> = Vec::new();
+        v.extend(self.tools.iter());
+        v.extend(self.skills.iter());
+        v.extend(self.mcp_tools.iter());
+        v.extend(self.workflows.iter());
+        v.extend(self.agents.iter());
+        v
+    }
+}
+
+impl Default for CapabilityInventory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

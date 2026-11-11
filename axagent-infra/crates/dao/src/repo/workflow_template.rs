@@ -595,6 +595,53 @@ pub fn template_version_model_to_data(
     }
 }
 
+/// 从需求发现工作流配置（id=`demand-discovery` 的 `domain_*` 变量）提取扫描关键词。
+///
+/// #264 批 6 自 `commands::demand_discovery::extract_domain_queries` 下沉：每个领域
+/// 关键词按 `/` 拆分为独立查询；配置为空 / 缺模板时用默认种子（与迁移前逐字同源）。
+pub async fn extract_demand_discovery_queries(db: &DatabaseConnection) -> Result<Vec<String>> {
+    let template = workflow_template::Entity::find_by_id("demand-discovery")
+        .one(db)
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("读取需求发现配置失败: {e}")))?;
+
+    let config_json = template
+        .and_then(|t| t.variables)
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let mut queries = Vec::new();
+
+    if let Some(vars) = config_json.get("variables").and_then(|v| v.as_array()) {
+        for var in vars {
+            let name = var.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            if name.starts_with("domain_") {
+                if let Some(value) = var.get("value").and_then(|v| v.as_str()) {
+                    for kw in value.split('/') {
+                        let trimmed = kw.trim();
+                        if !trimmed.is_empty() {
+                            queries.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if queries.is_empty() {
+        queries = vec![
+            "AI".to_string(),
+            "软件".to_string(),
+            "设计".to_string(),
+            "营销".to_string(),
+            "写作".to_string(),
+            "翻译".to_string(),
+        ];
+    }
+
+    Ok(queries)
+}
+
 #[cfg(test)]
 mod variables_only_update_tests {
     use super::*;

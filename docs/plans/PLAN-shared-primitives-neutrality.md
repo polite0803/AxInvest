@@ -49,8 +49,8 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| A1 | `src/components/chat/ChatViewMessages.tsx:86` | `QuoteBlock` | 误报 | `src/components/chat/QuoteBlock.tsx:3`「引用回复：消息气泡内显示被引用消息的预览块」——`quote` 是**消息引用**，与行情无关 | — | 不改 |
-| A2 | `src/components/chat/InputArea.tsx:69` | `QuotePreviewBar` | 误报 | `src/components/chat/QuotePreviewBar.tsx:17`「引用回复预览条：显示当前被引用的消息内容，可一键取消引用」 | — | 不改 |
+| A1 | `src/components/chat/ChatViewMessages.tsx:86` | `QuoteBlock` | 误报 | `src/components/chat/CiteBlock.tsx:3`「引用回复：消息气泡内显示被引用消息的预览块」——`quote` 是**消息引用**，与行情无关（原锚 QuoteBlock.tsx 第 3 行，2026-11-11 #263 改名后随迁，见下方注记） | — | 不改 |
+| A2 | `src/components/chat/InputArea.tsx:69` | `QuotePreviewBar` | 误报 | `src/components/chat/CitePreviewBar.tsx:17`「引用回复预览条：显示当前被引用的消息内容，可一键取消引用」（原锚 QuotePreviewBar.tsx 第 17 行，同上） | — | 不改 |
 | A3 | `src/components/settings/index.ts:30` | `../chat/PluginMarketplace` | 误报 | `src/components/chat/PluginMarketplace.tsx:112` 取键 `chat.plugins.marketplace.title`——`market` = **插件市场** | — | 不改 |
 | A4 | `src/pages/SettingsPage.tsx:71` | `@/components/chat/PluginMarketplace`（动态 `import()`） | 误报 | 同上（同一组件，另一处装载） | — | 不改 |
 | A5 | `src/components/settings/WorkflowSettings.tsx:5` | `@/pages/WorkflowMarketplace` | 误报 | `src/pages/WorkflowMarketplace.tsx:18`「目录条目类型，与后端 `axagent_harness::marketplace::CatalogItem` 对齐」= 工作流模板市场 | — | 不改 |
@@ -58,6 +58,8 @@
 | A7 | `src/pages/opc/OpcPage.tsx:25` | `./components/TalentMarketTab` | 误报（同上） | `src/pages/opc/components/TalentMarketTab.tsx:10` + `TALENT_CATEGORIES`——人才市场 | — | 不改 |
 
 > 与 §91.2 ① 的差异：§91 记 6 处，漏了 A5（`WorkflowMarketplace` 同样是 marketplace 假阳性）。今天实为 **7 处 / 6 文件**。
+
+> **2026-11-11 回写注记（快照保留原样，本注记消腐烂）**：#263 前端刀（提交 `e5e22ba97`）已将 `QuoteBlock`/`QuotePreviewBar` 改名 `CiteBlock`/`CitePreviewBar` —— **A1/A2 的「不改」判定被推翻**：改名后两文件不再命中股票域词面，前端反向 STOCK −2/−2（33/27 → 30/24）。A1/A2 行内证据锚已随改名改指新文件（`CiteBlock.tsx:3` / `CitePreviewBar.tsx:17`，头部注释文字与行号未变，锚点仍成立）；「引用位置」列的 86 / 69 是 2026-11-05 时点行号，现 import 行在 `ChatViewMessages.tsx:82` / `InputArea.tsx:56`。
 
 ### 2.2 ② 中性 → 可下沉（2 处 / 2 文件）
 

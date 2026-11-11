@@ -535,7 +535,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "delete_platform"
             | "save_scan_policy"
             | "discover_and_evaluate_leads"
-            | "create_lead",
+            | "create_lead"
+            // #264 批 3：需求实现三条写 op（状态机 / 转模板 / 启动执行）—— 都改库
+            // （转模板还会回灌能力索引），无读 op 随迁。
+            | "update_lead_status"
+            | "convert_lead_to_workflow"
+            | "run_lead_workflow",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -3860,6 +3865,61 @@ impl HostPeer {
                 };
                 match result {
                     Ok(lead) => to_value("DemandLeadDto", &lead),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 3：需求实现三 op（状态机 / 转模板 / 启动执行）──
+            // 出参分别为线索视图、新模板、执行 id 字符串；转模板还会回灌能力索引。
+            "opc.store" if op == "update_lead_status" => {
+                let lead_id: String = match deserialize_arg(&args, "lead_id", seam) {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let status: String = match deserialize_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_lead_status(lead_id, status))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(lead) => to_value("DemandLeadDto", &lead),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "convert_lead_to_workflow" => {
+                let lead_id: String = match deserialize_arg(&args, "lead_id", seam) {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.convert_lead_to_workflow(lead_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(template) => to_value("WorkflowTemplateData", &template),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "run_lead_workflow" => {
+                let lead_id: String = match deserialize_arg(&args, "lead_id", seam) {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.run_lead_workflow(lead_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(execution_id) => to_value("String", &execution_id),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -12619,19 +12679,18 @@ mod tests {
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
     }
 
-    /// `opc.store` 的权限表**逐条枚举锁**（十个写 op + 九个读 op + 两侧的反向锁）：
-    /// blog 三件 + #36 批 2 的四条（`transition_invoice` / `update_content_asset` /
-    /// `delete_content_asset` / `cancel_publish_schedule`）+ D-4 的三条
-    /// （`publish_landing_page` / `delete_landing_page` / `mark_contact_read`）⇒ `Write`；
-    /// 九条读 op（`list_blog_posts` + #36 批 1 的八条列表 op）⇒ **必须仍是 `None`**；
-    /// 表外 op 与近似接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
+    /// `opc.store` 的权限表**逐条枚举锁**（全量写 op + 全量读 op + 两侧的反向锁）：
+    /// blog 三件 + #36 批 2 四条 + #36 批 3 八条 + D-4 三条 + #32 批 A·B 六条 +
+    /// #264 批 1 三条 + 批 2 五条 + 批 3 三条 ⇒ `Write`；读 op（列表 / 报表 / 详情 /
+    /// 策略 / 摘要）⇒ **必须仍是 `None`**；表外 op 与近似接缝名 ⇒ `None`
+    /// （不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
     /// 这条承诺唯一的机械防线就是本用例 —— 多登记一条会把只读插件（今天
     /// `opc_list_*` 那几条命名命令）无端拒成 `PLUGIN_PERMISSION_DENIED`。
     #[test]
-    fn opc_store_permission_table_gates_exactly_the_ten_write_ops() {
-        for write_op in [
+    fn opc_store_permission_table_gates_every_registered_write_op() {
+        const WRITE_OPS: &[&str] = &[
             "publish_blog_post",
             "delete_blog_post",
             "create_blog_post",
@@ -12639,17 +12698,36 @@ mod tests {
             "update_content_asset",
             "delete_content_asset",
             "cancel_publish_schedule",
+            "create_invoice",
+            "delete_invoice",
+            "create_customer",
+            "update_customer",
+            "delete_customer",
+            "create_project",
+            "add_milestone",
+            "create_landing_page",
+            "create_content_asset",
+            "create_publish_schedule",
+            "process_due_schedules",
+            "update_project",
+            "delete_project",
+            "complete_milestone",
             "publish_landing_page",
             "delete_landing_page",
             "mark_contact_read",
-        ] {
-            assert_eq!(
-                required_permission_for("opc.store", write_op),
-                Some(PluginPermission::Write),
-                "写 op `{write_op}` 必须要求 write"
-            );
-        }
-        for read_op in [
+            "create_invoice_from_lead",
+            "update_delivery_invoice_status",
+            "delete_delivery_invoice",
+            "save_platform",
+            "delete_platform",
+            "save_scan_policy",
+            "discover_and_evaluate_leads",
+            "create_lead",
+            "update_lead_status",
+            "convert_lead_to_workflow",
+            "run_lead_workflow",
+        ];
+        const READ_OPS: &[&str] = &[
             "list_blog_posts",
             "list_invoices",
             "list_customers",
@@ -12659,7 +12737,22 @@ mod tests {
             "list_kpis",
             "list_content_assets",
             "list_publish_schedules",
-        ] {
+            "get_financial_report",
+            "get_project",
+            "list_delivery_invoices",
+            "delivery_summary",
+            "list_platforms",
+            "list_leads",
+            "get_scan_policy",
+        ];
+        for write_op in WRITE_OPS {
+            assert_eq!(
+                required_permission_for("opc.store", write_op),
+                Some(PluginPermission::Write),
+                "写 op `{write_op}` 必须要求 write"
+            );
+        }
+        for read_op in READ_OPS {
             assert_eq!(
                 required_permission_for("opc.store", read_op),
                 None,
@@ -12676,18 +12769,7 @@ mod tests {
             );
         }
         // 接缝名逐字：`opc` 少一段、`opc.stores` 多一个字符都不算命中。
-        for write_op in [
-            "publish_blog_post",
-            "delete_blog_post",
-            "create_blog_post",
-            "transition_invoice",
-            "update_content_asset",
-            "delete_content_asset",
-            "cancel_publish_schedule",
-            "publish_landing_page",
-            "delete_landing_page",
-            "mark_contact_read",
-        ] {
+        for write_op in WRITE_OPS {
             assert_eq!(required_permission_for("opc", write_op), None);
             assert_eq!(required_permission_for("opc.stores", write_op), None);
         }

@@ -74,6 +74,10 @@ pub struct HostOpcStore {
     /// 与 `AppState.harness.db()` **同一个**连接池句柄（`DatabaseConnection` 是 Clone 的句柄，
     /// 不是第二套连接语义）。
     db: DatabaseConnection,
+    /// 需求实现链的宿主服务（#264 批 3）：`convert_lead_to_workflow` 回灌能力索引用
+    /// indexer、`run_lead_workflow` 启动执行用 WorkEngine。测试只跑表读写 op，故不装配；
+    /// 生产由 `state.rs` 经 [`Self::with_demand_pipeline`] 装配（缺装配的调用回 `Provider` 错）。
+    demand: Option<DemandPipeline>,
     /// 受保护 id 名单（内置站点内容）：`delete_blog_post` 对它们回 `Protected` 且**不删除**。
     ///
     /// 名单机制照 `jobs.store` 的三件套（`axagent-runtime/crates/runtime-core/src/cron_job.rs`
@@ -84,9 +88,34 @@ pub struct HostOpcStore {
     protected: RwLock<HashSet<String>>,
 }
 
+/// 需求实现链的宿主服务句柄（#264 批 3）。
+struct DemandPipeline {
+    work_engine: std::sync::Arc<axagent_runtime::work_engine::WorkEngine>,
+    capability_indexer: std::sync::Arc<dyn axagent_harness::CapabilityIndexer>,
+}
+
 impl HostOpcStore {
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db, protected: RwLock::new(HashSet::new()) }
+        Self { db, demand: None, protected: RwLock::new(HashSet::new()) }
+    }
+
+    /// 装配需求实现链的两项宿主服务（生产唯一装配口，`state.rs` 调用）。
+    pub fn with_demand_pipeline(
+        mut self,
+        work_engine: std::sync::Arc<axagent_runtime::work_engine::WorkEngine>,
+        capability_indexer: std::sync::Arc<dyn axagent_harness::CapabilityIndexer>,
+    ) -> Self {
+        self.demand = Some(DemandPipeline { work_engine, capability_indexer });
+        self
+    }
+
+    /// 取需求实现链句柄；未装配即回 `Provider` 错（本层 fail-closed，不回退到任何默认值）。
+    fn demand_pipeline(&self, op: &str) -> Result<&DemandPipeline> {
+        self.demand.as_ref().ok_or_else(|| {
+            AxAgentError::Provider(format!(
+                "opc.store::{op} 未装配需求实现管线（宿主 wiring 缺 with_demand_pipeline）"
+            ))
+        })
     }
 
     /// 登记受保护 id（幂等、只增不减；判据同 `CronJobStore::protect_ids`）。
@@ -1040,10 +1069,262 @@ impl OpcStoreProvider for HostOpcStore {
         .await
         .map_err(|e| AxAgentError::Provider(format!("opc.store::create_lead 补录失败: {e}")))
     }
+
+    // ── #264 批 3：需求实现三 op（迁移前 `commands::opc_demand_implement` 的命令体）──
+
+    /// 与迁移前命令逐句同源：dao 判定合法迁移 / 终态幂等，错误原样上抛（保留
+    /// `Validation` / `NotFound` 的类别，不在这里塌成 `Provider`）。
+    async fn update_lead_status(&self, lead_id: String, status: String) -> Result<DemandLeadDto> {
+        opc_demand::update_lead_status(&self.db, &lead_id, &status).await
+    }
+
+    /// 与迁移前命令逐句同源：读线索 → 生成模板 → 写模板表 → 回灌能力索引 → 回写线索。
+    ///
+    /// 「回灌索引」必须在模板落库之后、回写线索之前 —— 迁移前注释已说明：不回灌则
+    /// 刚生成的模板在本会话内不可路由（`sync_passport` 只在索引失败时 warn，不回滚）。
+    async fn convert_lead_to_workflow(&self, lead_id: String) -> Result<WorkflowTemplateData> {
+        let pipeline = self.demand_pipeline("convert_lead_to_workflow")?;
+        let lead = opc_demand::get_lead(&self.db, &lead_id).await?;
+
+        if let Some(wid) = &lead.linked_workflow_id {
+            return Err(AxAgentError::Validation(format!("线索已转化，工作流 ID: {wid}")));
+        }
+
+        let template = generate_lead_workflow_template(&lead);
+        let active_model = build_active_model_from_data(&template);
+        insert_workflow_template(&self.db, active_model).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::convert_lead_to_workflow 创建模板失败: {e}"))
+        })?;
+
+        crate::commands::workflow_template::sync_passport(
+            pipeline.capability_indexer.as_ref(),
+            &template,
+        )
+        .await;
+
+        opc_demand::link_lead_to_workflow(&self.db, &lead_id, &template.id).await?;
+
+        tracing::info!(
+            lead_id = %lead_id,
+            workflow_id = %template.id,
+            "[opc_demand] 线索已转化为工作流"
+        );
+        Ok(template)
+    }
+
+    /// 与迁移前命令逐句同源：前置 = 线索已转化；执行输入为需求简报（与 LLM 节点 prompt
+    /// 同源）；启动成功后回写 `implemented_at`，出参为执行 id。
+    async fn run_lead_workflow(&self, lead_id: String) -> Result<String> {
+        let pipeline = self.demand_pipeline("run_lead_workflow")?;
+        let lead = opc_demand::get_lead(&self.db, &lead_id).await?;
+
+        let workflow_id = lead.linked_workflow_id.clone().ok_or_else(|| {
+            AxAgentError::Validation(
+                "线索尚未转化为工作流，请先调用 opc_convert_lead_to_workflow".into(),
+            )
+        })?;
+
+        let execution_id = pipeline
+            .work_engine
+            .start_workflow(
+                &workflow_id,
+                serde_json::json!({ "lead_brief": build_lead_brief(&lead) }),
+                None,
+            )
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::run_lead_workflow 启动执行失败: {e}"))
+            })?;
+
+        opc_demand::mark_lead_implemented(&self.db, &lead_id).await?;
+
+        tracing::info!(
+            lead_id = %lead_id,
+            workflow_id = %workflow_id,
+            execution_id = %execution_id,
+            "[opc_demand] 线索实现工作流已启动"
+        );
+        Ok(execution_id)
+    }
 }
 
 /// 手动补录平台的固定 platform 标识（与扫描器内置平台标识不冲突）
 const MANUAL_PLATFORM: &str = "manual";
+
+// ── #264 批 3 需求实现三 op 的依赖（同样放在 impl 之后，理由同上）──────────
+use axagent_dao::repo::workflow_template::{
+    build_active_model_from_data, insert_workflow_template,
+};
+use axagent_harness::workflow_types::WorkflowTemplateData;
+
+/// 模板描述/标题的字节截断上限（防线索标题超长撑爆列表 UI；迁移前命令同值）。
+const MAX_TEXT_BYTES: usize = 120;
+
+/// 从线索生成最小可用的实现工作流模板（Trigger + LLM + End）—— 迁移前命令体逐字搬移。
+fn generate_lead_workflow_template(lead: &DemandLeadDto) -> WorkflowTemplateData {
+    use axagent_harness::capability::Visibility;
+    use axagent_harness::workflow_types::{
+        EdgeType, EndNode, EndNodeConfig, LLMNode, LLMNodeConfig, Position, RetryConfig,
+        TriggerConfig, TriggerNode, TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+    };
+    use chrono::Utc;
+
+    let now = Utc::now().timestamp_millis();
+    let brief = build_lead_brief(lead);
+    let title = axagent_harness::util_fns::truncate_to_char_boundary(&lead.title, MAX_TEXT_BYTES);
+
+    let trigger_base = WorkflowNodeBase {
+        id: "trigger".to_string(),
+        title: "开始".to_string(),
+        description: Some("用户触发".to_string()),
+        position: Position { x: 100.0, y: 80.0 },
+        retry: RetryConfig::default(),
+        timeout: None,
+        enabled: true,
+        parent_id: None,
+        compensation: None,
+        continue_on_fail: false,
+    };
+
+    let llm_base = WorkflowNodeBase {
+        id: "llm_implement".to_string(),
+        title: format!("需求实现: {title}"),
+        description: Some(
+            axagent_harness::util_fns::truncate_to_char_boundary(&lead.description, MAX_TEXT_BYTES)
+                .to_string(),
+        ),
+        position: Position { x: 400.0, y: 80.0 },
+        retry: RetryConfig::default(),
+        timeout: None,
+        enabled: true,
+        parent_id: None,
+        compensation: None,
+        continue_on_fail: false,
+    };
+
+    let end_base = WorkflowNodeBase {
+        id: "end".to_string(),
+        title: "结束".to_string(),
+        description: Some("输出实施方案".to_string()),
+        position: Position { x: 700.0, y: 80.0 },
+        retry: RetryConfig::default(),
+        timeout: None,
+        enabled: true,
+        parent_id: None,
+        compensation: None,
+        continue_on_fail: false,
+    };
+
+    let llm_config = LLMNodeConfig {
+        model: String::new(),
+        prompt: format!(
+            "你是 OPC（一人公司）的需求实现助手。请针对以下需求线索产出实施方案，\
+             包含：①需求理解与范围边界 ②实施方案（分步骤）③交付物清单 \
+             ④工作量与报价建议 ⑤风险与前提。只使用需求简报中的事实，不得编造。\n\n{brief}"
+        ),
+        messages: None,
+        temperature: Some(0.7),
+        max_tokens: Some(2048),
+        tools: None,
+        functions: None,
+        consistency_check: None,
+        max_context_tokens: None,
+        reserved_output_tokens: None,
+    };
+
+    WorkflowTemplateData {
+        hooks_config: None,
+        id: format!("demand:lead:{}", lead.id),
+        name: format!("需求实现: {title}"),
+        description: Some(
+            axagent_harness::util_fns::truncate_to_char_boundary(&lead.description, MAX_TEXT_BYTES)
+                .to_string(),
+        ),
+        icon: "target".to_string(),
+        tags: vec!["opc_demand".to_string(), "demand_implement".to_string()],
+        version: 1,
+        is_preset: false,
+        is_editable: true,
+        is_public: false,
+        visibility: Visibility::Public,
+        trigger_config: Some(TriggerConfig {
+            trigger_type: TriggerType::Manual,
+            config: serde_json::json!({}),
+        }),
+        nodes: vec![
+            WorkflowNode::Trigger(TriggerNode {
+                base: trigger_base,
+                config: TriggerConfig {
+                    trigger_type: TriggerType::Manual,
+                    config: serde_json::json!({}),
+                },
+            }),
+            WorkflowNode::Llm(LLMNode { base: llm_base, config: llm_config }),
+            WorkflowNode::End(EndNode {
+                base: end_base,
+                config: EndNodeConfig { output_var: None },
+            }),
+        ],
+        edges: vec![
+            WorkflowEdge {
+                id: "e1".to_string(),
+                source: "trigger".to_string(),
+                source_handle: None,
+                target: "llm_implement".to_string(),
+                target_handle: None,
+                edge_type: EdgeType::Direct,
+                label: None,
+            },
+            WorkflowEdge {
+                id: "e2".to_string(),
+                source: "llm_implement".to_string(),
+                source_handle: None,
+                target: "end".to_string(),
+                target_handle: None,
+                edge_type: EdgeType::Direct,
+                label: None,
+            },
+        ],
+        input_schema: None,
+        output_schema: None,
+        variables: vec![],
+        error_config: None,
+        error_workflow_id: None,
+        tool_defs: vec![],
+        mission_hash: None,
+        cluster_id: Some("demand_implement".to_string()),
+        route_path: Some(format!("/automation/demand/{}", lead.id)),
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+/// 构建需求简报（转化 prompt 与执行输入共用，保证单一事实源）—— 迁移前命令体逐字搬移。
+fn build_lead_brief(lead: &DemandLeadDto) -> String {
+    let budget = match (lead.budget_min, lead.budget_max) {
+        (Some(min), Some(max)) => {
+            format!("{} {} – {} {}", min, lead.budget_currency, max, lead.budget_currency)
+        },
+        (Some(v), None) | (None, Some(v)) => format!("{v} {}", lead.budget_currency),
+        _ => "未提供".to_string(),
+    };
+    format!(
+        "【需求简报】\n标题: {}\n描述: {}\n来源平台: {}\n需求类型: {}\n预算: {}\n商业价值分: {:.0}（{}）\n原文链接: {}\n线索 ID: {}",
+        lead.title,
+        if lead.description.is_empty() {
+            "（无描述）"
+        } else {
+            &lead.description
+        },
+        lead.platform,
+        lead.demand_type,
+        budget,
+        lead.commercial_value_score,
+        lead.opportunity_level,
+        lead.source_url.as_deref().unwrap_or("（无）"),
+        lead.id,
+    )
+}
 
 // ── #264 批 2 需求发现八 op 的依赖 ────────────────────────────────────────
 //

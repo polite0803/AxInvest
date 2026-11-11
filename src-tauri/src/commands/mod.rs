@@ -103,7 +103,6 @@ pub mod narrative;
 pub mod nl_to_cron;
 pub mod onboarding;
 pub mod opc_demand_capability;
-pub mod opc_demand_implement;
 pub mod opc_demand_subscription;
 pub mod opc_llm_bridge;
 pub mod opc_setup;

@@ -144,7 +144,6 @@
         "src-tauri/src/commands/opc_capability_pack_actions.rs": 2,
         "src-tauri/src/commands/opc_capability_pack_bridge.rs": 2,
         "src-tauri/src/commands/opc_capability_pack_runtime.rs": 2,
-        "src-tauri/src/commands/opc_demand_implement.rs": 1,
         "src-tauri/src/commands/opc_demand_subscription.rs": 2,
         "src-tauri/src/commands/opc_learning_hook.rs": 2,
         "src-tauri/src/commands/opc_setup/mod.rs": 1,

@@ -1756,6 +1756,39 @@ function opcManifest({ version, binaryName, sha256 }) {
           required: ["input"],
         },
       },
+      {
+        name: "opc_update_lead_status",
+        description: "更新需求线索生命周期状态（new → evaluated → contacted → won/lost）",
+        command: "worker://opc_update_lead_status",
+        inputSchema: {
+          type: "object",
+          properties: {
+            leadId: { type: "string", description: "线索 ID" },
+            status: { type: "string", description: "目标状态（迁移合法性由宿主判定）" },
+          },
+          required: ["leadId", "status"],
+        },
+      },
+      {
+        name: "opc_convert_lead_to_workflow",
+        description: "把需求线索转化为实现工作流模板（已转化则报错）",
+        command: "worker://opc_convert_lead_to_workflow",
+        inputSchema: {
+          type: "object",
+          properties: { leadId: { type: "string", description: "线索 ID" } },
+          required: ["leadId"],
+        },
+      },
+      {
+        name: "opc_run_lead_workflow",
+        description: "启动线索实现工作流的执行（返回执行 ID）",
+        command: "worker://opc_run_lead_workflow",
+        inputSchema: {
+          type: "object",
+          properties: { leadId: { type: "string", description: "线索 ID" } },
+          required: ["leadId"],
+        },
+      },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };

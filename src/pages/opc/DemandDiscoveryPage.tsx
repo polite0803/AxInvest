@@ -130,6 +130,12 @@ const SAVE_SCAN_POLICY_COMMAND = "opc_save_scan_policy";
 const DISCOVER_AND_EVALUATE_LEADS_COMMAND = "opc_discover_and_evaluate_leads";
 const CREATE_LEAD_COMMAND = "opc_create_lead";
 
+// 需求实现三条命令（#264 批 3）：宿主 `opc_demand_implement.rs` 已整文件删除，
+// 插件命令是唯一通道。三条都写库（清单声明 `write` 权限）。
+const UPDATE_LEAD_STATUS_COMMAND = "opc_update_lead_status";
+const CONVERT_LEAD_TO_WORKFLOW_COMMAND = "opc_convert_lead_to_workflow";
+const RUN_LEAD_WORKFLOW_COMMAND = "opc_run_lead_workflow";
+
 /** 商业价值分 → 文字颜色（≥80 极高 / ≥60 高 / ≥40 中 / 其余低） */
 function scoreColor(
   score: number,
@@ -786,7 +792,10 @@ export function DemandDiscoveryPage() {
   const changeLeadStatus = useCallback(
     async (row: DemandLead, status: string) => {
       try {
-        await invoke<DemandLead>("opc_update_lead_status", { leadId: row.id, status });
+        await invokePluginCommand<DemandLead>(UPDATE_LEAD_STATUS_COMMAND, {
+          leadId: row.id,
+          status,
+        });
         message.success(t("opc.demand.statusUpdated"));
         await loadLeads();
       } catch (e) {
@@ -800,7 +809,7 @@ export function DemandDiscoveryPage() {
   const convertLead = useCallback(
     async (row: DemandLead) => {
       try {
-        await invoke<unknown>("opc_convert_lead_to_workflow", { leadId: row.id });
+        await invokePluginCommand<unknown>(CONVERT_LEAD_TO_WORKFLOW_COMMAND, { leadId: row.id });
         message.success(t("opc.demand.convertSuccess"));
         await loadLeads();
       } catch (e) {
@@ -814,7 +823,7 @@ export function DemandDiscoveryPage() {
   const runLeadWorkflow = useCallback(
     async (row: DemandLead) => {
       try {
-        await invoke<string>("opc_run_lead_workflow", { leadId: row.id });
+        await invokePluginCommand<string>(RUN_LEAD_WORKFLOW_COMMAND, { leadId: row.id });
         message.success(t("opc.demand.runSuccess"));
         await loadLeads();
       } catch (e) {

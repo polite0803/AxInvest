@@ -746,6 +746,48 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::create_lead 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 需求实现三 op（#264 批 3）──────────────────────────────────────────
+    //
+    // 整模块迁移：`commands::opc_demand_implement` 的三条宿主命令（线索状态机 /
+    // 转实现工作流 / 启动执行）。迁移后宿主不再有该模块（该 `.rs` 整文件删除）。
+
+    /// 更新线索生命周期状态（`update_lead_status` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 合法迁移与终态幂等由 dao（`repo::opc_demand::update_lead_status`）判定；
+    /// 非法迁移 / 未知状态 / 线索不存在均回 `Err`（与迁移前宿主命令同判据）。
+    async fn update_lead_status(
+        &self,
+        _lead_id: String,
+        _status: String,
+    ) -> Result<crate::types::opc_demand::DemandLeadDto> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_lead_status 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 把线索转化为实现工作流模板（`convert_lead_to_workflow` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 流程：读线索 → 生成 Trigger(Manual) + LLM + End 模板 → 写模板表 → 回灌能力索引
+    /// → 回写线索 `linked_workflow_id`；已转化的线索重复调用回 `Err`。
+    async fn convert_lead_to_workflow(
+        &self,
+        _lead_id: String,
+    ) -> Result<crate::workflow_types::WorkflowTemplateData> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::convert_lead_to_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 启动线索实现工作流的执行（`run_lead_workflow` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 前置：线索已转化（`linked_workflow_id` 非空，否则 `Err`）。成功回写 `implemented_at`，
+    /// 出参为执行 id。
+    async fn run_lead_workflow(&self, _lead_id: String) -> Result<String> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::run_lead_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

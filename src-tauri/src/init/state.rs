@@ -1791,8 +1791,12 @@ pub async fn create_app_state_with_resource_dir(
     // `repo::opc_blog_post`），wiring 层不出现 SQL；持的还是 `sea_db` 的同一个句柄。
     // 失败只 warn，不阻断启动（与 market.quote / jobs.store / analysis.record 同策略）。
     {
-        let provider: Arc<dyn axagent_harness::OpcStoreProvider> =
-            Arc::new(crate::init::opc_store_service::HostOpcStore::new(sea_db.clone()));
+        // 需求实现三 op（#264 批 3）需要两项宿主服务：转工作流回灌能力索引用 indexer、
+        // 启动执行用 work_engine —— 二者在此处均已就绪（work_engine :769 / indexer :1356）。
+        let provider: Arc<dyn axagent_harness::OpcStoreProvider> = Arc::new(
+            crate::init::opc_store_service::HostOpcStore::new(sea_db.clone())
+                .with_demand_pipeline(work_engine.clone(), capability_indexer_trait.clone()),
+        );
         match axagent_harness::get_capability_registry().register_opc_store(provider) {
             Ok(_) => tracing::info!("opc.store 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("opc.store 注册失败: {e}"),

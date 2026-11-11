@@ -83,8 +83,17 @@ fn model_to_active_model(
 ///
 /// 索引依赖本地 embedding 服务，失败仅 warn：模板已落库，重启后会被重建。
 pub(crate) async fn sync_template_passport(state: &AppState, template: &WorkflowTemplateData) {
+    sync_passport(state.capability_indexer.as_ref(), template).await;
+}
+
+/// [`sync_template_passport`] 的索引器入口：给拿不到 `AppState` 的 wiring 层（如
+/// `opc.store` 接缝的宿主实现）复用同一段回灌逻辑，不复制第二份 warn 口径。
+pub(crate) async fn sync_passport(
+    indexer: &dyn axagent_harness::CapabilityIndexer,
+    template: &WorkflowTemplateData,
+) {
     let passport = template.to_passport_dto();
-    if let Err(e) = state.capability_indexer.index_passport(&passport).await {
+    if let Err(e) = indexer.index_passport(&passport).await {
         tracing::warn!(
             target: "axagent.capability.index",
             capability_id = %passport.capability_id,

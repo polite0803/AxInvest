@@ -2359,7 +2359,7 @@ fmt 后按纪律**重跑全部判据**：`378 passed / 0 failed`（`tmp-d9-test3
 | 表 | 行数 | 判定 |
 |---|---|---|
 | `chat_run_events` · `chat_runs` · `opc_demand_lead` · `opc_market_platform` · `rl_policies` | 各 **0** | 删表零损失 |
-| `opc_capability` | **324**（`tool:AddKnowledgeDocument` 等工具能力清单，中文描述 + `scanned_at`） | ⚠ 有真实业务数据；写入端已移除（`v221_demand_discovery.rs:10`「已移除」/ `demand_discovery.rs:39`「不再落库」） |
+| `opc_capability` | **324**（`tool:AddKnowledgeDocument` 等工具能力清单，中文描述 + `scanned_at`） | ⚠ 有真实业务数据；写入端已移除（`v221_demand_discovery.rs` 已随 `992947dfc` 删除，其原文注记「已移除」/ `demand_discovery.rs:39`「不再落库」） |
 | `vec_kb_…_meta_dup_backup` | **24518**（仅 `rowid` 一列） | ⚠ 名自陈 `dup_backup`；活表 `vec_kb_…_meta` 现 **24516** 行 ⇒ 差 2 行，即被去重掉的项 ⇒ 它是**去重前快照** |
 
 顺带排掉一对**同名族陷阱**：`opc_demand_lead`（单数，31 列，DROP 候选）与 `opc_demand_leads`

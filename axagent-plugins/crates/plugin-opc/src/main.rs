@@ -143,6 +143,12 @@ const OPC_STORE_SAVE_SCAN_POLICY: &str = "save_scan_policy";
 const OPC_STORE_DISCOVER_AND_EVALUATE_LEADS: &str = "discover_and_evaluate_leads";
 const OPC_STORE_CREATE_LEAD: &str = "create_lead";
 
+/// #264 批 3：需求实现三 op（都要 `write`）—— 状态机 / 转模板 / 启动执行。
+/// 三条都改库（转模板还会回灌能力索引），无读 op 随迁。
+const OPC_STORE_UPDATE_LEAD_STATUS: &str = "update_lead_status";
+const OPC_STORE_CONVERT_LEAD_TO_WORKFLOW: &str = "convert_lead_to_workflow";
+const OPC_STORE_RUN_LEAD_WORKFLOW: &str = "run_lead_workflow";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -235,6 +241,12 @@ const COMMAND_GET_SCAN_POLICY: &str = "opc_get_scan_policy";
 const COMMAND_SAVE_SCAN_POLICY: &str = "opc_save_scan_policy";
 const COMMAND_DISCOVER_AND_EVALUATE_LEADS: &str = "opc_discover_and_evaluate_leads";
 const COMMAND_CREATE_LEAD: &str = "opc_create_lead";
+
+/// #264 批 3：需求实现三命令（清单 `commands[].name` 必须逐字一致）。宿主同名 Tauri 命令
+/// 随本批删除（模块 `commands::opc_demand_implement` 整文件移除）。
+const COMMAND_UPDATE_LEAD_STATUS: &str = "opc_update_lead_status";
+const COMMAND_CONVERT_LEAD_TO_WORKFLOW: &str = "opc_convert_lead_to_workflow";
+const COMMAND_RUN_LEAD_WORKFLOW: &str = "opc_run_lead_workflow";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -640,6 +652,31 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
+        },
+        // ── #264 批 3：需求实现三命令（状态机 / 转模板 / 启动执行）──
+        COMMAND_UPDATE_LEAD_STATUS => {
+            match update_lead_status(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_CONVERT_LEAD_TO_WORKFLOW => {
+            match convert_lead_to_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_RUN_LEAD_WORKFLOW => {
+            match run_lead_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
         },
         COMMAND_CREATE_PROJECT => match create_project(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -1664,6 +1701,57 @@ fn create_lead(
     const OP: &str = "opc_create_lead";
     let payload = require_object(input, OP, "input")?;
     call_opc_store(peer, OPC_STORE_CREATE_LEAD, json!({ "input": payload }), call_chain)
+}
+
+/// `opc_update_lead_status`：线索生命周期状态机（写 op，`leadId` + `status` 必填）。
+///
+/// 迁移判定（合法迁移 / 终态 / 幂等）全留在宿主 DAO 层，命令层只判形状 ——
+/// 与 `publish_blog_post` 的「形状 / 语义」分工同口径。
+fn update_lead_status(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_lead_status";
+    let lead_id = require_str(input, OP, "leadId")?;
+    let status = require_str(input, OP, "status")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_LEAD_STATUS,
+        json!({ "lead_id": lead_id, "status": status }),
+        call_chain,
+    )
+}
+
+/// `opc_convert_lead_to_workflow`：把线索转成实现工作流模板（写 op，`leadId` 必填）。
+///
+/// 出参是新建的 `WorkflowTemplateData`（含 `id`）；「已转化」由宿主 provider 判并报错。
+fn convert_lead_to_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_convert_lead_to_workflow";
+    let lead_id = require_str(input, OP, "leadId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CONVERT_LEAD_TO_WORKFLOW,
+        json!({ "lead_id": lead_id }),
+        call_chain,
+    )
+}
+
+/// `opc_run_lead_workflow`：启动线索实现工作流的执行（写 op，`leadId` 必填）。
+///
+/// 出参是执行 id 字符串（接缝出 JSON string，逐字透传）；「尚未转化」由宿主 provider 报错。
+fn run_lead_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_run_lead_workflow";
+    let lead_id = require_str(input, OP, "leadId")?;
+    call_opc_store(peer, OPC_STORE_RUN_LEAD_WORKFLOW, json!({ "lead_id": lead_id }), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

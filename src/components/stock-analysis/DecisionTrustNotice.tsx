@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
  * 三者对用户的意义天差地别（①要补数据或谨慎、②是明确结论），但 UI 上一模一样。
  * 本组件把 ① 的前提（因子权重坍缩 + 数据缺口清单）与「被动降级」判定直接摊开。
  *
- * 数据来源（均已在 `lib/agentOutput.ts::normalizeDecision` 落为 camelCase）：
+ * 数据来源（均已在 `lib/stock-analysis/agentOutput.ts::normalizeDecision` 落为 camelCase）：
  *   · `decision.weightsCollapsed` / `collapseReason` / `weightRatio` / `untrustedCount`
  *     — portfolio-mgr.rhai V66 输出，判定因子权重是否整体坍缩；
  *   · `decision.dataGaps` — portfolio-mgr 消费的上游节点缺失清单（后端原名

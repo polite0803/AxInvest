@@ -33,9 +33,9 @@
  *
  * 本模块按后端**声明分值**逐维复刻，方向判据交给权威归一化器 `parseActionStrict`。
  */
+import { parseActionStrict, parseRiskLevel, StockAction, StockRiskLevel } from "../stock-analysis-utils";
+import type { StockActionType } from "../stock-analysis-utils";
 import { extractLlmField, parseJsonLoose } from "./agentOutput";
-import { parseActionStrict, parseRiskLevel, StockAction, StockRiskLevel } from "./stock-analysis-utils";
-import type { StockActionType } from "./stock-analysis-utils";
 
 /**
  * 各维度满分 —— 与后端 `compute_decision_agreement` 的声明分值**逐一对应**。

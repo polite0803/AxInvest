@@ -1,22 +1,5 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import i18n from "@/i18n";
-import {
-  cleanToolCallTags,
-  type DecisionExplanation,
-  extractContent,
-  extractDecision,
-  extractJevJudgment,
-  extractValuationApplicability,
-  type JevJudgment,
-  normalizeDecision,
-  parseDecisionExplanation,
-  parseJsonLoose,
-  reconstructVerdictTag,
-  tryParseDecision,
-  type ValuationApplicability,
-} from "@/lib/agentOutput";
-import { computeAgreementScore } from "@/lib/decision-agreement";
-import { buildDecisionInputsReport, type DecisionInputsReport } from "@/lib/decisionInputDiagnosis";
 import { backendErrorText, translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
@@ -32,6 +15,23 @@ import {
   parseDebateRoundRef,
   StockAction,
 } from "@/lib/stock-analysis-utils";
+import {
+  cleanToolCallTags,
+  type DecisionExplanation,
+  extractContent,
+  extractDecision,
+  extractJevJudgment,
+  extractValuationApplicability,
+  type JevJudgment,
+  normalizeDecision,
+  parseDecisionExplanation,
+  parseJsonLoose,
+  reconstructVerdictTag,
+  tryParseDecision,
+  type ValuationApplicability,
+} from "@/lib/stock-analysis/agentOutput";
+import { computeAgreementScore } from "@/lib/stock-analysis/decision-agreement";
+import { buildDecisionInputsReport, type DecisionInputsReport } from "@/lib/stock-analysis/decisionInputDiagnosis";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { EarningsEvent, KLine, StockQuote, StockSearchResult } from "@/types";
@@ -1621,7 +1621,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           decisionAgreementScore = Math.round(Number(djParsed.formulaLlmAgreement));
         } else {
           // 2026-09-21: 降级打分收敛到单点 `computeAgreementScore`
-          //   （`@/lib/decision-agreement`）。原实现在本文件内有**三份近乎逐字的副本**
+          //   （`@/lib/stock-analysis/decision-agreement`）。原实现在本文件内有**三份近乎逐字的副本**
           //   （loadAnalysis / rerun / workflow-completed），三份都停留在 V45 的 3 维刻度
           //   （action 50 / positionPct 30 / confidence 20），而后端 V65 早已是 6 维
           //   （30 / 20 / 15 / 15 / 10 / 10）⇒ 同一个 `decisionAgreementScore` 在两条路径上
@@ -1941,7 +1941,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       if (llmDecisionJson) {
         try {
           // 2026-09-21: 降级打分收敛到单点 `computeAgreementScore`
-          //   （`@/lib/decision-agreement`）—— 原第二份副本，刻度同 loadAnalysis。
+          //   （`@/lib/stock-analysis/decision-agreement`）—— 原第二份副本，刻度同 loadAnalysis。
           decisionAgreementScore = computeAgreementScore(d, llmDecisionJson);
         } catch (e) {
           console.warn("一致性计算失败:", e);
@@ -2918,7 +2918,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (llmDecisionJson && decision) {
           try {
             // 2026-09-21: 降级打分收敛到单点 `computeAgreementScore`
-            //   （`@/lib/decision-agreement`）—— 原第三份副本，刻度同 loadAnalysis。
+            //   （`@/lib/stock-analysis/decision-agreement`）—— 原第三份副本，刻度同 loadAnalysis。
             decisionAgreementScore = computeAgreementScore(decision, llmDecisionJson);
           } catch (e) {
             console.warn("[StockAnalysis] Failed to compute LLM agreement:", e);

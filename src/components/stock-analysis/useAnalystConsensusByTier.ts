@@ -1,4 +1,3 @@
-import { contradictionBasesForTier } from "@/lib/dataQualityDiagnosis";
 import {
   type AnalystSentimentTally,
   type Consensus,
@@ -7,6 +6,7 @@ import {
   HORIZON_T_SUFFIX,
   tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
+import { contradictionBasesForTier } from "@/lib/stock-analysis/dataQualityDiagnosis";
 import type { DataQualityReport } from "@/types/stock-analysis";
 import { useMemo, useState } from "react";
 import { cleanToolCallTags } from "./utils";

@@ -4,7 +4,6 @@ import { useSimpleMode } from "@/components/stock-analysis/_workspace/_shared/us
 import { DecisionConsensusMeter } from "@/components/stock-analysis/_workspace/DecisionConsensusMeter";
 import { DecisionTrustNotice } from "@/components/stock-analysis/DecisionTrustNotice";
 import { useIsMobile } from "@/components/stock-analysis/MobileResponsive";
-import { extractLlmField } from "@/lib/agentOutput";
 import {
   getActionColor,
   getActionTKey,
@@ -12,6 +11,7 @@ import {
   getRiskTKey,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
+import { extractLlmField } from "@/lib/stock-analysis/agentOutput";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { StockDecision } from "@/types/stock-analysis";

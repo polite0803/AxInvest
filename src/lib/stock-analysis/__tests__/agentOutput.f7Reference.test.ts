@@ -1,4 +1,4 @@
-import { normalizeDecision } from "@/lib/agentOutput";
+import { normalizeDecision } from "@/lib/stock-analysis/agentOutput";
 import { describe, expect, it } from "vitest";
 
 /**

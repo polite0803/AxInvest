@@ -1,12 +1,12 @@
 /**
  * 股票分析组件共享工具函数
  *
- * 统一导出自 @/lib/agentOutput，避免重复实现。
+ * 统一导出自 @/lib/stock-analysis/agentOutput，避免重复实现。
  * 所有组件通过 `./utils` 导入保持向后兼容。
  */
-export { cleanToolCallTags, tryBeautifyJson } from "@/lib/agentOutput";
+export { cleanToolCallTags, tryBeautifyJson } from "@/lib/stock-analysis/agentOutput";
 import i18n from "@/i18n";
-import { cleanToolCallTags } from "@/lib/agentOutput";
+import { cleanToolCallTags } from "@/lib/stock-analysis/agentOutput";
 
 function looksLikeJson(text: string): boolean {
   const trimmed = text.trim();

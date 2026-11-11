@@ -2,7 +2,6 @@
 //
 // 夹具是 2026-10-10 立讯精密（002475）那条真实分析的两份分析师产物原文
 // （stock_analyses.blackboard_snapshot），不是按期望答案反造的样本。
-import { cleanToolCallTags, reconstructVerdictTag } from "@/lib/agentOutput";
 import {
   classifyAnalystReport,
   classifySentiment,
@@ -10,6 +9,7 @@ import {
   normalizeVerdictScore,
   tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
+import { cleanToolCallTags, reconstructVerdictTag } from "@/lib/stock-analysis/agentOutput";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -87,9 +87,9 @@ describe("嵌套 verdict 下钻（结构化优先于正文反方向词）", () =
 
 describe("形态门：计票判据不得再出现第二份副本", () => {
   const uiFiles = {
-    顶部共识条: "../../components/stock-analysis/StockAnalysisPage.tsx",
-    分歧卡: "../../components/stock-analysis/AnalystReportGrid.tsx",
-    紧凑摘要: "../../components/stock-analysis/dual-view/CompactAnalystSummary.tsx",
+    顶部共识条: "../../../components/stock-analysis/StockAnalysisPage.tsx",
+    分歧卡: "../../../components/stock-analysis/AnalystReportGrid.tsx",
+    紧凑摘要: "../../../components/stock-analysis/dual-view/CompactAnalystSummary.tsx",
   };
   const src = (p: string) => readFileSync(path.resolve(__dirname, p), "utf8");
 
@@ -119,7 +119,7 @@ describe("形态门：计票判据不得再出现第二份副本", () => {
   });
 
   it("逐档共识 hook 必须透传 tally，自己不得成为第四份计票实现", () => {
-    const text = src("../../components/stock-analysis/useAnalystConsensusByTier.ts");
+    const text = src("../../../components/stock-analysis/useAnalystConsensusByTier.ts");
     expect(text.length, "hook 源码应可读").toBeGreaterThan(500);
     expect(text).toContain("tallyAnalystSentiment(");
     expect(text).not.toMatch(/bullish\+\+/);
@@ -129,7 +129,7 @@ describe("形态门：计票判据不得再出现第二份副本", () => {
     // 两个计数域：`consensus.votes.*` 是票数，`consensus.neutral/total` 是按持有期加权的分数和。
     // 后者一度被写成 `${neutral}/${total}` 显示 ⇒ 用户看到的是「3.3/11.6 中性」这种假票数，
     // 与同屏顶部条的真票数长得一样却不可比。
-    const text = src("../../components/stock-analysis/RecommendationPanel.tsx");
+    const text = src("../../../components/stock-analysis/RecommendationPanel.tsx");
     expect(text).toContain("consensus.votes.neutral");
     expect(text).not.toMatch(/\$\{consensus\.neutral\}\/\$\{consensus\.total\}/);
   });
@@ -144,7 +144,7 @@ describe("形态门：计票判据不得再出现第二份副本", () => {
   it("store 里 value 槽位写入 analystReports 的**每一处**都必须过 reconstructVerdictTag", () => {
     // 三条写入路径（实时 routeNodeOutput ×2 / parseWorkflowResults / loadAnalysis）
     // 漏一条 ⇒ live 与重载算出的票型不同源，正是本次修的缺陷。
-    const store = src("../../stores/feature/stockAnalysisStore.ts");
+    const store = src("../../../stores/feature/stockAnalysisStore.ts");
     const valueWrites = store.split(/\r?\n/).filter((line) => {
       const t = line.trim();
       return (t.startsWith("analystReports[viKey] =") || t.startsWith("reports[viKey] =")
@@ -177,7 +177,7 @@ describe("形态门：计票判据不得再出现第二份副本", () => {
       expect(text, `${name} 不得内联 >1 判据`).not.toContain("> 1 ?");
     }
     // 面积下限：引用点被改名/删掉时，本门不得静默退化成空跑
-    const refs = [uiFiles.分歧卡, uiFiles.顶部共识条, "../../components/stock-analysis/AnalystReportCard.tsx"]
+    const refs = [uiFiles.分歧卡, uiFiles.顶部共识条, "../../../components/stock-analysis/AnalystReportCard.tsx"]
       .reduce((acc, p) => acc + (src(p).match(/normalizeVerdictScore\(/g) ?? []).length, 0);
     expect(refs).toBeGreaterThanOrEqual(3);
   });

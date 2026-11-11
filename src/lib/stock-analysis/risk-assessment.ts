@@ -13,7 +13,7 @@
  * 结构化字段原样上屏即可，不需要跨视角归一。
  */
 
-import { cleanToolCallTags } from "@/lib/agentOutput";
+import { cleanToolCallTags } from "@/lib/stock-analysis/agentOutput";
 
 /** 三视角的固定顺序与标签（主面板与 chat 卡片共用，不跟随事件/JSON 顺序） */
 export const RISK_VIEW_ROWS = [

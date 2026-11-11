@@ -1,8 +1,8 @@
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { formatFixed } from "@/lib/format";
 import { invoke } from "@/lib/invoke";
-import { loadRecoIcStats } from "@/lib/recoIcStats";
 import { horizonIcAbsenceKey, horizonSuffix } from "@/lib/stock-analysis-utils";
+import { loadRecoIcStats } from "@/lib/stock-analysis/recoIcStats";
 import type { TaskAccepted } from "@/types";
 import type {
   BacktestComparisonResponse,

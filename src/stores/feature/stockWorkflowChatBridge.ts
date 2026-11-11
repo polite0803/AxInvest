@@ -1,5 +1,4 @@
 import { makeWorkflowContent, type WorkflowCardData } from "@/components/stock-analysis/workflowChatCard";
-import { extractContent, extractDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import {
@@ -9,6 +8,7 @@ import {
   parseDebateRoundRef,
   TOOL_NODE_I18N_KEY,
 } from "@/lib/stock-analysis-utils";
+import { extractContent, extractDecision } from "@/lib/stock-analysis/agentOutput";
 import { useConversationStore } from "@/stores/domain/conversationStore";
 import type { Message } from "@/types";
 import type { StockDecision } from "@/types/stock-analysis";

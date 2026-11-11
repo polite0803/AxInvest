@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next";
 
 import { formatFixed } from "@/lib/format";
 import { invoke } from "@/lib/invoke";
-import { invalidateRecoIcStats, loadRecoIcStats } from "@/lib/recoIcStats";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
+import { invalidateRecoIcStats, loadRecoIcStats } from "@/lib/stock-analysis/recoIcStats";
 import type { RecoLoopCell, RecoLoopView } from "@/types/stock-analysis";
 
 /**

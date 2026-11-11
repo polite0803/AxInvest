@@ -9,7 +9,7 @@ import {
   provenanceOfRecord,
   StockAction,
   UNKNOWN_HORIZON,
-} from "../stock-analysis-utils";
+} from "../../stock-analysis-utils";
 
 /**
  * 历史分析弹窗「全量加载 + 筛选」的判据层。
@@ -192,7 +192,7 @@ describe("filterAnalysisHistory · 结论档与 Tag 同判据", () => {
 
   it("八个结论选项的展示键互不相同且都在 zh-CN 里（动态键逃过 check_i18n 的静态扫描）", () => {
     const zh = JSON.parse(
-      readFileSync(path.resolve(import.meta.dirname, "..", "..", "i18n", "locales", "zh-CN.json"), "utf8"),
+      readFileSync(path.resolve(import.meta.dirname, "..", "..", "..", "i18n", "locales", "zh-CN.json"), "utf8"),
     ) as { stockAnalysis: Record<string, string> };
     const keys = Object.values(StockAction).map((a) => getActionTKey(a));
     expect(new Set(keys).size).toBe(8);
@@ -252,7 +252,7 @@ describe("provenanceOfRecord · 记录来历（live / as-of 回放）", () => {
 
   it("弹窗确实把这两列声明进记录类型并接上来历判据（只改后端下发、组件仍读旧形状＝半改状态）", () => {
     const src = readFileSync(
-      path.resolve(import.meta.dirname, "..", "..", "components", "stock-analysis", "AnalysisHistoryButton.tsx"),
+      path.resolve(import.meta.dirname, "..", "..", "..", "components", "stock-analysis", "AnalysisHistoryButton.tsx"),
       "utf8",
     );
     expect(src).toContain("analysisKind?: string | null;");

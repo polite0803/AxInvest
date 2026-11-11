@@ -4,7 +4,7 @@ import { App } from "antd";
 import { I18nextProvider } from "react-i18next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { invalidateRecoIcStats } from "@/lib/recoIcStats";
+import { invalidateRecoIcStats } from "@/lib/stock-analysis/recoIcStats";
 import { RecoLoopPanel } from "../RecoLoopPanel";
 
 const invokeMock = vi.fn();

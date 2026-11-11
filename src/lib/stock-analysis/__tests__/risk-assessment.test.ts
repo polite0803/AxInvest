@@ -8,7 +8,7 @@
  * 这里锁的是「只取值、不打分」：verdict 三个字段原样返回，confidence 不转成风险分；
  * 规则档认不出结构化字段时返回 null，交给调用方按普通产物保留（不静默丢）。
  */
-import { isRiskAggregateKey, parseRiskAssessment, parseRiskLevel } from "@/lib/risk-assessment";
+import { isRiskAggregateKey, parseRiskAssessment, parseRiskLevel } from "@/lib/stock-analysis/risk-assessment";
 import { describe, expect, it } from "vitest";
 
 function agentResult(content: string): string {

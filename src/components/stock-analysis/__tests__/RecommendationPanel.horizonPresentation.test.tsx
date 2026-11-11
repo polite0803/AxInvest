@@ -1,5 +1,5 @@
 import i18n from "@/i18n";
-import { invalidateRecoIcStats } from "@/lib/recoIcStats";
+import { invalidateRecoIcStats } from "@/lib/stock-analysis/recoIcStats";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";

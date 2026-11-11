@@ -1,12 +1,12 @@
 // i18n-exempt: 业务逻辑判断字符串（节点类型/状态枚举键名），非 UI 展示文本
+import { invoke } from "@/lib/invoke";
 import {
   diagStatusToSeverity,
   dqAbbrOf,
   parseDataQualityReport,
   reportQualitySeverity,
   resolveAnalystDiagnosis,
-} from "@/lib/dataQualityDiagnosis";
-import { invoke } from "@/lib/invoke";
+} from "@/lib/stock-analysis/dataQualityDiagnosis";
 import { useStockAnalysisStore } from "@/stores";
 import type { DataQualityDiagItem } from "@/types/stock-analysis";
 import {
@@ -93,7 +93,7 @@ interface DiagRow {
   field: string;
   /**
    * 展示严重度。`"unknown"` = **无值**（旧快照缺字段），体现「不知道」而非等级 ——
-   * 与 `@/lib/dataQualityDiagnosis` 的 `DiagSeverity` 区分开，后者只有真实判定的三档。
+   * 与 `@/lib/stock-analysis/dataQualityDiagnosis` 的 `DiagSeverity` 区分开，后者只有真实判定的三档。
    */
   severity: "good" | "warning" | "issue" | "unknown";
   detail: string;
@@ -170,7 +170,7 @@ export function AnalystDataQualityModal({
       {
         // 2026-09-21 新增：本节点**自己的**报告质量分。此前该值只被累加进全局
         // report_quality_avg ⇒ 单节点得分不可见，弹窗顶部只能显示全局值（10 个弹窗同数）。
-        // 三档阈值取自 `@/lib/dataQualityDiagnosis::reportQualitySeverity` 的**单一来源**
+        // 三档阈值取自 `@/lib/stock-analysis/dataQualityDiagnosis::reportQualitySeverity` 的**单一来源**
         // （与 `DecisionBanner` 逐节点表格的「报告质量」列共用，避免同值两处不同色）。
         // 返回 null = 无值 ⇒ "unknown"（灰点），不再冒充 good。
         field: t("stockAnalysis.analystReport.dqFieldNodeReportQuality"),

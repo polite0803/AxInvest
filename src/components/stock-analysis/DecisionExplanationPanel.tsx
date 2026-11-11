@@ -21,7 +21,7 @@ import { useTranslation } from "react-i18next";
  * 数据来源：`stockAnalysisStore.decisionExplanation`
  *   · 实时路径 — `workflow-completed` 的 `results["decision-explainer"]`
  *   · 回放路径 — `loadAnalysis` 的 `blackboard_snapshot["decision-explainer"]`
- * 两条路径都经 `lib/agentOutput.ts::parseDecisionExplanation` 解包 +
+ * 两条路径都经 `lib/stock-analysis/agentOutput.ts::parseDecisionExplanation` 解包 +
  * 校验（四个内容字段全空则返回 null），因此此处**不需要**再做兜底解析。
  *
  * 无产出时整块不渲染 —— 该节点 `continue_on_fail = true`，失败/跳过是预期状态，

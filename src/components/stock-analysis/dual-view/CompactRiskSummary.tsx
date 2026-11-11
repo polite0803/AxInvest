@@ -2,14 +2,19 @@
 /**
  * CompactRiskSummary — RiskMatrix 在 chat 中的紧凑版本。
  *
- * 与主面板同源（`@/lib/risk-assessment`）：固定激进/保守/中性三行，各自展示
+ * 与主面板同源（`@/lib/stock-analysis/risk-assessment`）：固定激进/保守/中性三行，各自展示
  * verdict 的立场/建议仓位/置信度，再给规则档 category。
  *
  * 这里**不再有第二套风险分**：此前它用关键词词频另算一套分数（主面板用 confidence），
  * 同一份数据在 chat 与主面板读数不一致；也没有过滤 `risk-aggregated`，
  * 聚合容器会参与平均并挤掉一个真实视角。两处都随本轮收口。
  */
-import { parseRiskAssessment, parseRiskLevel, RISK_VIEW_ROWS, riskStanceLabelKey } from "@/lib/risk-assessment";
+import {
+  parseRiskAssessment,
+  parseRiskLevel,
+  RISK_VIEW_ROWS,
+  riskStanceLabelKey,
+} from "@/lib/stock-analysis/risk-assessment";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";

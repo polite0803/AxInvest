@@ -1,5 +1,5 @@
 // i18n-exempt: 断言全部为结构化诊断字段，无 UI 文案。
-import { contradictionBasesForTier } from "@/lib/dataQualityDiagnosis";
+import { contradictionBasesForTier } from "@/lib/stock-analysis/dataQualityDiagnosis";
 import type { DataQualityDiagItem, DataQualityReport } from "@/types/stock-analysis";
 import { describe, expect, it } from "vitest";
 

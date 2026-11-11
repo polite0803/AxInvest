@@ -1,5 +1,4 @@
 // i18n-exempt: 计票口径单测，断言全部为结构化输入/输出，无 UI 文案。
-import { cleanToolCallTags } from "@/lib/agentOutput";
 import {
   classifyAnalystReport,
   computeStockConsensus,
@@ -9,6 +8,7 @@ import {
   scopeAnalystReports,
   tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
+import { cleanToolCallTags } from "@/lib/stock-analysis/agentOutput";
 import { describe, expect, it } from "vitest";
 
 describe("extractBullBearScores", () => {

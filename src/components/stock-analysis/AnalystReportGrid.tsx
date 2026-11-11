@@ -1,6 +1,4 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
-import type { JevJudgment } from "@/lib/agentOutput";
-import { parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
 import {
   analystBaseOf,
   classifyDirectionText,
@@ -11,6 +9,8 @@ import {
   horizonLabelKey,
   normalizeVerdictScore,
 } from "@/lib/stock-analysis-utils";
+import type { JevJudgment } from "@/lib/stock-analysis/agentOutput";
+import { parseDataQualityReport } from "@/lib/stock-analysis/dataQualityDiagnosis";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Segmented, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";

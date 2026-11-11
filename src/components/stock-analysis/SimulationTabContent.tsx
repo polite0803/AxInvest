@@ -1,6 +1,6 @@
 import { translateBackendError } from "@/lib/errorI18n";
 import { useStockAnalysisStore } from "@/stores";
-import type { SimulationSnapshot } from "@/stores";
+import type { SimulationSnapshot } from "@/stores/feature/stockAnalysisStore";
 import { Tabs, Tag } from "antd";
 import { Info, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";

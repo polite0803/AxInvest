@@ -12,7 +12,7 @@
 
 import { formatCNY } from "@/lib/format";
 import { useProviderStore } from "@/stores/feature/providerStore";
-import { useScreenshotDiagnosisStore } from "@/stores/feature/screenshotDiagnosisStore";
+import { useScreenshotDiagnosisStore } from "@/stores/feature/stock-analysis/screenshotDiagnosisStore";
 import type { ProviderConfig } from "@/types";
 import type { RiskDiagnosis, ScreenshotDiagnosis, ScreenshotPosition } from "@/types/screenshot-diagnosis";
 import { UploadOutlined } from "@ant-design/icons";

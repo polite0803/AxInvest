@@ -3,7 +3,6 @@
  * 输入:分析师报告 { expertId: report }
  * 输出:共识标签 + 多空条 + Top 3 报告摘要
  */
-import { contradictionBasesForTier, parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
 import {
   classifyAnalystReport,
   type Consensus,
@@ -11,6 +10,7 @@ import {
   scopeAnalystReports,
   type Sentiment,
 } from "@/lib/stock-analysis-utils";
+import { contradictionBasesForTier, parseDataQualityReport } from "@/lib/stock-analysis/dataQualityDiagnosis";
 import { useStockAnalysisStore } from "@/stores";
 import { Tooltip } from "antd";
 import { useMemo } from "react";

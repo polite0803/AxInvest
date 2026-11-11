@@ -10,7 +10,7 @@ import {
   scoreAgreementEvidence,
   scoreAgreementPosition,
   scoreAgreementRisk,
-} from "@/lib/decision-agreement";
+} from "@/lib/stock-analysis/decision-agreement";
 import { describe, expect, it } from "vitest";
 
 /**

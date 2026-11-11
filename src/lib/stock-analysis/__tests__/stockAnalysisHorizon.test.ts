@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeDecision, normalizeHorizonPriceMap } from "../agentOutput";
 import {
   ACTION_SOURCES,
   actionSourceLabelKey,
@@ -15,7 +14,8 @@ import {
   moverLabelPresentation,
   readDecisionProvenance,
   readHorizonActions,
-} from "../stock-analysis-utils";
+} from "../../stock-analysis-utils";
+import { normalizeDecision, normalizeHorizonPriceMap } from "../agentOutput";
 
 /**
  * 历史列表的档位呈现（2026-09-29）：四档 Action 取自 `decisionJson.decisionsByHorizon`，
@@ -240,8 +240,8 @@ describe("normalizeHorizonPriceMap", () => {
  * 直接消失」（标签函数返回 null ⇒ 调用方不渲染）。000710 的抱怨正是这一族：
  * 主档=持有、标签=超短线分支选档、超短线 chip=买入，三者同屏而无人说明谁改写谁。
  */
-const RHAI_PATH = path.resolve(__dirname, "../../../src-tauri/src/commands/portfolio-mgr.rhai");
-const LOCALE_DIR = path.resolve(__dirname, "../../../src/i18n/locales");
+const RHAI_PATH = path.resolve(__dirname, "../../../../src-tauri/src/commands/portfolio-mgr.rhai");
+const LOCALE_DIR = path.resolve(__dirname, "../../../../src/i18n/locales");
 const LANGS = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "zh-CN", "zh-TW"];
 const PROVENANCE_KEYS = [
   ...ACTION_SOURCES.map(actionSourceLabelKey),
@@ -397,7 +397,7 @@ describe("readDecisionProvenance", () => {
  */
 const MOVER_RS_PATH = path.resolve(
   __dirname,
-  "../../../axagent-quant/crates/analysis-engine/src/mover_recall.rs",
+  "../../../../axagent-quant/crates/analysis-engine/src/mover_recall.rs",
 );
 
 describe("moverLabelPresentation（妖股标签四分句）", () => {

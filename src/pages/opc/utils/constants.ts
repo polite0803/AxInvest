@@ -194,21 +194,21 @@ export interface CapabilityEntry {
   name: string;
   description: string;
   source: string;
-  source_id: string;
-  capability_type: string;
-  applicable_scenarios: string[];
-  example_deliverables: string[];
+  sourceId: string;
+  capabilityType: string;
+  applicableScenarios: string[];
+  exampleDeliverables: string[];
   metadata: Record<string, unknown>;
 }
 
 export interface CapabilityInventory {
   tools: CapabilityEntry[];
   skills: CapabilityEntry[];
-  mcp_tools: CapabilityEntry[];
+  mcpTools: CapabilityEntry[];
   workflows: CapabilityEntry[];
   agents: CapabilityEntry[];
-  scanned_at: number;
-  total_count: number;
+  scannedAt: number;
+  totalCount: number;
 }
 
 // Delivery 类型已上收 `@/types/opc`（#264 批 5：页面 + dev mock 双消费方同源）。
@@ -240,17 +240,17 @@ export interface MarketPlatform {
 
 export interface CapabilityGap {
   id: string;
-  lead_id: string | null;
+  leadId: string | null;
   title: string;
   description: string;
-  missing_capability: string;
-  gap_type: string;
-  suggested_action: string;
+  missingCapability: string;
+  gapType: string;
+  suggestedAction: string;
   priority: number;
   status: string;
-  created_at: number;
-  updated_at: number;
-  closed_at: number | null;
+  createdAt: number;
+  updatedAt: number;
+  closedAt: number | null;
 }
 
 // ── 定时任务类型 ──────────────────────────────────────────────

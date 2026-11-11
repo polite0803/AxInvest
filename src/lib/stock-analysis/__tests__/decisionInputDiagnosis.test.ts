@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { buildDecisionInputsReport, summarizeDecisionInputs } from "@/lib/decisionInputDiagnosis";
+import { buildDecisionInputsReport, summarizeDecisionInputs } from "@/lib/stock-analysis/decisionInputDiagnosis";
 import { describe, expect, it } from "vitest";
 
 // i18n-exempt: 测试内断言值为模块内硬编码中文技术串（见 decisionInputDiagnosis.ts 文件头），非 UI 文案。

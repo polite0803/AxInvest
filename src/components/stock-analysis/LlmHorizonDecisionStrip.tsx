@@ -13,8 +13,8 @@
  * ⚠ 与公式侧并列时两侧仓位**不是同一个口径**：LLM 侧不含档内风控否决与仓位上限，
  * 所以本条只摆 LLM 自己的结论，不与之求差、不求平均（逐档一致率是 B1 的活）。
  */
-import { readLlmHorizonDecisions } from "@/lib/agentOutput";
 import { getActionColor, getActionTKey, HORIZON_CAMEL_TO_SNAKE, HORIZON_T_SUFFIX } from "@/lib/stock-analysis-utils";
+import { readLlmHorizonDecisions } from "@/lib/stock-analysis/agentOutput";
 import type { LlmHorizonDecision } from "@/types/stock-analysis";
 import { Tag } from "antd";
 import { useTranslation } from "react-i18next";

@@ -8,7 +8,7 @@ import {
   type RiskAssessmentView,
   type RiskLevelView,
   riskStanceLabelKey,
-} from "@/lib/risk-assessment";
+} from "@/lib/stock-analysis/risk-assessment";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { type CategoricalHue, hueVar } from "@/theme/categoricalColors";
 import { DownloadOutlined, ExpandOutlined } from "@ant-design/icons";

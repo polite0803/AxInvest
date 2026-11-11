@@ -12,7 +12,7 @@ import {
   parseJsonLoose,
   reconstructVerdictTag,
   tryParseDecision,
-} from "@/lib/agentOutput";
+} from "@/lib/stock-analysis/agentOutput";
 import type { StockDecision } from "@/types/stock-analysis";
 
 /**

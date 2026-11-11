@@ -1623,7 +1623,7 @@ function getAnalystWeight(rawId: string, timeHorizon?: string | null): number {
  * 不同持有期的四次作答（子集不同：4/5/7/7），不能合计成一个池、也不能跨档去重 ——
  * 需要并排看，用 `groupAnalystReportsByTier` 分组展示。
  *
- * ⚠ `reports` 的文本**必须先经 `cleanToolCallTags`**（`@/lib/agentOutput`）清洗：
+ * ⚠ `reports` 的文本**必须先经 `cleanToolCallTags`**（`@/lib/stock-analysis/agentOutput`）清洗：
  * 本模块不能反向依赖 agentOutput（它已依赖本模块），清洗由调用侧统一完成。
  */
 export function computeStockConsensus(
@@ -2290,7 +2290,7 @@ export function extractBullBearScores(report: string): { bull: number; bear: num
  * 口径：结构化分数优先且需领先 20%（1.2 倍阈值，接近即中性）；无结构化分数时回退
  * `classifySentiment`（VERDICT/JSON stance → 自由文本关键词）。
  *
- * 注意：传入前必须经 `cleanToolCallTags`（`@/lib/agentOutput`）清洗。本模块不能反向
+ * 注意：传入前必须经 `cleanToolCallTags`（`@/lib/stock-analysis/agentOutput`）清洗。本模块不能反向
  * 依赖 agentOutput（它已依赖本模块），故清洗由调用侧统一完成。
  */
 export function classifyAnalystReport(cleanedReport: string): Sentiment | null {

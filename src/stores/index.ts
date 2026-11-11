@@ -99,12 +99,14 @@ export type { SaveSkillWorkflowResponse, SimilarWorkflow } from "./feature/workf
 export { useWorkflowStore } from "./feature/workflowStore";
 
 // ── AxInvest 投资域 ──
-export { useCrossMarketStore } from "./feature/crossMarketStore";
-export { usePaperPortfolioStore } from "./feature/paperPortfolioStore";
+// ⚠ 域 store 不再经本 barrel 转发（宿主 barrel 只留跨域共享 DTO）：
+// crossMarket / paperPortfolio / quant 三个 store 请直接从 `@/stores/feature/<file>` 取；
+// stockAnalysisStore 的 PortfolioStressResult / SimulationScenarioRow / SimulationSnapshot
+// 三个类型请直接从 `@/stores/feature/stockAnalysisStore` 取（域类型归域，见 AGENTS.md 禁区 3）。
+// `useStockAnalysisStore` 与 `usePipelineStore` 仍保留导出：前者约 48 处经 barrel 消费，后者被
+// `PipelineJobCard` 经 barrel 使用 —— 收口需另批迁移，勿在本处顺手摘除。
 export { usePipelineStore } from "./feature/pipelineStore";
-export { useBacktestStore, useStrategyStore } from "./feature/quant";
 export { useStockAnalysisStore } from "./feature/stockAnalysisStore";
-export type { PortfolioStressResult, SimulationScenarioRow, SimulationSnapshot } from "./feature/stockAnalysisStore";
 export { useTaskCenterStore } from "./feature/taskCenterStore";
 export type { RunFilters, RunTimeRange } from "./feature/taskCenterStore";
 export { useWorkspaceStore, type WorkspaceView } from "./feature/workspaceStore";

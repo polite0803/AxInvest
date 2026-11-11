@@ -57,7 +57,7 @@ const LLM_SCHEMA_PATH = "src-tauri/config/llm-output-schemas.json";
 const LLM_PROMPT_PATH = "src-tauri/agency_experts/stock-analysis/trader.md";
 const LLM_CAMEL_AUTH_PATH = "axagent-core/crates/harness/src/holding_period.rs";
 const LLM_RUST_PARSE_PATH = "src-tauri/src/commands/stock_workflow/decision.rs";
-const LLM_TS_READER_PATH = "src/lib/agentOutput.ts";
+const LLM_TS_READER_PATH = "src/lib/stock-analysis/agentOutput.ts";
 const LLM_CORE_PATH = "src-tauri/src/commands/stock_workflow/core.rs";
 /** B4：逐档结局 2×2 的 DTO 权威（Rust 结构体在 engine 里，TS 镜像在同一份 `stock-analysis.ts`） */
 const REFLECTION_STATS_RS_PATH = `${crateRel("analysis-engine", "src/reflection_stats.rs")}`;

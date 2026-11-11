@@ -147,7 +147,7 @@ describe("熔断态三载体一致", () => {
   });
 
   it("normalizeDecision 是白名单重建 ⇒ 五个键必须显式带上（漏一个就是界面永远读不到）", () => {
-    const src = fs.readFileSync(path.join(ROOT, "src/lib/agentOutput.ts"), "utf8");
+    const src = fs.readFileSync(path.join(ROOT, "src/lib/stock-analysis/agentOutput.ts"), "utf8");
     for (
       const key of [
         FUSE_KEY + "State",

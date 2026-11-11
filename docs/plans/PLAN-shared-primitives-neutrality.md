@@ -51,9 +51,9 @@
 |---|---|---|---|---|---|---|
 | A1 | `src/components/chat/ChatViewMessages.tsx:86` | `QuoteBlock` | 误报 | `src/components/chat/CiteBlock.tsx:3`「引用回复：消息气泡内显示被引用消息的预览块」——`quote` 是**消息引用**，与行情无关（原锚 QuoteBlock.tsx 第 3 行，2026-11-11 #263 改名后随迁，见下方注记） | — | 不改 |
 | A2 | `src/components/chat/InputArea.tsx:69` | `QuotePreviewBar` | 误报 | `src/components/chat/CitePreviewBar.tsx:17`「引用回复预览条：显示当前被引用的消息内容，可一键取消引用」（原锚 QuotePreviewBar.tsx 第 17 行，同上） | — | 不改 |
-| A3 | `src/components/settings/index.ts:30` | `../chat/PluginMarketplace` | 误报 | `src/components/chat/PluginMarketplace.tsx:112` 取键 `chat.plugins.marketplace.title`——`market` = **插件市场** | — | 不改 |
+| A3 | `src/components/settings/index.ts:30` | `../chat/PluginMarketplace` | 误报 | `src/components/chat/PluginGallery.tsx:112`（原锚 `PluginMarketplace.tsx`，2026-11-12 §159 改名刀随迁）取键 `chat.plugins.marketplace.title`——`market` = **插件市场** | — | 不改 |
 | A4 | `src/pages/SettingsPage.tsx:71` | `@/components/chat/PluginMarketplace`（动态 `import()`） | 误报 | 同上（同一组件，另一处装载） | — | 不改 |
-| A5 | `src/components/settings/WorkflowSettings.tsx:5` | `@/pages/WorkflowMarketplace` | 误报 | `src/pages/WorkflowMarketplace.tsx:18`「目录条目类型，与后端 `axagent_harness::marketplace::CatalogItem` 对齐」= 工作流模板市场 | — | 不改 |
+| A5 | `src/components/settings/WorkflowSettings.tsx:5` | `@/pages/WorkflowMarketplace` | 误报 | `src/pages/WorkflowGallery.tsx:18`（原锚 `WorkflowMarketplace.tsx`，2026-11-12 §159 改名刀随迁）「目录条目类型，与后端 `axagent_harness::marketplace::CatalogItem` 对齐」= 工作流模板市场 | — | 不改 |
 | A6 | `src/pages/opc/OpcPage.tsx:22` | `./components/MarketPackTab` | 误报（**两域判据不同源**） | `src/pages/opc/components/MarketPackTab.tsx:20` 调 `invoke("opc_market_list")`——`market` 是 OPC 的**能力市场**；导入方与目标同属 OPC | — | 不改（前端补 `cross` 桶另行裁定） |
 | A7 | `src/pages/opc/OpcPage.tsx:25` | `./components/TalentMarketTab` | 误报（同上） | `src/pages/opc/components/TalentMarketTab.tsx:10` + `TALENT_CATEGORIES`——人才市场 | — | 不改 |
 

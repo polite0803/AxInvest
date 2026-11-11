@@ -362,7 +362,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 
 | 面 | 事实（全部指到行号） |
 |---|---|
-| 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowMarketplace.tsx:186`；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
+| 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowGallery.tsx:186`（原文件名 `WorkflowMarketplace`，2026-11-12 §159 改名刀 git mv 纯改名、行号不变）；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
 | 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1447 条 / 159 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源；2026-11-11 #264 批 2 删需求发现八命令整模块 ⇒ 1491→1486→1478，其中 1491→1486 的 −5 属并行批已落未登记，见 §150；**2026-11-11 #264 批 3 再 −3（1478→1475）、模块 163→162** = 整文件删除 `opc_demand_implement.rs` 三条需求实现命令，见 §151；**2026-11-11 #264 批 4 再 −3（1475→1472）、模块 162→161** = 整文件删除 `opc_workflows/domain_workflows.rs` 三条领域工作流只读命令，见 §152；**2026-11-11 #264 批 5 再 −6（1472→1466）、模块 161 不动** = 删 `demand_discovery.rs` 交付段六条交付命令（迁 T2 插件命令通道），见 §153；**2026-11-11 #264 批 6 再 −5（1466→1461）、模块 161→160** = 整文件删除 `demand_discovery.rs` 剩余五条发现面命令（`opc_scan_capabilities` / `opc_proactive_evaluate_leads` / `opc_list_capability_gaps` / `opc_close_capability_gap` / `opc_analyze_capability_gaps`，迁 T2 插件命令通道），见 §154；**2026-11-11 #264 批 7 刀 A 再 −11（1461→1450）、模块 160 不动** = 删十一条 OPC 宿主命令（`opc_capability_pack_actions` 5 + `opc_capability_pack_runtime` 3 + `opc_demand_subscription` 3；前两组共八条**零前端调用**、只活在中智能体工具面，订阅三条有前端调用点且已同批切插件命名命令 —— 按 `git grep -w … HEAD -- src` 实测 8 条 0 命中 / 3 条 5·3·3 命中），逐条映射与等价性实证见 §155。⚠ 本批**无整模块退出**：三条模块删后仍有宿主命令存活，故模块数不动；**2026-11-12 G19 DojoSDK 死通道退役批再 −3（1450→1447）、模块 160→159** = 整模块删除 `src-tauri/src/commands/dojo_sdk.rs`（三条命令全仓零消费方，且不带 `#[agent_command]`；连带工具面 9 条 DojoSDK 死声明同批退役），见 §156），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
 | 引擎 | `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs` 7366 行；构造点 `src-tauri/src/init/state.rs:745`；句柄在 **`app_state.rs:345` `pub work_engine: Arc<WorkEngine>`** |
 | 节点 | `NodeExecutorTrait`（`node_executor_trait.rs:224`）实现者 **33** 个，`rt-workflow/src/work_engine/dispatcher.rs:80-109` `init_builtin` 注册 26 个 + `engine/mod.rs:1214-1231` pending 补齐 |
@@ -976,7 +976,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P6.0-④ 页面贡献通道 T3** | 见 §0.12.5 三选一：选 A 是**配置 + CSP + 桥扩到 page**（3–5）；选 C 另加 10+ | **3–5**（选 A） | ②的选择由你定，不影响其它项 |
 | **P6.0-⑤ 引擎去域化** | `agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 ⇒ 改节点配置/接缝贡献；生产区股票词 32 行 | **5–8** | ③④ 之后（要有贡献通道才能把知识挪出去） |
 | **P6.0-⑥ 执行器与接缝单轨化** | 32 个执行器 0 个走注册表；`document_parser_executor.rs`(59 行空壳) 接真接缝、`notification_executor.rs`(165 行自带四平台 webhook) 并入 `notify.channel` | **10–15** | ⑤ 同批（都是引擎侧） |
-| **P6.1 股票迁出** | 改写 133 处 / 26 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 85 009 行前端出包 + 3 527 key（**这一行整体是 2026-11-04 立项时的规模读数**；现值 = Rust 待改写 51 处 / 13 文件 + H 桶 3 处 / 3 文件、前端反向 56 处 / 43 文件 ⇒ §0.10.1 + §125.7） | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
+| **P6.1 股票迁出** | 改写 133 处 / 26 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 85 009 行前端出包 + 3 527 key（**这一行整体是 2026-11-04 立项时的规模读数**；现值（2026-11-12 实测，`audit-l1-blockers --dump-readings`）= **Rust 待改写 0 处 / 0 文件**（`21a743fa5` #240 E 批消掉 tools 三工具最后 3 处）+ H 桶 3 处 / 3 文件（白名单，合计 3/3）、前端反向 **12 处 / 11 文件**（#263 系已逐条登记归因）⇒ §0.10.1 + §125.7） | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
 | **P6.2 OPC 迁出** | 0 处主壳改写（**现况已变 48 处 / 3 文件**：`84d8c357b` 起 `tools/opc.rs` 41 + `commands/fleet/mod.rs` 4 + `init/state.rs` 3 指 `axagent_company_runtime::`，见 §0.10.1 与 §116；**2026-11-08 `#36` 批 1 再变 24 处 / 4 文件** = 待改写 21 + H 桶 3；**同日 `#36` 批 2 再变 18 处 / 4 文件** = 待改写 15 + H 桶 3，见 §0.10.1；估工随之上浮，另批核）+ 28 处前端 + 137 条命令 + **29 处跨包口改 `call_seam`** + 28 表 + 12 797 行前端 | **20–28** | P6.1（跨包口指向股票 crate）+ D1 超时先修 |
 
 **合计：P6.0 ≈ 39–59 人日，P6.1 ≈ 45–60，P6.2 ≈ 20–28 ⇒ 全段 ≈ 105–147 人日**（单人 5–7 个月，3 人并行受限于关键路径约 2.5–3.5 个月）。
@@ -996,7 +996,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 股票还在主壳里时，OPC 迁出后只能反向依赖主壳 = 不是插件。顺序由这条决定，不由工作量决定。
 阶段收口才跑全量（CI 口径三条，见 AGENTS.md）；阶段内用 `cargo check` + 定点 clippy。
 
-| **P6.1** | **股票业务迁出为 L1 插件**（任务 #35）：改写 §0.10.1 桶① 的 133 处 / 26 文件（前 5 个文件占 **87** 处），304 条命令走 T2 通道，54 处前端反向 import 清 0（该 54 与左侧 133 同为 2026-11-04 立项读数，现值 56 处 / 43 文件 ⇒ §125.7），20 张表改由包内 `schema.json` 声明 | 主壳 `grep` 域 crate = 0；`src-tauri/Cargo.toml` 无股票 crate；卸载股票插件后其余 1 099 条命令可用、`stock_*` 表与数据保留 |
+| **P6.1** | **股票业务迁出为 L1 插件**（任务 #35）：改写 §0.10.1 桶① 的 133 处 / 26 文件（前 5 个文件占 **87** 处），304 条命令走 T2 通道，54 处前端反向 import 清 0（该 54 与左侧 133 同为 2026-11-04 立项读数，现值（2026-11-12）10 处 / 9 文件已逐条登记归因（Marketplace 改名刀 §159 消 2 处，余 8 处 ①②③ 类归因见 §0.10.1）、Rust 待改写已归零（待改写 0 + H 桶 3 = 合计 3/3）⇒ §125.7），17 张表（20 项口径含 3 项非表，§158 纠偏）改由包内 `schema.json` 声明 | 主壳 `grep` 域 crate = 0；`src-tauri/Cargo.toml` 无股票 crate；卸载股票插件后其余 1 099 条命令可用、`stock_*` 表与数据保留 |
 | **P6.2** | **OPC 业务迁出为 L1 插件**（任务 #36，**不得先于 P6.1**：OPC 的 29 处引用指向股票 crate）：138 条命令走 T2，28 处前端 import 清 0，29 处跨包口改 `call_seam` 并在 §0.6.2 权限面登记 `declared_calls` | 同上判据；且 OPC 停用不影响股票包 |
 | **P6.3** | 其余功能包按 P6.1/P6.2 模板批量迁出：工作流编辑器（83 条命令）、**知识库/Wiki 业务功能面**（131 条命令 / 11 827 行，阻塞面 72 处 / 25 文件，见 §0.6.3 C 层；它与 RAG 解 1/解 2 的取舍无关，可独立排期）等 | 每包一条 `grep 域 crate = 0` 的门禁记录，进 `docs/audits/` |
 ---
@@ -8319,4 +8319,82 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 
 1. 十一条新 op **没有各补一条 `plugin-opc/tests/protocol.rs` 端到端桁块** —— 现有 10 例只覆盖 blog 面与身份校验；十一条的**集合**由 `worker.rs` 的两处测试锁钉住（`WRITE_OPS` `:13206-13207`、`READ_OPS` `:13234-13242`），钉的是「op 名进没进分派面」，**不钉帧往返出参形状**。
 2. 全量 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 与 `cargo test --workspace` **未跑** —— 按 AGENTS.md「所有阶段完成后跑一次」，批 7 刀 B 仍在队列里，留待该批交回后的联合窗口。
+**未做（登记，不算本批通过项）**：
+
+1. 十一条新 op **没有各补一条 `plugin-opc/tests/protocol.rs` 端到端桁块** —— 现有 10 例只覆盖 blog 面与身份校验；十一条的**集合**由 `worker.rs` 的两处测试锁钉住（`WRITE_OPS` `:13206-13207`、`READ_OPS` `:13234-13242`），钉的是「op 名进没进分派面」，**不钉帧往返出参形状**。
+2. 全量 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 与 `cargo test --workspace` **未跑** —— 按 AGENTS.md「所有阶段完成后跑一次」，批 7 刀 B 仍在队列里，留待该批交回后的联合窗口。
 3. 两条体量锚的红与 `--update-baseline` 一律留给安静窗口（并行期做会把他人未提交的减少钉进棘轮）。
+
+## §156 #264 批 7 刀 B 底册：19 条零调用命令与两刀切分（2026-11-12 取证定案）
+
+**盘点口径（#277 交回，本轮 leader 复核）**：批 7 首轮退役核查（#273）后现存 56 条 `#[agent_command]`（`commands/opc.rs` 24 + `opc_capability_pack_actions.rs` 16 + `opc_capability_pack_runtime.rs` 等其余），前端调用面逐条 `git grep -w` 实测 **19 条零命中**（`opc_get_invoice` / `opc_update_invoice` / `opc_get_customer` / `opc_find_customer_by_email` / `opc_record_kpi` / `opc_list_revenue` / `opc_get_investment_advice` / `opc_import_talent_library` / `opc_sync_fleet` / `opc_get_publish_schedule` / `opc_update_publish_schedule` / `opc_get_workflow_config` / `opc_validate_entity` / `opc_compute_kpis` / `opc_batch_validate_entities` / `opc_get_capability_pack_data` / `opc_get_capability_pack_precheck` / `opc_get_capability_pack_health` / `opc_execute_dynamic_workflow`）。⚠ #278 任务名写的「20 条」是 G19 退役**前**的取证数；dojo 三条已随 G19 整批退役（§G19），**以盘上 19 条为准**。
+
+**两刀切分**（按「零 DTO 上收即可迁」与否，判据沿用 #274）：
+
+- **刀 B1 = 七条全读薄层**（机械透传，照 §155 九处形态逐项落地）：`opc_get_workflow_config`（返回类型 `CapabilityPackWorkflowConfig` **已在 harness `opc_store.rs`** 的 `:1394` 区段，宿主 `actions.rs` 头部 re-export，独缺单条 get op）、`opc_validate_entity`、`opc_batch_validate_entities`、`opc_compute_kpis`、`opc_get_capability_pack_data`、`opc_get_capability_pack_precheck`、`opc_get_capability_pack_health`（后六条返回 `serde_json::Value` 手工拼装，op 侧同形状透传，**零 DTO 上收**）。七条全是读 ⇒ **权限表写分支一条闸都不加**，`READ_OPS` 集合补七条；清单侧七条 `worker://opc_*` 全落 read-only。op 命名与既有 `get_capability_pack_config` 同风格：`get_workflow_config` / `validate_entity` / `batch_validate_entities` / `compute_kpis` / `get_capability_pack_data` / `get_capability_pack_precheck` / `get_capability_pack_health`。
+- **刀 B2 = 十二条**（A 组 `opc.rs` 11 条 + `opc_execute_dynamic_workflow`）：需 **9 个域模型 DTO 上收 harness**（`Invoice` + `UpdateInvoiceInput`、`Customer`、`CreateKpiInput`、`KpiRecord`、`RevenueRecord`、`InvestmentAdvice`、`PublishSchedule` + `UpdatePublishScheduleInput`——全部住在 `axagent-quant/crates/company-runtime` 的 invoice / customer / analytics / finance / publish_schedule 模块，harness 侧现只有对应 SummaryView 投影，单查完整体与 update 输入缺）+ **两个注入点**（`opc_sync_fleet` 需 fleet_repository + 直连 sea_orm 两实体改写；`opc_execute_dynamic_workflow` 最重——work_engine + tool_resolver 闭包 + 转调的 `opc_execute_workflow` 本体是存活命令，op 实现体必须下沉复用三级模板查找而非复制）。其中六条写（`opc_update_invoice` / `opc_record_kpi` / `opc_import_talent_library` / `opc_sync_fleet` / `opc_update_publish_schedule` / `opc_execute_dynamic_workflow`）进写权限档；`opc_import_talent_library` 的任意 path 读目录面随批裁定。
+
+**自由函数红线（lane 必须逐条核对引用面后才许删，删多一条即砍断存活数据源）**：
+
+- runtime.rs **可随命令迁走**：`validate_entity` / `validate_batch` / `compute_kpis`（除本文件命令包装器外全仓零引用，真实实现体在 company-runtime `capability_pack_validator.rs` 与 `capability_pack_kpi_service.rs` 不随宿主删除而消失）；三条 Phase1 命令共享的 `build_data_client` + `capability_pack_dir`（三条全迁 ⇒ 整链可删，装配逻辑搬进 `HostOpcStore` 实现体，`app_dir` 装配照刀 A 先例 fail-closed）。
+- runtime.rs **必须保留**：`list_industries` / `get_kpi_definitions` / `has_capability_pack`（HostOpcStore 刀 A 实现体的数据源）、`declared_kpi_thresholds` / `load_runtime_kpi_meta` / `apply_kpi_metadata`（分析命令与 dashboard 命令的源）。
+- actions.rs **必须保留**：`get_workflow_config` / `get_capability_pack_config` / `get_action_config` 三个自由函数（既是 `opc_capability_pack_bridge.rs` LLM 工具的实现体，也是接缝实现体唯一数据源）——**只删 `opc_get_workflow_config` 的 `#[tauri::command]` 包装器**。`run_template_via_engine` 归 B2。
+- opc.rs 两条私有 helper `parse_frontmatter_brief` 与 `opc_batch_role_status` 各自唯一调用点在本批退役命令体内（B2 范围），B1 不碰 opc.rs。
+
+**读数级联预期（lane 同批回写登记表，B1 落地后实测为准）**：`commandTotal` 1450→1443、`commandNameSetParity` 同步 1443、`registryFileLines` 1517→1510、`opcBoundaryCommands` 63/8→56/8（actions −1 + runtime −6，八模块不动）、`opcAuditDomainCommands` 53/6→46/6、`k1RsFileCount` / `remoteSeamCount` 不动；清单侧 `worker://opc_` 计数 78→85（读 56 · 写 29），manifest description 计数同批改。B2 落地后另算。宿主侧 `plugin-opc/src/main.rs` 的「未迁两条」注释（`opc_get_capability_pack` / `opc_get_workflow_config`）随批订正。
+
+## §157 #264 独立仓前置底册（#281，2026-11-12 取证定案）
+
+**退出判据三条**（= §0.4「脚手架期同仓」退出判据原文，PLAN 第 68-70 行区段）：① 依赖面收敛到「只有 harness」；② SDK 已有可发布版本号与 changelog；③ CI 能在不含主仓源码的目录独立跑绿。**在 ①②③ 达成前，任何「同仓插件根」都只是临时工位**。
+
+**逐插件实测缺口（对账结果：两插件今天都不可挪出）**：
+
+- **plugin-opc**：违判据① —— `axagent-plugins/crates/plugin-opc/Cargo.toml` 第 30 行存在 `axagent-company-runtime = { version = "3.0.0", path = "../../../axagent-quant/crates/company-runtime" }` 的 path 依赖（OPC 逻辑权威实现仍在 company-runtime，§159 搬迁的遗产）；违判据③ 的前端面 —— OPC 的 16 个页面仍住主壳 `src/pages/opc/**`（页面声明经 #260 已交域模块 `routes.tsx`，但**产物装载**未走 `pages[]`，`build-plugin-bundle.mjs` 的 `opcManifest`（第 1075 行起）生成的清单**没有 `pages` 字段**）⇒ 挪出主仓即页面全丢。
+- **plugin-stock**：对称形态 —— 同居 `axagent-plugins/` 根的子 crate，与 plugin-opc 共享同一 bundle 生成脚本与同一 workspace；前端 16+ 页面住主壳 `src/components/stock-analysis/**`，同样无 `pages[]` 声明。
+- **共同前置**：判据②（SDK 版本号 + changelog）两侧均未建 —— `axagent-plugins` 根无独立版本管理，版本号随 bundle 生成注入。
+
+**收口次序**（不排期，随 #264 主线推进自然达成）：先让两侧剩余命令迁 T2（§156 刀 B1/B2）+ 前端反向阻塞清零（#263 系）+ `plugin-opc` 摘 company-runtime path 依赖（OPC 逻辑完成 harness 化或插件内化）⇒ ①③ 自动达标；`pages[]` 声明与 SDK 版本化（②）单列批次处理。**判据③ 的验证形态**：`axagent-plugins` 目录拷出到独立位置后 `cargo test -p axagent-plugin-opc` 与 bundle 生成脚本双双跑绿。
+
+## §158 T4「20 表转 schema.json」前置底册（2026-11-12 取证 lane 交回，批次设计定案）
+
+> P6.1 判据行 = `docs/plans/PLAN-shell-plus-plugins.md:999`；「20 张表」出处 = §64.10（`:3198`）；17 表纠错与归属 = §64.11（`:3210`）。所有行号为 lane 用 `git grep -n` 实测。
+
+**底册纠偏两处**：① §64.10 的「并集实测 20 张表」是 **20 项**（直连 13 + 仅经 `axagent_dao::repo` 7，3 项重合），其中 **3 项不是表**（§64.11 已纠）：`reco_seed` 无建表（读口实为 `watchlist_items`）、`stock_lesson_queries` 是查询组（落 `stock_reflections`/`reflection_lessons`/`stock_analyses`）、`reco_pool` 是 dao 模块名（真表 `reco_pool_batches`）⇒ **实际 17 张表**；P6.1 判据行文字（「20 张表」）与 §64.11 已不同步，随本节一并改字。② **不存在手写 stock 建表 migration**：`axagent-infra/crates/dao/src/migrations/mod.rs` 头部（`:5-24`）`MIGRATIONS = &[]` 已清空（2026-09-16 起）；建表唯一来源是**声明式收敛引擎** —— dao `build.rs:22-23` 扫 `axagent-core/crates/entities/src/lib.rs` 的 `pub mod`（现存 201 个）生成 `OUT_DIR/entity_registry.rs`，`reconcile/expected.rs` 用 `Schema::create_table_from_entity` 渲染期望集。历史出身 `v200_axinvest_stock_tables.rs` 已删。
+
+**17 张表与消费矩阵要点**（完整表见 lane 报告，此处存判据）：
+
+| 档 | 表 | 关键障碍 |
+|---|---|---|
+| H（宿主持有/依赖深） | `stock_analyses`（src-tauri 直查 50 + gateway + scheduler/restore + 两个离线 bin）、`settings`（全仓 61 文件共用，域内只碰 6 具名键）、`workflow_templates`（非域 49 文件在写 + partial 索引） | 摘实体不可行或暂缓；`stock_analyses` 缓转最后处理 |
+| M（宿主零直查） | `portfolio_holdings`、`trades`（已有 `trading.engine` 六 op 承接）、`mover_recall_events`、`workflow_param_changes` | 写点全在 analysis-engine（随插件走）；先行批 |
+| S（先落 op 再摘） | `stock_reflections`（抢占 running 须合成单 op）、`stock_evolution_history`（approve 链 CAS）、`strategy_performance`、`financial_snapshots`（删窗+逐条插无事务）、`reco_picks`、`decision_validations`（`insert_if_absent` 判重）、`mover_recall_runs`、`reco_pool_batches`、`price_alerts`（upsert 单 op 已有 `StockMonitorProvider::upsert_alert` 先例） | 宿主直查合计 ~120+ 处须先按 §64.11 op 清单改接缝 |
+| 永不转 | `settings`、`workflow_templates` | 判据 1 不许双声明；实体摘除即功能断 |
+
+**三条硬障碍（转表的决定性前置）**：
+
+1. **摘实体是前置**：`reconcile/expected.rs:106-134` 判据 1 使「宿主实体仍在注册表 + 插件 schema.json 同名声明」**硬报错**（两份真源拒绝静默覆盖）⇒ 每张表转 schema.json 必须同批「删 `entities/src/<表>.rs` + 删 lib.rs 对应 `pub mod`」（201 个 pub mod 由 build.rs 自动收录，无手工登记）。
+2. **extras 条目必须同步迁走**：`expected.rs:486` 对「L2 指向实体未覆盖的表」报错 ⇒ `stock_analyses`×3、`financial_snapshots`、`stock_reflections`、`strategy_performance`×2、`workflow_templates` 共 8 条 extras 声明必须迁进 schema.json（CHECK/复合索引 v1 支持）或丢弃；但 **partial 索引两条**（`strategy_performance` 的 `source_ref` unique partial `extras.rs:1273`、`workflow_templates` 的 `mission_hash` partial `:1222`）**v1 词表不支持 `where`**（§69.1 明文）⇒ 要么扩 v1 词表（dao `ExternalIndex` 加字段 + §69.1 文档同批），要么这两张表缓转。
+3. **宿主直查未清**：src-tauri 侧 ~120+ 处 `::Entity` 直查（大头 `stock_analyses` 50、`stock_reflections` 26、`reco_picks` 17）须先落 §64.11 op 清单；analysis-engine 直连 `axagent_entities` 随本体迁出后自然消失。
+
+**T4 通道现状（#134 已实测打通）**：宿主消费入口 `src-tauri/src/init/plugin_schema.rs:31` `reconcile_installed`；挂载点 ×4（install/enable/update/启动 `services.rs:580`，失败仅 error! 不挡启动）；解析 `reconcile/external.rs`（`deny_unknown_fields` + 版本闸）；收敛 `apply.rs:819 cycle_with_external`（`additive_only=true + max_destructive_per_run=0`，卸载零 DDL）；验收先例 §69.4（J2 15 passed + J3 建表幂等第二轮 `executed==0`）。**盘上两插件均无 schema.json 先例**；`build-plugin-bundle.mjs` 只处理 ui.json（`:170/:263`），表声明不进 bundle 产物 —— 批 0 需补 bundle 侧。
+
+**批次分组**：批 0（闸门批）= v1 词表决策（partial 索引）+ P6.1 判据行改字（20→17 并剔 H 档 2）+ bundle 生成补 schema.json 段；批 1 = M 档 4 表（摘实体 + 插件 schema.json + 幂等 + 卸载零 DDL + 数据保留四验收）；批 2 = S 档 9 表（先 op 后摘，每 op 有 harness DTO + op 级权限；转表后宿主 grep `表名::Entity` = 0）；批 3 = 永不转/缓转按实况登记。
+
+**未取证项（随批 0 补齐）**：settings 域内 6 具名键清单；PG/SQLite 双方言 CHECK 写法差异（`ck_stock_analyses_kind` 是 PG 限定）；`stock_management` 表实况；stock 域宽口径表 ~25 张（不在 17 表口径）；worker 侧数据访问形态（直接开 SQLite 连接 vs 全走接缝 op）；`reco_scan_audit` 索引/CHECK 穷尽核对。
+
+## §159 ③ 类词面误伤逐条裁定 + Marketplace 改名刀（2026-11-12，前端反向 12/11 → 10/9）
+
+> §0.10.1 的 ③ 类「词面误伤业务合法 7 处」（PLAN:520）逐条裁定结论 + 可消账 2 处的落地。判据先例：#263 QuoteBlock→CiteBlock（内容零股票数据 ⇒ 改名正当）；§91.1①（名副其实 ⇒ 只登记）。
+
+**裁定表**（③ 类全部 6 处 / 5 文件，现 perFile 实测分布；PLAN:520 写 7 处系时点差，其中 1 处已被 #263 的 `e7dc0d458` 归并）：
+
+| 符号 | 消费方 | 裁定 | 理由 |
+|---|---|---|---|
+| `investTaskDefs` / `InvestTaskFields` | `TaskCreateModal.tsx:26,27`（2 处） | **维持登记，不可消账** | 内容真属投资任务种类定义，任何名副其实的路径必撞 feRe 的 `invest` 词；改名即语义漂移。终局随任务种类注册表（#216 task_cards 同模式）或域迁出走 |
+| `investSceneTemplates` | `main.tsx:44` 动态 import + `sceneTemplates.labelKey.test.ts:4`（2 处） | **维持登记，不可消账** | 内容真属 office/phaser 的「投资办公室」场景主题（`INVESTMENT_OFFICE_TEMPLATE`），名副其实 ⇒ 路径必撞词；`finance` 等替词是语义漂移，不许为凑读数改 |
+| `WorkflowMarketplace` | `WorkflowSettings.tsx:4,113`（1 处 foreign） | **改名消账** | 工作流模板市场，内容零股票数据，`Market` 撞 feRe 纯词面误导（#263 先例适用） |
+| `PluginMarketplace` | `SettingsPage.tsx:73`（1 处 foreign） | **改名消账** | 插件市场，同上 |
+
+**改名刀落地**（本批）：`PluginMarketplace.tsx`→`PluginGallery.tsx`、`WorkflowMarketplace.tsx`→`WorkflowGallery.tsx`、`usePluginMarketplace.ts`→`usePluginGallery.ts`（hook 被改名后的组件 import，目标路径含 `Market` 显形为新增 foreign —— 改名刀的连带边，同批消）+ 组件/hook 符号名 + 消费方改指（SettingsPage lazy 变量 `LazyPluginGallery`、WorkflowSettings import/渲染、测试文件 import/mock/describe）+ `components/settings/index.ts` 的 #193 退役注释改指（指引防腐烂，历史叙述保留原名 + 括注改名事实）+ `scripts/.i18n-allowlist.json` 的 `src/pages/WorkflowMarketplace.tsx` 豁免条目改指 `WorkflowGallery.tsx`（i18n key `*marketplace.*` 不参与 feRe 判定不动，#263 先例）。`MarketplaceStats`（`@/lib/reviewApi` 类型）与 hook 文件外的 marketplace 字面量不参与路径判定，不动。
+
+**读数与验证**：`--fe-json` 实测 stock **12/11 → 10/9**（−2 foreign：SettingsPage + WorkflowSettings；改名引入的 `PluginGallery.tsx:4`→hook 边由 hook 随刀改名消化，opc 0/0 不动）；`npx dprint check` 8 文件 EXIT=0（盘符路径跑，UNC 下 cmd 回退假绿已避开）；组件中立性基线外 0 / i18n 豁免预算 EXIT=0 / jsx-text-i18n 基线外 0。**未做清单**：vitest 定点（`PluginGallery.eventStats.test.tsx`）首轮 60.22s worker 启动超时（B1 cargo lane 编译期 #141 环境形态，全量落盘复跑中）；typecheck 全量（改名类改动兜底，随联合窗口跑）。

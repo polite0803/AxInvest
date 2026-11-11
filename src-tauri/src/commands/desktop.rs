@@ -158,8 +158,8 @@ pub async fn send_desktop_notification_opt(
         return Ok(DesktopNotificationResult { sent: false, method: "log".to_string() });
     };
 
-    // 偏好总闸。内部复用方（init/services.rs 定时荐股、commands/demand_discovery.rs
-    // 需求发现）都走这一个入口，故只需在此处判一次。读设置失败时按默认值放行，
+    // 偏好总闸。内部复用方（init/services.rs 定时荐股通知、OPC 需求发现扫描通知）
+    // 都走这一个入口，故只需在此处判一次。读设置失败时按默认值放行，
     // 与 commands/backup.rs、commands/webdav.rs 的 gated emit 口径一致。
     let notifications_enabled = {
         let state = app.state::<AppState>();

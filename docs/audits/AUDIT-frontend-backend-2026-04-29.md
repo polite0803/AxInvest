@@ -28,10 +28,10 @@
 | 8 | `update_search_provider` | `stores/feature/searchStore.ts` | 同上 |
 | 9 | `delete_search_provider` | `stores/feature/searchStore.ts:193` | 同上 |
 | 10 | `execute_search` | `stores/feature/searchStore.ts` | 同上 |
-| 11 | `plugin_install` | `components/chat/PluginMarketplace.tsx:59` | 需新增插件管理命令模块 |
-| 12 | `plugin_uninstall` | `components/chat/PluginMarketplace.tsx:72` | 同上 |
-| 13 | `plugin_enable` | `components/chat/PluginMarketplace.tsx:84` | 同上 |
-| 14 | `plugin_disable` | `components/chat/PluginMarketplace.tsx:84` | 同上 |
+| 11 | `plugin_install` | `components/chat/PluginGallery.tsx:59`（原 `PluginMarketplace.tsx`，2026-11-12 §159 改名刀随迁，行号为快照时点数） | 需新增插件管理命令模块 |
+| 12 | `plugin_uninstall` | `components/chat/PluginGallery.tsx:72` | 同上 |
+| 13 | `plugin_enable` | `components/chat/PluginGallery.tsx:84` | 同上 |
+| 14 | `plugin_disable` | `components/chat/PluginGallery.tsx:84` | 同上 |
 | 15 | `file_revoke_authorization` | `components/chat/FilePermissionDialog.tsx:69` | 需新增或前端移除该功能入口 |
 | 16 | `list_plugin_tools` | `components/atomicSkill/EntryRefSelector.tsx:39` | 需新增命令或使用 `list_local_tools` 替代 |
 | 17 | `proactive_convert_to_nudge` | `stores/feature/nudgeStore.ts:237` | 需在 `proactive.rs` 新增命令 |

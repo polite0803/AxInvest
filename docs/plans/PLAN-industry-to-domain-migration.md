@@ -994,7 +994,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 
 | # | 缺陷 | 证据 | 影响 |
 |---|---|---|---|
-| 1 | **`AnalysisDataSource` 同名不同体** | `crates/company-runtime/src/opc/capability_pack.rs:221`（YAML 解析用）vs `crates/company-runtime/src/opc/vendors.rs:185`（运行时构造用）；`opc_capability_pack_runtime.rs:635` 经 glob 拿到的是**后者** | 一处改名/改字段，另一处静默不动 ⇒ 二者永不兼容却同享名字（判据「一名多义」族）。**分属两个 crate，当前靠路径区分，尚未爆发** |
+| 1 | **`AnalysisDataSource` 同名不同体** | `crates/company-runtime/src/opc/capability_pack.rs:109`（YAML 解析用）vs `crates/company-runtime/src/opc/vendors.rs:185`（运行时构造用）；原宿主侧 glob 消费点已随 #264 批 7 刀 B 退役（2026-11-12），不再是第三处引用 | 一处改名/改字段，另一处静默不动 ⇒ 二者永不兼容却同享名字（判据「一名多义」族）。**分属两个 crate，当前靠路径区分，尚未爆发** |
 | 2 | **`copy_dir_recursive` 三份重复实现** | `commands/opc_workflows/mod.rs:241`（`std::io::Result`）、`commands/dashboard.rs:169`（`Result<(), String>`）、`commands/skills/install.rs:1204`（`Result<(), String>`） | 同一逻辑三处维护；且**签名的 `Err` 类型不一致**（io::Error vs String）⇒ 无法直接合并，需先定统一错误类型 |
 | 3 | **`opc_capability_pack_bridge.rs` 的工具 description 曾硬编码「9 个域包」** | 实测 14 个（`assert_eq!(configs.len(), 14)` @ `opc_capability_pack_actions.rs:2681` + `assert!(configs.len() >= 14)` @ `capability_pack_config.rs:1173`） | **已修**：改为不带数字（数字无信息增量，且已腐烂过一次） |
 
@@ -1061,7 +1061,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 |---|---|---|---|
 | `list_industries` | 8（**5 个定义**） | `analysis-engine/opc/capability_pack_config.rs:1078`、`opc/learning.rs:287`、`harness/domain_pack_orchestration/mod.rs:102`、`orchestrator/task_context.rs:263`、`commands/opc_capability_pack_runtime.rs:401` | 同名**四种返回类型**（`Vec<(String,String)>` / `Vec<&String>` / `Vec<&str>` / `Vec<String>`）⇒ 典型「一名多义」 |
 | `opc_list_industries` | 4 | `register_commands.rs:815`、`opc_capability_pack_bridge.rs:33/393`、`opc_capability_pack_actions.rs:2052` | **跨前后端契约**（Tauri 命令名 + LLM 工具名）⇒ 改名须同步前端 |
-| `opc_list_runtime_industries` | 2 | `register_commands.rs:833`、`opc_capability_pack_runtime.rs:510` | 同上 |
+| `opc_list_runtime_industries` | 已退役 | #264 批 7 刀 A（2026-11-11）三条只读包装器之一，退役注释见 `commands/opc_capability_pack_runtime.rs:369` | 调用方走 plugin-opc 同名命名命令 |
 | `LegacyIndustryPathRedirect` | 2 | `src/components/layout/ContentArea.tsx:114/304` | 前端「旧路径重定向」组件（批次②清了 `opc-industries` 路由 key，组件名未改） |
 | `opc_industries` / `opc_industries_pkey` / `idx_opc_industries_enabled` / `create_industries` | 4+2+2+2 | `dao/migrations/v211_opc_domain_packs.rs`、`v232_opc_domain_pack_rename.rs` | **历史迁移里的旧表名/约束名**（叙述改名本身）⇒ **保护名单**，不动 |
 | `domain_pack_pack_seed_registers_industries` | 1 | `opc_workflows/mod.rs:790` | 测试函数名 |
@@ -1183,7 +1183,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 
 ⇒ 命中数均 ≤ 基线，**不阻塞门禁**；彻底消 sib 须逐处改走 `axagent_analysis_engine::opc::…` / `axagent_tools::…`。
 
-**② `upsert_template` 下沉**（`opc_capability_pack_actions.rs:2433`，在测试块之外）· **③ `declared_kpi_thresholds`**（`opc_capability_pack_actions.rs:2094` ← `opc_capability_pack_runtime.rs`）
+**② `upsert_template` 下沉**（`opc_capability_pack_actions.rs:2421`，在测试块之外）· **③ `declared_kpi_thresholds`**（`opc_capability_pack_actions.rs:2082` ← `opc_capability_pack_runtime.rs`）
 
 **④ stock_workflow 域 4 处 —— ★ 已被并发会话做掉（待对方确认后关闭本批次）**
 实测：`sim_hook.rs` 仅剩 `crate::commands::error::` / `error_code::`（二者均在门禁 `SHARED_INFRA_MODULES` 豁免名单内）⇒ **合规**；
@@ -1292,7 +1292,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 | `declared_kpi_thresholds` | `runtime.rs:93` | `pub(crate) fn` | 读域包 `runtime.yaml` 声明阈值 | **analysis-engine**（须先核 runtime schema 落点） |
 | `find_repo_config_dir` | `opc_workflows/mod.rs:237` | `pub fn` | 纯 `fs` / `path` | analysis-engine 或公共 utils |
 | `upsert_template` | `opc_workflows/mod.rs:538` | `pub(crate) async fn` | **DB 写 `workflow_templates`** | **dao 层**（不宜落 analysis-engine） |
-| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2337` | `pub async fn`（**Tauri 命令**） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
+| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2325` | `pub async fn`（**Tauri 命令**） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
 
 ⇒ 后 2 项（`upsert_template` / `opc_execute_workflow`）**超出「机械替换」范畴**，待获批后单独立项。
 

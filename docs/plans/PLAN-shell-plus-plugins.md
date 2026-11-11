@@ -363,7 +363,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | 面 | 事实（全部指到行号） |
 |---|---|
 | 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowGallery.tsx:186`（原文件名 `WorkflowMarketplace`，2026-11-12 §159 改名刀 git mv 纯改名、行号不变）；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
-| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1447 条 / 159 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源；2026-11-11 #264 批 2 删需求发现八命令整模块 ⇒ 1491→1486→1478，其中 1491→1486 的 −5 属并行批已落未登记，见 §150；**2026-11-11 #264 批 3 再 −3（1478→1475）、模块 163→162** = 整文件删除 `opc_demand_implement.rs` 三条需求实现命令，见 §151；**2026-11-11 #264 批 4 再 −3（1475→1472）、模块 162→161** = 整文件删除 `opc_workflows/domain_workflows.rs` 三条领域工作流只读命令，见 §152；**2026-11-11 #264 批 5 再 −6（1472→1466）、模块 161 不动** = 删 `demand_discovery.rs` 交付段六条交付命令（迁 T2 插件命令通道），见 §153；**2026-11-11 #264 批 6 再 −5（1466→1461）、模块 161→160** = 整文件删除 `demand_discovery.rs` 剩余五条发现面命令（`opc_scan_capabilities` / `opc_proactive_evaluate_leads` / `opc_list_capability_gaps` / `opc_close_capability_gap` / `opc_analyze_capability_gaps`，迁 T2 插件命令通道），见 §154；**2026-11-11 #264 批 7 刀 A 再 −11（1461→1450）、模块 160 不动** = 删十一条 OPC 宿主命令（`opc_capability_pack_actions` 5 + `opc_capability_pack_runtime` 3 + `opc_demand_subscription` 3；前两组共八条**零前端调用**、只活在中智能体工具面，订阅三条有前端调用点且已同批切插件命名命令 —— 按 `git grep -w … HEAD -- src` 实测 8 条 0 命中 / 3 条 5·3·3 命中），逐条映射与等价性实证见 §155。⚠ 本批**无整模块退出**：三条模块删后仍有宿主命令存活，故模块数不动；**2026-11-12 G19 DojoSDK 死通道退役批再 −3（1450→1447）、模块 160→159** = 整模块删除 `src-tauri/src/commands/dojo_sdk.rs`（三条命令全仓零消费方，且不带 `#[agent_command]`；连带工具面 9 条 DojoSDK 死声明同批退役），见 §156），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
+| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1447 条 / 159 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源；2026-11-11 #264 批 2 删需求发现八命令整模块 ⇒ 1491→1486→1478，其中 1491→1486 的 −5 属并行批已落未登记，见 §150；**2026-11-11 #264 批 3 再 −3（1478→1475）、模块 163→162** = 整文件删除 `opc_demand_implement.rs` 三条需求实现命令，见 §151；**2026-11-11 #264 批 4 再 −3（1475→1472）、模块 162→161** = 整文件删除 `opc_workflows/domain_workflows.rs` 三条领域工作流只读命令，见 §152；**2026-11-11 #264 批 5 再 −6（1472→1466）、模块 161 不动** = 删 `demand_discovery.rs` 交付段六条交付命令（迁 T2 插件命令通道），见 §153；**2026-11-11 #264 批 6 再 −5（1466→1461）、模块 161→160** = 整文件删除 `demand_discovery.rs` 剩余五条发现面命令（`opc_scan_capabilities` / `opc_proactive_evaluate_leads` / `opc_list_capability_gaps` / `opc_close_capability_gap` / `opc_analyze_capability_gaps`，迁 T2 插件命令通道），见 §154；**2026-11-11 #264 批 7 刀 A 再 −11（1461→1450）、模块 160 不动** = 删十一条 OPC 宿主命令（`opc_capability_pack_actions` 5 + `opc_capability_pack_runtime` 3 + `opc_demand_subscription` 3；前两组共八条**零前端调用**、只活在中智能体工具面，订阅三条有前端调用点且已同批切插件命名命令 —— 按 `git grep -w … HEAD -- src` 实测 8 条 0 命中 / 3 条 5·3·3 命中），逐条映射与等价性实证见 §155。⚠ 本批**无整模块退出**：三条模块删后仍有宿主命令存活，故模块数不动；**2026-11-12 G19 DojoSDK 死通道退役批再 −3（1450→1447）、模块 160→159** = 整模块删除 `src-tauri/src/commands/dojo_sdk.rs`（三条命令全仓零消费方，且不带 `#[agent_command]`；连带工具面 9 条 DojoSDK 死声明同批退役），见 §156；**2026-11-12 #264 批 7 刀 B 再 −7（1447→1440）、模块 159 不动** = 退役七条 OPC 宿主命令（`opc_capability_pack_runtime` 6 条 + `opc_capability_pack_actions` 1 条；全部零前端调用，宿主包装器退役、调用面由 plugin-opc 同名命名命令接管，装配链随迁 `HostOpcStore`，`app_dir` 未装配即 fail-closed）），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
 | 引擎 | `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs` 7366 行；构造点 `src-tauri/src/init/state.rs:745`；句柄在 **`app_state.rs:345` `pub work_engine: Arc<WorkEngine>`** |
 | 节点 | `NodeExecutorTrait`（`node_executor_trait.rs:224`）实现者 **33** 个，`rt-workflow/src/work_engine/dispatcher.rs:80-109` `init_builtin` 注册 26 个 + `engine/mod.rs:1214-1231` pending 补齐 |
 
@@ -7505,7 +7505,7 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 
 | 类型族 | 前端 | Rust 内部引用 | 插件命令声明 | 判定 |
 |---|---|---|---|---|
-| `pool_scan` | 0 | `init/stock_analysis_service.rs:431`（delete）/`:412`（list）/`:421`（toggle）按 op 分派；`_core` 在 `commands/pool_scan.rs:632` / `:677` / `:688` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_pool_scan_cron` 四条声明，产物 `dist/plugins/stock/plugin.json` 的 24 条 commands 内含 `stock_delete_pool_scan_cron` 等 | **部分可退役**：create/list/toggle 的宿主 wrapper 已删（§141）；delete 保留（档位不等价） |
+| `pool_scan` | 0 | `init/stock_analysis_service.rs:58`（`pool_scan` use 起；delete `:431` / list `:412` / toggle `:421` 按 op 分派）；`_core` 在 `commands/pool_scan.rs:632` / `:677` / `:688` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_pool_scan_cron` 四条声明，产物 `dist/plugins/stock/plugin.json` 的 24 条 commands 内含 `stock_delete_pool_scan_cron` 等 | **部分可退役**：create/list/toggle 的宿主 wrapper 已删（§141）；delete 保留（档位不等价） |
 | `recommendation` | 0 | 同形分派（`:345` / `:326` / `:335`）；`_core` 在 `commands/recommendation_cron.rs:233` / `:261` / `:272` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_recommendation_cron` 四条声明 | **部分可退役**，同池扫描族 |
 | `trend_screening` | 0 | 同形分派（`:389` / `:367` / `:376`）；`_core` 在 `commands/recommendation_cron.rs:298` / `:336` / `:347` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_trend_screening_cron` 四条声明 | **部分可退役**，同池扫描族 |
 | `batch_reflection` | 0 | 无 —— 仓内只有定义 `commands/stock_analysis.rs:6477` / `:6491` / `:6513` | 无 | **可退役** |
@@ -7514,7 +7514,7 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 
 ### 138.3 为什么「前端零调用」不等于功能缺失
 
-管理面走**通用**面：`src/components/settings/SchedulerSettings.tsx:175` 起用 `list_scheduled_tasks` / `delete_scheduled_task` / `pause_scheduled_task` / `resume_scheduled_task`（`src-tauri/src/commands/scheduled_task.rs:281` / `:384` / `:395` / `:406`），对全部 cron job 通用；create 三兄弟仍被任务中心表单使用（`src/pages/TasksCenterPage/forms/investTaskDefs.ts:84` / `:134` / `:155`）。⇒ 删这三族的 delete/list/toggle **不影响 UI 的任何现有路径**，且不给「建得了、管不了」留新缺口（那本就是通用面在管）。
+管理面走**通用**面：`src/components/settings/SchedulerSettings.tsx:175` 起用四命令 `list_scheduled_tasks`（`src-tauri/src/commands/scheduled_task.rs:281`）/ `delete_scheduled_task`（`:384`）/ `pause_scheduled_task`（`:395`）/ `resume_scheduled_task`（`:406`），对全部 cron job 通用；create 三兄弟仍被任务中心表单使用（`src/pages/TasksCenterPage/forms/investTaskDefs.ts:84` / `:134` / `:155`）。⇒ 删这三族的 delete/list/toggle **不影响 UI 的任何现有路径**，且不给「建得了、管不了」留新缺口（那本就是通用面在管）。
 
 ### 138.4 与任务描述「15 条」的差异（如实声明）
 
@@ -7757,7 +7757,7 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 |---|---|---|
 | 命令面（`PluginManifest.commands[].inputSchema` + 命令帧 `input` + 前端 `invokePluginCommand`） | **camelCase** | 禁区 13。`stock_get_quote` 原读 `stock_code` 是既存偏离，本批收口；新增的 `stock_get_kline` 一开始就按 camelCase 声明 |
 | 接缝面（宿主 `axagent-plugins/crates/plugins/src/worker.rs` 既有协议、`MarketDataProvider` 形参） | snake_case | 宿主侧协议既定 ⇒ 插件负责翻译，不改宿主签名 |
-| 工具面（`tools()` 声明 + `exec_tool`，即 `get_stock_quote`） | snake_case，**本批不动** | 与宿主 `src-tauri/src/commands/stock_analysis_bridge.rs:57` 的 LLM 工具声明逐字同源（那里 `stock_code`）⇒ 改它等于改智能体提示里的工具契约，不是命令面收口 |
+| 工具面（`tools()` 声明 + `exec_tool`，即 `get_stock_quote`） | snake_case，**本批不动** | 与宿主 `src-tauri/src/commands/stock_analysis_bridge.rs:62` 的 LLM 工具声明逐字同源（那里 `stock_code`）⇒ 改它等于改智能体提示里的工具契约，不是命令面收口 |
 
 翻译点因此只有两处（路由表的 `keys` 与 `kline_seam_args`），其余通道原样透传，不存在「第三条需要记的规则」。
 
@@ -7767,7 +7767,7 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 
 ### 144.3 前端切换与 mock / 测试同步
 
-- 3 个调用点切 `invokePluginCommand`：`src/components/stock-analysis/CompareView.tsx:61` 与 `:62`（两条 quote；该文件 `invoke` 变未用 ⇒ 删 import）、`src/components/stock-analysis/WatchlistPanel.tsx:191`（逐票行情；同文件其余 `invoke` 仍在用，import 保留）、`src/components/quant/tabs/WfDesTab.tsx:107`（K 线，`adj` → `adjType`）。
+- 3 个调用点切 `invokePluginCommand`：`src/components/stock-analysis/CompareView.tsx:61` 与 `:62`（两条 quote；该文件 `invoke` 变未用 ⇒ 删 import）、`src/components/stock-analysis/WatchlistPanel.tsx:191`（`invokePluginCommand`，逐票行情；同文件其余 `invoke` 仍在用，import 保留）、`src/components/quant/tabs/WfDesTab.tsx:107`（`invokePluginCommand`，K 线，`adj` → `adjType`）。
 - `src/lib/browserMock.ts` 补两条显式 case（`stock_get_quote` → `{}`、`stock_get_kline` → `[]`）：`stock_get_*` 既不匹配 default 的 `list_` 前缀、也不以 `s` 结尾、更不以 `get_` 开头 ⇒ 不显式声明会兜成 `undefined`，消费端 `.sort` / 逐字段读直接踩空。
 - 3 个既有组件测试的 invoke mock **双面登记**（宿主名 + 插件名回同一形状）：`invokePluginCommand` 在非 Tauri 分支直接 `invoke(name, input)`，mock 只认宿主名时组件会**静默**拿到 `undefined` —— 那是假绿而不是失败。`StockAnalysisPage.prefill.test.tsx` 的 `quoteCalls()` 仍只统计宿主名（它锁的是「宿主退化」这件事，不该被插件名稀释）。
 - `src/lib/__tests__/browserMockStockPlugin.test.ts` 补两条正控（`{}` / `[]` 各一，后者注释写明 `.sort` 对 `undefined` 抛 TypeError）。i18n 零新增（无 UI 文案）。
@@ -7801,7 +7801,7 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 **未做 / 未跑**：
 
 ① 3 个组件测试（`ScreenerToWorkspace.integration` / `StockAnalysisPage.prefill` / `StockAnalysisPage.density`）**本机本轮跑不了**，且已归因到环境而不是本批：vitest worker 的 60 s 启动握手超时，`--pool=threads --no-file-parallelism`（wrapper 默认）与 `--pool=forks`、单文件与四文件并发四种组合全同型失败；三条判据把它钉成环境问题 —— a) 同目录一个本批**完全没碰**的 `src/components/stock-analysis/__tests__/AnalysisHistoryButton.loadAll.test.tsx` 同样 60.11 s 超时；b) 这批里唯一不需要 DOM 的 `browserMockStockPlugin.test.ts` 加 `--environment=node` 后 8 passed；c) SMB 本身吞吐正常（15 KB 读 63 ms、`node` 子进程派生 109 ms，`C:` 剩 132 G）。⇒ 卡的是 jsdom 冷启动超出 vitest 硬编码预算（任务 #141 同族的恶化形态，本轮无解决手段）。这三条 mock 双面登记的作用只是防假绿，其代码面已由 typecheck + 上面的正控覆盖。
-② `src/stores/feature/stockAnalysisStore.ts:1080` / `:1130` 两处行情调用仍走宿主 `get_stock_quote` / `get_stock_kline`。实测该文件现况确认它们是**宿主** `invoke` 而非插件命令面 ⇒ 本批的命令面改名对它零影响；该文件带另一并行批的未提交改动，本批不碰，留待交回后切换。
+② `src/stores/feature/stockAnalysisStore.ts:1080`（`get_stock_quote`）/ `:1130`（`get_stock_kline`）两处行情调用仍走宿主命令。实测该文件现况确认它们是**宿主** `invoke` 而非插件命令面 ⇒ 本批的命令面改名对它零影响；该文件带另一并行批的未提交改动，本批不碰，留待交回后切换。
 ③ 宿主 `get_stock_quote` / `get_stock_kline` 按 §143.2 双声明期保留，收口条件不变。
 ④ §144.2 末登记的「同名不同形」歧义未处理，属双声明期末尾工作。
 ⑤ 智能体命令索引端到端未跑（需运行实例）；本轮以清单握手 + 真 worker 协议测试覆盖。
@@ -7814,7 +7814,7 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 
 | 插件命令 | 分派形态 | 接缝 op | 命令面入参 | 接缝载荷 |
 |---|---|---|---|---|
-| `stock_get_hot_stocks` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:817`） | `market.quote / get_hot_stocks` | 无 | 无 |
+| `stock_get_hot_stocks` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:793`） | `market.quote / get_hot_stocks` | 无 | 无 |
 | `stock_get_industry_ranking` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:818`） | `get_industry_ranking` | 无 | 无 |
 | `stock_get_index_quotes` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:819`） | `get_index_quotes_outcome` | 无 | 无 |
 | `stock_get_market_dragon_tiger` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:820`） | `get_market_dragon_tiger` | 无 | 无 |
@@ -7879,7 +7879,7 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 
 `src/components/layout/ContentArea.tsx:43` 原先有一条 `lazy(() => import("@/pages/InvestPage"))` —— 宿主布局层持有一条命中股票域 `feRe` 的说明符，是前端反向阻塞里**唯一可当场消掉**的一处（其余 14 处属同域互引或判据误报，归因已在 #245 逐一登记）。
 
-做法与 OPC 先例同构（#230 的 `src/pages/opc/routes.tsx`）：新建 `src/pages/invest/routes.tsx`，导出 `DOMAIN_PAGES`（声明在 `src/pages/invest/routes.tsx:35`）声明 `path: "/invest"` / `pageKey: "finance-investment"`，由注册表的 eager glob（`src/lib/domainPageRegistry.ts:163`）装载并投影给 `<Routes>`；`ContentArea` 摘掉该 `lazy` 与对应 `<Route>`，只留说明注释（`src/components/layout/ContentArea.tsx:235`）。
+做法与 OPC 先例同构（#230 的 `src/pages/opc/routes.tsx`）：新建 `src/pages/invest/routes.tsx`，导出 `DOMAIN_PAGES`（声明在 `src/pages/invest/routes.tsx:35`）声明 `path: "/invest"` / `pageKey: "finance-investment"`，由注册表的 eager glob（`src/lib/domainPageRegistry.ts:163`）装载并投影给路由出口；`ContentArea` 摘掉对应懒加载调用与路由项，只留说明注释（`src/components/layout/ContentArea.tsx:235`，指向 `src/pages/invest/routes.tsx`）。
 
 三点边界：
 
@@ -7932,7 +7932,7 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 
 | 项 | 宿主 `opc_get_dashboard_summary` | 插件 `opc_get_dashboard` |
 |---|---|---|
-| 取数口径 | `DefaultAnalyticsService::get_dashboard_summary_overview` → `load_dashboard(None)`（`axagent-quant/crates/company-runtime/src/opc/analytics.rs:554`）：**五张表全量读 + 内存聚合**，无 limit | `dashboard()`（`axagent-plugins/crates/plugin-opc/src/main.rs:1341`）：三张表各 `limit: 100` 后现算 |
+| 取数口径 | `DefaultAnalyticsService::get_dashboard_summary_overview` → `load_dashboard(None)`（`axagent-quant/crates/company-runtime/src/opc/analytics.rs:554`）：**五张表全量读 + 内存聚合**，无 limit | `dashboard()`（`axagent-plugins/crates/plugin-opc/src/main.rs:1419`）：三张表各 `limit: 100` 后现算 |
 | 出参键 | `DashboardSummary`：`total_revenue` / `total_invoices` / `active_projects` / `total_customers` / `recent_kpis` / `revenue_trend` | 只有 `totalRevenue` / `pendingInvoices` / `activeProjects` / `activeCustomers` / `totalCustomers` / `totalProjects` |
 | 前端消费 | `src/pages/opc/components/DashboardTab.tsx` 用 `totalRevenue`（`:270`）/ `totalInvoices`（`:281`）/ `activeProjects`（`:299`）/ `revenueTrend`（`:311`） | **缺** `totalInvoices` / `recentKpis` / `revenueTrend` |
 
@@ -8095,7 +8095,7 @@ PLAN 同批回写五处：`:366`（1478 条 / 163 模块）、`:514`（91 条 / 
 **落地（八处）**：
 
 1. **接缝**：`harness/src/opc_store.rs` 的 `OpcStoreProvider` 末尾追加 3 个默认方法（`:755` / `:769` / `:782` 三组文档注释 + 方法），未实现时一律返回「该提供者不支持此数据面」；`pub trait` 起始行不动。
-2. **宿主实现**：`update_lead_status`（`init/opc_store_service.rs:1097`）/ `convert_lead_to_workflow`（`:1105`）/ `run_lead_workflow`（`:1137`）三方法，与迁移前命令体逐句同源 —— `update_lead_status` 直接把 dao 的 `Validation` / `NotFound` 原样上抛（不塌成 `Provider`）；`convert_lead_to_workflow` 保持「读线索 → 生成模板 → 写模板表 → **回灌能力索引** → 回写线索」的次序（回灌必须在模板落库之后、回写线索之前，否则刚生成的模板在本会话内不可路由）；`run_lead_workflow` 以「线索已转化」为前置，执行输入为需求简报，成功后 `mark_lead_implemented` 并回执行 id。
+2. **宿主实现**：`update_lead_status`（`init/opc_store_service.rs:1137`）/ `convert_lead_to_workflow`（`:1145`）/ `run_lead_workflow`（`:1177`）三方法，与迁移前命令体逐句同源 —— `update_lead_status` 直接把 dao 的 `Validation` / `NotFound` 原样上抛（不塌成 `Provider`）；`convert_lead_to_workflow` 保持「读线索 → 生成模板 → 写模板表 → **回灌能力索引** → 回写线索」的次序（回灌必须在模板落库之后、回写线索之前，否则刚生成的模板在本会话内不可路由）；`run_lead_workflow` 以「线索已转化」为前置，执行输入为需求简报，成功后 `mark_lead_implemented` 并回执行 id。
 3. **索引器入口抽薄壳**：`commands/workflow_template.rs:91` 新增 `sync_passport(&dyn CapabilityIndexer, …)`，`:85` 的 `sync_template_passport(&AppState, …)` 改为一行转发。原因：`HostOpcStore` 只持有 `dyn CapabilityIndexer`，拿不到 `AppState`；抽薄壳而非复制，避免禁区 12 的重复定义。
 4. **worker 分派**：`plugins/src/worker.rs` 的 `opc.store` 写白名单追加三条（`update_lead_status` / `convert_lead_to_workflow` / `run_lead_workflow`，都改库，转模板还会回灌能力索引）；无读 op 随迁。`dispatch_seam` 加三分派臂：`update_lead_status` 两入参（`lead_id` + `status` 走**接缝 snake_case**），另两条单入参 `lead_id`；出参分别序列化为 `DemandLeadDto` / `WorkflowTemplateData` / `String`。
 5. **插件命令**：`plugin-opc/src/main.rs` 加 3 组 `COMMAND_*` / `OPC_STORE_*` 常量 + 分派臂 + 函数；命令面读 **camelCase**（`leadId` / `status`），函数内转接缝 snake_case。
@@ -8191,7 +8191,7 @@ PLAN 同批回写五处：`:250`（2047→2046）、`:366`（1472 条 / 161 模�
 
 1. **接缝**：`axagent-core/crates/harness/src/opc_store.rs` 的 `OpcStoreProvider` 末尾追加六个默认方法（`:834` execute / `:853` list / `:867` get / `:882` update / `:893` retry / `:899` cancel），未实现一律返回「该提供者不支持此数据面」；`pub trait` 起始行 `:141` 未动。DTO `DeliveryRecordView` 追加在 trait 之后 `:949`（snake_case 字段 + `#[serde(rename_all = "camelCase")]`，三个 `*_json` 列在投影层解析为结构化容器）。
 2. **dao 下沉**：`axagent-infra/crates/dao/src/repo/opc_delivery.rs` 新增 `list_deliveries`（`:299`，status/lead_id 双过滤）/ `get_delivery`（`:317`）/ `update_delivery`（`:360`）/ `cancel_delivery`（`:412`）/ `mark_delivery_completed`（`:427`）/ `mark_delivery_failed`（`:446`）+ 私有 `get_delivery_model`（`:288`）与 `delivery_from_entity` 投影。✅ 修一处真编译错误：`mark_*` 两函数的 `Expr::value(...)` 撞缺 import —— `Expr` 在 `sea_orm::sea_query` 子模块、`use sea_orm::*` 不够，补 `use sea_orm::sea_query::Expr`。
-3. **宿主实现**：`execute_demand_workflow`（`src-tauri/src/init/opc_store_service.rs:1261`，起交付记录 → `tokio::spawn` 后台跑 `run_demand_delivery`，完成/失败路径各 `mark_*` 回写）+ 五只读与状态方法 `:1367` / `:1375` / `:1380` / `:1403` / `:1408`。
+3. **宿主实现**：`execute_demand_workflow`（`src-tauri/src/init/opc_store_service.rs:1301`，起交付记录 → `tokio::spawn` 后台跑 `run_demand_delivery`，完成/失败路径各 `mark_*` 回写）+ 五只读与状态方法 `:1407` / `:1415` / `:1420` / `:1443` / `:1448`。
 4. **worker 分派**：`axagent-plugins/crates/plugins/src/worker.rs` 权限表：写 op 四条（`:546-549` execute/update/retry/cancel）加 `write` 闸，读 op 两条（list/get）不设闸；六分派臂 `:3983` / `:4006` / `:4028` / `:4043` / `:4090` / `:4106`（接缝侧入参 snake_case：`lead_id` / `delivery_id` / `workflow_template_id`）；权限表测试锁 `:12925` 起同批追加四写清单。
 5. **插件命令**：`axagent-plugins/crates/plugin-opc/src/main.rs` 六组常量（`:276-281` COMMAND_*）+ 六分派臂 + 六函数（`:1897` execute / `:1924` list / `:1996` retry 等）；命令面读 **camelCase**（`leadId` / `deliveryId`），函数内转接缝 snake_case。
 6. **清单声明**：`scripts/build-plugin-bundle.mjs:1825-1877` 追加六条 `worker://`；`opc_execute_demand_workflow` required `["leadId"]`（`workflowTemplateId` 可选）、`opc_list_deliveries` 两个过滤项均可选、get/update/retry/cancel required `["deliveryId"]`。
@@ -8236,8 +8236,8 @@ PLAN 同批回写六处：`:268`/`:269`（evidence 改指）、`:366`（1466 条
 2. **接缝**：`axagent-core/crates/harness/src/opc_store.rs` 的 `OpcStoreProvider` 追加五个默认方法（`:912` `scan_capabilities` / `:923` `proactive_evaluate_leads` / `:932` `list_capability_gaps` / `:944` `close_capability_gap` / `:954` `analyze_capability_gaps`）；出参 DTO 紧随 trait 之后：`:1172` `ProactiveScanSummary`、`:1183` `QueryStat`、`:1201` `CapabilityGapView`、`:1222` `AnalyzeGapsSummary`、`:1235` `TopMissingKeyword`、`:1244` `DomainCoverage`。`pub trait` 起始行 `:141` 未动。
 3. **dao 下沉**：新建 `axagent-infra/crates/dao/src/repo/opc_capability_gap.rs`（`list_gaps` `:53` / `get_gap` `:70` / `close_gap` `:80` / `insert_gap` `:102`）+ `repo.rs` 追加模块声明；`repo/workflow_template.rs:602` 新增 `extract_demand_discovery_queries`（cron 侧取发现查询语料）。
 4. **域包侧改引用**：`axagent-quant/crates/company-runtime/src/opc/capability.rs` 删本地 `CapabilityEntry` / `CapabilityInventory` 定义（−77 行），改 `pub use axagent_harness::capability::…` —— 按禁区 12「发现重复 → 改为 pub use + 删除本地定义」，不是新抽象。
-5. **宿主实现**：`src-tauri/src/init/opc_store_service.rs:1417` / `:1474` / `:1518` / `:1523` / `:1530` 五方法。`scan_capabilities` 从宿主能力索引聚合五类容器；`proactive_evaluate_leads` / `analyze_capability_gaps` 保留迁移前的「扫描 → 评估 → 去重入库」链路与统计口径。
-6. **worker 分派 + 权限**：`axagent-plugins/crates/plugins/src/worker.rs` 五分派臂 `:4134` / `:4147` / `:4160` / `:4177` / `:4194`；`required_permission_for` 的 `opc.store` 写 op 分支追加四条（scan/proactive/close/analyze），两条读 op（`list_capability_gaps` 等）不进写臂；权限表测试锁的 `WRITE_OPS` / `READ_OPS` 同批补条目。
+5. **宿主实现**：`src-tauri/src/init/opc_store_service.rs:1457`（`scan_capabilities`）/ `:1514`（`proactive_evaluate_leads`）/ `:1558`（`list_capability_gaps`）/ `:1563`（`close_capability_gap`）/ `:1570`（`analyze_capability_gaps`）五方法。`scan_capabilities` 从宿主能力索引聚合五类容器；`proactive_evaluate_leads` / `analyze_capability_gaps` 保留迁移前的「扫描 → 评估 → 去重入库」链路与统计口径。
+6. **worker 分派 + 权限**：`axagent-plugins/crates/plugins/src/worker.rs` 五分派臂 `:4138` / `:4151` / `:4164` / `:4181` / `:4198`；`required_permission_for` 的 `opc.store` 写 op 分支追加四条（scan/proactive/close/analyze），两条读 op（`list_capability_gaps` 等）不进写臂；权限表测试锁的 `WRITE_OPS` / `READ_OPS` 同批补条目。
 7. **插件命令 + 清单**：`axagent-plugins/crates/plugin-opc/src/main.rs` 五组 `OPC_STORE_*` / `COMMAND_*` 常量 + 五分派臂 + 五函数（命令面 camelCase：`gapId` / `status`）；`scripts/build-plugin-bundle.mjs` 追加五条 `worker://opc_*` 声明，写命令同批进 `OPC_WRITE_COMMANDS` ⇒ `requiredPermission` 自动挂 `workspace-write`。
 8. **宿主退役**：整文件删 `commands/demand_discovery.rs`（587 行）+ `commands/mod.rs` 的 `pub mod` 声明；cron 执行体两函数改写入 `src-tauri/src/init/services.rs`（`run_demand_discovery_cron` `:5492`、`send_high_value_notification` `:5531`，**改私有** —— 唯一调用方是同文件的 `start_demand_discovery_cron` `:5440`）。`register_commands.rs` 由 build.rs 重生成，恰 −5 行（未手改）。前端半（`DemandDiscoveryPage` 五处调用点 + `browserMock` 五 case）与批 7 刀 A 的前端半同窗落地（提交 `7d971ba26`）。
 
@@ -8256,7 +8256,7 @@ PLAN 同批回写六处：`:268`/`:269`（evidence 改指）、`:366`（1466 条
 
 ### 154.2 验收
 
-批 6 的验收证据在提交 `d8695f3ea` 的单行消息与同批登记表 note 里，**该提交没有把退出码逐条落进 PLAN**（本节不补写未经日志支撑的 EXIT 码）。可复核的盘上现状（2026-11-11 批 7 窗口实测）：整文件已不在（`ls src-tauri/src/commands/demand_discovery.rs` ⇒ No such file）、`commands/mod.rs` 内 `demand_discovery` 零命中、`register_commands.rs` 内 `demand_discovery::` 零命中；五条插件命令在清单逐条在位（`scripts/build-plugin-bundle.mjs:1947` 起）、五个分派臂与权限表条目在盘（`worker.rs:4134`–`:4194`，测试锁 `WRITE_OPS` / `READ_OPS` 含对应 op）。批 6 与批 7 刀 A 的编译/测试链在同一条联合窗口里合并取证，见 §155.2。
+批 6 的验收证据在提交 `d8695f3ea` 的单行消息与同批登记表 note 里，**该提交没有把退出码逐条落进 PLAN**（本节不补写未经日志支撑的 EXIT 码）。可复核的盘上现状（2026-11-11 批 7 窗口实测）：整文件已不在（`ls src-tauri/src/commands/demand_discovery.rs` ⇒ No such file）、`commands/mod.rs` 内 `demand_discovery` 零命中、`register_commands.rs` 内 `demand_discovery::` 零命中；五条插件命令在清单逐条在位（`scripts/build-plugin-bundle.mjs:1947` 起）、五个分派臂与权限表条目在盘（`worker.rs:4138`（`scan_capabilities`）/`:4151`（`proactive_evaluate_leads`）/`:4164`（`list_capability_gaps`）/`:4181`（`close_capability_gap`）/`:4198`（`analyze_capability_gaps`）；测试锁 `worker.rs:13334` 的 `WRITE_OPS` / `READ_OPS` 含对应 op）。批 6 与批 7 刀 A 的编译/测试链在同一条联合窗口里合并取证，见 §155.2。
 
 ⚠ **随本批补记登记一条既存腐烂注释**：`src-tauri/src/commands/desktop.rs:161` 仍把 `commands/demand_discovery.rs` 当作在位的复用方来写（该文件已由批 6 整文件删除）。属他人文件、纯注释，本批不改（改它会连带触发他人文件的 fmt/clippy 面）；移交安静窗口随注释巡检批一并处理。
 
@@ -8373,7 +8373,7 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 **三条硬障碍（转表的决定性前置）**：
 
 1. **摘实体是前置**：`reconcile/expected.rs:106-134` 判据 1 使「宿主实体仍在注册表 + 插件 schema.json 同名声明」**硬报错**（两份真源拒绝静默覆盖）⇒ 每张表转 schema.json 必须同批「删 `entities/src/<表>.rs` + 删 lib.rs 对应 `pub mod`」（201 个 pub mod 由 build.rs 自动收录，无手工登记）。
-2. **extras 条目必须同步迁走**：`expected.rs:486` 对「L2 指向实体未覆盖的表」报错 ⇒ `stock_analyses`×3、`financial_snapshots`、`stock_reflections`、`strategy_performance`×2、`workflow_templates` 共 8 条 extras 声明必须迁进 schema.json（CHECK/复合索引 v1 支持）或丢弃；但 **partial 索引两条**（`strategy_performance` 的 `source_ref` unique partial `extras.rs:1273`、`workflow_templates` 的 `mission_hash` partial `:1222`）**v1 词表不支持 `where`**（§69.1 明文）⇒ 要么扩 v1 词表（dao `ExternalIndex` 加字段 + §69.1 文档同批），要么这两张表缓转。
+2. **extras 条目必须同步迁走**：`expected.rs:486` 的 `overlay_l2` 对「L2 指向实体未覆盖的表」报错 ⇒ `stock_analyses`（`expected.rs:789` 起）×3、`financial_snapshots`、`stock_reflections`、`strategy_performance`×2、`workflow_templates` 共 8 条 extras 声明必须迁进 schema.json（CHECK/复合索引 v1 支持）或丢弃；但 **partial 索引两条**（`strategy_performance` 的 `source_ref` unique partial `extras.rs:1273`、`workflow_templates` 的 `mission_hash` partial `:1222`）**v1 词表不支持 `where`**（§69.1 明文）⇒ 要么扩 v1 词表（dao `ExternalIndex` 加字段 + §69.1 文档同批），要么这两张表缓转。
 3. **宿主直查未清**：src-tauri 侧 ~120+ 处 `::Entity` 直查（大头 `stock_analyses` 50、`stock_reflections` 26、`reco_picks` 17）须先落 §64.11 op 清单；analysis-engine 直连 `axagent_entities` 随本体迁出后自然消失。
 
 **T4 通道现状（#134 已实测打通）**：宿主消费入口 `src-tauri/src/init/plugin_schema.rs:31` `reconcile_installed`；挂载点 ×4（install/enable/update/启动 `services.rs:580`，失败仅 error! 不挡启动）；解析 `reconcile/external.rs`（`deny_unknown_fields` + 版本闸）；收敛 `apply.rs:819 cycle_with_external`（`additive_only=true + max_destructive_per_run=0`，卸载零 DDL）；验收先例 §69.4（J2 15 passed + J3 建表幂等第二轮 `executed==0`）。**盘上两插件均无 schema.json 先例**；`build-plugin-bundle.mjs` 只处理 ui.json（`:170/:263`），表声明不进 bundle 产物 —— 批 0 需补 bundle 侧。

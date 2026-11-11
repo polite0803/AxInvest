@@ -534,7 +534,7 @@ M3 阈值不按 enabled 门控⇒只红「默认关」、M4 只发增量⇒红�
 | Rust · engine `--lib` | **687 passed / 1 failed**（22:3x）；失败那条 `evidence_weight` 单调性是**他人**未提交改动打破的 HEAD 既有测试（见 §12.1）；本批四条新判据全 `ok` | 判据：`chinese_label...` / `apply_runtime_vars...` / `correlation_lookback_window...` / `refresh_snapshot_runs...` |
 | Rust · astock-data `--lib calendar::` | **全绿**（含 `session_codes_are_distinct_and_stable`、`trading_session_boundaries_are_half_open`、`every_session_bucket_has_its_own_label`） | §9.1 里「未取到之前本条不算闭合」的那条 Z-12-2 **就此闭合** |
 | Rust · engine `--lib`（keylevel 退役后复跑） | **687 passed / 1 failed** —— 与退役前**逐条同数**（`key_levels.rs` 本身零测试），失败仍是他人那条 `evidence_weight` 单调性 | 用一个独立的 `CARGO_TARGET_DIR` 绕开卡住的构建锁跑完（见下） |
-| Rust · 主 crate `--lib` + clippy | **被别人挡住（已复现到底）**：`src/commands/pool_scan.rs:832/843`（E0063 `PoolScanOutcome` 缺 `pending_remaining`/`timed_out` —— 另一批次结构体加了字段、测试夹具没跟）⇒ `could not compile axagent (lib test) due to 2 previous errors` | 解锁后即可跑；本批自身文件已过 `cargo fmt --check` |：被并行批次的构建锁挡住（对方 rustc 5.8GB 在编，实测 `Blocking waiting for file lock`） | 解锁后自动续跑（后台链：`d-main-test.log`），随后补 `clippy -p axagent --all-targets` 与 CI 三条 |
+| Rust · 主 crate `--lib` + clippy | **被别人挡住（已复现到底）**：`src/commands/pool_scan.rs:846/:859`（E0063 `PoolScanOutcome` 缺 `pending_remaining`/`timed_out` —— 另一批次结构体加了字段、测试夹具没跟）⇒ `could not compile axagent (lib test) due to 2 previous errors` | 解锁后即可跑；本批自身文件已过 `cargo fmt --check` |：被并行批次的构建锁挡住（对方 rustc 5.8GB 在编，实测 `Blocking waiting for file lock`） | 解锁后自动续跑（后台链：`d-main-test.log`），随后补 `clippy -p axagent --all-targets` 与 CI 三条 |
 
 ## 15. 存量数据清理（2026-10-15，用户点「删」）
 

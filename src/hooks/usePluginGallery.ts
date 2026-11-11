@@ -10,7 +10,7 @@ import { usePluginStore } from "@/stores/feature/pluginStore";
  * （组件中立性，见 scripts/check-component-neutrality.mjs），统一从这里取。
  * 返回形态与原组件的 selector 完全一致，不改任何逻辑。
  */
-export function usePluginMarketplace() {
+export function usePluginGallery() {
   // 从 usePluginStore 获取状态和方法
   const plugins = usePluginStore((s) => s.plugins);
   const loading = usePluginStore((s) => s.loading);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { SystemTemplateList, TemplateList } from "@/components/workflow/Templates";
-import { WorkflowMarketplace } from "@/pages/WorkflowMarketplace";
+import { WorkflowGallery } from "@/pages/WorkflowGallery";
 import type { WorkflowTemplateResponse } from "@/types";
 import { Tabs } from "antd";
 import { BrainCircuit, GitBranch, Store } from "lucide-react";
@@ -110,7 +110,7 @@ export function WorkflowSettings({
                 {t("settings.workflow.marketplace")}
               </span>
             ),
-            children: <WorkflowMarketplace />,
+            children: <WorkflowGallery />,
           },
         ]}
       />

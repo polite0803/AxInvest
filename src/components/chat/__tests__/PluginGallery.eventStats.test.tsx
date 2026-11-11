@@ -23,8 +23,8 @@ vi.mock("@/lib/toast", () => ({
   message: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
-vi.mock("@/hooks/usePluginMarketplace", () => ({
-  usePluginMarketplace: () => ({
+vi.mock("@/hooks/usePluginGallery", () => ({
+  usePluginGallery: () => ({
     plugins: pluginsRef.current,
     loading: false,
     installing: null,
@@ -41,7 +41,7 @@ vi.mock("@/hooks/usePluginMarketplace", () => ({
   }),
 }));
 
-import { PluginMarketplace } from "../PluginMarketplace";
+import { PluginGallery } from "../PluginGallery";
 
 function plugin(overrides: Record<string, unknown>) {
   return {
@@ -60,10 +60,10 @@ function plugin(overrides: Record<string, unknown>) {
   };
 }
 
-describe("PluginMarketplace 的 eventStats 渲染", () => {
+describe("PluginGallery 的 eventStats 渲染", () => {
   it("eventStats 为 null 时显示「未订阅」，不显示成 0 丢弃", () => {
     pluginsRef.current = [plugin({ eventStats: null })];
-    const { container } = render(<PluginMarketplace />);
+    const { container } = render(<PluginGallery />);
     expect(container.textContent).toContain("chat.plugins.marketplace.eventStatsNone");
     expect(container.textContent).not.toContain("chat.plugins.marketplace.eventStats|");
   });
@@ -81,7 +81,7 @@ describe("PluginMarketplace 的 eventStats 渲染", () => {
         },
       }),
     ];
-    const { container } = render(<PluginMarketplace />);
+    const { container } = render(<PluginGallery />);
     expect(container.textContent).toContain("chat.plugins.marketplace.eventStats|7,3");
   });
 
@@ -98,7 +98,7 @@ describe("PluginMarketplace 的 eventStats 渲染", () => {
         },
       }),
     ];
-    const { container } = render(<PluginMarketplace />);
+    const { container } = render(<PluginGallery />);
     // 若前端把 unavailable 再加一遍，这里会变成 4。
     expect(container.textContent).toContain("chat.plugins.marketplace.eventStats|0,2");
     expect(container.textContent).not.toContain("eventStats|0,4");

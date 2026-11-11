@@ -1949,7 +1949,7 @@
       "phase": 3
     },
     {
-      "file": "src/pages/WorkflowMarketplace.tsx",
+      "file": "src/pages/WorkflowGallery.tsx",
       "lines": "16,17,21,29,37,46,162,263,265,274",
       "reason": "硬编码中文字符串",
       "phase": 3

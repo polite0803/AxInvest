@@ -69,8 +69,8 @@ const LazyBackupCenter = lazy(() =>
 const LazySettingsPanel = lazy(() =>
   import("@/components/settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel }))
 );
-const LazyPluginMarketplace = lazy(() =>
-  import("@/components/chat/PluginMarketplace").then((m) => ({ default: m.PluginMarketplace }))
+const LazyPluginGallery = lazy(() =>
+  import("@/components/chat/PluginGallery").then((m) => ({ default: m.PluginGallery }))
 );
 const LazyDashboardPluginsSettings = lazy(() =>
   import("@/components/settings/DashboardPluginsSettings").then((m) => ({ default: m.DashboardPluginsSettings }))
@@ -265,7 +265,7 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
   ),
   plugins: () => (
     <Suspense fallback={<SectionFallback />}>
-      <LazyPluginMarketplace />
+      <LazyPluginGallery />
     </Suspense>
   ),
   dashboardPlugins: () => (

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
-import { usePluginMarketplace } from "@/hooks/usePluginMarketplace";
+import { usePluginGallery } from "@/hooks/usePluginGallery";
 import { message } from "@/lib/toast";
 import type { PluginManifestDto } from "@/types";
 import { Badge, Button, Card, Descriptions, Input, Modal, Space, Tag, Typography } from "antd";
@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 
 const { Text, Title } = Typography;
 
-export function PluginMarketplace() {
+export function PluginGallery() {
   const { t } = useTranslation();
 
   // 插件清单 + 能力注册表读面（hook 内部聚合 pluginStore 与 capabilityStore）
@@ -29,7 +29,7 @@ export function PluginMarketplace() {
     registry,
     registryLoading,
     loadRegistry,
-  } = usePluginMarketplace();
+  } = usePluginGallery();
 
   // 组件本地 UI 状态（不适合放入全局 Store 的交互状态）
   const [installInput, setInstallInput] = useState("");

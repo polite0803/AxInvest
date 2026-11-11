@@ -139,7 +139,7 @@ function TemplateCard({
   );
 }
 
-export function WorkflowMarketplace() {
+export function WorkflowGallery() {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { token } = theme.useToken();

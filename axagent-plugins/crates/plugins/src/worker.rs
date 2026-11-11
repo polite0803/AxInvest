@@ -551,7 +551,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             // 都改库；两条读 op（`scan_capabilities` / `list_capability_gaps`）仍 `None`。
             | "proactive_evaluate_leads"
             | "close_capability_gap"
-            | "analyze_capability_gaps",
+            | "analyze_capability_gaps"
+            // #264 批 7 刀 A：订阅面两条写 op（新增/更新订阅、删除订阅 —— 后者不可逆）；
+            // 同批另九条 op（`list_subscriptions` + 域包配置五 + 运行时域包三）全是只读
+            // ⇒ 必须仍 `None`（给读缝加闸会把只读插件无端拒掉，锁在 READ_OPS 用例）。
+            | "save_subscription"
+            | "delete_subscription",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -4195,6 +4200,194 @@ impl HostPeer {
                 };
                 match result {
                     Ok(summary) => to_value("AnalyzeGapsSummary", &summary),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 7 刀 A：需求订阅面三 op ──────────────────────────────
+            //
+            // 三条都是 dao 的直投影：关键词必填、`interval_hours` / `min_score` 钳位、
+            // 查无行 `NotFound` 全在宿主 impl 委托的 dao 里，接缝不新增校验闸（「迁≠改」）。
+            "opc.store" if op == "list_subscriptions" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_subscriptions()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DemandSubscription>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "save_subscription" => {
+                let input: axagent_harness::types::opc_demand::SaveDemandSubscriptionInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.save_subscription(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("DemandSubscription", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "delete_subscription" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_subscription(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 7 刀 A：域包配置注册表五 op（代码内 14 份注册表）──────
+            //
+            // ⚠ `list_industries`（本节，注册表）与下一节的 `list_runtime_industries`
+            //（磁盘域包目录）同名不同源，故两条 op 分别保留、不可合并。
+            "opc.store" if op == "list_industries" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_industries()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<PackSummaryEntryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_capability_pack_config" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.get_capability_pack_config(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(config) => to_value("CapabilityPackConfig", &config),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_action_config" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let action_key: String = match deserialize_arg(&args, "action_key", seam) {
+                    Ok(action_key) => action_key,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.get_action_config(domain_pack_id, action_key))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(action) => to_value("CapabilityPackActionConfig", &action),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_capability_pack_actions" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.list_capability_pack_actions(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<PackActionSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_capability_pack_workflows" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.list_capability_pack_workflows(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<PackWorkflowSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 7 刀 A：运行时域包三 op（磁盘域包配置）────────────────
+            "opc.store" if op == "list_runtime_industries" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_runtime_industries()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("RuntimeIndustryListView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_kpi_definitions" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_kpi_definitions(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("PackKpiDefinitionsView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "has_capability_pack" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.has_capability_pack(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => to_value("PackExistenceView", &view),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -12956,8 +13149,9 @@ mod tests {
 
     /// `opc.store` 的权限表**逐条枚举锁**（全量写 op + 全量读 op + 两侧的反向锁）：
     /// blog 三件 + #36 批 2 四条 + #36 批 3 八条 + D-4 三条 + #32 批 A·B 六条 +
-    /// #264 批 1 三条 + 批 2 五条 + 批 3 三条 + 批 6 三条 ⇒ `Write`；读 op（列表 /
-    /// 报表 / 详情 / 策略 / 摘要 / 能力清单 / 缺口列表）⇒ **必须仍是 `None`**；
+    /// #264 批 1 三条 + 批 2 五条 + 批 3 三条 + 批 6 三条 + 批 7 刀 A 两条（订阅存 / 删）
+    /// ⇒ `Write`；读 op（列表 / 报表 / 详情 / 策略 / 摘要 / 能力清单 / 缺口列表 /
+    /// 订阅表 / 域包配置与运行时域包）⇒ **必须仍是 `None`**；
     /// 表外 op 与近似接缝名 ⇒ `None`（不许被通配符或前缀匹配接住）。
     ///
     /// 为什么读缝那条要专门钉：`required_permission_for` 的函数头承诺「只登记写 op」，
@@ -13008,6 +13202,9 @@ mod tests {
             "proactive_evaluate_leads",
             "close_capability_gap",
             "analyze_capability_gaps",
+            // #264 批 7 刀 A：订阅面两条写 op
+            "save_subscription",
+            "delete_subscription",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -13033,6 +13230,16 @@ mod tests {
             "get_delivery",
             "scan_capabilities",
             "list_capability_gaps",
+            // #264 批 7 刀 A：订阅面一条 + 域包配置注册表五条 + 运行时域包三条，全只读。
+            "list_subscriptions",
+            "list_industries",
+            "get_capability_pack_config",
+            "get_action_config",
+            "list_capability_pack_actions",
+            "list_capability_pack_workflows",
+            "list_runtime_industries",
+            "get_kpi_definitions",
+            "has_capability_pack",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

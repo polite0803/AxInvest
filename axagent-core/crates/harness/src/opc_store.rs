@@ -956,6 +956,142 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::analyze_capability_gaps 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 需求订阅面三 op（#264 批 7 刀 A；迁移前 `commands::opc_demand_subscription` 命令体）──
+
+    /// 列出全部需求订阅（`list_subscriptions` op）—— 读 op，不设权限闸。
+    ///
+    /// 按创建时间升序整表下发（与迁移前命令同口径，不做分页 / 未到期过滤）。
+    async fn list_subscriptions(
+        &self,
+    ) -> Result<Vec<crate::types::opc_demand::DemandSubscription>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_subscriptions 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新增或更新需求订阅（`save_subscription` op）—— 写 op。
+    ///
+    /// `input.id` 为空即新增（id 由宿主生成）。校验全部落在 dao 侧，本层不加新闸：
+    /// 关键词空白 ⇒ `Validation`、`interval_hours` / `min_score` 按 dao 常量钳位、
+    /// 缺行更新 ⇒ `NotFound`（迁移前命令就是直调 dao，语义逐字保持）。
+    async fn save_subscription(
+        &self,
+        _input: crate::types::opc_demand::SaveDemandSubscriptionInput,
+    ) -> Result<crate::types::opc_demand::DemandSubscription> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::save_subscription 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除需求订阅（`delete_subscription` op）—— 写 op，不可逆。
+    ///
+    /// `id` 空串与查无此行同样回 `NotFound`（dao 按 `rows_affected == 0` 判定，
+    /// 迁移前命令同形）⇒ 本层不调 `require_id`，免得把 `NotFound` 改成 `Validation`。
+    async fn delete_subscription(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::delete_subscription 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    // ── 域包配置注册表八 op（#264 批 7 刀 A；迁移前 `opc_capability_pack_actions` /
+    //    `opc_capability_pack_runtime` 的命令体，数据源见各条注释）──
+
+    /// 列出内建域包的摘要条目（`list_industries` op）—— 读 op。
+    ///
+    /// 数据源是宿主 `opc_capability_pack_actions` 的 14 份代码内注册表（**不是**
+    /// `list_runtime_industries` 的域包目录扫描，两条同名不同源，故 op 名分别保留）。
+    async fn list_industries(&self) -> Result<Vec<PackSummaryEntryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_industries 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取单个内建域包的完整配置（`get_capability_pack_config` op）—— 读 op。
+    ///
+    /// 出参就是注册表里的那份结构（含 prompt 模板全文），故 [`CapabilityPackConfig`]
+    /// 随本批上收 harness；查无 ⇒ `NotFound`（迁移前命令的 `域包不存在: {id}` 同语义）。
+    async fn get_capability_pack_config(
+        &self,
+        _domain_pack_id: String,
+    ) -> Result<CapabilityPackConfig> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_capability_pack_config 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取单个域包操作的配置（`get_action_config` op）—— 读 op。
+    ///
+    /// 查无 ⇒ `NotFound`，错误文本按迁移前的 `{域包}/{操作}` 斜杠形态给出。
+    async fn get_action_config(
+        &self,
+        _domain_pack_id: String,
+        _action_key: String,
+    ) -> Result<CapabilityPackActionConfig> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_action_config 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出一个域包的全部操作摘要（`list_capability_pack_actions` op）—— 读 op。
+    ///
+    /// 是 [`CapabilityPackActionConfig`] 的**投影**（去掉两条 prompt 字段），投影点唯一、
+    /// 落在本文件的 [`PackActionSummaryView`]；域包不存在 ⇒ `NotFound`。
+    async fn list_capability_pack_actions(
+        &self,
+        _domain_pack_id: String,
+    ) -> Result<Vec<PackActionSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_capability_pack_actions 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 列出一个域包的全部工作流摘要（`list_capability_pack_workflows` op）—— 读 op。
+    ///
+    /// 迁移前命令用 `json!` 手搭 camelCase 出参（`templateId`），本契约收成
+    /// [`PackWorkflowSummaryView`]，键名逐字不变。
+    async fn list_capability_pack_workflows(
+        &self,
+        _domain_pack_id: String,
+    ) -> Result<Vec<PackWorkflowSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_capability_pack_workflows 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 列出磁盘上的运行时域包（`list_runtime_industries` op）—— 读 op。
+    ///
+    /// 数据源是 company-runtime 的 `capability_pack_config::get_all_configs()`（进程级默认根，
+    /// 迁移前命令连 `app_state` 都没读，只把它当 `_app_state` 挂着）⇒ **本 op 不需要 `app_dir`**，
+    /// 与 `get_kpi_definitions` / `has_capability_pack` 两条不同（那两条迁移前显式传
+    /// `Some(&app_state.app_data_dir)`，接缝侧须由装配口给同一个目录）。出参带 `count`。
+    async fn list_runtime_industries(&self) -> Result<RuntimeIndustryListView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_runtime_industries 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取一个域包的 KPI 定义（`get_kpi_definitions` op）—— 读 op。
+    ///
+    /// 元数据权威来源是域包 `runtime.yaml` 的 `kpi_definitions`，包内无元数据时回退
+    /// 代码内配置（迁移前的两级回退逐字保持，包括「`name` 空则回落 `key`」）。
+    async fn get_kpi_definitions(&self, _domain_pack_id: String) -> Result<PackKpiDefinitionsView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_kpi_definitions 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 判断运行时域包是否存在（`has_capability_pack` op）—— 读 op。
+    ///
+    /// 存在与否回 `Ok` + `exists` 布尔（迁移前命令从不因「不存在」报错），出参回显入参
+    /// 的 `domainPackId`（同形）。
+    async fn has_capability_pack(&self, _domain_pack_id: String) -> Result<PackExistenceView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::has_capability_pack 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────
@@ -1109,6 +1245,185 @@ pub struct DomainCoverage {
     pub domain: String,
     pub covered: bool,
     pub demand_count: usize,
+}
+
+// ── 域包配置面出参（#264 批 7 刀 A；同样放在 trait 之后）─────────────────────
+
+/// 域包摘要条目（`list_industries` 的列表视图）。
+///
+/// 迁移前命令用 `json!` 手搭出这六个键（`actionCount` / `workflowCount` 是长度读数，
+/// 不是注册表字段），收成具名视图以保持同一份键名。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackSummaryEntryView {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub description: String,
+    /// 该域包的操作条数（`actions` 长度）。
+    pub action_count: usize,
+    /// 该域包的工作流条数（`workflows` 长度）。
+    pub workflow_count: usize,
+}
+
+/// 域包操作摘要（`list_capability_pack_actions` 的投影视图）。
+///
+/// 相对 [`CapabilityPackActionConfig`] 裁掉 `system_prompt` / `user_prompt_template` /
+/// `workflow_id` 三条（迁移前命令的 `json!` 就是这六键，裁剪点唯一在这里）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackActionSummaryView {
+    pub key: String,
+    pub label: String,
+    pub description: String,
+    pub action_type: CapabilityPackActionType,
+    pub icon: String,
+    pub tags: Vec<String>,
+}
+
+/// 域包工作流摘要（`list_capability_pack_workflows` 的列表视图）。
+///
+/// 键名与迁移前 `json!` 逐字一致（`templateId`），字段口径同
+/// [`CapabilityPackWorkflowConfig`]。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackWorkflowSummaryView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub template_id: String,
+}
+
+/// 运行时域包列表（`list_runtime_industries` 出参）。
+///
+/// 条目复用批 4 的 [`DomainEntryView`]（同为 `id` + `name` 两键）；`count` 是迁移前
+/// 命令一并下发的条目数，不是分页总数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeIndustryListView {
+    pub count: usize,
+    pub industries: Vec<DomainEntryView>,
+}
+
+/// 域包 KPI 定义列表（`get_kpi_definitions` 出参）。
+///
+/// 保持迁移前命令的外层包装形状（回显 `domainPackId` + `definitions` 数组）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackKpiDefinitionsView {
+    pub domain_pack_id: String,
+    pub definitions: Vec<PackKpiDefinitionView>,
+}
+
+/// 单条 KPI 定义（`get_kpi_definitions` 的列表项视图）。
+///
+/// 与域包侧的 `KpiDefinition` 逐字段同义。⚠ **本视图刻意不加 `rename_all = "camelCase"`**：
+/// 迁移前命令把 dao/域包那份 `Vec<KpiDefinition>` 原样塞进 `definitions`，内层键就是
+/// `metric_type` / `calculation_rule` 这类 snake_case；外层 `domainPackId` 是命令手工搭的，
+/// 两者口径本就不同。收成 camel 会静默改内层线格式 ⇒ 键名逐字保持 snake。
+/// `metric_type` 收成串而不重举枚举（判据在域包，harness 只搬运）：取 `MetricType` 的
+/// **serde 线格式**（那份枚举无 `rename_all` ⇒ 变体名原文，如 `Counter` / `Percentage`），
+/// ⚠ 不等于它的 `Display`（`counter` / `percentage` 小写）—— 抄错会改出参。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PackKpiDefinitionView {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub metric_type: String,
+    pub target: Option<f64>,
+    pub unit: Option<String>,
+    pub formula: Option<String>,
+    pub calculation_rule: Option<String>,
+}
+
+/// 域包存在性读数（`has_capability_pack` 出参）。
+///
+/// 「不存在」回 `Ok` + `exists: false`（迁移前命令从不因不存在报错），并回显入参 id。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackExistenceView {
+    pub domain_pack_id: String,
+    pub exists: bool,
+}
+
+/// 域包操作类型（随 #264 批 7 刀 A 自 `commands::opc_capability_pack_actions` 上收）。
+///
+/// 迁移前该枚举叫 `ActionType`，与本文件所在 crate 的 `plan_compiler::ActionType`
+/// （Tool / Llm / Agent，另一套语义）同名 ⇒ 上收时补 `CapabilityPack` 前缀消歧，
+/// 宿主侧经 `pub use ... as ActionType` 别名保持既有调用点不动。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityPackActionType {
+    /// 对话类型：启动一个带有预设 prompt 的新对话
+    Conversation,
+    /// 工作流类型：创建一个域包专属工作流
+    Workflow,
+}
+
+/// 域包操作配置（随 #264 批 7 刀 A 上收 harness，宿主注册表与接缝出参共用一份定义）。
+///
+/// ⚠ **线格式刻意保持 snake_case**（`action_type` / `system_prompt` /
+/// `user_prompt_template` / `workflow_id`）：本批是命令面迁移，出参键名逐字不动
+/// （`docs/plans/PLAN-shell-plus-plugins.md` §144.2 三面键名分档：工具面 snake 不动）。
+/// 全站 camelCase 收口属 #167 那一族，须单独一批做。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityPackActionConfig {
+    /// 操作唯一标识
+    pub key: String,
+    /// 操作标签
+    pub label: String,
+    /// 操作描述
+    pub description: String,
+    /// 操作类型
+    pub action_type: CapabilityPackActionType,
+    /// 预设 system prompt（对话类型使用）
+    pub system_prompt: String,
+    /// 预设 user prompt 模板（对话类型使用，支持 {{input}} 变量）
+    pub user_prompt_template: String,
+    /// 关联的工作流 ID（工作流类型使用）
+    pub workflow_id: Option<String>,
+    /// 操作图标标识
+    pub icon: String,
+    /// 分类标签
+    pub tags: Vec<String>,
+}
+
+/// 域包工作流配置（随 #264 批 7 刀 A 上收 harness；线格式同上，保持 snake_case）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityPackWorkflowConfig {
+    /// 工作流唯一标识
+    pub id: String,
+    /// 工作流名称
+    pub name: String,
+    /// 工作流描述
+    pub description: String,
+    /// 工作流版本
+    pub version: String,
+    /// 工作流模板 ID（对应 workflow_template 表）
+    pub template_id: String,
+}
+
+/// 域包完整配置（随 #264 批 7 刀 A 上收 harness；线格式同上，保持 snake_case）。
+///
+/// ⚠ 与 company-runtime 的 `opc::capability_pack_config::CapabilityPackConfig`
+/// **同名不同义**（那份是磁盘域包目录的 yaml 装载结构，含 `entity_types` /
+/// `automation_rules` 等），本份是宿主代码内注册表的操作 + 工作流配置。该歧义是
+/// 迁移前既存状态，本批只登记不改名（改名要动 14 份配置构造点，属独立批）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityPackConfig {
+    /// 域包 ID
+    pub id: String,
+    /// 域包名称
+    pub name: String,
+    /// 域包图标
+    pub icon: String,
+    /// 域包描述
+    pub description: String,
+    /// 域包专属操作列表
+    pub actions: Vec<CapabilityPackActionConfig>,
+    /// 域包专属工作流列表
+    pub workflows: Vec<CapabilityPackWorkflowConfig>,
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

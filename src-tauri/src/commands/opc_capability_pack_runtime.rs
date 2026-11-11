@@ -420,6 +420,13 @@ pub fn has_capability_pack(app_dir: Option<&Path>, domain_pack_id: &str) -> bool
 }
 
 // ── Tauri 命令（签名保持前端契约；app_state 由 Tauri 自动注入） ──
+//
+// #264 批 7 刀 A 删除三条只读包装器（`opc_list_runtime_industries` / `opc_get_kpi_definitions` /
+// `opc_has_capability_pack`）：调用方走 plugin-opc 的同名命名命令，宿主侧经 `opc.store` 的三个新
+// op 由 `HostOpcStore` 提供同一份域包配置读数（`app_dir` 由 `state.rs` 装配，未装配即 fail-closed）。
+// ⚠ 本文件的 `list_industries`（磁盘 `runtime.yaml`/config 域包）与
+// `opc_capability_pack_actions` 的注册表列表是**两个不同的数据源**，接缝侧分别落在
+// `list_runtime_industries` 与 `list_industries` 两个 op 上，不得混同。
 
 /// 验证域包实体（Tauri 命令）
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "验证域包实体")]
@@ -524,21 +531,6 @@ pub async fn opc_get_capability_pack_dashboard(
     }))
 }
 
-/// 列出全部域包（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "列出全部域包")]
-#[tauri::command]
-pub async fn opc_list_runtime_industries(
-    _app_state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let industries = list_industries();
-    Ok(serde_json::json!({
-        "count": industries.len(),
-        "industries": industries.into_iter().map(|(id, name)| {
-            serde_json::json!({ "id": id, "name": name })
-        }).collect::<Vec<_>>(),
-    }))
-}
-
 /// 获取域包工作流步骤（Tauri 命令）
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包工作流步骤")]
 #[tauri::command]
@@ -602,34 +594,6 @@ pub async fn opc_batch_validate_entities(
         "results": results.into_iter().map(|(t, errs)| {
             serde_json::json!({ "entityType": t, "valid": errs.is_empty(), "errors": errs })
         }).collect::<Vec<_>>(),
-    }))
-}
-
-/// 获取域包 KPI 定义（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包KPI定义")]
-#[tauri::command]
-pub async fn opc_get_kpi_definitions(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let definitions = get_kpi_definitions(Some(&app_state.app_data_dir), &capability_pack_id)?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "definitions": definitions,
-    }))
-}
-
-/// 检查域包是否存在（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "检查域包是否存在")]
-#[tauri::command]
-pub async fn opc_has_capability_pack(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let exists = has_capability_pack(Some(&app_state.app_data_dir), &capability_pack_id);
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "exists": exists,
     }))
 }
 

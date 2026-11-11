@@ -5449,8 +5449,7 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
         loop {
             interval.tick().await;
             let started = axagent_runtime_core::cron_job::now_millis();
-            let outcome =
-                run_demand_discovery_cron(&db, None, Some(&app)).await;
+            let outcome = run_demand_discovery_cron(&db, None, Some(&app)).await;
 
             let (success, output, error) = match outcome {
                 Ok(summary) => {

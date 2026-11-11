@@ -4,7 +4,10 @@
 //!
 //! 把「发现」从手动单关键词点按钮升级为**订阅词表驱动的定时扫描**：
 //!
-//! - 订阅 CRUD：`opc_list_subscriptions` / `opc_save_subscription` / `opc_delete_subscription`
+//! - 订阅 CRUD：三条宿主命令（`opc_list_subscriptions` / `opc_save_subscription` /
+//!   `opc_delete_subscription`）已由 #264 批 7 刀 A 删除，调用方走 plugin-opc 的同名命名命令，
+//!   宿主侧由 `HostOpcStore` 经 `opc.store` 的三个同名 op 直调 dao —— 关键词必填、`interval_hours`
+//!   / `min_score` 钳位、缺行 `NotFound` 全部沿用 dao 既有语义，接缝侧不新增校验闸。
 //! - 批量扫描：`opc_run_subscription_scan`（挑出到期订阅 → 复用 [`run_discovery_scan`]
 //!   → 按 `min_score` 过滤高价值命中 → 推进到期时间）
 //! - 定时任务装配：`opc_ensure_demand_scan_job`（幂等创建/更新
@@ -25,9 +28,7 @@ use crate::AppState;
 use crate::commands::error_code::common as common_err;
 use crate::commands::scheduled_task::{ScheduledTaskDto, cron_to_dto, validate_cron_expression};
 use axagent_harness::cron_delivery::{CronDeliveryChannel, CronDeliveryConfig};
-use axagent_harness::types::{
-    DemandSubscription, KeywordScanOutcome, SaveDemandSubscriptionInput, SubscriptionScanSummary,
-};
+use axagent_harness::types::{DemandSubscription, KeywordScanOutcome, SubscriptionScanSummary};
 use axagent_harness::util_fns::now_ts;
 use axagent_runtime_core::{CronJob, CronJobStatus};
 use axagent_tools::tools::opc_demand_scan::run_discovery_scan;
@@ -37,29 +38,6 @@ use tauri::State;
 pub const SCAN_JOB_TASK_TYPE: &str = "opc_demand_scan";
 /// 默认扫描频率：每 6 小时一次（00/06/12/18 点整）
 pub const DEFAULT_SCAN_CRON: &str = "0 */6 * * *";
-
-/// 列出全部需求订阅
-#[tauri::command]
-pub async fn opc_list_subscriptions(
-    state: State<'_, AppState>,
-) -> Result<Vec<DemandSubscription>, String> {
-    axagent_dao::repo::opc_demand::list_subscriptions(state.harness.db()).await.map_err(err)
-}
-
-/// 新增或更新需求订阅（`id` 为空则新增）
-#[tauri::command]
-pub async fn opc_save_subscription(
-    state: State<'_, AppState>,
-    input: SaveDemandSubscriptionInput,
-) -> Result<DemandSubscription, String> {
-    axagent_dao::repo::opc_demand::save_subscription(state.harness.db(), input).await.map_err(err)
-}
-
-/// 删除需求订阅
-#[tauri::command]
-pub async fn opc_delete_subscription(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    axagent_dao::repo::opc_demand::delete_subscription(state.harness.db(), &id).await.map_err(err)
-}
 
 /// 执行一轮订阅扫描
 ///

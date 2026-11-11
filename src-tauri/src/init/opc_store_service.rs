@@ -78,6 +78,11 @@ pub struct HostOpcStore {
     /// indexer、`run_lead_workflow` 启动执行用 WorkEngine。测试只跑表读写 op，故不装配；
     /// 生产由 `state.rs` 经 [`Self::with_demand_pipeline`] 装配（缺装配的调用回 `Provider` 错）。
     demand: Option<DemandPipeline>,
+    /// 域包配置根目录（= `AppState::app_data_dir`，#264 批 7 刀 A）：`get_kpi_definitions` /
+    /// `has_capability_pack` 两条 op 需要。生产由 `state.rs` 经 [`Self::with_app_dir`] 装配；
+    /// 迁移前那两条命令传的是 `Some(&app_state.app_data_dir)`，**不装配就不传**（传 `None` 会让
+    /// `resolve_capability_packs_dir` 回退到进程级默认根 ⇒ 读错目录，属行为变更，不许）。
+    app_dir: Option<std::path::PathBuf>,
     /// 受保护 id 名单（内置站点内容）：`delete_blog_post` 对它们回 `Protected` 且**不删除**。
     ///
     /// 名单机制照 `jobs.store` 的三件套（`axagent-runtime/crates/runtime-core/src/cron_job.rs`
@@ -96,7 +101,7 @@ struct DemandPipeline {
 
 impl HostOpcStore {
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db, demand: None, protected: RwLock::new(HashSet::new()) }
+        Self { db, demand: None, app_dir: None, protected: RwLock::new(HashSet::new()) }
     }
 
     /// 装配需求实现链的两项宿主服务（生产唯一装配口，`state.rs` 调用）。
@@ -114,6 +119,21 @@ impl HostOpcStore {
         self.demand.as_ref().ok_or_else(|| {
             AxAgentError::Provider(format!(
                 "opc.store::{op} 未装配需求实现管线（宿主 wiring 缺 with_demand_pipeline）"
+            ))
+        })
+    }
+
+    /// 装配域包配置根目录（生产唯一装配口，`state.rs` 调用）。
+    pub fn with_app_dir(mut self, app_dir: std::path::PathBuf) -> Self {
+        self.app_dir = Some(app_dir);
+        self
+    }
+
+    /// 取域包配置根目录；未装配即回 `Provider` 错（本层 fail-closed，**不回退进程级默认根**）。
+    fn pack_app_dir(&self, op: &str) -> Result<std::path::PathBuf> {
+        self.app_dir.clone().ok_or_else(|| {
+            AxAgentError::Provider(format!(
+                "opc.store::{op} 未装配域包配置目录（宿主 wiring 缺 with_app_dir）"
             ))
         })
     }
@@ -1248,9 +1268,7 @@ impl OpcStoreProvider for HostOpcStore {
 
         let lead = opc_demand::get_lead(&self.db, &lead_id).await?;
         let template_id = workflow_template_id.unwrap_or_else(|| {
-            lead.linked_workflow_id
-                .clone()
-                .unwrap_or_else(|| "default_demand_delivery".to_string())
+            lead.linked_workflow_id.clone().unwrap_or_else(|| "default_demand_delivery".to_string())
         });
 
         let saved = opc_delivery::create_delivery(
@@ -1530,9 +1548,10 @@ impl OpcStoreProvider for HostOpcStore {
 
         // 2) 统计高价值需求中的高频关键词（读 A 链路 opc_demand_leads；won/lost 为
         //    销售终态，不参与统计）
-        let all_leads = opc_demand::list_leads(&self.db, 10_000, Some(50.0), None).await.map_err(
-            |e| AxAgentError::Provider(format!("opc.store::analyze_capability_gaps {e}")),
-        )?;
+        let all_leads =
+            opc_demand::list_leads(&self.db, 10_000, Some(50.0), None).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::analyze_capability_gaps {e}"))
+            })?;
         let leads: Vec<_> =
             all_leads.iter().filter(|l| l.status != "won" && l.status != "lost").collect();
 
@@ -1645,6 +1664,177 @@ impl OpcStoreProvider for HostOpcStore {
             auto_created_gaps: auto_created,
         })
     }
+
+    // ── #264 批 7 刀 A：需求订阅面三 op ────────────────────────────────────
+    //
+    // 迁移前是 `commands::opc_demand_subscription` 的三条包装器（本批已删，该模块只留扫描
+    // 与定时装配）。三条都是 dao 的直投影 ⇒ 关键词必填、`interval_hours` / `min_score` 钳位、
+    // 查无行 `NotFound` 全部沿用 dao 语义，本层不新增校验闸（「迁≠改」）。
+
+    async fn list_subscriptions(&self) -> Result<Vec<DemandSubscription>> {
+        opc_demand::list_subscriptions(&self.db).await
+    }
+
+    async fn save_subscription(
+        &self,
+        input: SaveDemandSubscriptionInput,
+    ) -> Result<DemandSubscription> {
+        opc_demand::save_subscription(&self.db, input).await
+    }
+
+    async fn delete_subscription(&self, id: String) -> Result<()> {
+        // 刻意不调 `require_id`：空串与查无此行在 dao 里同走 `rows_affected == 0` ⇒
+        // `NotFound`。先拦空串会把错误类别改成 `Validation`，属行为变更。
+        opc_demand::delete_subscription(&self.db, &id).await
+    }
+
+    // ── #264 批 7 刀 A：域包配置注册表五 op（数据源 = 宿主代码内 14 份注册表）──
+    //
+    // 迁移前是 `commands::opc_capability_pack_actions` 的五条包装器（本批已删），自由函数保留：
+    // 它同时是 bridge LLM 工具实现体与本接缝的数据源，不在两处重抄一遍（禁区 12）。
+    // 出参线格式逐字不动 —— [`CapabilityPackConfig`] 那份保持 snake_case（PLAN §144.2 分档）。
+
+    async fn list_industries(&self) -> Result<Vec<PackSummaryEntryView>> {
+        Ok(opc_capability_pack_actions::get_all_capability_pack_configs()
+            .into_iter()
+            .map(|c| PackSummaryEntryView {
+                id: c.id,
+                name: c.name,
+                icon: c.icon,
+                description: c.description,
+                action_count: c.actions.len(),
+                workflow_count: c.workflows.len(),
+            })
+            .collect())
+    }
+
+    async fn get_capability_pack_config(
+        &self,
+        domain_pack_id: String,
+    ) -> Result<CapabilityPackConfig> {
+        pack_config_or_not_found(&domain_pack_id)
+    }
+
+    async fn get_action_config(
+        &self,
+        domain_pack_id: String,
+        action_key: String,
+    ) -> Result<CapabilityPackActionConfig> {
+        let action = opc_capability_pack_actions::get_action_config(&domain_pack_id, &action_key);
+        action.ok_or_else(|| {
+            AxAgentError::NotFound(format!("操作不存在: {domain_pack_id}/{action_key}"))
+        })
+    }
+
+    async fn list_capability_pack_actions(
+        &self,
+        domain_pack_id: String,
+    ) -> Result<Vec<PackActionSummaryView>> {
+        let config = pack_config_or_not_found(&domain_pack_id)?;
+        Ok(config
+            .actions
+            .into_iter()
+            .map(|a| PackActionSummaryView {
+                key: a.key,
+                label: a.label,
+                description: a.description,
+                action_type: a.action_type,
+                icon: a.icon,
+                tags: a.tags,
+            })
+            .collect())
+    }
+
+    async fn list_capability_pack_workflows(
+        &self,
+        domain_pack_id: String,
+    ) -> Result<Vec<PackWorkflowSummaryView>> {
+        let config = pack_config_or_not_found(&domain_pack_id)?;
+        Ok(config
+            .workflows
+            .into_iter()
+            .map(|w| PackWorkflowSummaryView {
+                id: w.id,
+                name: w.name,
+                description: w.description,
+                version: w.version,
+                template_id: w.template_id,
+            })
+            .collect())
+    }
+
+    // ── #264 批 7 刀 A：运行时域包三 op（数据源 = 磁盘域包配置，与上节同名不同源）──
+
+    async fn list_runtime_industries(&self) -> Result<RuntimeIndustryListView> {
+        // 本 op 迁移前就没读 `app_state`（参数写作 `_app_state`），数据源是进程级默认根
+        // ⇒ 刻意不经 `pack_app_dir`，接上目录反而改成行为。
+        let industries = opc_capability_pack_runtime::list_industries();
+        Ok(RuntimeIndustryListView {
+            count: industries.len(),
+            industries: industries
+                .into_iter()
+                .map(|(id, name)| DomainEntryView { id, name })
+                .collect(),
+        })
+    }
+
+    async fn get_kpi_definitions(&self, domain_pack_id: String) -> Result<PackKpiDefinitionsView> {
+        let app_dir = self.pack_app_dir("get_kpi_definitions")?;
+        let definitions =
+            opc_capability_pack_runtime::get_kpi_definitions(Some(&app_dir), &domain_pack_id)
+                .map_err(|e| {
+                    AxAgentError::Provider(format!("opc.store::get_kpi_definitions {e}"))
+                })?;
+        Ok(PackKpiDefinitionsView {
+            domain_pack_id,
+            definitions: project_kpi_definitions(&definitions)?,
+        })
+    }
+
+    async fn has_capability_pack(&self, domain_pack_id: String) -> Result<PackExistenceView> {
+        let app_dir = self.pack_app_dir("has_capability_pack")?;
+        let exists =
+            opc_capability_pack_runtime::has_capability_pack(Some(&app_dir), &domain_pack_id);
+        Ok(PackExistenceView { domain_pack_id, exists })
+    }
+}
+
+// ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────
+//
+// 这两个 `use` 同样**刻意放在 impl 之后**（`impl OpcStoreProvider for HostOpcStore` 那一行被
+// PLAN 与登记表按行号引用，往文件头的 `use` 列表里加名字会让它整体下移；模块级 `use`
+// 在任意 item 位置都生效）。
+use crate::commands::opc_capability_pack_actions;
+use crate::commands::opc_capability_pack_runtime;
+use axagent_harness::opc_store::{
+    CapabilityPackActionConfig, CapabilityPackConfig, PackActionSummaryView, PackExistenceView,
+    PackKpiDefinitionView, PackKpiDefinitionsView, PackSummaryEntryView, PackWorkflowSummaryView,
+    RuntimeIndustryListView,
+};
+use axagent_harness::types::opc_demand::{DemandSubscription, SaveDemandSubscriptionInput};
+
+/// 域包注册表查表 + 迁移前的 `NotFound` 口径（三条命令同用这句 `域包不存在: {id}`）。
+fn pack_config_or_not_found(domain_pack_id: &str) -> Result<CapabilityPackConfig> {
+    opc_capability_pack_actions::get_capability_pack_config(domain_pack_id)
+        .ok_or_else(|| AxAgentError::NotFound(format!("域包不存在: {domain_pack_id}")))
+}
+
+/// 域包 `KpiDefinition` → 接缝视图的唯一投影点。
+///
+/// 走 serde 往返而不是逐字段手抄：[`PackKpiDefinitionView`] 刻意与域包那份**逐字段同名**
+/// （内层键保持 snake_case，见该视图的文档），往返投影保证出参与迁移前命令
+/// `json!` 里那份 `definitions` 逐字节相同；将来域包改名会在这里显式报投影失败，
+/// 不会静默丢字段。⚠ `metric_type` 因此取的是 serde 线格式（变体名 `Counter`），
+/// 不是 `MetricType` 的 `Display`（小写 `counter`）—— 手抄成 `to_string()` 即改出参。
+fn project_kpi_definitions(
+    definitions: &[axagent_company_runtime::opc::KpiDefinition],
+) -> Result<Vec<PackKpiDefinitionView>> {
+    let raw = serde_json::to_value(definitions).map_err(|e| {
+        AxAgentError::Provider(format!("opc.store::get_kpi_definitions 序列化失败: {e}"))
+    })?;
+    serde_json::from_value(raw).map_err(|e| {
+        AxAgentError::Provider(format!("opc.store::get_kpi_definitions 投影失败: {e}"))
+    })
 }
 
 // ── #264 批 4 领域工作流三 op 的依赖（同样放在 impl 之后，理由同上）──────────
@@ -2467,7 +2657,16 @@ mod tests {
         .expect("发票视图可序列化");
         assert_keys(
             &invoice,
-            &["id", "customerId", "invoiceNumber", "status", "total", "currency", "createdAt"],
+            &[
+                "id",
+                "customerId",
+                "invoiceNumber",
+                "status",
+                "total",
+                "currency",
+                "dueAt",
+                "createdAt",
+            ],
         );
         assert_eq!(invoice["status"], "paid", "枚举必须落 as_str 的小写串");
         assert!(invoice.get("lineItems").is_none(), "行明细不过线");
@@ -2497,9 +2696,32 @@ mod tests {
         .expect("客户视图可序列化");
         assert_keys(
             &customer,
-            &["id", "name", "email", "phone", "company", "status", "totalRevenue", "createdAt"],
+            &[
+                "id",
+                "name",
+                "email",
+                "phone",
+                "company",
+                "customerType",
+                "country",
+                "region",
+                "city",
+                "address",
+                "latitude",
+                "longitude",
+                "source",
+                "notes",
+                "status",
+                "totalRevenue",
+                "invoiceCount",
+                "createdAt",
+            ],
         );
-        assert!(customer.get("notes").is_none(), "备注不过线");
+        // `notes` 与地理六列、`invoiceCount` 由 #32 批 B/C 定案**过线**（前端 `CustomersTab.tsx`
+        // 的 `CustomerRow` 逐列直读，编辑表单回填也读 `notes`）⇒ 真正被裁掉的是 `tags` /
+        // `updatedAt`，负控改钉这两列，键集合与 harness 同一条钉桩逐字同源。
+        assert!(customer.get("tags").is_none(), "标签数组不过线");
+        assert!(customer.get("updatedAt").is_none(), "建行后的修改时刻不过线");
 
         let project = serde_json::to_value(project_summary_view(&Project {
             id: "prj-1".into(),

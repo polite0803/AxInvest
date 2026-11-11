@@ -4,7 +4,6 @@
 //!
 //! 为 9 个垂直域包的操作入口提供后端配置和 prompt 生成。
 
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
 
@@ -13,70 +12,16 @@ use axagent_agent_macro::agent_command;
 use axagent_company_runtime::opc::{CapabilityPackLearningManager, OpcCapabilityPackAnalysisRound};
 use axagent_orchestrator::{ReinforcementLearningConfig, RewardWeightConfig};
 
-/// 域包操作类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActionType {
-    /// 对话类型：启动一个带有预设 prompt 的新对话
-    Conversation,
-    /// 工作流类型：创建一个域包专属工作流
-    Workflow,
-}
-
-/// 域包操作配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapabilityPackActionConfig {
-    /// 操作唯一标识
-    pub key: String,
-    /// 操作标签
-    pub label: String,
-    /// 操作描述
-    pub description: String,
-    /// 操作类型
-    pub action_type: ActionType,
-    /// 预设 system prompt（对话类型使用）
-    pub system_prompt: String,
-    /// 预设 user prompt 模板（对话类型使用，支持 {{input}} 变量）
-    pub user_prompt_template: String,
-    /// 关联的工作流 ID（工作流类型使用）
-    pub workflow_id: Option<String>,
-    /// 操作图标标识
-    pub icon: String,
-    /// 分类标签
-    pub tags: Vec<String>,
-}
-
-/// 域包工作流配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapabilityPackWorkflowConfig {
-    /// 工作流唯一标识
-    pub id: String,
-    /// 工作流名称
-    pub name: String,
-    /// 工作流描述
-    pub description: String,
-    /// 工作流版本
-    pub version: String,
-    /// 工作流模板 ID（对应 workflow_template 表）
-    pub template_id: String,
-}
-
-/// 域包完整配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapabilityPackConfig {
-    /// 域包 ID
-    pub id: String,
-    /// 域包名称
-    pub name: String,
-    /// 域包图标
-    pub icon: String,
-    /// 域包描述
-    pub description: String,
-    /// 域包专属操作列表
-    pub actions: Vec<CapabilityPackActionConfig>,
-    /// 域包专属工作流列表
-    pub workflows: Vec<CapabilityPackWorkflowConfig>,
-}
+// 域包配置的四个数据类型已上收 harness（`axagent-core/crates/harness/src/opc_store.rs`，
+// #264 批 7 刀 A）：`opc.store` 接缝要把同一份结构原样投影给插件，禁区 12 要求单一权威定义，
+// 故本文件只 re-export、不再本地声明。harness 侧枚举名为 `CapabilityPackActionType`
+// （避开 harness 既有的 `plan_compiler::ActionType`），本文件沿用原名 `ActionType` 不动注册表。
+// ⚠ 与 `axagent-quant/crates/company-runtime/src/opc/capability_pack_config.rs` 的同名类型
+// 是**两套不同的数据源**（那边读 `config/opc/domain_packs/*/runtime.yaml`，这边是代码内注册表）。
+pub use axagent_harness::opc_store::{
+    CapabilityPackActionConfig, CapabilityPackActionType as ActionType, CapabilityPackConfig,
+    CapabilityPackWorkflowConfig,
+};
 
 // ── 9 个域包配置定义 ──────────────────────────────────────────────
 
@@ -2045,48 +1990,14 @@ pub fn get_workflow_config(
 }
 
 // ── Tauri 命令 ──────────────────────────────────────────────────
-
-/// 获取所有域包列表（简要信息）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取所有域包列表")]
-#[tauri::command]
-pub async fn opc_list_industries() -> Result<serde_json::Value, String> {
-    let configs = get_all_capability_pack_configs();
-    let list: Vec<serde_json::Value> = configs
-        .into_iter()
-        .map(|c| {
-            serde_json::json!({
-                "id": c.id,
-                "name": c.name,
-                "icon": c.icon,
-                "description": c.description,
-                "actionCount": c.actions.len(),
-                "workflowCount": c.workflows.len(),
-            })
-        })
-        .collect();
-    serde_json::to_value(list).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 获取域包完整配置（含操作和工作流）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包完整配置")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_config(
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let config = get_capability_pack_config(&capability_pack_id)
-        .ok_or_else(|| format!("域包不存在: {capability_pack_id}"))?;
-    serde_json::to_value(config).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+//
+// #264 批 7 刀 A 删除五条只读包装器（`opc_list_industries` / `opc_get_capability_pack_config` /
+// `opc_get_action_config` / `opc_list_capability_pack_actions` / `opc_list_capability_pack_workflows`）：
+// 调用方一律走 plugin-opc 的**同名**命名命令，宿主侧经 `opc.store` 的五个新 op 由 `HostOpcStore`
+// 提供同一份注册表读数（出参逐字保持，见 harness `opc_store.rs` 的视图文档）。
+// 下面的自由函数**保留不动** —— 它们既是 `opc_capability_pack_bridge.rs` 的 LLM 工具实现体
+// （工具面入参按 `PLAN-shell-plus-plugins.md` §144.2 维持 snake_case，本批不动），
+// 也是接缝实现体的唯一数据源。
 
 /// 获取域包（manifest 基本信息）
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包 manifest")]
@@ -2107,23 +2018,6 @@ pub async fn opc_get_capability_pack(
     });
 
     serde_json::to_value(serde_json::json!({ "manifest": manifest })).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 获取域包操作的执行配置（用于前端调用）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包操作配置")]
-#[tauri::command]
-pub async fn opc_get_action_config(
-    capability_pack_id: String,
-    action_key: String,
-) -> Result<serde_json::Value, String> {
-    let action = get_action_config(&capability_pack_id, &action_key)
-        .ok_or_else(|| format!("操作不存在: {capability_pack_id}/{action_key}"))?;
-    serde_json::to_value(action).map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -2174,65 +2068,6 @@ pub async fn opc_build_capability_pack_prompt(
         "actionLabel": action.label,
         "domainPackId": capability_pack_id,
     }))
-}
-
-/// 获取域包所有操作列表
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出域包所有操作")]
-#[tauri::command]
-pub async fn opc_list_capability_pack_actions(
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let config = get_capability_pack_config(&capability_pack_id)
-        .ok_or_else(|| format!("域包不存在: {capability_pack_id}"))?;
-    let actions: Vec<serde_json::Value> = config
-        .actions
-        .into_iter()
-        .map(|a| {
-            serde_json::json!({
-                "key": a.key,
-                "label": a.label,
-                "description": a.description,
-                "actionType": a.action_type,
-                "icon": a.icon,
-                "tags": a.tags,
-            })
-        })
-        .collect();
-    serde_json::to_value(actions).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 获取域包所有工作流列表
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出域包所有工作流")]
-#[tauri::command]
-pub async fn opc_list_capability_pack_workflows(
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let config = get_capability_pack_config(&capability_pack_id)
-        .ok_or_else(|| format!("域包不存在: {capability_pack_id}"))?;
-    let workflows: Vec<serde_json::Value> = config
-        .workflows
-        .into_iter()
-        .map(|w| {
-            serde_json::json!({
-                "id": w.id,
-                "name": w.name,
-                "description": w.description,
-                "version": w.version,
-                "templateId": w.template_id,
-            })
-        })
-        .collect();
-    serde_json::to_value(workflows).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
 }
 
 // ── 域包分析引擎命令 ──────────────────────────────────────────

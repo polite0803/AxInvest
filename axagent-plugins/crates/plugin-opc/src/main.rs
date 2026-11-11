@@ -171,6 +171,25 @@ const OPC_STORE_LIST_CAPABILITY_GAPS: &str = "list_capability_gaps";
 const OPC_STORE_CLOSE_CAPABILITY_GAP: &str = "close_capability_gap";
 const OPC_STORE_ANALYZE_CAPABILITY_GAPS: &str = "analyze_capability_gaps";
 
+/// #264 批 7 刀 A：需求订阅面三 op（`save_subscription` / `delete_subscription` 要
+/// `write`，`list_subscriptions` 不登记权限闸）。
+const OPC_STORE_LIST_SUBSCRIPTIONS: &str = "list_subscriptions";
+const OPC_STORE_SAVE_SUBSCRIPTION: &str = "save_subscription";
+const OPC_STORE_DELETE_SUBSCRIPTION: &str = "delete_subscription";
+
+/// #264 批 7 刀 A：域包配置面八 op，全只读 ⇒ 宿主权限表一条都不登记。
+///
+/// ⚠ 两组同名不同源，不可合并：`list_industries` 读宿主代码内的 14 份注册表，
+/// `list_runtime_industries` 读磁盘上的域包目录（迁移前就是两条不同的命令）。
+const OPC_STORE_LIST_INDUSTRIES: &str = "list_industries";
+const OPC_STORE_GET_CAPABILITY_PACK_CONFIG: &str = "get_capability_pack_config";
+const OPC_STORE_GET_ACTION_CONFIG: &str = "get_action_config";
+const OPC_STORE_LIST_CAPABILITY_PACK_ACTIONS: &str = "list_capability_pack_actions";
+const OPC_STORE_LIST_CAPABILITY_PACK_WORKFLOWS: &str = "list_capability_pack_workflows";
+const OPC_STORE_LIST_RUNTIME_INDUSTRIES: &str = "list_runtime_industries";
+const OPC_STORE_GET_KPI_DEFINITIONS: &str = "get_kpi_definitions";
+const OPC_STORE_HAS_CAPABILITY_PACK: &str = "has_capability_pack";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -296,6 +315,22 @@ const COMMAND_PROACTIVE_EVALUATE_LEADS: &str = "opc_proactive_evaluate_leads";
 const COMMAND_LIST_CAPABILITY_GAPS: &str = "opc_list_capability_gaps";
 const COMMAND_CLOSE_CAPABILITY_GAP: &str = "opc_close_capability_gap";
 const COMMAND_ANALYZE_CAPABILITY_GAPS: &str = "opc_analyze_capability_gaps";
+
+/// #264 批 7 刀 A：订阅面三命令 + 域包配置面八命令（清单 `commands[].name` 必须逐字一致）。
+/// 宿主同名的十一条 Tauri 命令随本批删除 —— #273 已裁定这 28 条零前端调用命令**全部保留**
+/// （`#[agent_command]` 让它们在智能体工具面是活命令），故唯一收口路径就是迁 T2，
+/// 且插件命令必须保持 `opc_*` 原名（改名等于换掉智能体侧的工具名）。
+const COMMAND_LIST_SUBSCRIPTIONS: &str = "opc_list_subscriptions";
+const COMMAND_SAVE_SUBSCRIPTION: &str = "opc_save_subscription";
+const COMMAND_DELETE_SUBSCRIPTION: &str = "opc_delete_subscription";
+const COMMAND_LIST_INDUSTRIES: &str = "opc_list_industries";
+const COMMAND_GET_CAPABILITY_PACK_CONFIG: &str = "opc_get_capability_pack_config";
+const COMMAND_GET_ACTION_CONFIG: &str = "opc_get_action_config";
+const COMMAND_LIST_CAPABILITY_PACK_ACTIONS: &str = "opc_list_capability_pack_actions";
+const COMMAND_LIST_CAPABILITY_PACK_WORKFLOWS: &str = "opc_list_capability_pack_workflows";
+const COMMAND_LIST_RUNTIME_INDUSTRIES: &str = "opc_list_runtime_industries";
+const COMMAND_GET_KPI_DEFINITIONS: &str = "opc_get_kpi_definitions";
+const COMMAND_HAS_CAPABILITY_PACK: &str = "opc_has_capability_pack";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -823,6 +858,92 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_ANALYZE_CAPABILITY_GAPS => {
             match analyze_capability_gaps(&request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 批 7 刀 A：订阅面三命令 + 域包配置面八命令（十一条全部一条接缝调用直投影，
+        // 命令层只做形状判；订阅的业务校验在 dao，域包的 NotFound 在宿主实现体）。
+        COMMAND_LIST_SUBSCRIPTIONS => match list_subscriptions(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_SAVE_SUBSCRIPTION => {
+            match save_subscription(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_DELETE_SUBSCRIPTION => {
+            match delete_subscription(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_INDUSTRIES => match list_industries(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_CAPABILITY_PACK_CONFIG => {
+            match get_capability_pack_config(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_ACTION_CONFIG => {
+            match get_action_config(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_CAPABILITY_PACK_ACTIONS => {
+            match list_capability_pack_actions(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_CAPABILITY_PACK_WORKFLOWS => {
+            match list_capability_pack_workflows(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_RUNTIME_INDUSTRIES => {
+            match list_runtime_industries(&request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_KPI_DEFINITIONS => {
+            match get_kpi_definitions(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_HAS_CAPABILITY_PACK => {
+            match has_capability_pack(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2129,6 +2250,165 @@ fn analyze_capability_gaps(
     peer: &mut WorkerPeer,
 ) -> Result<Value, (String, String)> {
     call_opc_store(peer, OPC_STORE_ANALYZE_CAPABILITY_GAPS, json!({}), call_chain)
+}
+
+// ── #264 批 7 刀 A：订阅面三命令 + 域包配置面八命令 ──────────────────────────
+//
+// 键名分档同既有批（PLAN §144.2）：命令面 camelCase（`capabilityPackId` / `actionKey` /
+// `input`），接缝面 snake_case（`domain_pack_id` / `action_key`）。域包侧的入参键沿用
+// 迁移前那十一条 Tauri 命令的参数名（`capability_pack_id` ⇒ `capabilityPackId`），
+// 与**未迁**的 `opc_get_capability_pack` / `opc_get_workflow_config` 保持同形；
+// 接缝 op 的键则是 harness trait 的形参名（`domain_pack_id`），两处不许互换。
+
+/// `opc_list_subscriptions`：列出全部需求订阅（读 op，零入参；创建时间升序整表下发）。
+fn list_subscriptions(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_LIST_SUBSCRIPTIONS, json!({}), call_chain)
+}
+
+/// `opc_save_subscription`：新增或更新订阅（写 op，`input` 必填对象）。
+///
+/// 命令层只判 `input` 是不是对象；关键词必填、`intervalHours` / `minScore` 钳位、
+/// 缺行 `NotFound` 全在 dao（迁移前的 Tauri 命令就是 dao 的直包装，接缝不加新闸）。
+fn save_subscription(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_save_subscription";
+    let payload = require_object(input, OP, "input")?;
+    call_opc_store(peer, OPC_STORE_SAVE_SUBSCRIPTION, json!({ "input": payload }), call_chain)
+}
+
+/// `opc_delete_subscription`：删除订阅（写 op，`id` 必填；空串与查无行同回 `NotFound`）。
+fn delete_subscription(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_delete_subscription";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_DELETE_SUBSCRIPTION, json!({ "id": id }), call_chain)
+}
+
+/// `opc_list_industries`：列出内建域包摘要（读 op，零入参 —— 数据源是代码内注册表）。
+fn list_industries(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_LIST_INDUSTRIES, json!({}), call_chain)
+}
+
+/// `opc_get_capability_pack_config`：取一个内建域包的完整配置（读 op，含 prompt 全文）。
+fn get_capability_pack_config(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_config";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_CAPABILITY_PACK_CONFIG,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_get_action_config`：取单个域包操作的配置（读 op，两个必填键）。
+fn get_action_config(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_action_config";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let action_key = require_str(input, OP, "actionKey")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_ACTION_CONFIG,
+        json!({ "domain_pack_id": pack_id, "action_key": action_key }),
+        call_chain,
+    )
+}
+
+/// `opc_list_capability_pack_actions`：列出一个域包的全部操作摘要（读 op，裁掉两条 prompt 字段）。
+fn list_capability_pack_actions(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_capability_pack_actions";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_LIST_CAPABILITY_PACK_ACTIONS,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_list_capability_pack_workflows`：列出一个域包的全部工作流摘要（读 op）。
+fn list_capability_pack_workflows(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_capability_pack_workflows";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_LIST_CAPABILITY_PACK_WORKFLOWS,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_list_runtime_industries`：列出磁盘上的运行时域包（读 op，零入参，出参带 `count`）。
+///
+/// 与 `opc_list_industries` 同名不同源（那边是代码内注册表），两条命令都保留、不许合并。
+fn list_runtime_industries(
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_LIST_RUNTIME_INDUSTRIES, json!({}), call_chain)
+}
+
+/// `opc_get_kpi_definitions`：取一个域包的 KPI 定义（读 op）。
+///
+/// 出参内层键是 snake_case（`metric_type` / `calculation_rule`），与迁移前逐字一致 ——
+/// 那条线格式由 harness 那份视图的文档钉住，本命令不改写、不重命名。
+fn get_kpi_definitions(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_kpi_definitions";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_KPI_DEFINITIONS,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_has_capability_pack`：判断运行时域包是否存在（读 op；不存在回 `exists: false`，不报错）。
+fn has_capability_pack(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_has_capability_pack";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_HAS_CAPABILITY_PACK,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
 }
 
 /// `opc_create_project`：创建项目（写 op）。

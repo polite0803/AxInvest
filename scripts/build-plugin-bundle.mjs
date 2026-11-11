@@ -1052,11 +1052,13 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_delete_invoice",
   "opc_delete_landing_page",
   "opc_delete_project",
+  "opc_delete_subscription",
   "opc_mark_contact_read",
   "opc_process_due_schedules",
   "opc_proactive_evaluate_leads",
   "opc_publish_blog_post",
   "opc_publish_landing_page",
+  "opc_save_subscription",
   "opc_transition_invoice",
   "opc_update_content_asset",
   "opc_update_customer",
@@ -1075,7 +1077,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 33 条命名命令（读 12 条 · 写 21 条）",
+      "OPC 域功能包（#36）：worker 通道 + 78 条命名命令（读 49 条 · 写 29 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -1934,6 +1936,130 @@ function opcManifest({ version, binaryName, sha256 }) {
         description: "主动分析能力缺口：统计高频缺失关键词并自动创建 Top 5 缺口行（写 op）",
         command: "worker://opc_analyze_capability_gaps",
         inputSchema: { type: "object", properties: {} },
+      },
+      // ── #264 批 7 刀 A：需求订阅面三命令 + 域包配置面八命令（宿主同名 11 条 Tauri 命令
+      // 已删，智能体工具面经本清单续用 `opc_*` 原名，见 #273 裁定）。
+      // ⚠ 两组「同名不同源」不许合并：`opc_list_industries` 读代码内域包注册表，
+      //   `opc_list_runtime_industries` 扫运行时目录下的 yaml；描述已逐条写明数据源。
+      // 入参键 = 命令面 camelCase（`capabilityPackId` / `actionKey` / `input` / `id`），
+      // 插件内部再映射成接缝 snake_case（`domain_pack_id` / `action_key`），两侧不互换。
+      {
+        name: "opc_list_subscriptions",
+        description: "列出全部需求订阅词（读 op，整表按创建时间升序，含启停与最近扫描命中数）",
+        command: "worker://opc_list_subscriptions",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_save_subscription",
+        description: "新增或更新一条需求订阅（写 op；input.id 缺省 = 新增，关键词唯一冲突由宿主拒）",
+        command: "worker://opc_save_subscription",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              description: "订阅字段；缺省字段按 dao 既有默认值/不动处理",
+              properties: {
+                id: { type: "string", description: "订阅 ID；留空表示新增" },
+                keyword: { type: "string", description: "订阅关键词（全表唯一）" },
+                enabled: { type: "boolean", description: "是否启用扫描" },
+                intervalHours: { type: "number", description: "扫描间隔（小时，越界由宿主钳位）" },
+                minScore: { type: "number", description: "推送门槛：商业价值分（越界由宿主钳位）" },
+                platforms: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "限定平台 ID；空数组 = 跟随全局启用的平台",
+                },
+              },
+            },
+          },
+          required: ["input"],
+        },
+      },
+      {
+        name: "opc_delete_subscription",
+        description: "删除一条需求订阅（写 op；空 ID 与查无此行同回未找到）",
+        command: "worker://opc_delete_subscription",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "订阅 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_list_industries",
+        description: "列出代码内注册表登记的内建域包摘要（读 op，含操作数与工作流数；不扫磁盘）",
+        command: "worker://opc_list_industries",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_get_capability_pack_config",
+        description: "取一个内建域包的完整配置（读 op，含 prompt 全文；未注册域包回未找到）",
+        command: "worker://opc_get_capability_pack_config",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID（注册表键）" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_get_action_config",
+        description: "取内建域包单个操作的完整配置（读 op，含 prompt 与目标工具；不存在回未找到）",
+        command: "worker://opc_get_action_config",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID（注册表键）" },
+            actionKey: { type: "string", description: "操作 key" },
+          },
+          required: ["capabilityPackId", "actionKey"],
+        },
+      },
+      {
+        name: "opc_list_capability_pack_actions",
+        description: "列出一个内建域包的全部操作摘要（读 op，裁掉 prompt / resultPrompt 两个长字段）",
+        command: "worker://opc_list_capability_pack_actions",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID（注册表键）" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_list_capability_pack_workflows",
+        description: "列出一个内建域包的全部工作流摘要（读 op，含 templateId，不含节点定义）",
+        command: "worker://opc_list_capability_pack_workflows",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID（注册表键）" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_list_runtime_industries",
+        description: "列出运行时域包目录下已存在的域包（读 op，扫磁盘 yaml；出参带 count）",
+        command: "worker://opc_list_runtime_industries",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_get_kpi_definitions",
+        description: "取一个域包的 KPI 定义清单（读 op；出参内层键为 snake_case，如 metric_type）",
+        command: "worker://opc_get_kpi_definitions",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_has_capability_pack",
+        description: "判断运行时域包是否存在（读 op；不存在回 exists=false，不当错误处理）",
+        command: "worker://opc_has_capability_pack",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
       },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },

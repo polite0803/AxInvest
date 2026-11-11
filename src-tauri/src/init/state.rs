@@ -1793,9 +1793,12 @@ pub async fn create_app_state_with_resource_dir(
     {
         // 需求实现三 op（#264 批 3）需要两项宿主服务：转工作流回灌能力索引用 indexer、
         // 启动执行用 work_engine —— 二者在此处均已就绪（work_engine :769 / indexer :1356）。
+        // `with_app_dir`（#264 批 7 刀 A）给 KPI 定义与域包存在性两条 op 提供域包配置根目录，
+        // 与迁移前那两条命令传的 `Some(&app_state.app_data_dir)` 是同一个 `app_dir`。
         let provider: Arc<dyn axagent_harness::OpcStoreProvider> = Arc::new(
             crate::init::opc_store_service::HostOpcStore::new(sea_db.clone())
-                .with_demand_pipeline(work_engine.clone(), capability_indexer_trait.clone()),
+                .with_demand_pipeline(work_engine.clone(), capability_indexer_trait.clone())
+                .with_app_dir(app_dir.clone()),
         );
         match axagent_harness::get_capability_registry().register_opc_store(provider) {
             Ok(_) => tracing::info!("opc.store 接缝已注册 (BuiltIn)"),

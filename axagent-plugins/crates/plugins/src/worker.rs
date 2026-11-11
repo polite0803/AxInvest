@@ -555,6 +555,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             // #264 批 7 刀 A：订阅面两条写 op（新增/更新订阅、删除订阅 —— 后者不可逆）；
             // 同批另九条 op（`list_subscriptions` + 域包配置五 + 运行时域包三）全是只读
             // ⇒ 必须仍 `None`（给读缝加闸会把只读插件无端拒掉，锁在 READ_OPS 用例）。
+            // #264 批 7 刀 B1：域包全读七 op（`get_workflow_config` / `validate_entity` /
+            // `batch_validate_entities` / `compute_kpis` / `get_capability_pack_data` /
+            // `get_capability_pack_precheck` / `get_capability_pack_health`）——
+            // 同样全是只读，写分支**一条都不加**，锁在 READ_OPS 用例。
             | "save_subscription"
             | "delete_subscription",
         ) => Some(PluginPermission::Write),
@@ -4388,6 +4392,174 @@ impl HostPeer {
                 };
                 match result {
                     Ok(view) => to_value("PackExistenceView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 7 刀 B1：域包全读七 op（薄层透传）────────────────────
+            //
+            // 七条全是读 ⇒ 权限表写分支一条闸都不加（`READ_OPS` 测试集合钉住）。
+            // `get_workflow_config` 走刀 A 上收的 `CapabilityPackWorkflowConfig`；
+            // 其余六条的 provider 出参已是 `serde_json::Value`（形状钉在宿主实现体），
+            // 本层直接透传、不做二次映射。
+            "opc.store" if op == "get_workflow_config" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let workflow_id: String = match deserialize_arg(&args, "workflow_id", seam) {
+                    Ok(workflow_id) => workflow_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.get_workflow_config(domain_pack_id, workflow_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(config) => to_value("CapabilityPackWorkflowConfig", &config),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "validate_entity" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let entity_type: String = match deserialize_arg(&args, "entity_type", seam) {
+                    Ok(entity_type) => entity_type,
+                    Err(response) => return response,
+                };
+                let entity_data: Value = match deserialize_arg(&args, "entity_data", seam) {
+                    Ok(entity_data) => entity_data,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.validate_entity(
+                    domain_pack_id,
+                    entity_type,
+                    entity_data,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "batch_validate_entities" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let entities: Vec<Value> = match deserialize_arg(&args, "entities", seam) {
+                    Ok(entities) => entities,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.batch_validate_entities(domain_pack_id, entities))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "compute_kpis" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let days: Option<i64> = match deserialize_arg(&args, "days", seam) {
+                    Ok(days) => days,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.compute_kpis(domain_pack_id, days))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_capability_pack_data" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let source_id: String = match deserialize_arg(&args, "source_id", seam) {
+                    Ok(source_id) => source_id,
+                    Err(response) => return response,
+                };
+                let data_domain: String = match deserialize_arg(&args, "data_domain", seam) {
+                    Ok(data_domain) => data_domain,
+                    Err(response) => return response,
+                };
+                let query: Option<Value> = match deserialize_arg(&args, "query", seam) {
+                    Ok(query) => query,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_capability_pack_data(
+                    domain_pack_id,
+                    source_id,
+                    data_domain,
+                    query,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_capability_pack_precheck" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.get_capability_pack_precheck(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_capability_pack_health" => {
+                let domain_pack_id: String = match deserialize_arg(&args, "domain_pack_id", seam) {
+                    Ok(domain_pack_id) => domain_pack_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.get_capability_pack_health(domain_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -13240,6 +13412,14 @@ mod tests {
             "list_runtime_industries",
             "get_kpi_definitions",
             "has_capability_pack",
+            // #264 批 7 刀 B1：域包全读七条（薄层透传），全只读 ⇒ 写分支一条不加。
+            "get_workflow_config",
+            "validate_entity",
+            "batch_validate_entities",
+            "compute_kpis",
+            "get_capability_pack_data",
+            "get_capability_pack_precheck",
+            "get_capability_pack_health",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

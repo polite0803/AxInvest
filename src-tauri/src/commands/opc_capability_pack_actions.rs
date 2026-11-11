@@ -2025,22 +2025,10 @@ pub async fn opc_get_capability_pack(
     })
 }
 
-/// 获取域包工作流配置
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包工作流配置")]
-#[tauri::command]
-pub async fn opc_get_workflow_config(
-    capability_pack_id: String,
-    workflow_id: String,
-) -> Result<serde_json::Value, String> {
-    let workflow = get_workflow_config(&capability_pack_id, &workflow_id)
-        .ok_or_else(|| format!("工作流不存在: {capability_pack_id}/{workflow_id}"))?;
-    serde_json::to_value(workflow).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// #264 批 7 刀 B1 退役 `opc_get_workflow_config`（零前端调用，`#[agent_command]` 属工具面
+// ⇒ 迁 T2 插件通道）：调用方走 plugin-opc 同名命名命令，宿主侧经 `opc.store` 的
+// `get_workflow_config` op 由 `HostOpcStore` 提供同一份读数（`get_workflow_config` 自由
+// 函数保留 —— 它同时是 bridge LLM 工具实现体与本接缝的数据源，禁区 12）。
 
 /// 构建带域包上下文的对话 prompt
 /// 返回 system_prompt 和初始 user_prompt，供前端使用

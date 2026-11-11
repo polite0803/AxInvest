@@ -1077,7 +1077,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 78 条命名命令（读 49 条 · 写 29 条）",
+      "OPC 域功能包（#36）：worker 通道 + 85 条命名命令（读 56 条 · 写 29 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2055,6 +2055,103 @@ function opcManifest({ version, binaryName, sha256 }) {
         name: "opc_has_capability_pack",
         description: "判断运行时域包是否存在（读 op；不存在回 exists=false，不当错误处理）",
         command: "worker://opc_has_capability_pack",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      // ── #264 批 7 刀 B1：域包全读七命令（宿主同名七条 Tauri 命令已删，智能体工具面
+      // 经本清单续用 `opc_*` 原名，见 #273 裁定）。七条全 read-only，与 worker 权限表
+      // 同批同源（写分支一条都不加）。
+      {
+        name: "opc_get_workflow_config",
+        description: "取域包单个工作流配置（读 op；查无回未找到）",
+        command: "worker://opc_get_workflow_config",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID（注册表键）" },
+            workflowId: { type: "string", description: "工作流 ID" },
+          },
+          required: ["capabilityPackId", "workflowId"],
+        },
+      },
+      {
+        name: "opc_validate_entity",
+        description: "验证域包实体（读 op —— 只校验不落库；出参含 valid 与 errors 数组）",
+        command: "worker://opc_validate_entity",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            entityType: { type: "string", description: "实体类型" },
+            entityData: { type: "object", description: "实体数据（键名与域包实体定义一致）" },
+          },
+          required: ["capabilityPackId", "entityType", "entityData"],
+        },
+      },
+      {
+        name: "opc_batch_validate_entities",
+        description:
+          "批量验证域包实体（读 op；元素内 entityType 为空的条目被宿主跳过，出参逐条带 valid/errors）",
+        command: "worker://opc_batch_validate_entities",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            entities: {
+              type: "array",
+              items: { type: "object" },
+              description: "实体列表；每元素含 entityType 与 data 两键",
+            },
+          },
+          required: ["capabilityPackId", "entities"],
+        },
+      },
+      {
+        name: "opc_compute_kpis",
+        description: "计算域包 KPI（读 op，走 DefaultDataService 读库；days 缺省按 30 处理）",
+        command: "worker://opc_compute_kpis",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            days: { type: "number", description: "统计天数（可选整数，缺省 30）" },
+          },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_get_capability_pack_data",
+        description:
+          "按域包 analysis.yaml 的 data_sources 路由取数据（读 op，db/cache/web/file vendor 降级链；query 缺省按空对象处理）",
+        command: "worker://opc_get_capability_pack_data",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            sourceId: { type: "string", description: "数据源 ID（analysis.yaml data_sources[].id）" },
+            dataDomain: { type: "string", description: "数据域" },
+            query: { type: "object", description: "查询参数（可选对象）" },
+          },
+          required: ["capabilityPackId", "sourceId", "dataDomain"],
+        },
+      },
+      {
+        name: "opc_get_capability_pack_precheck",
+        description: "域包数据源质量预检（读 op，quality_precheck 源清单探测）",
+        command: "worker://opc_get_capability_pack_precheck",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_get_capability_pack_health",
+        description: "域包数据源健康快照（读 op，vendor 降级可观测）",
+        command: "worker://opc_get_capability_pack_health",
         inputSchema: {
           type: "object",
           properties: { capabilityPackId: { type: "string", description: "域包 ID" } },

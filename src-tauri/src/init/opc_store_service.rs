@@ -138,6 +138,46 @@ impl HostOpcStore {
         })
     }
 
+    /// 构造域包数据客户端（`get_capability_pack_data` / `get_capability_pack_precheck` /
+    /// `get_capability_pack_health` 三 op 共用）。
+    ///
+    /// 逻辑自宿主 `commands::opc_capability_pack_runtime::build_data_client`（本批随命令
+    /// 迁移搬入，自由函数已删）：域包目录解析 + db/cache/web/file 四内建 vendor 装配，
+    /// 无容器。`app_data_dir` 用已装配的 `app_dir`（未装配 fail-closed，不回退进程默认根）。
+    fn build_data_client(&self, op: &str, domain_pack_id: &str) -> Result<OpCapabilityPackClient> {
+        let app_dir = self.pack_app_dir(op)?;
+        let base = axagent_company_runtime::opc::resolve_capability_packs_dir(Some(&app_dir));
+        let dir = base.join(domain_pack_id);
+        if !dir.is_dir() {
+            return Err(AxAgentError::NotFound(format!("域包不存在: {domain_pack_id}")));
+        }
+        let config = crate::commands::opc_data::load_analysis_config(&dir)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::{op} {e}")))?;
+        let db = self.db.clone();
+        let mut vendors: std::collections::HashMap<
+            String,
+            std::sync::Arc<dyn OpCapabilityPackVendor>,
+        > = std::collections::HashMap::new();
+        let db_vendor = DbVendor::new(std::sync::Arc::new(DefaultDataService::new(db)));
+        vendors.insert("db".to_string(), std::sync::Arc::new(db_vendor));
+        let cache_vendor = CacheVendor::new(app_dir.join("opc-cache"));
+        vendors.insert("cache".to_string(), std::sync::Arc::new(cache_vendor));
+        vendors.insert("web".to_string(), std::sync::Arc::new(WebVendor));
+        vendors.insert("file".to_string(), std::sync::Arc::new(FileVendor));
+
+        let sources: Vec<AnalysisDataSource> = config
+            .data_sources
+            .iter()
+            .map(|s| AnalysisDataSource {
+                id: s.id.clone(),
+                chain: s.chain.clone(),
+                quality_precheck: s.quality_precheck,
+            })
+            .collect();
+
+        Ok(OpCapabilityPackClient::new(domain_pack_id.to_string(), sources, vendors))
+    }
+
     /// 登记受保护 id（幂等、只增不减；判据同 `CronJobStore::protect_ids`）。
     pub async fn protect_ids(&self, ids: impl IntoIterator<Item = String>) {
         self.protected.write().await.extend(ids);
@@ -1797,6 +1837,148 @@ impl OpcStoreProvider for HostOpcStore {
             opc_capability_pack_runtime::has_capability_pack(Some(&app_dir), &domain_pack_id);
         Ok(PackExistenceView { domain_pack_id, exists })
     }
+
+    // ── #264 批 7 刀 B1：域包全读七 op ─────────────────────────────────────
+    //
+    // 迁移前是 `commands::opc_capability_pack_actions` / `opc_capability_pack_runtime` 的
+    // 七条 `#[agent_command]` 包装器（本批删）。出参线格式逐字不动：六条 `Value` 透传
+    // 的外层 camelCase 键（`domainPackId` / `sourceId`）与迁移前命令体逐字一致；
+    // `get_workflow_config` 直接返回 harness 那份 snake_case 结构（同 §155 分档）。
+
+    async fn get_workflow_config(
+        &self,
+        domain_pack_id: String,
+        workflow_id: String,
+    ) -> Result<CapabilityPackWorkflowConfig> {
+        let workflow =
+            opc_capability_pack_actions::get_workflow_config(&domain_pack_id, &workflow_id);
+        workflow.ok_or_else(|| {
+            AxAgentError::NotFound(format!("工作流不存在: {domain_pack_id}/{workflow_id}"))
+        })
+    }
+
+    async fn validate_entity(
+        &self,
+        domain_pack_id: String,
+        entity_type: String,
+        entity_data: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("validate_entity")?;
+        // 迁移前命令的 `db` 参数是死参（`let _ = db`）⇒ 接缝不带 db，直调 validator
+        // 只传 `app_dir`；查无域包/读盘失败的错误类别沿用 `ErrorResponse::from_error`
+        // 那条链的 Unrecoverable ⇒ 本层统一折进 `Provider`（文本逐字透传）。
+        let errors = capability_pack_validator::validate_entity(
+            &domain_pack_id,
+            &entity_type,
+            &entity_data,
+            Some(&app_dir),
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("opc.store::validate_entity {e}")))?;
+        Ok(serde_json::json!({
+            "domainPackId": domain_pack_id,
+            "entityType": entity_type,
+            "valid": errors.is_empty(),
+            "errors": errors,
+        }))
+    }
+
+    async fn batch_validate_entities(
+        &self,
+        domain_pack_id: String,
+        entities: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("batch_validate_entities")?;
+        // 逐元素取 `entityType` / `data` 两键、空 `entityType` 跳过 —— 裁剪语义与
+        // 迁移前命令体逐字一致（`迁≠改`）。
+        let pairs: Vec<(String, serde_json::Value)> = entities
+            .into_iter()
+            .filter_map(|e| {
+                let t = e.get("entityType").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let d = e.get("data").cloned().unwrap_or(serde_json::Value::Null);
+                if t.is_empty() { None } else { Some((t, d)) }
+            })
+            .collect();
+        let results =
+            capability_pack_validator::validate_batch(&domain_pack_id, &pairs, Some(&app_dir))
+                .await
+                .map_err(|e| {
+                    AxAgentError::Provider(format!("opc.store::batch_validate_entities {e}"))
+                })?;
+        Ok(serde_json::json!({
+            "domainPackId": domain_pack_id,
+            "results": results.into_iter().map(|(t, errs)| {
+                serde_json::json!({ "entityType": t, "valid": errs.is_empty(), "errors": errs })
+            }).collect::<Vec<_>>(),
+        }))
+    }
+
+    async fn compute_kpis(
+        &self,
+        domain_pack_id: String,
+        days: Option<i64>,
+    ) -> Result<serde_json::Value> {
+        let range = match days {
+            Some(d) => TimeRange::days(d),
+            None => TimeRange::days(30),
+        };
+        // KPI 计算真读库（经 DefaultDataService 走 `self.db`），与迁移前命令体同链。
+        let data_service: std::sync::Arc<dyn OpcDataService> =
+            std::sync::Arc::new(DefaultDataService::new(self.db.clone()));
+        let kpis =
+            capability_pack_kpi_service::compute_kpis(&domain_pack_id, &data_service, &range)
+                .await
+                .map_err(|e| AxAgentError::Provider(format!("opc.store::compute_kpis {e}")))?;
+        Ok(serde_json::json!({
+            "domainPackId": domain_pack_id,
+            "kpis": kpis,
+        }))
+    }
+
+    async fn get_capability_pack_data(
+        &self,
+        domain_pack_id: String,
+        source_id: String,
+        data_domain: String,
+        query: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let client = self.build_data_client("get_capability_pack_data", &domain_pack_id)?;
+        let data = client
+            .fetch(&source_id, &data_domain, &query.unwrap_or(serde_json::json!({})))
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::get_capability_pack_data {e}"))
+            })?;
+        Ok(serde_json::json!({
+            "domainPackId": domain_pack_id,
+            "sourceId": source_id,
+            "data": data,
+        }))
+    }
+
+    async fn get_capability_pack_precheck(
+        &self,
+        domain_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        let client = self.build_data_client("get_capability_pack_precheck", &domain_pack_id)?;
+        let precheck = client.precheck().await;
+        Ok(serde_json::json!({
+            "domainPackId": domain_pack_id,
+            "precheck": precheck,
+        }))
+    }
+
+    async fn get_capability_pack_health(
+        &self,
+        domain_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        let client = self.build_data_client("get_capability_pack_health", &domain_pack_id)?;
+        let health = client.health_snapshot();
+        Ok(serde_json::json!({
+            "domainPackId": domain_pack_id,
+            "health": health,
+        }))
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────
@@ -1806,10 +1988,18 @@ impl OpcStoreProvider for HostOpcStore {
 // 在任意 item 位置都生效）。
 use crate::commands::opc_capability_pack_actions;
 use crate::commands::opc_capability_pack_runtime;
+use axagent_company_runtime::opc::vendors::{
+    AnalysisDataSource, CacheVendor, DbVendor, FileVendor, OpCapabilityPackClient,
+    OpCapabilityPackVendor, WebVendor,
+};
+use axagent_company_runtime::opc::{
+    DefaultDataService, OpcDataService, TimeRange, capability_pack_kpi_service,
+    capability_pack_validator,
+};
 use axagent_harness::opc_store::{
-    CapabilityPackActionConfig, CapabilityPackConfig, PackActionSummaryView, PackExistenceView,
-    PackKpiDefinitionView, PackKpiDefinitionsView, PackSummaryEntryView, PackWorkflowSummaryView,
-    RuntimeIndustryListView,
+    CapabilityPackActionConfig, CapabilityPackConfig, CapabilityPackWorkflowConfig,
+    PackActionSummaryView, PackExistenceView, PackKpiDefinitionView, PackKpiDefinitionsView,
+    PackSummaryEntryView, PackWorkflowSummaryView, RuntimeIndustryListView,
 };
 use axagent_harness::types::opc_demand::{DemandSubscription, SaveDemandSubscriptionInput};
 

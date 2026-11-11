@@ -190,6 +190,19 @@ const OPC_STORE_LIST_RUNTIME_INDUSTRIES: &str = "list_runtime_industries";
 const OPC_STORE_GET_KPI_DEFINITIONS: &str = "get_kpi_definitions";
 const OPC_STORE_HAS_CAPABILITY_PACK: &str = "has_capability_pack";
 
+/// #264 批 7 刀 B1：域包全读七 op（薄层透传），全只读 ⇒ 宿主权限表一条都不登记。
+///
+/// 出参除 `get_workflow_config`（复用刀 A 的 `CapabilityPackWorkflowConfig`）外，
+/// 其余六条是宿主拼好的 `serde_json::Value`（外层 camelCase 键与迁移前命令体逐字同形），
+/// worker 与本插件都不做二次映射。
+const OPC_STORE_GET_WORKFLOW_CONFIG: &str = "get_workflow_config";
+const OPC_STORE_VALIDATE_ENTITY: &str = "validate_entity";
+const OPC_STORE_BATCH_VALIDATE_ENTITIES: &str = "batch_validate_entities";
+const OPC_STORE_COMPUTE_KPIS: &str = "compute_kpis";
+const OPC_STORE_GET_CAPABILITY_PACK_DATA: &str = "get_capability_pack_data";
+const OPC_STORE_GET_CAPABILITY_PACK_PRECHECK: &str = "get_capability_pack_precheck";
+const OPC_STORE_GET_CAPABILITY_PACK_HEALTH: &str = "get_capability_pack_health";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -331,6 +344,17 @@ const COMMAND_LIST_CAPABILITY_PACK_WORKFLOWS: &str = "opc_list_capability_pack_w
 const COMMAND_LIST_RUNTIME_INDUSTRIES: &str = "opc_list_runtime_industries";
 const COMMAND_GET_KPI_DEFINITIONS: &str = "opc_get_kpi_definitions";
 const COMMAND_HAS_CAPABILITY_PACK: &str = "opc_has_capability_pack";
+
+/// #264 批 7 刀 B1：域包全读七命令（清单 `commands[].name` 必须逐字一致）。宿主同名七条
+/// Tauri 命令随本批删除 —— 七条全读，仍按 #273 裁定走迁 T2 收口，插件命令保持 `opc_*`
+/// 原名（智能体工具名与出参形状不变）。
+const COMMAND_GET_WORKFLOW_CONFIG: &str = "opc_get_workflow_config";
+const COMMAND_VALIDATE_ENTITY: &str = "opc_validate_entity";
+const COMMAND_BATCH_VALIDATE_ENTITIES: &str = "opc_batch_validate_entities";
+const COMMAND_COMPUTE_KPIS: &str = "opc_compute_kpis";
+const COMMAND_GET_CAPABILITY_PACK_DATA: &str = "opc_get_capability_pack_data";
+const COMMAND_GET_CAPABILITY_PACK_PRECHECK: &str = "opc_get_capability_pack_precheck";
+const COMMAND_GET_CAPABILITY_PACK_HEALTH: &str = "opc_get_capability_pack_health";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -944,6 +968,60 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_HAS_CAPABILITY_PACK => {
             match has_capability_pack(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 批 7 刀 B1：域包全读七命令（每条一次接缝调用直投影；命令层只做形状判，
+        // 查无域包/工作流的 NotFound 在宿主实现体，校验语义在 company-runtime）。
+        COMMAND_GET_WORKFLOW_CONFIG => {
+            match get_workflow_config(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_VALIDATE_ENTITY => match validate_entity(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_BATCH_VALIDATE_ENTITIES => {
+            match batch_validate_entities(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_COMPUTE_KPIS => match compute_kpis(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_CAPABILITY_PACK_DATA => {
+            match get_capability_pack_data(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_CAPABILITY_PACK_PRECHECK => {
+            match get_capability_pack_precheck(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_CAPABILITY_PACK_HEALTH => {
+            match get_capability_pack_health(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2256,9 +2334,10 @@ fn analyze_capability_gaps(
 //
 // 键名分档同既有批（PLAN §144.2）：命令面 camelCase（`capabilityPackId` / `actionKey` /
 // `input`），接缝面 snake_case（`domain_pack_id` / `action_key`）。域包侧的入参键沿用
-// 迁移前那十一条 Tauri 命令的参数名（`capability_pack_id` ⇒ `capabilityPackId`），
-// 与**未迁**的 `opc_get_capability_pack` / `opc_get_workflow_config` 保持同形；
+// 迁移前那十一条 Tauri 命令的参数名（`capability_pack_id` ⇒ `capabilityPackId`）；
 // 接缝 op 的键则是 harness trait 的形参名（`domain_pack_id`），两处不许互换。
+// （刀 B1 的七条域包全读命令已同风格落地，见下方「域包全读七命令」段；
+// 旧注里的 `opc_get_workflow_config` 已随刀 B1 迁入本文件。）
 
 /// `opc_list_subscriptions`：列出全部需求订阅（读 op，零入参；创建时间升序整表下发）。
 fn list_subscriptions(
@@ -2406,6 +2485,140 @@ fn has_capability_pack(
     call_opc_store(
         peer,
         OPC_STORE_HAS_CAPABILITY_PACK,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+// ── #264 批 7 刀 B1：域包全读七命令 ──────────────────────────────────────────
+//
+// 键名分档同刀 A：命令面 camelCase（`capabilityPackId` / `workflowId` / `entityType` /
+// `entityData` / `sourceId` / `dataDomain`，沿用迁移前七条 Tauri 命令的参数名），
+// 接缝面 snake_case（`domain_pack_id` 与刀 A 域包 op 同键），两处不许互换。
+
+/// `opc_get_workflow_config`：取域包单个工作流配置（读 op，两个必填键；查无回未找到）。
+fn get_workflow_config(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_workflow_config";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let workflow_id = require_str(input, OP, "workflowId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_WORKFLOW_CONFIG,
+        json!({ "domain_pack_id": pack_id, "workflow_id": workflow_id }),
+        call_chain,
+    )
+}
+
+/// `opc_validate_entity`：验证域包实体（读 op —— 只校验不落库；`entityData` 形状判在命令层）。
+fn validate_entity(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_validate_entity";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let entity_type = require_str(input, OP, "entityType")?;
+    let entity_data = require_object(input, OP, "entityData")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_VALIDATE_ENTITY,
+        json!({
+            "domain_pack_id": pack_id,
+            "entity_type": entity_type,
+            "entity_data": entity_data,
+        }),
+        call_chain,
+    )
+}
+
+/// `opc_batch_validate_entities`：批量验证域包实体（读 op；元素内 `entityType` 为空的
+/// 条目由宿主跳过 —— 裁剪语义在宿主实现体，命令层只判「是数组」）。
+fn batch_validate_entities(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_batch_validate_entities";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let entities = input
+        .get("entities")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_shape(format!("{OP} 的 `entities` 必须是数组（形状判在命令层）")))?;
+    call_opc_store(
+        peer,
+        OPC_STORE_BATCH_VALIDATE_ENTITIES,
+        json!({ "domain_pack_id": pack_id, "entities": entities }),
+        call_chain,
+    )
+}
+
+/// `opc_compute_kpis`：计算域包 KPI（读 op；`days` 可选，缺省由宿主按 30 处理）。
+fn compute_kpis(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_compute_kpis";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let mut request = serde_json::Map::new();
+    request.insert("domain_pack_id".to_string(), json!(pack_id));
+    copy_optional_i64(input, OP, &mut request, &["days"])?;
+    call_opc_store(peer, OPC_STORE_COMPUTE_KPIS, Value::Object(request), call_chain)
+}
+
+/// `opc_get_capability_pack_data`：按 analysis.yaml 数据源路由取域包数据（读 op；
+/// `query` 可选，缺省由宿主按空对象处理）。
+fn get_capability_pack_data(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_data";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let source_id = require_str(input, OP, "sourceId")?;
+    let data_domain = require_str(input, OP, "dataDomain")?;
+    let mut request = serde_json::Map::new();
+    request.insert("domain_pack_id".to_string(), json!(pack_id));
+    request.insert("source_id".to_string(), json!(source_id));
+    request.insert("data_domain".to_string(), json!(data_domain));
+    if let Some(query) = input.get("query").filter(|value| !value.is_null()) {
+        request.insert("query".to_string(), query.clone());
+    }
+    call_opc_store(peer, OPC_STORE_GET_CAPABILITY_PACK_DATA, Value::Object(request), call_chain)
+}
+
+/// `opc_get_capability_pack_precheck`：域包数据源质量预检（读 op，`quality_precheck`
+/// 源清单探测）。
+fn get_capability_pack_precheck(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_precheck";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_CAPABILITY_PACK_PRECHECK,
+        json!({ "domain_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_get_capability_pack_health`：域包数据源健康快照（读 op，vendor 降级可观测）。
+fn get_capability_pack_health(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_health";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_CAPABILITY_PACK_HEALTH,
         json!({ "domain_pack_id": pack_id }),
         call_chain,
     )

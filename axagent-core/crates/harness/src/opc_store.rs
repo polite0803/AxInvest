@@ -1092,6 +1092,107 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::has_capability_pack 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── #264 批 7 刀 B1：域包全读七 op（薄层透传，零 DTO 上收）─────────────────
+    //
+    // 迁移前是 `commands::opc_capability_pack_actions` / `opc_capability_pack_runtime` 的
+    // 七条 `#[agent_command]` 包装器（本批删）。七条全是读 ⇒ 权限表写分支一条闸都不加
+    // （`READ_OPS` 测试集合钉住）。除 `get_workflow_config` 复用刀 A 上收的那份
+    // [`CapabilityPackWorkflowConfig`] 外，其余六条的出参是 `serde_json::Value` 透传：
+    // 形状钉在宿主实现体（与迁移前命令体逐字同形，外层 camelCase 键
+    // `domainPackId` / `sourceId` 等），接缝侧不做二次映射 —— 迁移前就没有 DTO，
+    // 为六条各造一份视图才是新增面积（禁区 12）。
+
+    /// 取域包单个工作流配置（`get_workflow_config` op）—— 读 op。
+    ///
+    /// 查无回 `NotFound`（迁移前文案 `工作流不存在: {pack}/{workflow}`）。
+    async fn get_workflow_config(
+        &self,
+        _domain_pack_id: String,
+        _workflow_id: String,
+    ) -> Result<CapabilityPackWorkflowConfig> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_workflow_config 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 验证域包实体（`validate_entity` op）—— 读 op（只校验，不落库）。
+    ///
+    /// 迁移前命令的 `db` 参数是死参（`let _ = db`），接缝入参不带 db；
+    /// 域包配置根目录由实现方自备（宿主 = 装配的 `app_dir`，未装配 fail-closed）。
+    async fn validate_entity(
+        &self,
+        _domain_pack_id: String,
+        _entity_type: String,
+        _entity_data: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::validate_entity 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 批量验证域包实体（`batch_validate_entities` op）—— 读 op（只校验，不落库）。
+    ///
+    /// `entities` 逐元素取 `entityType` / `data` 两键（空 `entityType` 的元素跳过），
+    /// 该裁剪语义与迁移前命令体逐字一致，钉在实现方。
+    async fn batch_validate_entities(
+        &self,
+        _domain_pack_id: String,
+        _entities: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::batch_validate_entities 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 计算域包 KPI（`compute_kpis` op）—— 读 op。
+    ///
+    /// `days = None` ⇒ 30（迁移前命令体的缺省，语义钉在实现方）。
+    async fn compute_kpis(
+        &self,
+        _domain_pack_id: String,
+        _days: Option<i64>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::compute_kpis 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取域包数据（`get_capability_pack_data` op）—— 读 op。
+    ///
+    /// `query = None` ⇒ 空对象（迁移前命令体的缺省，语义钉在实现方）。
+    async fn get_capability_pack_data(
+        &self,
+        _domain_pack_id: String,
+        _source_id: String,
+        _data_domain: String,
+        _query: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_capability_pack_data 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取域包数据质量预检（`get_capability_pack_precheck` op）—— 读 op。
+    async fn get_capability_pack_precheck(
+        &self,
+        _domain_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_capability_pack_precheck 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 获取域包数据源健康状态（`get_capability_pack_health` op）—— 读 op。
+    async fn get_capability_pack_health(
+        &self,
+        _domain_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_capability_pack_health 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

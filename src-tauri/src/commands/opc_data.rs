@@ -6,7 +6,8 @@
 //! 获取 OpCapabilityPackVendor / OpCapabilityPackClient 实现，命令层只负责调用。
 //!
 //! 注：vendor 装配与 OpCapabilityPackClient 构造的权威实现在
-//! `opc_capability_pack_runtime::build_data_client`（内联 db/cache/web/file 装配），
+//! `init::opc_store_service::HostOpcStore::build_data_client`（内联 db/cache/web/file 装配，
+//! #264 批 7 刀 B1 自 `opc_capability_pack_runtime::build_data_client` 搬入），
 //! 本文件只保留 analysis.yaml 读取入口。
 
 use axagent_company_runtime::opc::capability_pack::analysis_schema::CapabilityPackAnalysisConfig;

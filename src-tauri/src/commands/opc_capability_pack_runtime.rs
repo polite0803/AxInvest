@@ -4,7 +4,7 @@
 //!
 //! 所有业务逻辑通过独立的 Service 实现，不再依赖域包适配器。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use axagent_agent_macro::agent_command;
@@ -16,19 +16,6 @@ use axagent_dao::db::DatabaseConnection;
 use crate::AppState;
 use crate::commands::opc_capability_pack_logic;
 use axagent_company_runtime::opc::capability_pack;
-
-/// 定位域包目录：`{industries_dir}/{domain_pack_id}`
-///
-/// 仅用于 Phase 1 数据接入（读取域包 `analysis.yaml` 数据源配置）。
-fn capability_pack_dir(app_dir: Option<&Path>, domain_pack_id: &str) -> Result<PathBuf, String> {
-    let base = axagent_company_runtime::opc::resolve_capability_packs_dir(app_dir);
-    let dir = base.join(domain_pack_id);
-    if dir.is_dir() {
-        Ok(dir)
-    } else {
-        Err(format!("域包不存在: {domain_pack_id}"))
-    }
-}
 
 /// 读取域包 `runtime.yaml` 的 KPI **元数据**（key/name/unit + dashboard_cards）。
 ///
@@ -198,67 +185,13 @@ fn apply_kpi_metadata(
 }
 
 // ── 公共 API（内部函数） ───────────────────────────────────────
-
-/// 验证域包实体
-pub async fn validate_entity(
-    db: &DatabaseConnection,
-    app_dir: Option<&Path>,
-    domain_pack_id: &str,
-    entity_type: &str,
-    entity_data: &serde_json::Value,
-) -> Result<Vec<ValidationError>, String> {
-    let errors = capability_pack_validator::validate_entity(
-        domain_pack_id,
-        entity_type,
-        entity_data,
-        app_dir,
-    )
-    .await
-    .map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    let _ = db; // 参数保留，未来可能用于数据库验证
-    Ok(errors)
-}
-
-/// 批量验证域包实体
-pub async fn validate_batch(
-    db: &DatabaseConnection,
-    app_dir: Option<&Path>,
-    domain_pack_id: &str,
-    entities: &[(String, serde_json::Value)],
-) -> Result<Vec<(String, Vec<ValidationError>)>, String> {
-    let results = capability_pack_validator::validate_batch(domain_pack_id, entities, app_dir)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-    let _ = db;
-    Ok(results)
-}
-
-/// 计算域包 KPI 指标
-pub async fn compute_kpis(
-    db: &DatabaseConnection,
-    domain_pack_id: &str,
-    time_range: TimeRange,
-) -> Result<Vec<KpiValue>, String> {
-    let data_service: Arc<dyn OpcDataService> = Arc::new(DefaultDataService::new(db.clone()));
-    capability_pack_kpi_service::compute_kpis(domain_pack_id, &data_service, &time_range)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })
-}
+//
+// #264 批 7 刀 B1 退役三个自由函数（`validate_entity` / `validate_batch` / `compute_kpis`）：
+// 唯一调用面是同批已删的三条 `#[agent_command]` 包装器（`opc_validate_entity` /
+// `opc_batch_validate_entities` / `opc_compute_kpis`，零前端调用迁 T2 插件通道）。真实
+// 实现体在 company-runtime 的 `capability_pack_validator` 与 `capability_pack_kpi_service`，
+// 现由 `HostOpcStore`（`src-tauri/src/init/opc_store_service.rs`）直调 —— 两条 validate 的
+// `db` 形参本来就是死参（`let _ = db`），接缝侧已按此收敛为只带域包配置目录。
 
 /// 获取域包 KPI 定义列表
 ///
@@ -358,7 +291,19 @@ pub async fn get_dashboard(
     let config = capability_pack_config::get_config(domain_pack_id, app_dir)
         .ok_or_else(|| format!("域包配置不存在: {}", domain_pack_id))?;
     let meta = load_runtime_kpi_meta(app_dir, domain_pack_id);
-    let mut kpis = compute_kpis(db, domain_pack_id, time_range).await?;
+    // KPI 计算直调 company-runtime（#264 批 7 刀 B1 删宿主 `compute_kpis` 薄包装后
+    // 改为原地装配 —— 装配形态与 `HostOpcStore::compute_kpis` 同链，错误映射沿用
+    // `ErrorResponse::from_error` 的 Unrecoverable 档）。
+    let data_service: Arc<dyn OpcDataService> = Arc::new(DefaultDataService::new(db.clone()));
+    let mut kpis =
+        capability_pack_kpi_service::compute_kpis(domain_pack_id, &data_service, &time_range)
+            .await
+            .map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
     apply_kpi_metadata(&mut kpis, domain_pack_id, meta.as_ref());
 
     // 风控判定**就在上面这份已装配的 KPI 列表上做**：
@@ -427,52 +372,6 @@ pub fn has_capability_pack(app_dir: Option<&Path>, domain_pack_id: &str) -> bool
 // ⚠ 本文件的 `list_industries`（磁盘 `runtime.yaml`/config 域包）与
 // `opc_capability_pack_actions` 的注册表列表是**两个不同的数据源**，接缝侧分别落在
 // `list_runtime_industries` 与 `list_industries` 两个 op 上，不得混同。
-
-/// 验证域包实体（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "验证域包实体")]
-#[tauri::command]
-pub async fn opc_validate_entity(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    entity_type: String,
-    entity_data: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let db = app_state.harness.db();
-    let errors = validate_entity(
-        db,
-        Some(&app_state.app_data_dir),
-        &capability_pack_id,
-        &entity_type,
-        &entity_data,
-    )
-    .await?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "entityType": entity_type,
-        "valid": errors.is_empty(),
-        "errors": errors,
-    }))
-}
-
-/// 计算域包 KPI（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "计算域包KPI")]
-#[tauri::command]
-pub async fn opc_compute_kpis(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    days: Option<i64>,
-) -> Result<serde_json::Value, String> {
-    let range = match days {
-        Some(d) => TimeRange::days(d),
-        None => TimeRange::days(30),
-    };
-    let db = app_state.harness.db();
-    let kpis = compute_kpis(db, &capability_pack_id, range).await?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "kpis": kpis,
-    }))
-}
 
 /// 运行域包自动化规则（Tauri 命令）
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "运行域包自动化规则")]
@@ -570,121 +469,13 @@ pub async fn opc_get_capability_pack_automation_rules(
     }))
 }
 
-/// 批量验证域包实体（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "批量验证域包实体")]
-#[tauri::command]
-pub async fn opc_batch_validate_entities(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    entities: Vec<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    let pairs: Vec<(String, serde_json::Value)> = entities
-        .into_iter()
-        .filter_map(|e| {
-            let t = e.get("entityType").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let d = e.get("data").cloned().unwrap_or(serde_json::Value::Null);
-            if t.is_empty() { None } else { Some((t, d)) }
-        })
-        .collect();
-    let db = app_state.harness.db();
-    let results =
-        validate_batch(db, Some(&app_state.app_data_dir), &capability_pack_id, &pairs).await?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "results": results.into_iter().map(|(t, errs)| {
-            serde_json::json!({ "entityType": t, "valid": errs.is_empty(), "errors": errs })
-        }).collect::<Vec<_>>(),
-    }))
-}
-
 // ── Phase 1 数据接入命令（OpCapabilityPackClient 直读域包 analysis.yaml） ──
-
-/// 构造域包数据客户端（db/cache/web/file 内建 vendor，无容器）
-fn build_data_client(
-    app_state: &AppState,
-    domain_pack_id: &str,
-) -> Result<OpCapabilityPackClient, String> {
-    let dir = capability_pack_dir(Some(&app_state.app_data_dir), domain_pack_id)?;
-    let config = crate::commands::opc_data::load_analysis_config(&dir)?;
-    let db = app_state.harness.db();
-    let mut vendors: std::collections::HashMap<String, std::sync::Arc<dyn OpCapabilityPackVendor>> =
-        std::collections::HashMap::new();
-    let db_vendor = DbVendor::new(std::sync::Arc::new(DefaultDataService::new(db.clone())));
-    vendors.insert("db".to_string(), std::sync::Arc::new(db_vendor));
-    let cache_vendor = CacheVendor::new(app_state.app_data_dir.join("opc-cache"));
-    vendors.insert("cache".to_string(), std::sync::Arc::new(cache_vendor));
-    vendors.insert("web".to_string(), std::sync::Arc::new(WebVendor));
-    vendors.insert("file".to_string(), std::sync::Arc::new(FileVendor));
-
-    let sources: Vec<AnalysisDataSource> = config
-        .data_sources
-        .iter()
-        .map(|s| AnalysisDataSource {
-            id: s.id.clone(),
-            chain: s.chain.clone(),
-            quality_precheck: s.quality_precheck,
-        })
-        .collect();
-
-    Ok(OpCapabilityPackClient::new(domain_pack_id.to_string(), sources, vendors))
-}
-
-/// 获取域包数据（Phase 1：按 analysis.yaml data_sources 路由 + 降级）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包数据")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_data(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    source_id: String,
-    data_domain: String,
-    query: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    let client = build_data_client(&app_state, &capability_pack_id)?;
-    let data = client
-        .fetch(&source_id, &data_domain, &query.unwrap_or(serde_json::json!({})))
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "sourceId": source_id,
-        "data": data,
-    }))
-}
-
-/// 获取域包数据质量预检（Phase 1：quality_precheck 源清单探测）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包数据质量预检")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_precheck(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let client = build_data_client(&app_state, &capability_pack_id)?;
-    let precheck = client.precheck().await;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "precheck": precheck,
-    }))
-}
-
-/// 获取域包数据源健康状态（Phase 1：vendor 降级可观测）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包数据源健康状态")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_health(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let client = build_data_client(&app_state, &capability_pack_id)?;
-    let health = client.health_snapshot();
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "health": health,
-    }))
-}
+//
+// #264 批 7 刀 B1 退役三条命令（`opc_get_capability_pack_data` / `opc_get_capability_pack_precheck`
+// / `opc_get_capability_pack_health`，零前端调用迁 T2 插件通道）与它们的私有装配链
+// （`build_data_client` + `capability_pack_dir`，唯一调用面就是这三条命令）：装配逻辑搬进
+// `HostOpcStore::build_data_client`（`src-tauri/src/init/opc_store_service.rs`），`app_data_dir`
+// 用已装配的 `app_dir`（未装配 fail-closed，不回退进程级默认根）。
 
 /// 动态工作流执行（兼容旧接口）
 ///

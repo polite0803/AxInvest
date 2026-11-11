@@ -59,7 +59,7 @@ page_type='doc' 的笔记                 : 15 行，**15 行全有 vault_id**
 
 ### 缺口 1（P0）｜端口公理门禁只覆盖 1/6 入口，且**最容易被绕过的那条恰好没覆盖**
 
-`validate_port_axioms` 的唯一生产调用点是 `workflow_template.rs:973`，它属于 **`validate_workflow_template`（`pub async fn`，line 595）** —— 而这是一个**Tauri 命令**（注册于 `register_commands.rs:1527`），全仓**唯一消费方是前端** `workflowEditorStore.ts:997`。
+`validate_port_axioms` 的唯一生产调用点是 `workflow_template.rs:973`，它属于 **`validate_workflow_template`（`pub async fn`，line 595）** —— 而这是一个**Tauri 命令**（已登记进生成物 `register_commands.rs`；当时在 `1527` 行 —— 该产物由 `build.rs` 重写，行号随命令增删整体移位，不作文档锚点），全仓**唯一消费方是前端** `workflowEditorStore.ts:997`。
 
 于是「谁在写工作流」这个集合与「谁被校验」这个集合几乎不相交：
 

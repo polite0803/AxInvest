@@ -679,7 +679,7 @@ settings.valuation_params        不存在（DB 实测，96 键中 0 命中）
 | `stock_pipeline/core.rs` | 原只有 6 个管道变量 | 🔴 → **F3** |
 | `init/state.rs:1441`（**RunWorkflow 工具执行器**） | 无 | 🔴 → **F5** |
 | `stock_workflow/serenity.rs:964` | `loaded.variables`（**已含模板变量**，`serenity.rs:868`） | ✅ 无缺陷 |
-| `demand_discovery.rs:682` / `opc_capability_pack_actions.rs:2458` | `Some(variables)` | ✅ 已传 |
+| 需求发现宿主命令（时点行 682；2026-11-11 #264 批 6 整文件退役）/ `opc_capability_pack_actions.rs:2458` | `Some(variables)` | ✅ 已传 |
 | `plan.rs:1249`（计划执行器） | 无 | ⚪ 不适用（该模板无面板参数）|
 | `stock_workflow/reflection.rs:426` | `Some(variables)` | ✅ 已传 |
 

@@ -91,7 +91,8 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
   - 导出 `src-tauri/src/commands/opc.rs:635`
   - 导入 `src-tauri/src/commands/opc.rs:651`
   - 启停 `src-tauri/src/commands/opc.rs:706`
-  - 配置查询/动作/学习指标：`src-tauri/src/commands/opc_capability_pack_actions.rs:2052`（`opc_list_industries`）、`:2078`（`opc_get_capability_pack_config`）、`:2182`（`opc_list_capability_pack_actions`）
+  - 配置查询 / 动作 / 学习指标三条读口（2026-11-11 #264 批 7 刀 A 起，原宿主 `opc_capability_pack_actions.rs` 里的这三条 Tauri 命令已删除，命令面由插件命名命令逐字续用原名 `opc_list_industries` / `opc_get_capability_pack_config` / `opc_list_capability_pack_actions`，实现落回 `opc.store` 接缝的宿主服务）：
+    `axagent-plugins/crates/plugin-opc/src/main.rs:2297`（`list_industries`）、`:2305`（`get_capability_pack_config`）、`:2338`（`list_capability_pack_actions`）
 - 引擎/业务层：
   - 封闭校验 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:925`
   - 审计装配 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1098`

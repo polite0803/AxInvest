@@ -83,7 +83,7 @@
 | C7 | `src/lib/agentOutput.ts:29` | `F7ReferenceSnapshot`、`HorizonAgreement`、`HorizonDivergence`、`LlmDecisionsByHorizon`、`LlmHorizonDecision`、`LlmHorizonReadState`、`StockDecision` | 域特定 | `normalizeDecision(): StockDecision`（同文件 `:247`）、`normalizeHorizonPriceMap(): StockDecision["horizonPriceMap"]`（`:46`） | 中 | B8-2 |
 | C8 | `src/lib/dataQualityDiagnosis.ts:15` | `analystBaseOf` | 域特定 | 同文件 `:28-39` 的 `EXPERT_ID_TO_DQ_ABBR` 逐条列 10 个分析师槽位（`a-market-analyst` / `a-sentiment` / …）；消费方仅 `src/components/stock-analysis/**` | 低 | B8-2 |
 | C9 | `src/lib/decision-agreement.ts:37` | `parseActionStrict`、`parseRiskLevel`、`StockAction`、`StockRiskLevel` | 域特定 | 模块头 `:34`「方向判据交给权威归一化器 `parseActionStrict`」；`:44 AGREEMENT_WEIGHTS` 逐维复刻后端股票决策一致性分值；消费方仅 `stockAnalysisStore` + 本文件测试 | 低 | B8-2 |
-| C10 | `src/lib/decision-agreement.ts:38` | `StockActionType` | 域特定 | 同上 | 低 | B8-2 |
+| C10 | `src/lib/decision-agreement.ts:37` | `StockActionType` | 域特定 | 同上 | 低 | B8-2 |
 | C11 | `src/lib/decisionInputDiagnosis.ts:21` | `analystBaseOf`、`analystNodeId` | 域特定 | 模块头 `:2-3`「把 **portfolio-mgr** 实际消费的 16 个上游节点输出…」；`:103` `analystNodeId(nodeId, "mid")` 用四档之一的 `mid` | 低 | B8-2 |
 | C12 | `src/lib/__tests__/agentOutput.test.ts:16` | `StockDecision` | 域特定（域测试） | 被测模块 `@/lib/agentOutput` 为域文件（见 C6） | 低 | B8-2 |
 | C13 | `src/lib/__tests__/analysisHistoryFilter.test.ts:12` | `filterAnalysisHistory`、`getActionTKey`、`horizonOfRecord`、`mergeAnalysisHistoryPages`、`provenanceOfRecord`、`StockAction`、`UNKNOWN_HORIZON` | 域特定（域测试） | 同文件 `:14-18`「历史分析弹窗『全量加载 + 筛选』的判据层」 | 低 | B8-2 |
@@ -99,7 +99,7 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| D1 | `src/components/layout/ContentArea.tsx:44` | `InvestPage`（lazy） | 域特定 | 宿主路由表的投资中心入口；同文件 `:361` 注释「2026-10-28：股票旧路由已全部删除，统一走 `/invest`」 | 中（插件 `pages[]`） | B8-2 |
+| D1 | `src/components/layout/ContentArea.tsx:354` | `InvestPage`（lazy） | 域特定 | 宿主路由表的投资中心入口；同文件 `:361` 注释「2026-10-28：股票旧路由已全部删除，统一走 `/invest`」 | 中（插件 `pages[]`） | B8-2 |
 | D2 | ~~`src/pages/ScreenerPage.tsx`~~ **已注销** | `stock-analysis/ScreenerPage` | **已收口（2026-11-08）** | 5 行纯转发薄壳已删除，改由 `src/components/invest/InvestHub.tsx:15` 直取域组件（无行为变化）⇒ 该处反向 import 归零；文件名不含 `feRe` 词，删除不动 `frontendFileCaliber` | — | 已收口 |
 | D3 | ~~`src/pages/ScreenshotDiagnosisPage.tsx`~~ **已注销** | `ScreenshotDiagnosisDashboard` | **已收口（2026-11-08）** | 同上：薄壳已删除，`src/components/invest/InvestHub.tsx:22` 直取域组件 | — | 已收口 |
 | D4 | `src/pages/TasksCenterPage/OverviewTab.tsx:3` | `EvolutionApprovalDrawer` | 域特定 | 任务中心概览内联**股票进化审批**抽屉 | 中 | B8-2 |
@@ -117,7 +117,7 @@
 | D16 | `src/stores/index.ts:103` | `usePaperPortfolioStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
 | D17 | `src/stores/index.ts:105` | `useBacktestStore`、`useStrategyStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
 | D18 | `src/stores/index.ts:106` | `useStockAnalysisStore` | 域特定（barrel） | 同上 | 高 | B8-5 |
-| D19 | `src/stores/index.ts:107` | `PortfolioStressResult`、`SimulationScenarioRow`、`SimulationSnapshot`（类型 re-export） | 域特定（barrel） | 同上 | 高 | B8-5 |
+| D19 | `src/stores/index.ts:104` | `PortfolioStressResult`、`SimulationScenarioRow`、`SimulationSnapshot`（类型 re-export） | 域特定（barrel） | 同上 | 高 | B8-5 |
 | D20 | `src/types/index.ts:2420` | `export * from "./quant"` | 域特定（barrel） | 同文件 `:2419` 分节注释「=== AxInvest 投资域（stock/quant/pipeline）===」 | 高 | B8-5 |
 | D21 | `src/types/index.ts:2425` | `BacktestResult`（类型 re-export） | 域特定（barrel） | 同文件 `:2421-2424` 注释：`BacktestResult` 与 `stock-analysis` 同名不同义，barrel 权威取 quant 版 | 高 | B8-5 |
 | D22 | `src/types/index.ts:2426` | `export * from "./stock-analysis"` | 域特定（barrel） | 同上 | 高 | B8-5 |

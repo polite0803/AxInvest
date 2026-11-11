@@ -2603,7 +2603,7 @@ const summary =
   // ⚠ 按判据⑥ **分两面**报：活文档面（棘轮 / 升硬靶面）与快照面（永不订正）——
   //   只报合计会让「收窄了多少靶面」不可复算（判据 #7：未检查与检查通过长得一样）。
   ` ｜ SYMDRIFT 活文档面 ${sym.drift.length}` +
-  `（第二层·符号不在所指行，${REQUIRE_SYMBOL_MATCH ? "**--require-symbol-match 判红**" : symRatchet.armed ? (symRatchet.newViolations.length > 0 ? "**基线外新增 ${symRatchet.newViolations.length} 条判红**" : "棘轮已武装·无新增") : "**棘轮未武装**（基线无 symEntries ⇒ 只报告）"}；` +
+  `（第二层·符号不在所指行，${REQUIRE_SYMBOL_MATCH ? "**--require-symbol-match 判红**" : symRatchet.armed ? (symRatchet.newViolations.length > 0 ? `**基线外新增 ${symRatchet.newViolations.length} 条判红**` : "棘轮已武装·无新增") : "**棘轮未武装**（基线无 symEntries ⇒ 只报告）"}；` +
   `可比对符号 ${sym.face.live.withSymbol} 条 / 进入比对 ${sym.face.live.checked} 条 / 符号零存在跳过 ${sym.face.live.absent} 条` +
   `；漂移按形态 ${Object.entries(sym.byForm).map(([k, v]) => `${k} ${v}`).join(" / ") || "无"}）` +
   ` / 快照面 ${sym.driftSnapshot.length}（docs/audits 时点快照·**不订正、不进棘轮、永不判红**；` +

@@ -715,8 +715,7 @@ AGENTS.md「后端错误码 i18n 规范（强制）」：
 
 **D. 消费端未逐一验证（诚实标注，勿当已排查）**
 
-`workflows/mod.rs:544`、`work_engine.rs:613`、`stock_analysis.rs:6130`、`demand_discovery.rs:207`、
-`index_queue.rs:1035`、`serenity.rs:942`（`serenity-screening-step`，前端有 listen）。
+`workflows/mod.rs:544`、`work_engine.rs:613`、`stock_analysis.rs:6130`、`index_queue.rs:1035`、`serenity.rs:942`（`serenity-screening-step`，前端有 listen）。原列的第四条（需求发现宿主命令，2026-11-11 随 #264 批 6 整文件退役）的消费面已随命令迁至插件通道。
 
 #### 9.12.3 为什么本轮不改
 

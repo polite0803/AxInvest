@@ -134,7 +134,7 @@ Tool 节点必须对「解析不出契约 JSON」显式失败并留痕，**不�
 （`src-tauri/src/commands/backtest_validation.rs:463-565` 的 `run_serenity_backtest_pass`，
 报表结构 `SerenityHitRateReport`，判据 `src-tauri/crates/analysis-engine/src/serenity_hit_rate_backtest.rs`，
 该模块已在编译清单 `src-tauri/crates/analysis-engine/src/lib.rs:93`、命令已注册
-`src-tauri/src/register_commands.rs:122`），但**前端没有任何地方 invoke `run_decision_backtest`**（按两个可能的
+`src-tauri/src/register_commands.rs:120`），但**前端没有任何地方 invoke `run_decision_backtest`**（按两个可能的
 名字 grep 全 `src/` 零命中），报表只进 tracing 日志。现网已有 354 行智选后验样本躺着没人看。
 
 **修法**：在回测视图（`src/components/stock-analysis/BacktestView` 所在链）加一格，按「四态」显示：

@@ -912,7 +912,7 @@ error: could not compile `axagent-dao` (lib) due to 1 previous error
 | 标识符 | 原位置（commands） | 新权威源 | 消费点改动 |
 |---|---|---|---|
 | `content-media-kpi-persist` | `commands/opc_workflow_kpi_hook.rs:121` `HOOK_NAME` | `axagent_harness::constants::domain_pack::KPI_HOOK_NAME` | `seed_content_media.rs`（import + 5 处）、`kpi_hook` 自身 2 处 |
-| `domain_pack_id` | `commands/opc_workflow_kpi_hook.rs:127` `DOMAIN_PACK_INPUT_KEY` | `axagent_harness::constants::domain_pack::INPUT_KEY` | `opc_capability_pack_actions.rs:2449`、`kpi_hook` 自身 2 处 |
+| `domain_pack_id` | `commands/opc_workflow_kpi_hook.rs:127` `DOMAIN_PACK_INPUT_KEY` | `axagent_harness::constants::domain_pack::INPUT_KEY` | `opc_capability_pack_actions.rs:2271`、`kpi_hook` 自身 2 处 |
 
 - **不保留旧名**（无 `as` 别名）：同一个值在项目里只允许有一个名字（判据 K 组）。
 - 消费方路径写 `crate::commands::constants::domain_pack::*` —— `constants` 在豁免名单内，
@@ -1183,7 +1183,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 
 ⇒ 命中数均 ≤ 基线，**不阻塞门禁**；彻底消 sib 须逐处改走 `axagent_analysis_engine::opc::…` / `axagent_tools::…`。
 
-**② `upsert_template` 下沉**（`opc_capability_pack_actions.rs:2609`，在测试块之外）· **③ `declared_kpi_thresholds`**（`opc_capability_pack_actions.rs:2259` ← `opc_capability_pack_runtime.rs`）
+**② `upsert_template` 下沉**（`opc_capability_pack_actions.rs:2433`，在测试块之外）· **③ `declared_kpi_thresholds`**（`opc_capability_pack_actions.rs:2094` ← `opc_capability_pack_runtime.rs`）
 
 **④ stock_workflow 域 4 处 —— ★ 已被并发会话做掉（待对方确认后关闭本批次）**
 实测：`sim_hook.rs` 仅剩 `crate::commands::error::` / `error_code::`（二者均在门禁 `SHARED_INFRA_MODULES` 豁免名单内）⇒ **合规**；
@@ -1292,7 +1292,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 | `declared_kpi_thresholds` | `runtime.rs:93` | `pub(crate) fn` | 读域包 `runtime.yaml` 声明阈值 | **analysis-engine**（须先核 runtime schema 落点） |
 | `find_repo_config_dir` | `opc_workflows/mod.rs:237` | `pub fn` | 纯 `fs` / `path` | analysis-engine 或公共 utils |
 | `upsert_template` | `opc_workflows/mod.rs:538` | `pub(crate) async fn` | **DB 写 `workflow_templates`** | **dao 层**（不宜落 analysis-engine） |
-| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2502` | `pub async fn`（**Tauri 命令**） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
+| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2337` | `pub async fn`（**Tauri 命令**） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
 
 ⇒ 后 2 项（`upsert_template` / `opc_execute_workflow`）**超出「机械替换」范畴**，待获批后单独立项。
 

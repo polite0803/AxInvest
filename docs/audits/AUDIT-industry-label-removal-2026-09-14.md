@@ -431,7 +431,7 @@ panicked at crates\analysis-engine\src\portfolio_monitor.rs:1233:63:
 
 | 方案 | 改动面 | 成本 | 风险 |
 |---|---|---|---|
-| **A. 追加进 `note`** | 后端 1 处 `format!` + 截断策略（> N 只用「…等」） | **低** —— `note` 已在 `PortfolioMonitorPanel.tsx:334` 与 `RiskRoomMiniBar.tsx:300` 渲染，无需改 UI、无需 i18n | `note` 是中文硬编码自由文本（**既有形态，非本轮引入**）；列表长时可读性下降 |
+| **A. 追加进 `note`** | 后端 1 处 `format!` + 截断策略（> N 只用「…等」） | **低** —— `note` 已在 `PortfolioMonitorPanel.tsx:334` 与 RiskRoomMiniBar.tsx 行 300 渲染（后者已随 2026-11 的 `992947dfc` 股票模块大清理退役，仓内已无此文件——2026-11-12 门禁对账注记），无需改 UI、无需 i18n | `note` 是中文硬编码自由文本（**既有形态，非本轮引入**）；列表长时可读性下降 |
 | **B. 前端独立列表** | 两个消费面各加一段 + 新增 i18n key **× 11 语言** | 中高 | 两处消费面都要改，且要与面板既有布局协调 |
 
 **建议**：先做 **A**（成本最低、立刻可核查）；若后续要做「点代码跳到该股详情」，再升级为 B。

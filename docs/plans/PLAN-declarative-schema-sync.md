@@ -470,7 +470,7 @@ SeaORM 的 `ColumnType` 已内置方言分支（`ColumnType::Json` → PG `jsonb
 >
 > 本轮一度新增了一条 `v234_drop_orphan_tables` 迁移来删这 5 张表，随后**已撤回**（文件与注册均已回滚）。理由：
 > 1. **它与本次改造的目标直接相悖** —— 目标是「不再新增手写迁移文件」，而删表恰恰是目标引擎**必然能自动完成**的动作（§四·九）。用新写的一条迁移去删表，等于给待淘汰的机制续命。
-> 2. **它违背项目自己已写下的约定** —— `commands/demand_discovery.rs:21-22` 原文：「线上孤儿表由**运维侧手动 DROP，不走迁移**」。本轮的做法正好相反。
+> 2. **它违背项目自己已写下的约定** —— `commands/demand_discovery.rs` 头部注释原文（该文件 2026-11-11 随 #264 批 6 整文件退役）：「线上孤儿表由**运维侧手动 DROP，不走迁移**」。本轮的做法正好相反。
 > 3. 这 5 张表要么零写入（`chat_runs` / `chat_run_events` / `rl_policies`），要么已废弃且无数据（`opc_demand_lead` / `opc_market_platform`），**留着不产生任何功能影响**，不需要抢在引擎上线前删除。
 >
 > ⇒ 正确的落地方式是二选一：**(a)** 等引擎上线后由孤儿清理自动处理（顺带成为引擎的第一个真实验收用例）；**(b)** 需要立刻清爽的话，走运维手工 `DROP TABLE IF EXISTS`（一次性动作，不进代码库）。
@@ -483,7 +483,7 @@ SeaORM 的 `ColumnType` 已内置方言分支（`ColumnType::Json` → PG `jsonb
   ⇒ **持久化从未实现，这两张表自创建起零写入。** ⚠ 若将来要做多实例网关的 run 持久化，需**重新建表 + 同步补实体**，不能只建表（否则又回到本轮修掉的"孤儿表"状态）。
 - **`rl_policies`**：全仓仅 v100 的建表语句 + 2 个索引，**零读写**。
   ⚠ **易误判点**：`crates/orchestrator/src/capability_pack_learning.rs:169` 的 `RLPolicyUpdate` 是同名不同物的**纯 DTO**（不触碰该表），按名字搜会误判成"有访问"。
-- **`opc_demand_lead`（单数） / `opc_market_platform`**：`v221_demand_discovery.rs` 引入的 B 链路。`commands/demand_discovery.rs:7-25` 头部注释写明已收敛为 A 链路薄壳：「已删除的 B 链路命令：…（连同废弃实体 `opc_demand_lead` / `opc_market_platform`；**线上孤儿表由运维侧手动 DROP，不走迁移**）」。
+- **`opc_demand_lead`（单数） / `opc_market_platform`**：`v221_demand_discovery.rs` 引入的 B 链路。`commands/demand_discovery.rs` 头部注释（该文件 2026-11-11 随 #264 批 6 整文件退役）写明已收敛为 A 链路薄壳：「已删除的 B 链路命令：…（连同废弃实体 `opc_demand_lead` / `opc_market_platform`；**线上孤儿表由运维侧手动 DROP，不走迁移**）」。
   ⇒ 本轮的处置**遵循这条既有约定**：不写删表迁移。用户已确认单数表内无数据。
   ⚠ 与 A 链路复数表 `opc_demand_leads` 仅差一个字母，误删会损伤真实需求数据 —— `opc_demand_leads`（复数）才是活跃表，**有**实体（`entities/src/opc_demand_leads.rs`）。
 
@@ -2359,7 +2359,7 @@ fmt 后按纪律**重跑全部判据**：`378 passed / 0 failed`（`tmp-d9-test3
 | 表 | 行数 | 判定 |
 |---|---|---|
 | `chat_run_events` · `chat_runs` · `opc_demand_lead` · `opc_market_platform` · `rl_policies` | 各 **0** | 删表零损失 |
-| `opc_capability` | **324**（`tool:AddKnowledgeDocument` 等工具能力清单，中文描述 + `scanned_at`） | ⚠ 有真实业务数据；写入端已移除（`v221_demand_discovery.rs` 已随 `992947dfc` 删除，其原文注记「已移除」/ `demand_discovery.rs:39`「不再落库」） |
+| `opc_capability` | **324**（`tool:AddKnowledgeDocument` 等工具能力清单，中文描述 + `scanned_at`） | ⚠ 有真实业务数据；写入端已移除（`v221_demand_discovery.rs` 已随 `992947dfc` 删除，其原文注记「已移除」/ 需求发现宿主命令头部注释原文「不再落库」，该文件 2026-11-11 随 #264 批 6 整文件退役） |
 | `vec_kb_…_meta_dup_backup` | **24518**（仅 `rowid` 一列） | ⚠ 名自陈 `dup_backup`；活表 `vec_kb_…_meta` 现 **24516** 行 ⇒ 差 2 行，即被去重掉的项 ⇒ 它是**去重前快照** |
 
 顺带排掉一对**同名族陷阱**：`opc_demand_lead`（单数，31 列，DROP 候选）与 `opc_demand_leads`

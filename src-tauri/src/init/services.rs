@@ -119,9 +119,6 @@ pub async fn start_background_services(
     start_daily_snapshot_sweep(state);
     start_market_close_sweep(state);
     spawn_opc_workflows_seeding(state);
-    // register_dojo_sdk_executor 中的 DojoSdkExecutorImpl 注册（依赖 astock_client）已移除，
-    // 仅保留 Plan 三件套正常后台任务——PLANS_REGISTRY TTL 清理
-    crate::commands::dojo_sdk::spawn_plan_ttl_cleanup(state.shutdown_token.clone());
 
     // PTY 事件转发器
     #[cfg(not(mobile))]

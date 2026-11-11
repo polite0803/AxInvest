@@ -129,7 +129,7 @@ pub use recovery_strategies::{
     RecoveryAttempt, RecoveryResult, RecoveryStrategy,
 };
 
-// hierarchical_planner — 外部引用：commands/plan, commands/dojo_sdk (G19 Plan 三件套)
+// hierarchical_planner — 外部引用：commands/plan, react_engine
 pub use hierarchical_planner::{
     ActionType, HierarchicalPlanner, Phase, PhaseStatus, Plan, PlanStatus, PlannedTask, TaskStatus,
 };

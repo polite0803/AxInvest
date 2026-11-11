@@ -131,11 +131,12 @@ pub struct RateLimitViolation {
 /// 名字的真值校验在域侧（`src-tauri/src/init/stock_domain_tools.rs`）：定义来源已
 /// 经 `crate::domain_tools` 槽位倒置，本 crate 不再认识具体域，手抄不到真清单。
 ///
-/// - `dojo_create_plan` / `dojo_revise_plan` / `dojo_execute_plan`：计划状态机，
-///   三者都会落库；
 /// - `optimize_attention_weights`：把优化后的权重写回。
-pub const MUTATING_DATA_TOOL_NAMES: &[&str] =
-    &["dojo_create_plan", "dojo_revise_plan", "dojo_execute_plan", "optimize_attention_weights"];
+///
+/// ⚠ Dojo Plan 三件套（`dojo_create_plan` / `dojo_revise_plan` / `dojo_execute_plan`）
+/// 原登记于此，已随整条 DojoSDK 死通道退役而同批删名。旧注释称「三者都会落库」是假话：
+/// 计划只活在进程内的 `PLANS_REGISTRY`（内存 HashMap + TTL 清理），从未写库。
+pub const MUTATING_DATA_TOOL_NAMES: &[&str] = &["optimize_attention_weights"];
 
 /// 只读取数工具的**豁免集合**（P1-2, 2026-09-21）——单点派生，勿手抄。
 ///
@@ -165,7 +166,7 @@ pub const MUTATING_DATA_TOOL_NAMES: &[&str] =
 /// 后者一旦在注册前被读过就永远读到空集，且没有任何报错。
 ///
 /// ⚠ **不是整包豁免**：清单内混有写类工具，由 [`MUTATING_DATA_TOOL_NAMES`] 逐个剔除
-/// （实测 58 个工具里有 4 个写类/有副作用）。
+/// （现清单 55 个工具 —— astock 53 + 产业链 2 —— 里有 1 个写类/有副作用）。
 fn read_only_data_tool_names() -> Arc<HashSet<String>> {
     static CACHE: LazyLock<parking_lot::RwLock<(u64, Arc<HashSet<String>>)>> =
         LazyLock::new(|| parking_lot::RwLock::new((u64::MAX, Arc::new(HashSet::new()))));

@@ -71,7 +71,7 @@ mod tests {
             .collect();
         assert!(
             declared.len() >= 50,
-            "股票域定义只有 {} 项 —— 预期 ≥ 50（astock 58 + 产业链 2）。\
+            "股票域定义只有 {} 项 —— 预期 ≥ 50（astock 53 + 产业链 2；DojoSDK 9 条死声明已退役）。\
              先查是不是只抽到了其中一支数据源。",
             declared.len()
         );

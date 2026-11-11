@@ -106,13 +106,14 @@ impl Tool for DomainMcpTool {
     }
 }
 
-/// Dojo 变更类工具（创建/执行/修订计划）——非只读，其余全部只读。
+/// 变更类工具（非只读）——按名字查审计层的写类名单，其余全部只读。
 ///
 /// 定义 JSON 目前不带只读标记（MCP schema 里没有 `readOnlyHint`），故按名字判。
-/// 域侧若要改分类，应先给定义补字段，而不是在这里加域专属规则。
+/// 名单与限流豁免同源（[`crate::audit::MUTATING_DATA_TOOL_NAMES`]）：此前这里是
+/// 一套 `dojo_*` 前缀启发式，与审计名单各说各话 —— 名单里的 `optimize_attention_weights`
+/// 在工具层反被判成「只读」。域侧若要改分类，应先给定义补字段，而不是在这里加域专属规则。
 fn is_mutating_tool(name: &str) -> bool {
-    name.starts_with("dojo_")
-        && (name.contains("create") || name.contains("execute") || name.contains("revise"))
+    crate::audit::MUTATING_DATA_TOOL_NAMES.contains(&name)
 }
 
 /// 从给定定义批量构建注册项（跳过与既有内置实现重名的工具）。
@@ -138,6 +139,14 @@ pub fn domain_mcp_tool_instances() -> Vec<Arc<dyn Tool>> {
 mod tests {
     use super::*;
 
+    /// 写类夹具名：取审计名单第 0 项，不在测试里重抄一个会随退役腐烂的名字。
+    fn mutating_fixture_name() -> &'static str {
+        crate::audit::MUTATING_DATA_TOOL_NAMES
+            .first()
+            .copied()
+            .expect("审计写类名单为空 ⇒ 本夹具无处取名，改用显式名字或恢复名单")
+    }
+
     fn fixture() -> Vec<(String, Value)> {
         vec![
             (
@@ -148,7 +157,7 @@ mod tests {
                     "inputSchema": {"type": "object", "properties": {"stock_code": {"type": "string"}}}
                 }),
             ),
-            ("stock".to_string(), serde_json::json!({"name": "dojo_execute_plan"})),
+            ("stock".to_string(), serde_json::json!({"name": mutating_fixture_name()})),
             ("stock".to_string(), serde_json::json!({"name": "get_north_bound_flow"})),
             ("stock".to_string(), serde_json::json!({"description": "无名字"})),
             ("stock".to_string(), serde_json::json!({"name": "  "})),
@@ -176,7 +185,7 @@ mod tests {
         assert_eq!(quote.input_schema()["properties"]["stock_code"]["type"], "string");
         assert_eq!(quote.domain(), ToolDomain::Finance);
         // 缺 inputSchema 时给空 object schema，而不是 None/panic
-        let exec = instances.iter().find(|t| t.name() == "dojo_execute_plan").unwrap();
+        let exec = instances.iter().find(|t| t.name() == mutating_fixture_name()).unwrap();
         assert_eq!(exec.input_schema()["type"], "object");
     }
 
@@ -185,8 +194,15 @@ mod tests {
         let instances = instances_from(fixture());
         let quote = instances.iter().find(|t| t.name() == "get_stock_quote").unwrap();
         assert!(quote.is_read_only(), "行情查询是只读");
-        let exec = instances.iter().find(|t| t.name() == "dojo_execute_plan").unwrap();
-        assert!(!exec.is_read_only(), "Dojo 计划执行是变更类");
+        let exec = instances.iter().find(|t| t.name() == mutating_fixture_name()).unwrap();
+        assert!(!exec.is_read_only(), "审计名单登记的写类工具必须判非只读");
+        // 反向钉桩：分类只看审计名单，不再认 `dojo_*` + create/execute/revise 前缀启发式
+        // （该启发式已随 DojoSDK 死通道退役；留着会让名单外的名字各说各话）。
+        let legacy = instances_from(vec![(
+            "stock".to_string(),
+            serde_json::json!({"name": "dojo_execute_plan"}),
+        )]);
+        assert!(legacy[0].is_read_only(), "前缀启发式已退役：名单外的名字一律判只读");
     }
 
     #[tokio::test]

@@ -145,6 +145,24 @@ const LIST_DELIVERIES_COMMAND = "opc_list_deliveries";
 const RETRY_DELIVERY_COMMAND = "opc_retry_delivery";
 const CANCEL_DELIVERY_COMMAND = "opc_cancel_delivery";
 
+// 能力发现面五命令（#264 批 6）：宿主 `commands::demand_discovery` 整文件已退役，
+// 插件命令是唯一通道。scan / proactive / analyze 零入参；list 的 status 可选；
+// close 只收 gapId。proactive 不再传 min_score 历史遗留参数（A 链路全量入库）。
+const SCAN_CAPABILITIES_COMMAND = "opc_scan_capabilities";
+const PROACTIVE_EVALUATE_COMMAND = "opc_proactive_evaluate_leads";
+const LIST_CAPABILITY_GAPS_COMMAND = "opc_list_capability_gaps";
+const CLOSE_CAPABILITY_GAP_COMMAND = "opc_close_capability_gap";
+const ANALYZE_CAPABILITY_GAPS_COMMAND = "opc_analyze_capability_gaps";
+
+// 需求订阅三条命令：前端调用点先行切插件命令通道（T2 接缝，经 `invokePluginCommand`：真机
+// 按命令名解析提供它的启用插件 ⇒ `plugin_execute_command` 派发并解析回执 JSON，浏览器模式
+// 直达 `browserMock` 同名分支）。宿主 `opc_demand_subscription.rs` 双声明期未退役，插件侧
+// 命令同名同形（出/入参形状不变）；`opc_run_subscription_scan` / `opc_ensure_demand_scan_job`
+// 两条扫描装配命令本批未迁，仍走宿主 invoke。
+const LIST_SUBSCRIPTIONS_COMMAND = "opc_list_subscriptions";
+const SAVE_SUBSCRIPTION_COMMAND = "opc_save_subscription";
+const DELETE_SUBSCRIPTION_COMMAND = "opc_delete_subscription";
+
 /** 商业价值分 → 文字颜色（≥80 极高 / ≥60 高 / ≥40 中 / 其余低） */
 function scoreColor(
   score: number,
@@ -333,7 +351,7 @@ export function DemandDiscoveryPage() {
 
   const loadSubscriptions = useCallback(async () => {
     try {
-      const rows = await invoke<DemandSubscription[]>("opc_list_subscriptions");
+      const rows = await invokePluginCommand<DemandSubscription[]>(LIST_SUBSCRIPTIONS_COMMAND, {});
       setSubscriptions(rows ?? []);
     } catch (e) {
       message.error(t("opc.demand.loadFailed", { error: String(e) }));
@@ -520,16 +538,16 @@ export function DemandDiscoveryPage() {
   const runProactiveScan = useCallback(async () => {
     setProactiveScanning(true);
     try {
-      const result = await invoke<{
-        total_queries: number;
-        total_scanned: number;
-        total_saved: number;
-        high_value_count: number;
-      }>("opc_proactive_evaluate_and_save_leads", { min_score: 0.0 });
+      const result = await invokePluginCommand<{
+        totalQueries: number;
+        totalScanned: number;
+        totalSaved: number;
+        highValueCount: number;
+      }>(PROACTIVE_EVALUATE_COMMAND, {});
       message.success(
         t("opc.demand.proactiveScanComplete", {
-          saved: result.total_saved,
-          highValue: result.high_value_count,
+          saved: result.totalSaved,
+          highValue: result.highValueCount,
         }),
       );
       void loadLeads();
@@ -718,7 +736,7 @@ export function DemandDiscoveryPage() {
     };
     setSubSaving(true);
     try {
-      await invoke<DemandSubscription>("opc_save_subscription", { input });
+      await invokePluginCommand<DemandSubscription>(SAVE_SUBSCRIPTION_COMMAND, { input });
       message.success(t("opc.demand.subscriptionSaved"));
       setSubModalOpen(false);
       await loadSubscriptions();
@@ -738,7 +756,7 @@ export function DemandDiscoveryPage() {
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
-            await invoke<void>("opc_delete_subscription", { id: row.id });
+            await invokePluginCommand<void>(DELETE_SUBSCRIPTION_COMMAND, { id: row.id });
             message.success(t("opc.demand.subscriptionDeleted"));
             await loadSubscriptions();
           } catch (e) {
@@ -753,7 +771,7 @@ export function DemandDiscoveryPage() {
   const toggleSubscription = useCallback(
     async (row: DemandSubscription, enabled: boolean) => {
       try {
-        await invoke<DemandSubscription>("opc_save_subscription", {
+        await invokePluginCommand<DemandSubscription>(SAVE_SUBSCRIPTION_COMMAND, {
           input: { id: row.id, enabled },
         });
         await loadSubscriptions();
@@ -2132,7 +2150,7 @@ function CapabilitiesPanel() {
   const loadInventory = useCallback(async () => {
     setLoading(true);
     try {
-      setInventory(await invoke<CapabilityInventory>("opc_scan_capabilities"));
+      setInventory(await invokePluginCommand<CapabilityInventory>(SCAN_CAPABILITIES_COMMAND, {}));
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
       setInventory(null);
@@ -2144,7 +2162,7 @@ function CapabilitiesPanel() {
   const loadGaps = useCallback(async () => {
     setGapsLoading(true);
     try {
-      setGaps(await invoke<CapabilityGap[]>("opc_list_capability_gaps", {}));
+      setGaps(await invokePluginCommand<CapabilityGap[]>(LIST_CAPABILITY_GAPS_COMMAND, {}));
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
       setGaps([]);
@@ -2161,13 +2179,13 @@ function CapabilitiesPanel() {
   const analyzeGaps = useCallback(async () => {
     setAnalyzingGaps(true);
     try {
-      const result = await invoke<{
-        auto_created_gaps: string[];
-        missing_keywords_count: number;
-      }>("opc_analyze_capability_gaps", {});
-      if (result.auto_created_gaps.length > 0) {
+      const result = await invokePluginCommand<{
+        autoCreatedGaps: string[];
+        missingKeywordsCount: number;
+      }>(ANALYZE_CAPABILITY_GAPS_COMMAND, {});
+      if (result.autoCreatedGaps.length > 0) {
         message.success(
-          t("opc.demand.gapsAnalyzedCreated", { count: result.auto_created_gaps.length }),
+          t("opc.demand.gapsAnalyzedCreated", { count: result.autoCreatedGaps.length }),
         );
       } else {
         message.info(t("opc.demand.gapsAnalyzedNoNew"));
@@ -2183,7 +2201,7 @@ function CapabilitiesPanel() {
   const closeGap = useCallback(
     async (id: string) => {
       try {
-        await invoke("opc_close_capability_gap", { id });
+        await invokePluginCommand<CapabilityGap>(CLOSE_CAPABILITY_GAP_COMMAND, { gapId: id });
         message.success(t("opc.demand.gapClosed"));
         void loadGaps();
       } catch (e) {
@@ -2204,7 +2222,7 @@ function CapabilitiesPanel() {
         width: 100,
         render: (v: string) => <Tag>{v}</Tag>,
       },
-      { title: t("opc.demand.colType"), dataIndex: "capability_type", key: "type", width: 100 },
+      { title: t("opc.demand.colType"), dataIndex: "capabilityType", key: "type", width: 100 },
     ];
     return (
       <Card title={`${title} (${data.length})`} size="small" style={{ marginBottom: 16 }}>
@@ -2225,15 +2243,15 @@ function CapabilitiesPanel() {
     { title: t("opc.demand.colDescription"), dataIndex: "description", key: "description", ellipsis: true },
     {
       title: t("opc.demand.colGapType"),
-      dataIndex: "gap_type",
-      key: "gap_type",
+      dataIndex: "gapType",
+      key: "gapType",
       width: 110,
       render: (v: string) => <Tag color="orange">{v}</Tag>,
     },
     {
       title: t("opc.demand.colSuggestedAction"),
-      dataIndex: "suggested_action",
-      key: "suggested_action",
+      dataIndex: "suggestedAction",
+      key: "suggestedAction",
       ellipsis: true,
     },
     {
@@ -2278,7 +2296,7 @@ function CapabilitiesPanel() {
           <Button onClick={() => void loadGaps()}>{t("opc.demand.btnRefresh")}</Button>
           {inventory && (
             <Tag color="blue">
-              {t("opc.demand.totalCapabilities", { count: inventory.total_count })}
+              {t("opc.demand.totalCapabilities", { count: inventory.totalCount })}
             </Tag>
           )}
         </Space>
@@ -2289,7 +2307,7 @@ function CapabilitiesPanel() {
           <>
             {renderTable(t("opc.demand.categoryTools"), inventory.tools)}
             {renderTable(t("opc.demand.categorySkills"), inventory.skills)}
-            {renderTable(t("opc.demand.categoryMcpTools"), inventory.mcp_tools)}
+            {renderTable(t("opc.demand.categoryMcpTools"), inventory.mcpTools)}
             {renderTable(t("opc.demand.categoryWorkflows"), inventory.workflows)}
             {renderTable(t("opc.demand.categoryAgents"), inventory.agents)}
           </>

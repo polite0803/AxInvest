@@ -6610,7 +6610,11 @@ async function executeCommand<T>(
       return { ...row } as unknown as T;
     }
 
-    // ── OPC 需求订阅（v133 定时扫描）────────────────────────────────
+    // ── OPC 需求订阅（v133 定时扫描；前端 DemandDiscoveryPage 已切 invokePluginCommand，
+    // 浏览器模式派发到本段同名分支）────────────────────────────────
+    // ⚠ 三条均须保持显式 case：opc_save_subscription / opc_delete_subscription 不命中
+    // default 兜底的 list_/get_ 特判（落到末位 return undefined），删掉显式 case 会静默
+    // 改变保存/删除的回执语义。
     case "opc_list_subscriptions":
       return [...MOCK_DEMAND_SUBSCRIPTIONS] as unknown as T;
 
@@ -7015,6 +7019,51 @@ async function executeCommand<T>(
       row.updatedAt = now;
       return row as unknown as T;
     }
+
+    // ── OPC 发现面五命令（#264 批 6：宿主同名命令已迁入 OPC 插件）──
+    // ⚠ 必须显式登记（判据同 opc_get_dashboard_summary）：default 的 `endsWith("s")`
+    // 兜底会给 `[]`，而 scan/analyze 的消费方读 `.tools` / `.autoCreatedGaps` 字段 ⇒
+    // 空数组是 truthy，读字段才炸（TypeError 无可定位性）。这里给**零值完整形状**，
+    // 与浏览器模式「无能力护照注册表 / 无扫描引擎」的语义一致，不造假数据。
+    case "opc_scan_capabilities":
+      // CapabilityInventory 零值形状（camelCase，与插件命令出参契约逐字一致）。
+      return {
+        tools: [],
+        skills: [],
+        mcpTools: [],
+        workflows: [],
+        agents: [],
+        scannedAt: Math.floor(Date.now() / 1000),
+        totalCount: 0,
+      } as unknown as T;
+    case "opc_proactive_evaluate_leads":
+      // ProactiveScanSummary 零值形状：浏览器 mock 无需求扫描引擎。
+      return {
+        totalQueries: 0,
+        totalScanned: 0,
+        totalSaved: 0,
+        highValueCount: 0,
+        queryStats: [],
+      } as unknown as T;
+    case "opc_list_capability_gaps":
+      // 缺口清单：mock 无缺口存储 ⇒ 空清单（UI 合法 =「没有缺口」）。
+      return [] as unknown as T;
+    case "opc_close_capability_gap": {
+      // 与 opc_cancel_delivery 同形：按 id 找行，找不到抛错。list 恒 [] ⇒ 必然找不到，
+      // 行为自洽 fail-closed。
+      const gapId = readMockReqField<string>(args, "gapId");
+      throw new Error(`缺口记录不存在: ${gapId ?? ""}`);
+    }
+    case "opc_analyze_capability_gaps":
+      // AnalyzeGapsSummary 零值形状：autoCreatedGaps 空 ⇒ 消费方走「没有新缺口」提示分支。
+      return {
+        totalLeadsAnalyzed: 0,
+        totalCapabilities: 0,
+        missingKeywordsCount: 0,
+        topMissingKeywords: [],
+        domainCoverage: [],
+        autoCreatedGaps: [],
+      } as unknown as T;
 
     // ── OPC 看板汇总（#36：宿主命令 `opc_get_dashboard_summary` 已迁入 OPC 插件）──
     // ⚠ 必须显式登记：default 兜底只对 `list_*` / 以 `s` 结尾 / `get_*` 三类返回占位值，

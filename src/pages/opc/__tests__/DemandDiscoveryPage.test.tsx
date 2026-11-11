@@ -21,8 +21,8 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
-  // 交付环五条命令已改走 invokePluginCommand：浏览器模式（isTauri=false）直接派发给
-  // browserMock 同名处理器，测试里等价于 invokeMock 收到原命令名 ⇒ 与本文其余断言同形。
+  // 已迁 invokePluginCommand 的命令（交付环五条 + 需求订阅三条）：浏览器模式（isTauri=false）
+  // 直接派发给 browserMock 同名处理器，测试里等价于 invokeMock 收到原命令名 ⇒ 与本文其余断言同形。
   isTauri: () => false,
 }));
 

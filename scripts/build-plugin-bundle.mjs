@@ -1789,6 +1789,36 @@ function opcManifest({ version, binaryName, sha256 }) {
           required: ["leadId"],
         },
       },
+      // ── #264 批 4：领域工作流三只读命令（无前端调用方，保留智能体工具面）──
+      // 属性名 camelCase（命令面）；两条可缺省，一条必填 workflowId。
+      {
+        name: "opc_list_domain_workflows",
+        description: "列出领域工作流摘要（可按 domainId 或 tag 过滤）",
+        command: "worker://opc_list_domain_workflows",
+        inputSchema: {
+          type: "object",
+          properties: {
+            domainId: { type: "string", description: "领域标识（如 academic / finance）" },
+            tag: { type: "string", description: "标签过滤" },
+          },
+        },
+      },
+      {
+        name: "opc_get_domain_workflow",
+        description: "获取单个领域工作流的完整定义（缺行返回 null）",
+        command: "worker://opc_get_domain_workflow",
+        inputSchema: {
+          type: "object",
+          properties: { workflowId: { type: "string", description: "工作流模板 ID" } },
+          required: ["workflowId"],
+        },
+      },
+      {
+        name: "opc_list_domains",
+        description: "列出领域 ID 与中文名（下拉选择用）",
+        command: "worker://opc_list_domains",
+        inputSchema: { type: "object", properties: {} },
+      },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };

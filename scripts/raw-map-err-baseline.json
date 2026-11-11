@@ -38,7 +38,6 @@
     "src-tauri/src/commands/opc_data.rs": 2,
     "src-tauri/src/commands/opc_llm_bridge.rs": 1,
     "src-tauri/src/commands/opc_setup/seed_opc_workflow_template.rs": 6,
-    "src-tauri/src/commands/opc_workflows/domain_workflows.rs": 5,
     "src-tauri/src/commands/opc_workflows/mod.rs": 5,
     "src-tauri/src/commands/opc_workflows/seed_content_media.rs": 3,
     "src-tauri/src/commands/orchestrator.rs": 2,

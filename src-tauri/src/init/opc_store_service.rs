@@ -1146,6 +1146,192 @@ impl OpcStoreProvider for HostOpcStore {
         );
         Ok(execution_id)
     }
+
+    // ── #264 批 4：领域工作流只读三 op ────────────────────────────────────
+    //
+    // 迁移前是 `commands::opc_workflows::domain_workflows` 的三条只读命令（该文件已删除）。
+    // 前缀筛选下沉 dao，领域/标签过滤与摘要映射仍在本层：出参逐字段保持迁移前语义。
+
+    async fn list_domain_workflows(
+        &self,
+        domain_id: Option<String>,
+        tag: Option<String>,
+    ) -> Result<Vec<DomainWorkflowSummaryView>> {
+        let all = axagent_dao::repo::workflow_template::list_domain_workflow_templates(&self.db)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "opc.store::list_domain_workflows 查询领域工作流失败: {e}"
+                ))
+            })?;
+
+        let summaries = all
+            .iter()
+            .filter(|wf| {
+                if let Some(ref did) = domain_id {
+                    if extract_domain_from_id(&wf.id) != did.as_str() {
+                        return false;
+                    }
+                }
+                if let Some(ref t) = tag {
+                    if !parse_tags(&wf.tags).iter().any(|tag_item| tag_item == t) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .map(|wf| DomainWorkflowSummaryView {
+                id: wf.id.clone(),
+                name: wf.name.clone(),
+                description: wf.description.clone().unwrap_or_default(),
+                icon: wf.icon.clone(),
+                tags: parse_tags(&wf.tags),
+                domain: extract_domain_from_id(&wf.id).to_string(),
+                step_count: parse_nodes_len(&wf.nodes).unwrap_or(0),
+            })
+            .collect();
+
+        Ok(summaries)
+    }
+
+    async fn get_domain_workflow(
+        &self,
+        workflow_id: String,
+    ) -> Result<Option<WorkflowTemplateResponse>> {
+        let model =
+            axagent_dao::repo::workflow_template::get_workflow_template(&self.db, &workflow_id)
+                .await
+                .map_err(|e| {
+                    AxAgentError::Provider(format!(
+                        "opc.store::get_domain_workflow 查询工作流失败: {e}"
+                    ))
+                })?;
+        model.map(|m| model_to_domain_response(m).map_err(AxAgentError::Provider)).transpose()
+    }
+
+    async fn list_domains(&self) -> Result<Vec<DomainEntryView>> {
+        let all = axagent_dao::repo::workflow_template::list_domain_workflow_templates(&self.db)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::list_domains 查询领域失败: {e}"))
+            })?;
+
+        let mut domains: Vec<DomainEntryView> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for wf in &all {
+            let domain_id = extract_domain_from_id(&wf.id).to_string();
+            if seen.insert(domain_id.clone()) {
+                domains
+                    .push(DomainEntryView { name: domain_id_to_name(&domain_id), id: domain_id });
+            }
+        }
+
+        domains.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(domains)
+    }
+}
+
+// ── #264 批 4 领域工作流三 op 的依赖（同样放在 impl 之后，理由同上）──────────
+use axagent_harness::opc_store::{DomainEntryView, DomainWorkflowSummaryView};
+use axagent_harness::workflow_types::WorkflowTemplateResponse;
+
+/// 从工作流 ID 提取领域标识：`wf-acd-xxx` → `acd`（无法判断回 `unknown`）。
+fn extract_domain_from_id(id: &str) -> &str {
+    if let Some(rest) = id.strip_prefix("wf-") {
+        if let Some(domain) = rest.split('-').next() {
+            return domain;
+        }
+    }
+    "unknown"
+}
+
+/// 领域 ID → 中文名（迁移前命令的固定映射表，逐字搬移）。
+fn domain_id_to_name(id: &str) -> String {
+    match id {
+        "academic" => "学术研究".to_string(),
+        "design" => "设计与创意".to_string(),
+        "engineering" => "工程与开发".to_string(),
+        "finance" => "财务与会计".to_string(),
+        "gamedev" => "游戏开发".to_string(),
+        "gis" => "地理信息系统".to_string(),
+        "marketing" => "市场营销".to_string(),
+        "paidmedia" => "付费媒体".to_string(),
+        "pm" => "项目管理".to_string(),
+        "product" => "产品管理".to_string(),
+        "sales" => "销售与商务".to_string(),
+        "security" => "安全与合规".to_string(),
+        "spatial" => "空间计算".to_string(),
+        "specialized" => "专业服务".to_string(),
+        "strategy" => "战略规划".to_string(),
+        "support" => "客户支持".to_string(),
+        "testing" => "测试与质量".to_string(),
+        _ => id.to_string(),
+    }
+}
+
+/// 解析 `tags` JSON 列（解码失败 = 空数组，与迁移前同一降级）。
+fn parse_tags(tags: &Option<String>) -> Vec<String> {
+    tags.as_ref().and_then(|s| serde_json::from_str::<Vec<String>>(s).ok()).unwrap_or_default()
+}
+
+/// 解析 `nodes` JSON 列并取节点数（解码失败回 `None`，调用方降级为 0）。
+fn parse_nodes_len(nodes_json: &str) -> Option<usize> {
+    serde_json::from_str::<Vec<serde_json::Value>>(nodes_json).ok().map(|v| v.len())
+}
+
+/// DB Model → `WorkflowTemplateResponse`（迁移前命令的映射体，逐字搬移）。
+///
+/// 不复用 dao 的 `workflow_template_response_from_model`：那份把 `tool_defs` 固定为 `None`、
+/// 且 nodes/edges 解析失败时降级为空数组；迁移前命令要保留 `tool_defs` 且解析失败即错，
+/// 语义不同，合并会静默改变出参。
+fn model_to_domain_response(
+    m: axagent_entities::workflow_template::Model,
+) -> std::result::Result<WorkflowTemplateResponse, String> {
+    let nodes: Vec<axagent_harness::workflow_types::WorkflowNode> =
+        serde_json::from_str(&m.nodes).map_err(|e| format!("解析 nodes: {e}"))?;
+    let edges: Vec<axagent_harness::workflow_types::WorkflowEdge> =
+        serde_json::from_str(&m.edges).map_err(|e| format!("解析 edges: {e}"))?;
+    let tags: Vec<String> =
+        m.tags.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let is_system = m.is_preset && tags.iter().any(|t| t == "cognitive_router");
+    let variables: Vec<axagent_harness::workflow_types::Variable> =
+        m.variables.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let tool_defs: Option<Vec<axagent_harness::workflow_types::RhaiToolDef>> =
+        m.tool_defs.as_deref().and_then(|s| serde_json::from_str(s).ok());
+    let trigger_config: Option<axagent_harness::workflow_types::TriggerConfig> =
+        m.trigger_config.as_deref().and_then(|s| serde_json::from_str(s).ok());
+    let input_schema: Option<axagent_harness::workflow_types::JsonSchema> =
+        m.input_schema.as_deref().and_then(|s| serde_json::from_str(s).ok());
+    let output_schema: Option<axagent_harness::workflow_types::JsonSchema> =
+        m.output_schema.as_deref().and_then(|s| serde_json::from_str(s).ok());
+    let error_config: Option<axagent_harness::workflow_types::ErrorConfig> =
+        m.error_config.as_deref().and_then(|s| serde_json::from_str(s).ok());
+
+    Ok(WorkflowTemplateResponse {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        icon: m.icon,
+        cluster_id: m.cluster_id,
+        route_path: m.route_path,
+        tags,
+        version: m.version,
+        is_preset: m.is_preset,
+        is_editable: m.is_editable,
+        is_public: m.is_public,
+        is_system,
+        trigger_config,
+        nodes,
+        edges,
+        input_schema,
+        output_schema,
+        variables,
+        error_config,
+        tool_defs,
+        mission_hash: m.mission_hash,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+    })
 }
 
 /// 手动补录平台的固定 platform 标识（与扫描器内置平台标识不冲突）

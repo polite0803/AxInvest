@@ -3923,6 +3923,56 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            "opc.store" if op == "list_domain_workflows" => {
+                let domain_id: Option<String> =
+                    match deserialize_optional_arg(&args, "domain_id", seam) {
+                        Ok(domain_id) => domain_id,
+                        Err(response) => return response,
+                    };
+                let tag: Option<String> = match deserialize_optional_arg(&args, "tag", seam) {
+                    Ok(tag) => tag,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_domain_workflows(domain_id, tag))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DomainWorkflowSummaryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_domain_workflow" => {
+                let workflow_id: String = match deserialize_arg(&args, "workflow_id", seam) {
+                    Ok(workflow_id) => workflow_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_domain_workflow(workflow_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(template) => to_value("Option<WorkflowTemplateResponse>", &template),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_domains" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_domains()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DomainEntryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -12744,6 +12794,9 @@ mod tests {
             "list_platforms",
             "list_leads",
             "get_scan_policy",
+            "list_domain_workflows",
+            "get_domain_workflow",
+            "list_domains",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

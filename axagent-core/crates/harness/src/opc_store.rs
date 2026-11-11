@@ -788,6 +788,80 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::run_lead_workflow 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── 领域工作流只读三 op（#264 批 4）────────────────────────────────────
+    //
+    // 整模块迁移：`commands::opc_workflows::domain_workflows` 的三条 OPC 只读命令。
+    // 前端零 `invoke`，但三条都带 `#[agent_command(domain = "OPC", safety = Safe)]`
+    // ⇒ 它们是智能体工具面的一部分。迁到 T2 后由插件命名命令继续出现在智能体命令面
+    // （#146 的合并通道），工具名与出参形状保持不变，能力面不退化。
+
+    /// 列出领域工作流摘要（`list_domain_workflows` op）—— 读 op，不设权限闸。
+    ///
+    /// `domain_id` / `tag` 为 `None` 时不过滤；领域标识从模板 id 的 `wf-<domain>-…` 前缀推断
+    /// （与迁移前宿主命令同一判据）。
+    async fn list_domain_workflows(
+        &self,
+        _domain_id: Option<String>,
+        _tag: Option<String>,
+    ) -> Result<Vec<DomainWorkflowSummaryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_domain_workflows 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取单个领域工作流的完整定义（`get_domain_workflow` op）—— 读 op，不设权限闸。
+    ///
+    /// 缺行回 `Ok(None)`（**不是错误**，与迁移前宿主命令同口径）。
+    async fn get_domain_workflow(
+        &self,
+        _workflow_id: String,
+    ) -> Result<Option<crate::workflow_types::WorkflowTemplateResponse>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_domain_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出领域元数据（`list_domains` op）—— 读 op，不设权限闸。
+    ///
+    /// 出参按领域 id 升序去重（与迁移前宿主命令同序）。
+    async fn list_domains(&self) -> Result<Vec<DomainEntryView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_domains 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+}
+
+// ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────
+
+/// 领域工作流摘要（`list_domain_workflows` 的列表视图）。
+///
+/// 与迁移前宿主 DTO `DomainWorkflowSummary` 逐字段同义，键名按全站 DTO 规范收敛 camelCase
+/// （`step_count` → `stepCount`）。无前端消费方（零 `invoke`），键名迁移仅影响智能体工具
+/// 的出参文本。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainWorkflowSummaryView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub icon: String,
+    pub tags: Vec<String>,
+    /// 从 id 前缀推断的领域标识（`unknown` 表示无法判断）。
+    pub domain: String,
+    /// `nodes` JSON 数组长度；解析失败按 0（迁移前同一降级）。
+    pub step_count: usize,
+}
+
+/// 领域元数据（`list_domains` 的列表视图）。
+///
+/// 迁移前出参是 `Vec<(String, String)>`（元组下发是两元素数组，无键名）；收成具名对象
+/// 以符合 DTO 规范，语义逐字对应（`id` = 领域标识，`name` = 中文展示名）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainEntryView {
+    pub id: String,
+    pub name: String,
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

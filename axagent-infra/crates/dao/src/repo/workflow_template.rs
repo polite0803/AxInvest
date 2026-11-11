@@ -160,6 +160,21 @@ pub async fn get_workflow_template(
     Ok(template)
 }
 
+/// 列出领域工作流模板（`id` 前缀 `wf-`）。
+///
+/// 前缀筛选属存储契约，从 `commands::opc_workflows::domain_workflows` 的内联查询下沉到本层
+/// （该命令模块已随 #264 批 4 删除）。**不指定排序** —— 迁移前命令没有 `order_by`，
+/// 这里保持一致，出参顺序仍由 SQLite 扫描序决定。
+pub async fn list_domain_workflow_templates(
+    db: &DatabaseConnection,
+) -> Result<Vec<workflow_template::Model>> {
+    let templates = workflow_template::Entity::find()
+        .filter(workflow_template::Column::Id.starts_with("wf-"))
+        .all(db)
+        .await?;
+    Ok(templates)
+}
+
 pub async fn insert_workflow_template<C: ConnectionTrait>(
     db: &C,
     template: workflow_template::ActiveModel,

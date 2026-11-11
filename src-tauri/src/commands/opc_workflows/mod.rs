@@ -9,7 +9,7 @@ use axagent_entities::workflow_template;
 use axagent_harness::workflow_types::*;
 use sea_orm::DatabaseConnection;
 
-pub mod domain_workflows;
+// `domain_workflows.rs` 三条只读命令已随 #264 批 4 迁入 T2 插件命令通道（opc.store 接缝）。
 // 域包引擎已下沉：实现见 `axagent_company_runtime::opc::capability_pack`，
 // 工具白名单映射见 `axagent_tools::tools::capability_pack_defs`。
 // 本模块只保留 re-export，维持既有调用面（opc.rs / opc_data.rs / 本文件内部 helper）。

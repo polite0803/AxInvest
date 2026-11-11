@@ -149,6 +149,11 @@ const OPC_STORE_UPDATE_LEAD_STATUS: &str = "update_lead_status";
 const OPC_STORE_CONVERT_LEAD_TO_WORKFLOW: &str = "convert_lead_to_workflow";
 const OPC_STORE_RUN_LEAD_WORKFLOW: &str = "run_lead_workflow";
 
+/// #264 批 4：领域工作流三只读 op（都不登记权限闸）。
+const OPC_STORE_LIST_DOMAIN_WORKFLOWS: &str = "list_domain_workflows";
+const OPC_STORE_GET_DOMAIN_WORKFLOW: &str = "get_domain_workflow";
+const OPC_STORE_LIST_DOMAINS: &str = "list_domains";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -247,6 +252,14 @@ const COMMAND_CREATE_LEAD: &str = "opc_create_lead";
 const COMMAND_UPDATE_LEAD_STATUS: &str = "opc_update_lead_status";
 const COMMAND_CONVERT_LEAD_TO_WORKFLOW: &str = "opc_convert_lead_to_workflow";
 const COMMAND_RUN_LEAD_WORKFLOW: &str = "opc_run_lead_workflow";
+
+/// #264 批 4：领域工作流三只读命令（清单 `commands[].name` 必须逐字一致）。宿主同名 Tauri
+/// 命令随本批删除（模块 `commands::opc_workflows::domain_workflows` 整文件移除）。
+/// 前端零 `invoke`：三条原本是 `#[agent_command]` 工具，迁后由插件命名命令继续出现在
+/// 智能体命令面（#146 的合并通道），工具名与出参语义不变。
+const COMMAND_LIST_DOMAIN_WORKFLOWS: &str = "opc_list_domain_workflows";
+const COMMAND_GET_DOMAIN_WORKFLOW: &str = "opc_get_domain_workflow";
+const COMMAND_LIST_DOMAINS: &str = "opc_list_domains";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -677,6 +690,29 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // ── #264 批 4：领域工作流三只读命令（列表 / 详情 / 领域元数据）──
+        COMMAND_LIST_DOMAIN_WORKFLOWS => {
+            match list_domain_workflows(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_DOMAIN_WORKFLOW => {
+            match get_domain_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_DOMAINS => match list_domains(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         COMMAND_CREATE_PROJECT => match create_project(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -1752,6 +1788,52 @@ fn run_lead_workflow(
     const OP: &str = "opc_run_lead_workflow";
     let lead_id = require_str(input, OP, "leadId")?;
     call_opc_store(peer, OPC_STORE_RUN_LEAD_WORKFLOW, json!({ "lead_id": lead_id }), call_chain)
+}
+
+/// `opc_list_domain_workflows`：领域工作流摘要列表（只读 op，两个可选过滤项）。
+///
+/// 命令面 `domainId` ⇒ 接缝面 `domain_id`（三面键名分档）；`tag` 两面同形。
+fn list_domain_workflows(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_domain_workflows";
+    let mut args = serde_json::Map::new();
+    match input.get("domainId") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("domain_id".to_string(), Value::String(value.clone()));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `domainId` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    copy_optional_strings(input, OP, &mut args, &["tag"])?;
+    call_opc_store(peer, OPC_STORE_LIST_DOMAIN_WORKFLOWS, Value::Object(args), call_chain)
+}
+
+/// `opc_get_domain_workflow`：单个领域工作流的完整定义（只读 op，`workflowId` 必填）。
+fn get_domain_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_domain_workflow";
+    let workflow_id = require_str(input, OP, "workflowId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_DOMAIN_WORKFLOW,
+        json!({ "workflow_id": workflow_id }),
+        call_chain,
+    )
+}
+
+/// `opc_list_domains`：领域 id 与中文名（只读 op，零入参）。
+fn list_domains(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_LIST_DOMAINS, json!({}), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

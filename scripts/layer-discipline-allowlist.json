@@ -3,7 +3,7 @@
   "note": "分层护栏棘轮基线：**只减不增**。修复违规后必须用 --update-baseline 下调，否则基线虚高会让棘轮失效。",
   "rules": {
     "commands-no-direct-db": {
-      "total": 625,
+      "total": 623,
       "files": {
         "src-tauri/src/commands/agency_expert.rs": 4,
         "src-tauri/src/commands/agent/command_bridge.rs": 1,
@@ -48,7 +48,6 @@
         "src-tauri/src/commands/opc_setup/domain_agents.rs": 3,
         "src-tauri/src/commands/opc_setup/mod.rs": 3,
         "src-tauri/src/commands/opc_setup/seed_opc_workflow_template.rs": 4,
-        "src-tauri/src/commands/opc_workflows/domain_workflows.rs": 2,
         "src-tauri/src/commands/opc_workflows/mod.rs": 6,
         "src-tauri/src/commands/opc_workflows/seed_capability_pack_accounting.rs": 1,
         "src-tauri/src/commands/opc_workflows/seed_capability_pack_ai_research.rs": 1,

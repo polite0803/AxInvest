@@ -8397,4 +8397,40 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 
 **改名刀落地**（本批）：`PluginMarketplace.tsx`→`PluginGallery.tsx`、`WorkflowMarketplace.tsx`→`WorkflowGallery.tsx`、`usePluginMarketplace.ts`→`usePluginGallery.ts`（hook 被改名后的组件 import，目标路径含 `Market` 显形为新增 foreign —— 改名刀的连带边，同批消）+ 组件/hook 符号名 + 消费方改指（SettingsPage lazy 变量 `LazyPluginGallery`、WorkflowSettings import/渲染、测试文件 import/mock/describe）+ `components/settings/index.ts` 的 #193 退役注释改指（指引防腐烂，历史叙述保留原名 + 括注改名事实）+ `scripts/.i18n-allowlist.json` 的 `src/pages/WorkflowMarketplace.tsx` 豁免条目改指 `WorkflowGallery.tsx`（i18n key `*marketplace.*` 不参与 feRe 判定不动，#263 先例）。`MarketplaceStats`（`@/lib/reviewApi` 类型）与 hook 文件外的 marketplace 字面量不参与路径判定，不动。
 
-**读数与验证**：`--fe-json` 实测 stock **12/11 → 10/9**（−2 foreign：SettingsPage + WorkflowSettings；改名引入的 `PluginGallery.tsx:4`→hook 边由 hook 随刀改名消化，opc 0/0 不动）；`npx dprint check` 8 文件 EXIT=0（盘符路径跑，UNC 下 cmd 回退假绿已避开）；组件中立性基线外 0 / i18n 豁免预算 EXIT=0 / jsx-text-i18n 基线外 0。**未做清单**：vitest 定点（`PluginGallery.eventStats.test.tsx`）首轮 60.22s worker 启动超时（B1 cargo lane 编译期 #141 环境形态，全量落盘复跑中）；typecheck 全量（改名类改动兜底，随联合窗口跑）。
+**读数与验证**：`--fe-json` 实测 stock **12/11 → 10/9**（−2 foreign：SettingsPage + WorkflowSettings；改名引入的 `PluginGallery.tsx:4`→hook 边由 hook 随刀改名消化，opc 0/0 不动）；`npx dprint check` 8 文件 EXIT=0（盘符路径跑，UNC 下 cmd 回退假绿已避开）；组件中立性基线外 0 / i18n 豁免预算 EXIT=0 / jsx-text-i18n 基线外 0；vitest 定点全量落盘复跑 **3 passed / EXIT=0（141.40s）**——首轮 60.22s worker 启动超时坐实为 #141 环境形态（B1 cargo 编译期必现），非代码问题。**未做清单**：typecheck 全量（改名类改动兜底，随联合窗口跑）。
+
+## §160 #35 批 3 前置底册：T2 剩余 258 条分档与候选批次设计（2026-11-12 只读 lane 交回）
+
+> **纠正：#253「T2 主体 300 条分批设计」没有落 PLAN 底册**（lane 实测 `grep "#253\|T2 主体\|300 条分批"` 在 docs/ 与 .tmp/ 零命中）——#253 只做过一次性盘点，批次设计散见于已执行各批章节。本节为首个前瞻底册。lane 测于 HEAD `f71923da0`；其引用的 PLAN 行号（§140-§145）在本节追加前已实测，末尾追加不漂移前部行号。
+
+### 已迁底账（HEAD `f71923da0` 时点）
+
+- 插件命令面 **41 条**（`stockManifest` :401 起；`worker://stock_` 37 + 无前缀 4：parse_analysis_intent :468 / compute_evidence_weights :480 / list_recent_workflow_runs :524 / list_stock_analysis_records :539）；写命令 `workspace-write` **10 条**（mainline_batch_upsert :588 + 三族 cron create/toggle/delete 9 条 :685-:834）。
+- 双声明残存 **25 条**；宿主已删 16 条（4 条早期接缝命令 + cron 10 条 + `stock_get_stock_factor`/`stock_get_industry_constituents` 等）。⚠ 批 2a 的「11 条双声明」**已部分收口**：宿主版已删 6（research_reports / concept_blocks / announcements / peers / option_pcr / financials——§143.2 的「保留」表述已过期），残存 5。
+- 宿主 cmdRe 现值 **283 条 / 20 模块**（audit 与 lane 按 `scripts/lib/command-domains.mjs` parseRegistry 复算吻合）。大头：stock_analysis 164 / stock_workflow 24 / paper 20 / paper_portfolio 9。
+
+### 剩余净集合 258 条三档（剔除双声明 25）
+
+| 档 | 条数 | 要点 |
+|---|---|---|
+| 有前端调用 | 181 | stock_analysis 124、paper 19、stock_workflow 14、paper_portfolio 9 |
+| 零调用·写形 | 24 | trade_intent 5、stock_analysis 10、stock_workflow 3、analyst_evolution/feedback 各 1 等 |
+| 零调用·读形 | 53 | stock_analysis 26、market_mainline 8、stock_workflow 6、analyst_feedback 4、trade_intent 3 等 |
+
+### 候选批次（推荐次序 A → B → C1；C2/C3 排后）
+
+**候选 A：行情资讯直映批 10 条**（收益/风险比最高）——`search_stock` / `search_news` / `search_concept_boards` / `get_social_sentiment` / `get_limit_up_pool` / `get_international_stock_quote` / `get_international_stock_kline` / `get_forex_kline` / `get_benchmark_kline` / `get_consensus_eps`（全 stock_analysis 模块）。关键实证：宿主 `worker.rs` 的 market.quote 分派**已实现全部 10 个 op**（:1003/:1287/:1312/:1333/:1469/:1493/:1515/:1602/:1675/:1755）⇒ **零宿主接缝改动**，纯插件路由表 17→27 行 + 清单声明；`get_limit_up_pool` 顺带执行 §145 未做③（可选键档）。验收：路由表用例 17→27（dedup 断言自动跟随）、`worker://stock_` 37→47、`build-plugin-bundle.mjs --check` EXIT=0、register_commands.rs 零变化（283/20 不动）、vitest 逐文件跑（避开 #141 worker 超时假绿形态）。
+
+**候选 B：trade_intent 整模块退役 8 条**（−8 ⇒ 275/19，照 #264 批 4/6 整文件退出形态）——前端全零；全仓引用仅 `init/services.rs:4185-4188`（调度器直调自由函数 `expire_intents_for_scheduler`，非命令）与 `init/stock_automation_cron_seed.rs:399/:668`（常量 `DEFAULT_INTENT_MAX_AGE_HOURS`）；5 条写命令全 `safety = Safe`（trade_intent.rs:58/:69/:80/:96/:121）。**自由函数与常量保留**（照 §156「必须保留」红线）。验收：register_commands.rs −8、`commandTotal`/`stockBoundaryCommands` 五锚回写、`grep -w "trade_intent::"` 全仓仅剩 init 两处 + mod.rs 声明删除。
+
+**候选 C1：cron 残尾 2 条零风险**——`pool_scan::delete_pool_scan_cron` + `recommendation_cron::delete_trend_screening_cron` 宿主直接退役（插件等价命令已在清单，照 §142 形态）。
+
+**C2（排后）**：stock_workflow 零调用 6 条直映既有 stock.monitor / quote.watcher op（aggregator 3 条 → `aggregator_config`/`set_aggregator_config`/`aggregator_buffer`，op 已在 worker.rs 分派 + trait stock_monitor.rs:538/:549/:560；watch 族 → quote.watcher）。**C3（最后）**：market_mainline 8 条（4 写 Caution market_mainline.rs:57-112 + 4 读）——`StockAnalysisProvider` 现只有 `batch_upsert_mainlines` 一条 op，CRUD 需扩 op 或按 #264 刀 B2 形态做 DTO 上收，工作量最大。
+
+### 未取证（入批 A / B 前必须补）
+
+1. `batch_get_quotes/klines/financials` ↔ `market_snapshot_batch` 出参形状等价性（BatchResult 信封 vs op 侧）——若入批 A 需先做 §145.2 式信封裁定。
+2. trade_intent 8 条在**智能体命令面**（LLM 工具索引）的消费未查——退役前补 `stock_analysis_bridge` 类工具面 grep（#273 裁定：零前端调用 = 迁 T2 不退役；若工具面有消费同理，改为迁移而非退役）。
+3. `market_mainline_list_recent` 前端 1 处调用未定位到文件/行号（命中统计有，定位未做）。
+4. `get_stock_consensus_eps` ↔ `get_consensus_eps` op 是否同一 trait 实现体（vs 直连 vendor）未核——照候选 A 同构应核一条。
+5. check-capability-register 现报 6 条硬失败均归 OPC 刀 B 写面（未提交改动），股票五锚未被牵连。

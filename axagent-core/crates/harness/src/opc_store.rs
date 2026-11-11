@@ -830,6 +830,78 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::list_domains 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 执行需求交付（`execute_demand_workflow` op）—— 写 op，`write` 权限闸。
+    ///
+    /// 为线索创建交付记录（`opc_delivery` 表 pending 行）并后台触发工作流引擎：
+    /// 成功 → completed（进度 1.0），失败 → failed（错误写 `errors_json`）；后台回写
+    /// 失败不影响本次调用的出参（出参是刚落库的行）。模板缺省链
+    /// `入参 → lead.linkedWorkflowId → "default_demand_delivery"` 与迁移前一致。
+    async fn execute_demand_workflow(
+        &self,
+        _lead_id: String,
+        _workflow_template_id: Option<String>,
+    ) -> Result<DeliveryRecordView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::execute_demand_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出交付记录（`list_deliveries` op）—— 读 op，不设权限闸。
+    ///
+    /// `status` / `lead_id` 可选过滤，按创建时间降序（迁移前同序）。
+    async fn list_deliveries(
+        &self,
+        _status: Option<String>,
+        _lead_id: Option<String>,
+    ) -> Result<Vec<DeliveryRecordView>> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_deliveries 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取单个交付详情（`get_delivery` op）—— 读 op。
+    ///
+    /// 缺行报 NotFound（迁移前 get 命令同语义；与 `get_domain_workflow` 的「缺行回
+    /// `Ok(None)`」不同档 —— 交付 id 由调用方持有，读到不存在的 id 是异常输入）。
+    async fn get_delivery(&self, _delivery_id: String) -> Result<DeliveryRecordView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_delivery 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新交付执行面字段（`update_delivery` op）—— 写 op。
+    ///
+    /// `status` 必写；其余可选缺席 = 不动。`completedAt` 由实现层按
+    /// `completed|failed` 落 now（迁移前同判据）。
+    #[allow(clippy::too_many_arguments)]
+    async fn update_delivery(
+        &self,
+        _delivery_id: String,
+        _status: String,
+        _progress: Option<f64>,
+        _result_summary: Option<String>,
+        _deliverables: Option<serde_json::Value>,
+        _errors: Option<serde_json::Value>,
+    ) -> Result<DeliveryRecordView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_delivery 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 重置为待执行（`retry_delivery` op）—— 写 op（pending / 0 进度 / 清结果与错误）。
+    async fn retry_delivery(&self, _delivery_id: String) -> Result<DeliveryRecordView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::retry_delivery 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取消交付（`cancel_delivery` op）—— 写 op（cancelled + 完成时间）。
+    async fn cancel_delivery(&self, _delivery_id: String) -> Result<DeliveryRecordView> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::cancel_delivery 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────
@@ -862,6 +934,41 @@ pub struct DomainWorkflowSummaryView {
 pub struct DomainEntryView {
     pub id: String,
     pub name: String,
+}
+
+// ── 交付记录出参（#264 批 5；同样放在 trait 之后）──────────────────────────
+
+/// 交付记录（交付面六 op 的出参）。
+///
+/// 与迁移前命令直出的 `opc_delivery::Model` 相比收敛两点：键名按全站 DTO 规范
+/// camelCase；三个 `*_json` 字符串列解析成结构化字段（解析失败降级空容器 —— 迁移前
+/// 前端 `Delivery` 接口声明的 `deliverables` / `errors` / `metadata` 因实体列名带
+/// `_json` 后缀而在真实数据流下恒 undefined，本投影使消费点第一次真正可用）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryRecordView {
+    pub id: String,
+    /// 所属线索（B 链路遗留可空字段；A 链路创建的交付恒有值）。
+    pub lead_id: Option<String>,
+    pub project_id: Option<String>,
+    pub customer_id: Option<String>,
+    pub title: String,
+    pub workflow_template_id: String,
+    pub description: String,
+    /// pending / running / completed / failed / cancelled
+    pub status: String,
+    pub progress: f64,
+    pub started_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub result_summary: Option<String>,
+    /// `deliverables_json` 解析结果；非数组 / 解析失败降级空数组。
+    pub deliverables: Vec<serde_json::Value>,
+    /// `errors_json` 解析结果；非数组 / 解析失败降级空数组。
+    pub errors: Vec<serde_json::Value>,
+    /// `metadata_json` 解析结果；非对象 / 解析失败降级空对象。
+    pub metadata: serde_json::Map<String, serde_json::Value>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 // ── 写 op 的出参（刻意放在 trait **之后**）──────────────────────────────────

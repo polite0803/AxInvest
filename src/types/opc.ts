@@ -243,6 +243,30 @@ export interface DeliverySummary {
   conversionRate: number;
 }
 
+/**
+ * 交付记录（#264 批 5：与后端 `DeliveryRecordView` camelCase 出参逐字段一致；
+ * 三个 `*_json` 列在宿主投影层已解析成结构化容器）。
+ */
+export interface Delivery {
+  id: string;
+  leadId: string | null;
+  projectId: string | null;
+  customerId: string | null;
+  title: string;
+  workflowTemplateId: string;
+  description: string;
+  status: string;
+  progress: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  resultSummary: string | null;
+  deliverables: Array<Record<string, unknown>>;
+  errors: Array<Record<string, unknown>>;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** 扫描策略：并发 / 限流 / 重试 / 去重窗口 */
 export interface ScanPolicy {
   /** 并发扫描的平台数上限（1-32） */

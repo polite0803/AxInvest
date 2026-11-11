@@ -6,6 +6,7 @@
 //! 交付汇总（转化率）。开票前置校验（线索必须 won / 一线索单张有效发票）
 //! 在命令层，本模块只管存储与查询。
 
+use sea_orm::sea_query::Expr;
 use sea_orm::*;
 
 use axagent_entities::opc_invoices;
@@ -235,6 +236,228 @@ pub async fn delivery_summary(
             f64::from(won_leads) / f64::from(active_leads)
         },
     })
+}
+
+// ── 交付记录 CRUD（#264 批 5：迁移前宿主命令的存储面下沉）─────────────────
+//
+// 迁移前六条命令（execute / list / get / update / retry / cancel）在命令层直写
+// `ActiveModel`；迁 T2 后宿主 provider 层保持「无 `sea_orm` 导入」纪律 ⇒ 全部触点
+// 收进本模块。`deliverables_json` / `errors_json` / `metadata_json` 是字符串列，
+// 出参统一解析成结构化字段（解析失败降级空容器）。
+
+use axagent_entities::opc_delivery;
+
+use axagent_harness::opc_store::DeliveryRecordView;
+
+/// `opc_delivery::Model` → 线格式视图：三个 `*_json` 字符串列在此解析成结构化字段。
+///
+/// 解析失败（非 JSON / 非期望形状）降级为空数组 / 空对象，不报错 —— 历史行可能不是
+/// 合法 JSON（迁移前命令从不回读校验），投影层不做数据清洗。
+pub fn delivery_from_entity(m: opc_delivery::Model) -> DeliveryRecordView {
+    let deliverables =
+        serde_json::from_str::<Vec<serde_json::Value>>(&m.deliverables_json).unwrap_or_default();
+    let errors = serde_json::from_str::<Vec<serde_json::Value>>(&m.errors_json).unwrap_or_default();
+    let metadata =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&m.metadata_json)
+            .unwrap_or_default();
+    DeliveryRecordView {
+        id: m.id,
+        lead_id: m.lead_id,
+        project_id: m.project_id,
+        customer_id: m.customer_id,
+        title: m.title,
+        workflow_template_id: m.workflow_template_id,
+        description: m.description,
+        status: m.status,
+        progress: m.progress,
+        started_at: m.started_at,
+        completed_at: m.completed_at,
+        result_summary: m.result_summary,
+        deliverables,
+        errors,
+        metadata,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+    }
+}
+
+fn delivery_not_found(id: &str) -> AxAgentError {
+    AxAgentError::NotFound(format!("交付记录不存在: {id}"))
+}
+
+async fn get_delivery_model(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+) -> Result<opc_delivery::Model> {
+    opc_delivery::Entity::find_by_id(delivery_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| delivery_not_found(delivery_id))
+}
+
+/// 列出交付记录（`status` / `lead_id` 可选过滤；按创建时间降序 —— 迁移前同序）。
+pub async fn list_deliveries(
+    db: &DatabaseConnection,
+    status: Option<&str>,
+    lead_id: Option<&str>,
+) -> Result<Vec<DeliveryRecordView>> {
+    let mut qs = opc_delivery::Entity::find();
+    if let Some(s) = status {
+        qs = qs.filter(opc_delivery::Column::Status.eq(s));
+    }
+    if let Some(l) = lead_id {
+        qs = qs.filter(opc_delivery::Column::LeadId.eq(l));
+    }
+    let rows = qs.order_by_desc(opc_delivery::Column::CreatedAt).all(db).await?;
+    Ok(rows.into_iter().map(delivery_from_entity).collect())
+}
+
+/// 读取单个交付记录（缺行报 NotFound —— 迁移前 get 命令同语义，与领域工作流读口的
+/// 「缺行回 None」不同档：交付记录 id 由调用方持有，读到不存在的 id 是异常输入）。
+pub async fn get_delivery(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+) -> Result<DeliveryRecordView> {
+    Ok(delivery_from_entity(get_delivery_model(db, delivery_id).await?))
+}
+
+/// 创建交付记录（execute 落行；标题拼接与模板缺省语义在调用方，这里只管写入）。
+pub async fn create_delivery(
+    db: &DatabaseConnection,
+    lead_id: &str,
+    title: &str,
+    workflow_template_id: &str,
+    description: String,
+    now: i64,
+) -> Result<DeliveryRecordView> {
+    let active = opc_delivery::ActiveModel {
+        id: Set(format!("dv-{}", uuid::Uuid::new_v4().simple())),
+        lead_id: Set(Some(lead_id.to_string())),
+        // A 表无 project/customer 归属（B 链路遗留字段，随表废弃）
+        project_id: Set(None),
+        customer_id: Set(None),
+        title: Set(title.to_string()),
+        workflow_template_id: Set(workflow_template_id.to_string()),
+        description: Set(description),
+        status: Set("pending".to_string()),
+        progress: Set(0.0),
+        started_at: Set(Some(now)),
+        completed_at: Set(None),
+        result_summary: Set(None),
+        deliverables_json: Set("[]".to_string()),
+        errors_json: Set("[]".to_string()),
+        metadata_json: Set("{}".to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    let saved = active.insert(db).await?;
+    Ok(delivery_from_entity(saved))
+}
+
+/// 更新交付执行面字段（`status` 必写；其余可选缺席 = 不动 —— 迁移前同语义）。
+///
+/// `completed_at`：迁移前由命令层按 `completed|failed` 写 now，此处保持同判据。
+pub async fn update_delivery(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+    status: &str,
+    progress: Option<f64>,
+    result_summary: Option<String>,
+    deliverables: Option<serde_json::Value>,
+    errors: Option<serde_json::Value>,
+    now: i64,
+) -> Result<DeliveryRecordView> {
+    let existing = get_delivery_model(db, delivery_id).await?;
+    let mut am: opc_delivery::ActiveModel = existing.into();
+    am.status = Set(status.to_string());
+    if let Some(p) = progress {
+        am.progress = Set(p);
+    }
+    if let Some(summary) = result_summary {
+        am.result_summary = Set(Some(summary));
+    }
+    if let Some(d) = deliverables {
+        am.deliverables_json = Set(serde_json::to_string(&d).unwrap_or_default());
+    }
+    if let Some(e) = errors {
+        am.errors_json = Set(serde_json::to_string(&e).unwrap_or_default());
+    }
+    if status == "completed" || status == "failed" {
+        am.completed_at = Set(Some(now));
+    }
+    am.updated_at = Set(now);
+    let saved = am.update(db).await?;
+    Ok(delivery_from_entity(saved))
+}
+
+/// 重置为待执行（retry 语义：pending / 0 进度 / 清结果与错误）。
+pub async fn reset_delivery(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+    now: i64,
+) -> Result<DeliveryRecordView> {
+    let existing = get_delivery_model(db, delivery_id).await?;
+    let mut am: opc_delivery::ActiveModel = existing.into();
+    am.status = Set("pending".to_string());
+    am.progress = Set(0.0);
+    am.result_summary = Set(None);
+    am.completed_at = Set(None);
+    am.errors_json = Set("[]".to_string());
+    am.updated_at = Set(now);
+    let saved = am.update(db).await?;
+    Ok(delivery_from_entity(saved))
+}
+
+/// 取消交付（cancelled + completed_at）。
+pub async fn cancel_delivery(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+    now: i64,
+) -> Result<DeliveryRecordView> {
+    let existing = get_delivery_model(db, delivery_id).await?;
+    let mut am: opc_delivery::ActiveModel = existing.into();
+    am.status = Set("cancelled".to_string());
+    am.completed_at = Set(Some(now));
+    am.updated_at = Set(now);
+    let saved = am.update(db).await?;
+    Ok(delivery_from_entity(saved))
+}
+
+/// 后台任务收尾：工作流成功 → completed（进度 1.0，写完成时间与摘要）。
+pub async fn mark_delivery_completed(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+    completed_at: i64,
+    summary: &str,
+) -> Result<()> {
+    opc_delivery::Entity::update_many()
+        .col_expr(opc_delivery::Column::Status, Expr::value("completed"))
+        .col_expr(opc_delivery::Column::Progress, Expr::value(1.0))
+        .col_expr(opc_delivery::Column::CompletedAt, Expr::value(completed_at))
+        .col_expr(opc_delivery::Column::UpdatedAt, Expr::value(completed_at))
+        .col_expr(opc_delivery::Column::ResultSummary, Expr::value(summary))
+        .filter(opc_delivery::Column::Id.eq(delivery_id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// 后台任务收尾：工作流失败 → failed（错误写 `errors_json`，完成时间同步落列）。
+pub async fn mark_delivery_failed(
+    db: &DatabaseConnection,
+    delivery_id: &str,
+    completed_at: i64,
+    errors_json: &str,
+) -> Result<()> {
+    opc_delivery::Entity::update_many()
+        .col_expr(opc_delivery::Column::Status, Expr::value("failed"))
+        .col_expr(opc_delivery::Column::CompletedAt, Expr::value(completed_at))
+        .col_expr(opc_delivery::Column::UpdatedAt, Expr::value(completed_at))
+        .col_expr(opc_delivery::Column::ErrorsJson, Expr::value(errors_json))
+        .filter(opc_delivery::Column::Id.eq(delivery_id))
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]

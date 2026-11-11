@@ -540,7 +540,13 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             // （转模板还会回灌能力索引），无读 op 随迁。
             | "update_lead_status"
             | "convert_lead_to_workflow"
-            | "run_lead_workflow",
+            | "run_lead_workflow"
+            // #264 批 5：交付面四条写 op（落交付行 + 后台启工作流 / 状态更新 / 重试 /
+            // 取消）—— 都改库；两条读 op（`list_deliveries` / `get_delivery`）仍 `None`。
+            | "execute_demand_workflow"
+            | "update_delivery"
+            | "retry_delivery"
+            | "cancel_delivery",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -3970,6 +3976,146 @@ impl HostPeer {
                 };
                 match result {
                     Ok(rows) => to_value("Vec<DomainEntryView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 5：交付面六 op（execute 写 + list/get 读 + update/retry/cancel 写）──
+            "opc.store" if op == "execute_demand_workflow" => {
+                let lead_id: String = match deserialize_arg(&args, "lead_id", seam) {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let workflow_template_id: Option<String> =
+                    match deserialize_optional_arg(&args, "workflow_template_id", seam) {
+                        Ok(workflow_template_id) => workflow_template_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.execute_demand_workflow(lead_id, workflow_template_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("DeliveryRecordView", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_deliveries" => {
+                let status: Option<String> = match deserialize_optional_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let lead_id: Option<String> = match deserialize_optional_arg(&args, "lead_id", seam)
+                {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_deliveries(status, lead_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<DeliveryRecordView>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_delivery" => {
+                let delivery_id: String = match deserialize_arg(&args, "delivery_id", seam) {
+                    Ok(delivery_id) => delivery_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_delivery(delivery_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("DeliveryRecordView", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "update_delivery" => {
+                let delivery_id: String = match deserialize_arg(&args, "delivery_id", seam) {
+                    Ok(delivery_id) => delivery_id,
+                    Err(response) => return response,
+                };
+                let status: String = match deserialize_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let progress: Option<f64> = match deserialize_optional_arg(&args, "progress", seam)
+                {
+                    Ok(progress) => progress,
+                    Err(response) => return response,
+                };
+                let result_summary: Option<String> =
+                    match deserialize_optional_arg(&args, "result_summary", seam) {
+                        Ok(result_summary) => result_summary,
+                        Err(response) => return response,
+                    };
+                let deliverables: Option<serde_json::Value> =
+                    match deserialize_optional_arg(&args, "deliverables", seam) {
+                        Ok(deliverables) => deliverables,
+                        Err(response) => return response,
+                    };
+                let errors: Option<serde_json::Value> =
+                    match deserialize_optional_arg(&args, "errors", seam) {
+                        Ok(errors) => errors,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_delivery(
+                    delivery_id,
+                    status,
+                    progress,
+                    result_summary,
+                    deliverables,
+                    errors,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("DeliveryRecordView", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "retry_delivery" => {
+                let delivery_id: String = match deserialize_arg(&args, "delivery_id", seam) {
+                    Ok(delivery_id) => delivery_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.retry_delivery(delivery_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("DeliveryRecordView", &row),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "cancel_delivery" => {
+                let delivery_id: String = match deserialize_arg(&args, "delivery_id", seam) {
+                    Ok(delivery_id) => delivery_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.cancel_delivery(delivery_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(row) => to_value("DeliveryRecordView", &row),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -12776,6 +12922,10 @@ mod tests {
             "update_lead_status",
             "convert_lead_to_workflow",
             "run_lead_workflow",
+            "execute_demand_workflow",
+            "update_delivery",
+            "retry_delivery",
+            "cancel_delivery",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -12797,6 +12947,8 @@ mod tests {
             "list_domain_workflows",
             "get_domain_workflow",
             "list_domains",
+            "list_deliveries",
+            "get_delivery",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

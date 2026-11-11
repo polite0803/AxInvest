@@ -136,6 +136,15 @@ const UPDATE_LEAD_STATUS_COMMAND = "opc_update_lead_status";
 const CONVERT_LEAD_TO_WORKFLOW_COMMAND = "opc_convert_lead_to_workflow";
 const RUN_LEAD_WORKFLOW_COMMAND = "opc_run_lead_workflow";
 
+// 交付记录命令（#264 批 5）：宿主 `demand_discovery.rs` 交付段已随本批删除，
+// 插件命令是唯一通道（页面下方交付环四处调用 + 详情抽屉消费点同批切 camelCase）。
+// opc_get_delivery / opc_update_delivery 已随命令面迁入插件，本页暂无调用点，
+// 待有调用面时再取常量（dev mock 已覆盖六命令）。
+const EXECUTE_DEMAND_WORKFLOW_COMMAND = "opc_execute_demand_workflow";
+const LIST_DELIVERIES_COMMAND = "opc_list_deliveries";
+const RETRY_DELIVERY_COMMAND = "opc_retry_delivery";
+const CANCEL_DELIVERY_COMMAND = "opc_cancel_delivery";
+
 /** 商业价值分 → 文字颜色（≥80 极高 / ≥60 高 / ≥40 中 / 其余低） */
 function scoreColor(
   score: number,
@@ -535,7 +544,7 @@ export function DemandDiscoveryPage() {
   const executeDelivery = useCallback(
     async (row: DemandLead) => {
       try {
-        await invoke<Delivery>("opc_execute_demand_workflow", { lead_id: row.id });
+        await invokePluginCommand<Delivery>(EXECUTE_DEMAND_WORKFLOW_COMMAND, { leadId: row.id });
         message.success(t("opc.demand.deliveryStarted"));
       } catch (e) {
         showBackendError(message, e);
@@ -2316,7 +2325,7 @@ function DeliveriesPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setDeliveries(await invoke<Delivery[]>("opc_list_deliveries", {}));
+      setDeliveries(await invokePluginCommand<Delivery[]>(LIST_DELIVERIES_COMMAND, {}));
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
       setDeliveries([]);
@@ -2332,7 +2341,7 @@ function DeliveriesPanel() {
   const handleRetry = useCallback(
     async (id: string) => {
       try {
-        await invoke("opc_retry_delivery", { id });
+        await invokePluginCommand(RETRY_DELIVERY_COMMAND, { deliveryId: id });
         message.success(t("opc.demand.deliveryRetried"));
         void load();
       } catch (e) {
@@ -2345,7 +2354,7 @@ function DeliveriesPanel() {
   const handleCancel = useCallback(
     async (id: string) => {
       try {
-        await invoke("opc_cancel_delivery", { id });
+        await invokePluginCommand(CANCEL_DELIVERY_COMMAND, { deliveryId: id });
         message.success(t("opc.demand.deliveryCancelled"));
         void load();
       } catch (e) {
@@ -2377,21 +2386,21 @@ function DeliveriesPanel() {
     },
     {
       title: t("opc.demand.colTemplate"),
-      dataIndex: "workflow_template_id",
+      dataIndex: "workflowTemplateId",
       key: "template",
       width: 180,
       ellipsis: true,
     },
     {
       title: t("opc.demand.colStartedAt"),
-      dataIndex: "started_at",
-      key: "started_at",
+      dataIndex: "startedAt",
+      key: "startedAt",
       width: 160,
       render: (v: number | null) => (v ? new Date(v * 1000).toLocaleString() : "-"),
     },
     {
       title: t("opc.demand.colResult"),
-      dataIndex: "result_summary",
+      dataIndex: "resultSummary",
       key: "result",
       ellipsis: true,
     },
@@ -2434,7 +2443,7 @@ function DeliveriesPanel() {
     ? [
       {
         title: t("opc.demand.deliverySteps.initiated"),
-        time: delivery.started_at ? new Date(delivery.started_at * 1000).toLocaleString() : "-",
+        time: delivery.startedAt ? new Date(delivery.startedAt * 1000).toLocaleString() : "-",
         color: "green",
       },
       {
@@ -2444,8 +2453,8 @@ function DeliveriesPanel() {
       },
       {
         title: t("opc.demand.deliverySteps.completed"),
-        time: delivery.completed_at
-          ? new Date(delivery.completed_at * 1000).toLocaleString()
+        time: delivery.completedAt
+          ? new Date(delivery.completedAt * 1000).toLocaleString()
           : "-",
         color: delivery.status === "completed" || delivery.status === "delivered"
           ? "green"
@@ -2516,19 +2525,19 @@ function DeliveriesPanel() {
                   <Progress percent={Math.round(delivery.progress * 100)} />
                 </Descriptions.Item>
                 <Descriptions.Item label={t("opc.demand.colTemplate")}>
-                  {delivery.workflow_template_id || "-"}
+                  {delivery.workflowTemplateId || "-"}
                 </Descriptions.Item>
                 <Descriptions.Item label={t("opc.demand.leadId")}>
-                  {delivery.lead_id}
+                  {delivery.leadId}
                 </Descriptions.Item>
                 <Descriptions.Item label={t("opc.demand.colStartedAt")}>
-                  {delivery.started_at
-                    ? new Date(delivery.started_at * 1000).toLocaleString()
+                  {delivery.startedAt
+                    ? new Date(delivery.startedAt * 1000).toLocaleString()
                     : "-"}
                 </Descriptions.Item>
                 <Descriptions.Item label={t("opc.demand.colCompletedAt")}>
-                  {delivery.completed_at
-                    ? new Date(delivery.completed_at * 1000).toLocaleString()
+                  {delivery.completedAt
+                    ? new Date(delivery.completedAt * 1000).toLocaleString()
                     : "-"}
                 </Descriptions.Item>
               </Descriptions>
@@ -2548,12 +2557,12 @@ function DeliveriesPanel() {
               />
             </Card>
 
-            {delivery.result_summary && (
+            {delivery.resultSummary && (
               <Card size="small" title={t("opc.demand.deliveryResult")}>
                 <Typography.Paragraph
                   ellipsis={{ rows: 3, expandable: true, symbol: t("opc.demand.expand") }}
                 >
-                  {delivery.result_summary}
+                  {delivery.resultSummary}
                 </Typography.Paragraph>
               </Card>
             )}

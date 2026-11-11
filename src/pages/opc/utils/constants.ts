@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { Delivery } from "@/types/opc";
+
 // ── 类型定义 ─────────────────────────────────────────────────
 
 export interface InvoiceLineItem {
@@ -209,22 +211,8 @@ export interface CapabilityInventory {
   total_count: number;
 }
 
-export interface Delivery {
-  id: string;
-  lead_id: string;
-  title: string;
-  workflow_template_id: string;
-  status: string;
-  progress: number;
-  started_at: number | null;
-  completed_at: number | null;
-  result_summary: string | null;
-  deliverables: Array<Record<string, unknown>>;
-  errors: Array<Record<string, unknown>>;
-  metadata: Record<string, unknown>;
-  created_at: number;
-  updated_at: number;
-}
+// Delivery 类型已上收 `@/types/opc`（#264 批 5：页面 + dev mock 双消费方同源）。
+export type { Delivery };
 
 export const DELIVERY_STATUS_COLOR_MAP: Record<string, string> = {
   pending: "default",

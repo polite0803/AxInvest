@@ -1819,6 +1819,80 @@ function opcManifest({ version, binaryName, sha256 }) {
         command: "worker://opc_list_domains",
         inputSchema: { type: "object", properties: {} },
       },
+      // ── #264 批 5：交付面六命令（执行 / 列表 / 详情 / 更新 / 重试 / 取消）──
+      // 属性名 camelCase（命令面）；deliverables / errors 是任意 JSON 值。
+      {
+        name: "opc_execute_demand_workflow",
+        description: "为需求线索创建交付记录并后台触发工作流（返回交付记录）",
+        command: "worker://opc_execute_demand_workflow",
+        inputSchema: {
+          type: "object",
+          properties: {
+            leadId: { type: "string", description: "线索 ID" },
+            workflowTemplateId: { type: "string", description: "工作流模板 ID（缺省走线索已转化模板或默认交付模板）" },
+          },
+          required: ["leadId"],
+        },
+      },
+      {
+        name: "opc_list_deliveries",
+        description: "列出交付记录（可按 status / leadId 过滤，按创建时间降序）",
+        command: "worker://opc_list_deliveries",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "状态过滤（pending/running/completed/failed/cancelled）" },
+            leadId: { type: "string", description: "线索 ID 过滤" },
+          },
+        },
+      },
+      {
+        name: "opc_get_delivery",
+        description: "获取单个交付详情（缺行报 NotFound）",
+        command: "worker://opc_get_delivery",
+        inputSchema: {
+          type: "object",
+          properties: { deliveryId: { type: "string", description: "交付记录 ID" } },
+          required: ["deliveryId"],
+        },
+      },
+      {
+        name: "opc_update_delivery",
+        description: "更新交付执行面字段（status 必写；其余可选缺席 = 不动）",
+        command: "worker://opc_update_delivery",
+        inputSchema: {
+          type: "object",
+          properties: {
+            deliveryId: { type: "string", description: "交付记录 ID" },
+            status: { type: "string", description: "目标状态（pending/running/completed/failed/cancelled）" },
+            progress: { type: "number", description: "进度 0-1" },
+            resultSummary: { type: "string", description: "结果摘要" },
+            deliverables: { description: "交付物（任意 JSON 值）" },
+            errors: { description: "错误列表（任意 JSON 值）" },
+          },
+          required: ["deliveryId", "status"],
+        },
+      },
+      {
+        name: "opc_retry_delivery",
+        description: "重置交付为待执行（清进度 / 结果 / 错误）",
+        command: "worker://opc_retry_delivery",
+        inputSchema: {
+          type: "object",
+          properties: { deliveryId: { type: "string", description: "交付记录 ID" } },
+          required: ["deliveryId"],
+        },
+      },
+      {
+        name: "opc_cancel_delivery",
+        description: "取消交付（状态置 cancelled 并落完成时间）",
+        command: "worker://opc_cancel_delivery",
+        inputSchema: {
+          type: "object",
+          properties: { deliveryId: { type: "string", description: "交付记录 ID" } },
+          required: ["deliveryId"],
+        },
+      },
     ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };

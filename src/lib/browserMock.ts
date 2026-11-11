@@ -56,7 +56,7 @@ import type {
   IndexResult,
   RankedCapability,
 } from "@/types";
-import type { DeliveryInvoice, DemandLead, DemandSubscription } from "@/types/opc";
+import type { Delivery, DeliveryInvoice, DemandLead, DemandSubscription } from "@/types/opc";
 import { emitBrowserEvent } from "./browserEvents";
 
 interface Fleet {
@@ -368,6 +368,48 @@ let MOCK_INVOICES: DeliveryInvoice[] = [
     notes: null,
     createdAt: 1700000450,
     updatedAt: 1700000500,
+  },
+];
+
+/** 交付记录 mock（#264 批 5）：预置一已完成 + 一进行中，与发票/线索 id 互链 */
+let MOCK_DELIVERIES: Delivery[] = [
+  {
+    id: "dv-demo-001",
+    leadId: "lead-hn-001",
+    projectId: null,
+    customerId: null,
+    title: "交付: Show HN: 我需要一个能自动汇总 arXiv 论文的周报工具",
+    workflowTemplateId: "default_demand_delivery",
+    description: "每周要读 50+ 篇论文，人工筛选太慢。希望有工具按我的兴趣关键词自动聚类并生成摘要周报，愿意付费。",
+    status: "completed",
+    progress: 1,
+    startedAt: 1700000600,
+    completedAt: 1700000900,
+    resultSummary: "工作流已完成，节点数: 3",
+    deliverables: [{ kind: "report", path: "reports/arxiv-weekly.md" }],
+    errors: [],
+    metadata: {},
+    createdAt: 1700000600,
+    updatedAt: 1700000900,
+  },
+  {
+    id: "dv-demo-002",
+    leadId: "lead-zbj-002",
+    projectId: null,
+    customerId: null,
+    title: "交付: 跨境电商多店铺库存同步系统",
+    workflowTemplateId: "default_demand_delivery",
+    description: "多店铺库存需要实时同步，超卖和缺货频发，希望有自动对账与调拨建议。",
+    status: "pending",
+    progress: 0,
+    startedAt: 1700001100,
+    completedAt: null,
+    resultSummary: null,
+    deliverables: [],
+    errors: [],
+    metadata: {},
+    createdAt: 1700001100,
+    updatedAt: 1700001100,
   },
 ];
 
@@ -6856,6 +6898,122 @@ async function executeCommand<T>(
         revenues: [...byCurrency.entries()].map(([currency, v]) => ({ currency, ...v })),
         conversionRate: active === 0 ? 0 : won / active,
       } as unknown as T;
+    }
+
+    // ── 交付记录六命令（#264 批 5）──
+    // 语义镜像宿主：execute 建 pending 行（后台工作流在浏览器模式无真身，留在 pending）；
+    // update 在 completed/failed 落 completedAt；retry 复位 pending；cancel 标 cancelled。
+    // camel 读键经 readMockReqField 兼容（直调路径 snake 也命中）。
+    case "opc_execute_demand_workflow": {
+      const leadId = readMockReqField<string>(args, "leadId");
+      const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
+      if (!lead) {
+        throw new Error(`需求线索不存在: ${leadId ?? ""}`);
+      }
+      const templateId = readMockReqField<string>(args, "workflowTemplateId") ?? lead.linkedWorkflowId
+        ?? "default_demand_delivery";
+      const now = Math.floor(Date.now() / 1000);
+      const row: Delivery = {
+        id: `dv-${Math.random().toString(36).slice(2, 10)}`,
+        leadId: lead.id,
+        projectId: null,
+        customerId: null,
+        title: `交付: ${lead.title}`,
+        workflowTemplateId: templateId,
+        description: lead.description,
+        status: "pending",
+        progress: 0,
+        startedAt: now,
+        completedAt: null,
+        resultSummary: null,
+        deliverables: [],
+        errors: [],
+        metadata: {},
+        createdAt: now,
+        updatedAt: now,
+      };
+      MOCK_DELIVERIES.unshift(row);
+      return row as unknown as T;
+    }
+
+    case "opc_list_deliveries": {
+      const status = readMockReqField<string>(args, "status");
+      const leadId = readMockReqField<string>(args, "leadId");
+      const rows = MOCK_DELIVERIES.filter(
+        (d) => (!status || d.status === status) && (!leadId || d.leadId === leadId),
+      ).sort((a, b) => b.createdAt - a.createdAt);
+      return rows as unknown as T;
+    }
+
+    case "opc_get_delivery": {
+      const deliveryId = readMockReqField<string>(args, "deliveryId");
+      const row = MOCK_DELIVERIES.find((d) => d.id === deliveryId);
+      if (!row) {
+        throw new Error(`交付记录不存在: ${deliveryId ?? ""}`);
+      }
+      return row as unknown as T;
+    }
+
+    case "opc_update_delivery": {
+      const deliveryId = readMockReqField<string>(args, "deliveryId");
+      const row = MOCK_DELIVERIES.find((d) => d.id === deliveryId);
+      if (!row) {
+        throw new Error(`交付记录不存在: ${deliveryId ?? ""}`);
+      }
+      const status = readMockReqField<string>(args, "status");
+      const progress = readMockReqField<number>(args, "progress");
+      const resultSummary = readMockReqField<string>(args, "resultSummary");
+      const deliverables = readMockReqField<Array<Record<string, unknown>>>(args, "deliverables");
+      const errors = readMockReqField<Array<Record<string, unknown>>>(args, "errors");
+      if (status !== undefined) {
+        row.status = status;
+      }
+      if (progress !== undefined) {
+        row.progress = progress;
+      }
+      if (resultSummary !== undefined) {
+        row.resultSummary = resultSummary;
+      }
+      if (deliverables !== undefined) {
+        row.deliverables = deliverables;
+      }
+      if (errors !== undefined) {
+        row.errors = errors;
+      }
+      if (status === "completed" || status === "failed") {
+        row.completedAt = Math.floor(Date.now() / 1000);
+      }
+      row.updatedAt = Math.floor(Date.now() / 1000);
+      return row as unknown as T;
+    }
+
+    case "opc_retry_delivery": {
+      const deliveryId = readMockReqField<string>(args, "deliveryId");
+      const row = MOCK_DELIVERIES.find((d) => d.id === deliveryId);
+      if (!row) {
+        throw new Error(`交付记录不存在: ${deliveryId ?? ""}`);
+      }
+      const now = Math.floor(Date.now() / 1000);
+      row.status = "pending";
+      row.progress = 0;
+      row.resultSummary = null;
+      row.completedAt = null;
+      row.errors = [];
+      row.updatedAt = now;
+      return row as unknown as T;
+    }
+
+    case "opc_cancel_delivery": {
+      const deliveryId = readMockReqField<string>(args, "deliveryId");
+      const row = MOCK_DELIVERIES.find((d) => d.id === deliveryId);
+      if (!row) {
+        throw new Error(`交付记录不存在: ${deliveryId ?? ""}`);
+      }
+      const now = Math.floor(Date.now() / 1000);
+      row.status = "cancelled";
+      row.completedAt = now;
+      row.updatedAt = now;
+      return row as unknown as T;
     }
 
     // ── OPC 看板汇总（#36：宿主命令 `opc_get_dashboard_summary` 已迁入 OPC 插件）──

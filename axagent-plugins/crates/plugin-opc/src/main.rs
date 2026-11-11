@@ -154,6 +154,15 @@ const OPC_STORE_LIST_DOMAIN_WORKFLOWS: &str = "list_domain_workflows";
 const OPC_STORE_GET_DOMAIN_WORKFLOW: &str = "get_domain_workflow";
 const OPC_STORE_LIST_DOMAINS: &str = "list_domains";
 
+/// #264 批 5：交付面六 op —— execute / update / retry / cancel 四写（都要 `write`），
+/// list / get 两读（不登记权限闸）。
+const OPC_STORE_EXECUTE_DEMAND_WORKFLOW: &str = "execute_demand_workflow";
+const OPC_STORE_LIST_DELIVERIES: &str = "list_deliveries";
+const OPC_STORE_GET_DELIVERY: &str = "get_delivery";
+const OPC_STORE_UPDATE_DELIVERY: &str = "update_delivery";
+const OPC_STORE_RETRY_DELIVERY: &str = "retry_delivery";
+const OPC_STORE_CANCEL_DELIVERY: &str = "cancel_delivery";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -260,6 +269,16 @@ const COMMAND_RUN_LEAD_WORKFLOW: &str = "opc_run_lead_workflow";
 const COMMAND_LIST_DOMAIN_WORKFLOWS: &str = "opc_list_domain_workflows";
 const COMMAND_GET_DOMAIN_WORKFLOW: &str = "opc_get_domain_workflow";
 const COMMAND_LIST_DOMAINS: &str = "opc_list_domains";
+
+/// #264 批 5：交付面六命令（清单 `commands[].name` 必须逐字一致）。宿主同名 Tauri 命令
+/// 随本批从 `commands::demand_discovery` 删除（该文件余发现面五条）；前端四处裸 `invoke`
+/// 同批切 `invokePluginCommand`。
+const COMMAND_EXECUTE_DEMAND_WORKFLOW: &str = "opc_execute_demand_workflow";
+const COMMAND_LIST_DELIVERIES: &str = "opc_list_deliveries";
+const COMMAND_GET_DELIVERY: &str = "opc_get_delivery";
+const COMMAND_UPDATE_DELIVERY: &str = "opc_update_delivery";
+const COMMAND_RETRY_DELIVERY: &str = "opc_retry_delivery";
+const COMMAND_CANCEL_DELIVERY: &str = "opc_cancel_delivery";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -709,6 +728,45 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             }
         },
         COMMAND_LIST_DOMAINS => match list_domains(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // ── #264 批 5：交付面六命令（执行 / 列表 / 详情 / 更新 / 重试 / 取消）──
+        COMMAND_EXECUTE_DEMAND_WORKFLOW => {
+            match execute_demand_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_DELIVERIES => match list_deliveries(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_DELIVERY => match get_delivery(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_UPDATE_DELIVERY => match update_delivery(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_RETRY_DELIVERY => match retry_delivery(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_CANCEL_DELIVERY => match cancel_delivery(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -1834,6 +1892,137 @@ fn get_domain_workflow(
 /// `opc_list_domains`：领域 id 与中文名（只读 op，零入参）。
 fn list_domains(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (String, String)> {
     call_opc_store(peer, OPC_STORE_LIST_DOMAINS, json!({}), call_chain)
+}
+
+/// `opc_execute_demand_workflow`：为线索创建交付记录并后台触发工作流（写 op）。
+///
+/// `leadId` 必填；`workflowTemplateId` 可选（缺省链 `入参 → lead.linkedWorkflowId →
+/// "default_demand_delivery"` 由宿主实现）。出参是刚落库的交付记录（camelCase DTO）。
+fn execute_demand_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_execute_demand_workflow";
+    let lead_id = require_str(input, OP, "leadId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("lead_id".to_string(), Value::String(lead_id.to_string()));
+    match input.get("workflowTemplateId") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("workflow_template_id".to_string(), Value::String(value.clone()));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `workflowTemplateId` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_EXECUTE_DEMAND_WORKFLOW, Value::Object(args), call_chain)
+}
+
+/// `opc_list_deliveries`：交付记录列表（只读 op，两个可选过滤项）。
+///
+/// 命令面 `leadId` ⇒ 接缝面 `lead_id`（三面键名分档）；`status` 两面同形。
+fn list_deliveries(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_deliveries";
+    let mut args = serde_json::Map::new();
+    copy_optional_strings(input, OP, &mut args, &["status"])?;
+    match input.get("leadId") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("lead_id".to_string(), Value::String(value.clone()));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `leadId` 必须是字符串（形状判在命令层）")));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_LIST_DELIVERIES, Value::Object(args), call_chain)
+}
+
+/// `opc_get_delivery`：单个交付详情（只读 op，`deliveryId` 必填）。
+fn get_delivery(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_delivery";
+    let delivery_id = require_str(input, OP, "deliveryId")?;
+    call_opc_store(peer, OPC_STORE_GET_DELIVERY, json!({ "delivery_id": delivery_id }), call_chain)
+}
+
+/// `opc_update_delivery`：更新交付执行面字段（写 op；`deliveryId` + `status` 必填）。
+///
+/// `progress`（数值）/ `resultSummary`（字符串）可选；`deliverables` / `errors` 是任意
+/// JSON 值（形状由宿主 serde 判），缺键 = 不动。
+fn update_delivery(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_delivery";
+    let delivery_id = require_str(input, OP, "deliveryId")?;
+    let status = require_str(input, OP, "status")?;
+    let mut args = serde_json::Map::new();
+    args.insert("delivery_id".to_string(), Value::String(delivery_id.to_string()));
+    args.insert("status".to_string(), Value::String(status.to_string()));
+    copy_optional_f64(input, OP, &mut args, &["progress"])?;
+    match input.get("resultSummary") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("result_summary".to_string(), Value::String(value.clone()));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `resultSummary` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    for key in ["deliverables", "errors"] {
+        match input.get(key) {
+            None | Some(Value::Null) => {},
+            Some(value) => {
+                args.insert(key.to_string(), value.clone());
+            },
+        }
+    }
+    call_opc_store(peer, OPC_STORE_UPDATE_DELIVERY, Value::Object(args), call_chain)
+}
+
+/// `opc_retry_delivery`：重置为待执行（写 op，`deliveryId` 必填）。
+fn retry_delivery(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_retry_delivery";
+    let delivery_id = require_str(input, OP, "deliveryId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_RETRY_DELIVERY,
+        json!({ "delivery_id": delivery_id }),
+        call_chain,
+    )
+}
+
+/// `opc_cancel_delivery`：取消交付（写 op，`deliveryId` 必填）。
+fn cancel_delivery(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_cancel_delivery";
+    let delivery_id = require_str(input, OP, "deliveryId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CANCEL_DELIVERY,
+        json!({ "delivery_id": delivery_id }),
+        call_chain,
+    )
 }
 
 /// `opc_create_project`：创建项目（写 op）。

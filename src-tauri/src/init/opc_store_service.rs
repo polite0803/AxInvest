@@ -1229,10 +1229,172 @@ impl OpcStoreProvider for HostOpcStore {
         domains.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(domains)
     }
+
+    // ── #264 批 5：交付面六 op ────────────────────────────────────
+    //
+    // 迁移前是 `commands::demand_discovery` 的六条交付命令（该文件余发现面五条）。存储
+    // 触点全在 dao（本文件无 `sea_orm` 导入）；dao 的错误已带分类（NotFound / Db）⇒
+    // 与批 3 的 `update_lead_status` 同模式**原样上抛**，不在本层包 Provider 抹掉分类。
+    // execute 的后台块保持迁移前的 `tauri::async_runtime::spawn`；后台回写失败从静默
+    // `ok()` 改为 warn 日志（行为面不变，主流程不感知）。
+
+    async fn execute_demand_workflow(
+        &self,
+        lead_id: String,
+        workflow_template_id: Option<String>,
+    ) -> Result<DeliveryRecordView> {
+        let pipeline = self.demand_pipeline("execute_demand_workflow")?;
+        let now = chrono::Utc::now().timestamp();
+
+        let lead = opc_demand::get_lead(&self.db, &lead_id).await?;
+        let template_id = workflow_template_id.unwrap_or_else(|| {
+            lead.linked_workflow_id
+                .clone()
+                .unwrap_or_else(|| "default_demand_delivery".to_string())
+        });
+
+        let saved = opc_delivery::create_delivery(
+            &self.db,
+            &lead_id,
+            &format!("交付: {}", lead.title),
+            &template_id,
+            lead.description.clone(),
+            now,
+        )
+        .await?;
+
+        // 真正调用工作流引擎下发（异步后台执行，不阻塞交付记录创建）—— 逐句同源迁移前命令。
+        let engine = std::sync::Arc::clone(&pipeline.work_engine);
+        let db = self.db.clone();
+        let delivery_id = saved.id.clone();
+        use axagent_harness::workflow_types::Variable;
+        use axagent_rt_workflow::work_engine::RunOptions;
+
+        let variables = vec![
+            Variable {
+                name: "lead_id".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(lead_id.clone()),
+                description: Some("需求线索 ID".into()),
+                is_secret: false,
+            },
+            Variable {
+                name: "delivery_id".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(delivery_id.clone()),
+                description: Some("交付记录 ID".into()),
+                is_secret: false,
+            },
+            Variable {
+                name: "demand_title".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(saved.title.clone()),
+                description: Some("需求标题".into()),
+                is_secret: false,
+            },
+            Variable {
+                name: "demand_description".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(saved.description.clone()),
+                description: Some("需求描述".into()),
+                is_secret: false,
+            },
+        ];
+
+        let opts = RunOptions {
+            max_concurrent: 2,
+            step_timeout: std::time::Duration::from_secs(300),
+            tool_timeout: std::time::Duration::from_secs(60),
+            variables: Some(variables),
+            progress_callback: None,
+            ..Default::default()
+        };
+
+        let wf_id = template_id;
+        tauri::async_runtime::spawn(async move {
+            let result = engine.run_workflow(&wf_id, opts).await;
+            let task_now = chrono::Utc::now().timestamp();
+            let outcome = match result {
+                Ok(wf) => {
+                    opc_delivery::mark_delivery_completed(
+                        &db,
+                        &delivery_id,
+                        task_now,
+                        &format!("工作流已完成，节点数: {}", wf.nodes.len()),
+                    )
+                    .await
+                },
+                Err(e) => {
+                    opc_delivery::mark_delivery_failed(
+                        &db,
+                        &delivery_id,
+                        task_now,
+                        &serde_json::json!([{ "workflow": e.to_string() }]).to_string(),
+                    )
+                    .await
+                },
+            };
+            if let Err(update_err) = outcome {
+                tracing::warn!(
+                    delivery_id = %delivery_id,
+                    error = %update_err,
+                    "[opc_delivery] 后台回写交付行失败"
+                );
+            }
+        });
+
+        Ok(saved)
+    }
+
+    async fn list_deliveries(
+        &self,
+        status: Option<String>,
+        lead_id: Option<String>,
+    ) -> Result<Vec<DeliveryRecordView>> {
+        opc_delivery::list_deliveries(&self.db, status.as_deref(), lead_id.as_deref()).await
+    }
+
+    async fn get_delivery(&self, delivery_id: String) -> Result<DeliveryRecordView> {
+        opc_delivery::get_delivery(&self.db, &delivery_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn update_delivery(
+        &self,
+        delivery_id: String,
+        status: String,
+        progress: Option<f64>,
+        result_summary: Option<String>,
+        deliverables: Option<serde_json::Value>,
+        errors: Option<serde_json::Value>,
+    ) -> Result<DeliveryRecordView> {
+        let now = chrono::Utc::now().timestamp();
+        opc_delivery::update_delivery(
+            &self.db,
+            &delivery_id,
+            &status,
+            progress,
+            result_summary,
+            deliverables,
+            errors,
+            now,
+        )
+        .await
+    }
+
+    async fn retry_delivery(&self, delivery_id: String) -> Result<DeliveryRecordView> {
+        let now = chrono::Utc::now().timestamp();
+        opc_delivery::reset_delivery(&self.db, &delivery_id, now).await
+    }
+
+    async fn cancel_delivery(&self, delivery_id: String) -> Result<DeliveryRecordView> {
+        let now = chrono::Utc::now().timestamp();
+        opc_delivery::cancel_delivery(&self.db, &delivery_id, now).await
+    }
 }
 
 // ── #264 批 4 领域工作流三 op 的依赖（同样放在 impl 之后，理由同上）──────────
-use axagent_harness::opc_store::{DomainEntryView, DomainWorkflowSummaryView};
+use axagent_harness::opc_store::{DeliveryRecordView, DomainEntryView, DomainWorkflowSummaryView};
 use axagent_harness::workflow_types::WorkflowTemplateResponse;
 
 /// 从工作流 ID 提取领域标识：`wf-acd-xxx` → `acd`（无法判断回 `unknown`）。

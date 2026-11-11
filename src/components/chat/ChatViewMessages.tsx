@@ -79,11 +79,11 @@ import { Actions, AssistantFooter, styleBtn } from "./AssistantFooter";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { AssistantMarkdown, getChatCodeThemes, THINKING_LOADING_MARKER } from "./ChatMarkdownNodes";
 import { getStreamingLoadingState, shouldRenderAssistantMarkdownFromContent } from "./chatStreaming";
+import { CiteBlock } from "./CiteBlock";
 import { CognitiveDecisionCard } from "./CognitiveDecisionCard";
 import { MultiModelDisplay, type MultiModelDisplayMode } from "./MultiModelDisplay";
 import { PermissionCard } from "./PermissionCard";
 import { PluginSchemaCardSlot } from "./PluginSchemaCardSlot";
-import { QuoteBlock } from "./QuoteBlock";
 import { ToolCallBlockView } from "./ToolCallBlockView";
 import { ToolCallCard } from "./ToolCallCard";
 import { buildAssistantDisplayContent, shouldHideAssistantBubble } from "./toolCallDisplay";
@@ -750,7 +750,7 @@ export function useChatViewMessages({
                 />
                 {quotedMessage && (
                   <div style={{ textAlign: "left" }}>
-                    <QuoteBlock quotedMessage={quotedMessage} onJump={handleJumpToMessage} />
+                    <CiteBlock quotedMessage={quotedMessage} onJump={handleJumpToMessage} />
                   </div>
                 )}
                 {text
@@ -797,7 +797,7 @@ export function useChatViewMessages({
                 />
                 {quotedMessage && (
                   <div style={{ textAlign: "left", marginBottom: 4 }}>
-                    <QuoteBlock quotedMessage={quotedMessage} onJump={handleJumpToMessage} />
+                    <CiteBlock quotedMessage={quotedMessage} onJump={handleJumpToMessage} />
                   </div>
                 )}
                 {settings.renderUserMarkdown
@@ -1124,7 +1124,7 @@ export function useChatViewMessages({
           // 引用回复：被引用消息预览块（streaming 时不显示，避免干扰）
           const quotedMessage = !isStreaming ? getQuotedMessage(msg?.quotedMessageId) : null;
           const quoteBlock = quotedMessage
-            ? <QuoteBlock quotedMessage={quotedMessage} onJump={handleJumpToMessage} />
+            ? <CiteBlock quotedMessage={quotedMessage} onJump={handleJumpToMessage} />
             : null;
           if (msg?.status === "error") {
             return (

@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CitePreviewBar } from "./CitePreviewBar";
 import { CommandSuggest } from "./CommandSuggest";
 import { CompanionModelTags } from "./CompanionModelTags";
 import { ContextSourceMenu } from "./ContextSourceMenu";
@@ -66,7 +67,6 @@ import { ModelSelector } from "./ModelSelector";
 import { PermissionMenu } from "./PermissionMenu";
 import { PlanHistoryPanel } from "./PlanHistoryPanel";
 import { PromptTemplateSelector } from "./PromptTemplateSelector";
-import { QuotePreviewBar } from "./QuotePreviewBar";
 import { SendControls } from "./SendControls";
 import { ThinkingMenu } from "./ThinkingMenu";
 import { VoiceCall } from "./VoiceCall";
@@ -1474,7 +1474,7 @@ export function InputArea() {
 
         {/* 引用回复预览条：显示当前被引用的消息 */}
         {quotedMessage && (
-          <QuotePreviewBar
+          <CitePreviewBar
             content={quotedMessage.content}
             onCancel={() => useUIStore.getState().setQuotedMessageId(null)}
           />

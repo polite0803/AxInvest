@@ -1129,7 +1129,8 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 
 - `super::domain_pack::` **5 处全在 `#[cfg(test)]` 块内**（`super` = `opc_workflows`，用 re-export 的模块名 ⇒ 合法）
 - `crate::commands::.*domain_pack` **17 处里 12 处是正则过宽**（`opc_domain_pack_actions` / `_bridge` / `_runtime` /
-  `constants::domain_pack` 等**无关文件**）；真 5 处（`opc.rs:632/634/647/1154`、当时 `opc_capability_pack_actions.rs` 的 `:2961`）走 re-export
+  `constants::domain_pack` 等**无关文件**）；真 5 处（`opc.rs:632/634/647/1154`、当时 `opc_capability_pack_actions.rs`
+  内的一处 stale 位点——其行号已随 #264 刀 C 批 3 七命令迁出（文件缩至 2794 行）失效，行号不具引）走 re-export
   **合法**（即 §12.4 已登记的后续批次，且 ≤ 基线不阻塞）
 
 #### 12.9.6 新增判据

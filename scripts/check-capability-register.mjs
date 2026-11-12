@@ -786,8 +786,15 @@ export function reconcile(register, readings, planText) {
       }
       case "registryDomainCount": {
         const r = readings.auditDomain?.[a.domainName];
-        mismatch = !r ? `域「${a.domainName}」不存在于 domainOf 读数（域名或 DOMAIN_RULES 变了 ⇒ 同批改表）`
-          : (cmpNum(r.total, a.value, " 条") ?? cmpNum(r.modules, a.value2, ` ${a.value2Label}`));
+        if (!r) {
+          // 整域合法归零（2026-11-13 #264 批 4 收口：`opc` 宿主模块删尽 ⇒ 「OPC 公司运行时」域从
+          // domainOf 读数中消失）：锚点登记 0/0 ⇒ 域缺失就是 0 条命令的读数形态，放行；
+          // 登记非 0 ⇒ 域缺失仍是「域名/DOMAIN_RULES 变了或漂移未回写」，照旧必红（负控⑭-opcZero 锁）。
+          mismatch = (a.value === 0 && (a.value2 ?? 0) === 0) ? null
+            : `域「${a.domainName}」不存在于 domainOf 读数（域名或 DOMAIN_RULES 变了 ⇒ 同批改表）`;
+          break;
+        }
+        mismatch = cmpNum(r.total, a.value, " 条") ?? cmpNum(r.modules, a.value2, ` ${a.value2Label}`);
         break;
       }
       case "frontendVolume":
@@ -1713,6 +1720,9 @@ function fixture() {
       { id: "registryFileLines", label: "注册表行数", value: 5, check: "registryFileLineCount", hard: false },
       { id: "stockBoundary", label: "股票边界命令", value: 4, value2: 2, value2Label: "模块", check: "registryBoundaryCount", domainKey: "STOCK", hard: true },
       { id: "stockDomain", label: "股票域命令", value: 4, value2: 2, value2Label: "模块", check: "registryDomainCount", domainName: "股票域", hard: true },
+      // 整域归零形态（2026-11-13 #264 批 4 收口新增）：域在本 fixture 的 auditDomain 里**不存在**，
+      // 登记 0/0 ⇒ 正控必须 PASS（域缺失 = 0 条命令）；负控侧把登记改成非 0 ⇒ 域缺失必须红。
+      { id: "opcDomainZero", label: "OPC 域命令（整域归零形态）", value: 0, value2: 0, value2Label: "模块", check: "registryDomainCount", domainName: "OPC 域", hard: true },
       { id: "frontendVolume", label: "前端体量", value: 100, value2: 4, value2Label: "文件", check: "frontendVolume", hard: true },
       { id: "frontendDirVolume", label: "前端目录体量", value: 40, value2: 2, value2Label: "文件", check: "frontendDirVolume", dir: "src/x", hard: true },
       { id: "l1Stock", label: "L1 股票阻塞", value: 6, value2: 2, value2Label: "文件", check: "l1ForeignBlockers", domainKey: "STOCK", hard: true },
@@ -1769,6 +1779,10 @@ const ANCHOR_CHECK_NEGATIVE_CASES = [
   { check: "registryBoundaryCount", id: "stockBoundary", tier: "hard", mutate: (f) => { f.readings.boundary.STOCK.modules = 3; } },
   { check: "registryDomainCount", id: "stockDomain", tier: "hard", mutate: (f) => { delete f.readings.auditDomain["股票域"]; } },
   { check: "registryDomainCount", id: "stockDomain", tier: "hard", mutate: (f) => { f.readings.auditDomain["股票域"].modules = 5; } },
+  // 整域归零的两面：域消失但登记还留非 0 旧值 ⇒ 必须红（漂移未回写形态，2026-11-13 #264 批 4 收口锁）；
+  // 域消失且登记 0/0 ⇒ 必须绿（负控表只收「必须红」的 mutate；绿面由正控⑭的干净读数断言覆盖 ——
+  // fixture 的 auditDomain 里本就没有「OPC 域」键，cleanResults 对该锚走「0/0 放行」分支必须 PASS）。
+  { check: "registryDomainCount", id: "opcDomainZero", tier: "hard", mutate: (f) => { const a2 = f.register.anchors.find((x) => x.id === "opcDomainZero"); a2.value = 2; a2.planNumber = "2"; } },
   { check: "frontendVolume", id: "frontendVolume", tier: "hard", mutate: (f) => { f.readings.frontend.lines = 101; } },
   { check: "frontendVolume", id: "frontendVolume", tier: "hard", mutate: (f) => { f.readings.frontend.files = 5; } },
   { check: "frontendDirVolume", id: "frontendDirVolume", tier: "hard", mutate: (f) => { f.readings.frontendDir["src/x"].files = 3; } },

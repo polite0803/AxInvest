@@ -169,7 +169,6 @@ pub mod wiki;
 // P0-5: 错误分类与故障转移
 pub mod error_classification;
 pub mod market_sim;
-pub mod opc;
 pub mod opc_capability_pack_actions;
 pub mod opc_capability_pack_bridge;
 pub mod opc_capability_pack_logic;

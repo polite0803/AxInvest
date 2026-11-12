@@ -68,6 +68,35 @@ describe("browserMock 覆盖股票插件命名命令（T2 试点批）", () => {
     await expect(handleCommand("stock_get_north_bound_flow", {})).resolves.toEqual({});
   });
 
+  // 候选 A 直映批（#300 前端半）：六条有前端调用方的命令。
+  // stock_search_stock 两类消费端（StockSearchBar / stockAnalysisStore）都先
+  // Array.isArray 再取 [0] ⇒ [] 即诚实空态。
+  it("stock_search_stock 返回数组（Array.isArray 消费；default 兜底给 undefined 同样能过但显式登记不受兜底收紧牵连）", async () => {
+    await expect(handleCommand("stock_search_stock", { keyword: "茅台" })).resolves.toEqual([]);
+  });
+
+  it("stock_get_limit_up_pool 返回 null 而不是 {}（可空 DTO，{} 会让 entries 读取 TypeError 落 connectionFailed）", async () => {
+    await expect(handleCommand("stock_get_limit_up_pool", {})).resolves.toBeNull();
+  });
+
+  it("stock_get_international_stock_quote 返回对象 DTO 空态 {}（crossMarketStore 逐字段消费）", async () => {
+    await expect(
+      handleCommand("stock_get_international_stock_quote", { stockCode: "AAPL" }),
+    ).resolves.toEqual({});
+  });
+
+  it("三条跨市场 kline 返回数组而不是 undefined（消费端按数组使用）", async () => {
+    await expect(
+      handleCommand("stock_get_international_stock_kline", { stockCode: "AAPL", period: "daily", limit: 30 }),
+    ).resolves.toEqual([]);
+    await expect(
+      handleCommand("stock_get_benchmark_kline", { benchmarkCode: "SPX", period: "daily", limit: 30 }),
+    ).resolves.toEqual([]);
+    await expect(
+      handleCommand("stock_get_forex_kline", { pair: "USD/CNY", period: "daily", limit: 30 }),
+    ).resolves.toEqual([]);
+  });
+
   // 负控：这批命令名均不以 get_/list_ 开头，default 兜底对它们给 undefined
   // （或对 endsWith("s") 给 []）。用未登记探针锁住兜底规则本身仍在，
   // 避免上面四条因兜底被改而失去「显式 case 生效」的证明力。

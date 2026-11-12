@@ -7610,6 +7610,24 @@ async function executeCommand<T>(
     case "stock_get_north_bound_flow":
       return {} as unknown as T;
 
+    // ── 股票插件命名命令（插件命令桥 候选 A 直映批，#300 前端半）──────────
+    // 六条有前端调用方的直映命令。消费端形状：搜索（StockSearchBar /
+    // stockAnalysisStore 均 Array.isArray 判）回 []；涨停池是可空 DTO
+    // （LimitUpPanel `if (!p)` 判 noData）回 null —— 宿主名 get_ 兜底给 {}，
+    // 会让 entries 读取 TypeError 落 connectionFailed，null 才是诚实空态；
+    // 跨市场单对象 quote 回 {}（消费端逐字段兜底），三条 kline 数组回 []。
+    // ⚠ 逐条显式声明：stock_* 不命中 get_/list_ 前缀兜底规则（同上 2c 段）。
+    case "stock_search_stock":
+      return [] as unknown as T;
+    case "stock_get_limit_up_pool":
+      return null as unknown as T;
+    case "stock_get_international_stock_quote":
+      return {} as unknown as T;
+    case "stock_get_international_stock_kline":
+    case "stock_get_benchmark_kline":
+    case "stock_get_forex_kline":
+      return [] as unknown as T;
+
     // 暂停 / 恢复仅需成功 resolve（无返回体）。
     case "workflow_pause":
     case "workflow_resume":

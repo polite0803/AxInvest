@@ -7,22 +7,22 @@
  * - 国际基准指数 K 线（标普 500 / 纳指 / 恒生 / 上证等）
  * - 外汇 K 线（USD/CNY、HKD/CNY 等）
  *
- * 命令清单（与后端 commands/stock_analysis.rs 对齐）：
- * - get_international_stock_quote / get_international_stock_kline
- * - get_benchmark_kline
- * - get_forex_kline
+ * 命令清单（#300 前端半起走 stock_* 插件命名命令，真机经插件命令桥到 market.quote 接缝）：
+ * - stock_get_international_stock_quote / stock_get_international_stock_kline
+ * - stock_get_benchmark_kline
+ * - stock_get_forex_kline
  */
 
 import { parseBackendError, translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { KLine, StockQuote } from "@/types";
 import { create } from "zustand";
 
 /**
  * 区级失败文案 = 码的译文 + 后端 `detail`（技术详情）。
  *
- * 为什么不直接用 `translateBackendError`：这三个命令恒用 `STOCK_WORKFLOW_INTERNAL` 报错，
- * 而该码命中 locale 后 `translateBackendError` **只返回通用译文、丢弃 detail** ——
+ * 为什么不直接用 `translateBackendError`：跨市场取数失败是常态路径（上游 RST），
+ * 而带码错误命中 locale 后 `translateBackendError` **只返回通用译文、丢弃 detail** ——
  * 于是「东财 kline 路径被 RST」这类真实原因在 UI 上被抹成「股票分析工作流内部错误」，
  * 排查时只能翻日志。此处把 detail 附上，让面板自己说明失败原因。
  */
@@ -99,7 +99,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     }
     set((s) => ({ loadingQuote: true, errors: { ...s.errors, quote: null } }));
     try {
-      const quote = await invoke<StockQuote>("get_international_stock_quote", {
+      const quote = await invokePluginCommand<StockQuote>("stock_get_international_stock_quote", {
         stockCode,
       });
       set((s) => ({
@@ -120,7 +120,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     }
     set((s) => ({ loadingKline: true, errors: { ...s.errors, kline: null } }));
     try {
-      const klines = await invoke<KLine[]>("get_international_stock_kline", {
+      const klines = await invokePluginCommand<KLine[]>("stock_get_international_stock_kline", {
         stockCode,
         period,
         limit,
@@ -143,7 +143,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     }
     set((s) => ({ loadingBenchmark: true, errors: { ...s.errors, benchmark: null } }));
     try {
-      const klines = await invoke<KLine[]>("get_benchmark_kline", {
+      const klines = await invokePluginCommand<KLine[]>("stock_get_benchmark_kline", {
         benchmarkCode,
         period,
         limit,
@@ -166,7 +166,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     }
     set((s) => ({ loadingForex: true, errors: { ...s.errors, forex: null } }));
     try {
-      const klines = await invoke<KLine[]>("get_forex_kline", {
+      const klines = await invokePluginCommand<KLine[]>("stock_get_forex_kline", {
         pair,
         period,
         limit,

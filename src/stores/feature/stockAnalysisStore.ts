@@ -3,6 +3,7 @@ import i18n from "@/i18n";
 import { backendErrorText, translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   ANALYST_TIER_SEP,
   analystBaseOf,
@@ -1047,7 +1048,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     if (skipDebounce) {
       // Enter/点击搜索直接执行，跳过防抖
       try {
-        const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
+        const results = await invokePluginCommand<StockSearchResult[]>("stock_search_stock", { keyword });
         set({ searchResults: results });
       } catch {
         set({ searchResults: [] });
@@ -1056,7 +1057,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
     const timer = setTimeout(async () => {
       try {
-        const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
+        const results = await invokePluginCommand<StockSearchResult[]>("stock_search_stock", { keyword });
         set({ searchResults: results });
       } catch {
         set({ searchResults: [] });
@@ -1464,8 +1465,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     let resolvedName = record.stockName;
     if (!resolvedName || resolvedName === record.stockCode) {
       try {
-        const hits = await invoke<Array<{ code: string; name: string; market: string }>>(
-          "search_stock",
+        const hits = await invokePluginCommand<Array<{ code: string; name: string; market: string }>>(
+          "stock_search_stock",
           { keyword: record.stockCode },
         );
         const exact = hits.find((h) => h.code === record.stockCode);

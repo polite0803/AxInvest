@@ -1,7 +1,7 @@
 // i18n-exempt: 业务逻辑/格式化（金额、百分比、时间）字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
 import { formatYi } from "@/lib/format";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -94,7 +94,8 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
         setEmptyKind("backendOffline");
         return;
       }
-      const p = await invoke<LimitUpPool | null>("get_limit_up_pool");
+      // #300 前端半：走 stock_* 插件命名命令（真机经插件命令桥；宿主命令双声明期保留）
+      const p = await invokePluginCommand<LimitUpPool | null>("stock_get_limit_up_pool");
       // 后端把「该日不可得」报成错误（走 catch），到这里的数据都属于请求的那一天
       if (!p) {
         setPool(null);

@@ -1,5 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { FAST_TEMPLATE_ID, horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
@@ -38,7 +39,11 @@ async function resolveCodeFromKeyword(keyword: string): Promise<string | null> {
   if (inParen?.[1]) { return inParen[1]; }
   if (/^\d{6}$/.test(kw)) { return kw; }
   try {
-    const hits = await invoke<Array<{ code: string; name: string }>>("search_stock", { keyword: kw });
+    // #300 前端半：走 stock_* 插件命名命令（真机经插件命令桥；宿主命令双声明期保留）
+    const hits = await invokePluginCommand<Array<{ code: string; name: string }>>(
+      "stock_search_stock",
+      { keyword: kw },
+    );
     if (!Array.isArray(hits) || hits.length === 0) { return null; }
     const exact = hits.find((h) => h.name === kw);
     return (exact ?? hits[0])?.code ?? null;

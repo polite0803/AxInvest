@@ -111,8 +111,10 @@ describe("CrossMarketDashboard 取数失败态", () => {
   });
 
   it("取到数据时正常渲染图表，两种缺席态都不出现", async () => {
+    // #300 前端半起跨市场四条走 stock_* 插件命名命令（invokePluginCommand 浏览器
+    // 路径仍落 invoke，此处 mock 不变，只改按名分派）。
     vi.mocked(invoke).mockImplementation(async (cmd: string) =>
-      cmd === "get_benchmark_kline" || cmd === "get_forex_kline"
+      cmd === "stock_get_benchmark_kline" || cmd === "stock_get_forex_kline"
         ? ([{ close: 1 }, { close: 2 }] as unknown as KLine[])
         : []
     );
@@ -126,7 +128,7 @@ describe("CrossMarketDashboard 取数失败态", () => {
 
   it("一区失败不得覆盖另一区的状态", async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "get_benchmark_kline") {
+      if (cmd === "stock_get_benchmark_kline") {
         throw "benchmark upstream reset";
       }
       return [{ close: 7 }] as unknown as KLine[];

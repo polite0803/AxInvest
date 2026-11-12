@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# OPC（OpenOPC）域插件 worker —— 任务 #36 第 1 批**骨架**。
+# OPC（OpenOPC）域插件 worker。
 #
 # 角色：**插件侧可执行**，与 `plugin-stock` 同形，不入 harness 那套
 # foundation / consumer / implementor / hybrid / wiring 分层（那套判的是 `axagent-*`
@@ -8,11 +8,6 @@
 # 依赖规则：只依赖「协议 crate + 域自有实现」，**不得**反向依赖 `axagent`（主壳）
 # 或 `axagent-plugins`（宿主侧运行时）。**不直接依赖 `axagent-dao` / `axagent-entities`**
 # —— 插件不持 `DatabaseConnection`，一切落库读写都必须经宿主接缝（`call_seam`）。
-#
-# `axagent-company-runtime` 是 OPC 逻辑（Self-Built / Self-Run / Self-Grown 三机制）的
-# **权威实现所在地**（`axagent-quant/crates/company-runtime`）。本批只建骨架、**未引用**
-# 其中任何符号（业务命令数为零）；这条边提前落下是为了让「插件能否在 plugins workspace
-# 里编到 OPC 实现」这一前提在骨架期就真编译一次，而不是等搬业务代码时才发现依赖图不通。
 
 [package]
 name = "axagent-plugin-opc"
@@ -20,14 +15,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "OPC 域插件 worker：长度前缀 JSON 帧的插件侧实现（#36 骨架，零业务命令）"
+description = "OPC 域插件 worker：长度前缀 JSON 帧的插件侧实现"
 
 [[bin]]
 name = "axagent-plugin-opc"
 path = "src/main.rs"
 
 [dependencies]
-axagent-company-runtime = { version = "3.0.0", path = "../../../axagent-quant/crates/company-runtime" }
 axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
 serde_json = "1"
 

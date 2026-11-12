@@ -8349,11 +8349,11 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 
 **逐插件实测缺口（对账结果：两插件今天都不可挪出）**：
 
-- **plugin-opc**：违判据① —— `axagent-plugins/crates/plugin-opc/Cargo.toml` 第 30 行存在 `axagent-company-runtime = { version = "3.0.0", path = "../../../axagent-quant/crates/company-runtime" }` 的 path 依赖（OPC 逻辑权威实现仍在 company-runtime，§159 搬迁的遗产）；违判据③ 的前端面 —— OPC 的 16 个页面仍住主壳 `src/pages/opc/**`（页面声明经 #260 已交域模块 `routes.tsx`，但**产物装载**未走 `pages[]`，`build-plugin-bundle.mjs` 的 `opcManifest`（第 1075 行起）生成的清单**没有 `pages` 字段**）⇒ 挪出主仓即页面全丢。
+- **plugin-opc**：违判据① —— `axagent-plugins/crates/plugin-opc/Cargo.toml` 第 30 行存在 `axagent-company-runtime = { version = "3.0.0", path = "../../../axagent-quant/crates/company-runtime" }` 的 path 依赖（OPC 逻辑权威实现仍在 company-runtime，§159 搬迁的遗产）。**2026-11-13 #297 判据① 已闭合**：该 path 依赖已删——#293/#294/#296 命令迁 T2 后业务全走 `opc.store` 接缝回宿主，全 crate 对该 crate 零代码引用（余 3 处注释均为描述宿主实现体措辞，仍准确），依赖面收敛到 `axagent-plugin-proto`（协议 crate）+ `serde_json`——判据①「只有 harness」对插件 worker 的实际映射 = 收敛到 foundation 协议 crate（harness 本体不经插件 SDK 暴露）；同批订正 Cargo.toml「#36 骨架」过期措辞与 `crates/README.md` 角色表，`axagent-plugins/Cargo.lock` 摘除 company-runtime 段（−23 行）。仍违判据③ 的前端面 —— OPC 的 16 个页面仍住主壳 `src/pages/opc/**`（页面声明经 #260 已交域模块 `routes.tsx`，但**产物装载**未走 `pages[]`，`build-plugin-bundle.mjs` 的 `opcManifest`（第 1075 行起）生成的清单**没有 `pages` 字段**）⇒ 挪出主仓即页面全丢。
 - **plugin-stock**：对称形态 —— 同居 `axagent-plugins/` 根的子 crate，与 plugin-opc 共享同一 bundle 生成脚本与同一 workspace；前端 16+ 页面住主壳 `src/components/stock-analysis/**`，同样无 `pages[]` 声明。
 - **共同前置**：判据②（SDK 版本号 + changelog）两侧均未建 —— `axagent-plugins` 根无独立版本管理，版本号随 bundle 生成注入。
 
-**收口次序**（不排期，随 #264 主线推进自然达成）：先让两侧剩余命令迁 T2（§156 刀 B1/B2）+ 前端反向阻塞清零（#263 系）+ `plugin-opc` 摘 company-runtime path 依赖（OPC 逻辑完成 harness 化或插件内化）⇒ ①③ 自动达标；`pages[]` 声明与 SDK 版本化（②）单列批次处理。**判据③ 的验证形态**：`axagent-plugins` 目录拷出到独立位置后 `cargo test -p axagent-plugin-opc` 与 bundle 生成脚本双双跑绿。
+**收口次序**（不排期，随 #264 主线推进自然达成）：先让两侧剩余命令迁 T2（§156 刀 B1/B2）+ 前端反向阻塞清零（#263 系）+ `plugin-opc` 摘 company-runtime path 依赖（OPC 逻辑完成 harness 化或插件内化）⇒ ①③ 自动达标 —— **摘依赖这步已于 2026-11-13 #297 执行**，实际形态是第三种「接缝化」（命令迁 T2 后逻辑走 `opc.store` 回宿主，插件不依赖 OPC 实现）；`pages[]` 声明与 SDK 版本化（②）单列批次处理。**判据③ 的验证形态**：`axagent-plugins` 目录拷出到独立位置后 `cargo test -p axagent-plugin-opc` 与 bundle 生成脚本双双跑绿。
 
 ## §158 T4「20 表转 schema.json」前置底册（2026-11-12 取证 lane 交回，批次设计定案）
 

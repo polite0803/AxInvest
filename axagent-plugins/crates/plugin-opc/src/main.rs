@@ -520,6 +520,29 @@ const COMMAND_ESCALATE_WORK_ITEM: &str = "opc_escalate_work_item";
 const COMMAND_WORK_ITEM_UNBLOCK: &str = "opc_work_item_unblock";
 const COMMAND_RUN_SELF_IMPROVING_WORK_ITEM: &str = "run_self_improving_opc_work_item";
 
+/// #264 批 4b：域包与内容资产五 op（三写两读）。
+///
+/// 域包导出/导入/启停的落盘与注册、市场扫描、内容资产全文全在宿主 ⇒ 插件进程够不着，
+/// 全部走接缝回宿主。三条写 op 在宿主权限表登记 `Write`（判据在 `worker.rs` 的
+/// `required_permission_for` 与 `WRITE_OPS` 用例）；`get_content_asset` / `market_list`
+/// 是纯读 ⇒ 无闸。
+const OPC_STORE_EXPORT_CAPABILITY_PACK: &str = "export_capability_pack";
+const OPC_STORE_IMPORT_CAPABILITY_PACK: &str = "import_capability_pack";
+const OPC_STORE_SET_CAPABILITY_PACK_ENABLED: &str = "set_capability_pack_enabled";
+const OPC_STORE_GET_CONTENT_ASSET: &str = "get_content_asset";
+const OPC_STORE_MARKET_LIST: &str = "market_list";
+
+/// #264 批 4b：域包与内容资产五命令（三写两读）。命令名续用宿主原名 ⇒ 前端调用名与
+/// 智能体工具面不变；宿主同名 `#[tauri::command]` 处于双声明期，待前端半迁完再删。
+///
+/// 三条写命令同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
+/// `opc_get_content_asset` / `opc_market_list` 是读命令 ⇒ 不进。
+const COMMAND_EXPORT_CAPABILITY_PACK: &str = "opc_export_capability_pack";
+const COMMAND_IMPORT_CAPABILITY_PACK: &str = "opc_import_capability_pack";
+const COMMAND_SET_CAPABILITY_PACK_ENABLED: &str = "opc_set_capability_pack_enabled";
+const COMMAND_GET_CONTENT_ASSET: &str = "opc_get_content_asset";
+const COMMAND_MARKET_LIST: &str = "opc_market_list";
+
 fn main() -> ExitCode {
     match serve(handle) {
         // 对端关管道 = 宿主停机，正常退出（`Peer::run` 里 EOF 不是错误）。
@@ -1395,6 +1418,46 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // #264 批 4b：域包与内容资产五命令（三写两读，每条一次接缝调用直投影；导出/导入
+        // 的落盘与注册、市场扫描、内容资产全文全在宿主 provider）。
+        COMMAND_EXPORT_CAPABILITY_PACK => {
+            match export_capability_pack(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_IMPORT_CAPABILITY_PACK => {
+            match import_capability_pack(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_SET_CAPABILITY_PACK_ENABLED => {
+            match set_capability_pack_enabled(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_CONTENT_ASSET => {
+            match get_content_asset(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_MARKET_LIST => match market_list(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写，每条一次接缝调用直投影；
         // 命令层只做形状判，规则装配与仪表盘聚合全在宿主 provider）。
@@ -4016,6 +4079,75 @@ fn run_self_improving_work_item(
         },
     }
     call_opc_store(peer, OPC_STORE_RUN_SELF_IMPROVING_WORK_ITEM, Value::Object(args), call_chain)
+}
+
+/// `opc_export_capability_pack`：导出域包为 `.opcip` 归档（写 op；落盘与打包在宿主）。
+fn export_capability_pack(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_export_capability_pack";
+    let id = require_str(input, OP, "id")?;
+    let out_dir = require_str(input, OP, "outDir")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_EXPORT_CAPABILITY_PACK,
+        json!({ "id": id, "out_dir": out_dir }),
+        call_chain,
+    )
+}
+
+/// `opc_import_capability_pack`：导入 `.opcip` 域包并注册（写 op；解包与能力闭合校验在宿主）。
+fn import_capability_pack(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_import_capability_pack";
+    let archive_path = require_str(input, OP, "archivePath")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_IMPORT_CAPABILITY_PACK,
+        json!({ "archive_path": archive_path }),
+        call_chain,
+    )
+}
+
+/// `opc_set_capability_pack_enabled`：启用 / 停用域包（写 op；写库在宿主）。
+fn set_capability_pack_enabled(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_set_capability_pack_enabled";
+    let pack_id = require_str(input, OP, "packId")?;
+    let enabled = input
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| invalid_shape(format!("{OP} 需要布尔字段 `enabled`（形状判在命令层）")))?;
+    call_opc_store(
+        peer,
+        OPC_STORE_SET_CAPABILITY_PACK_ENABLED,
+        json!({ "pack_id": pack_id, "enabled": enabled }),
+        call_chain,
+    )
+}
+
+/// `opc_get_content_asset`：内容资产全文（读 op；`ContentAsset` 键名与迁移前逐字一致）。
+fn get_content_asset(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_content_asset";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_GET_CONTENT_ASSET, json!({ "id": id }), call_chain)
+}
+
+/// `opc_market_list`：市场域包列表（读 op，无入参）。
+fn market_list(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_MARKET_LIST, json!({}), call_chain)
 }
 
 fn require_str<'a>(input: &'a Value, op: &str, key: &str) -> Result<&'a str, (String, String)> {

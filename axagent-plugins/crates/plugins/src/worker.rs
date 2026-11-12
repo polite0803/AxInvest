@@ -602,7 +602,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "work_item_review"
             | "escalate_work_item"
             | "work_item_unblock"
-            | "run_self_improving_work_item",
+            | "run_self_improving_work_item"
+            // #264 批 4b：域包与内容资产三条写 op（导出落盘 / 导入解包注册 / 启停写库）。
+            // 同批 `get_content_asset` / `market_list` 是纯读 ⇒ 必须仍 `None`（锁在 READ_OPS 用例）。
+            | "export_capability_pack"
+            | "import_capability_pack"
+            | "set_capability_pack_enabled",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -5470,6 +5475,97 @@ impl HostPeer {
                 let Some(result) =
                     self.block_on(provider.run_self_improving_work_item(task, max_rounds))
                 else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #264 批 4b：域包与内容资产五 op（三条写 op 在权限表登记 `Write`；
+            // `get_content_asset` / `market_list` 纯读）。
+            "opc.store" if op == "export_capability_pack" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let out_dir: String = match deserialize_arg(&args, "out_dir", seam) {
+                    Ok(out_dir) => out_dir,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.export_capability_pack(id, out_dir))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(path) => FrameResponse::success(serde_json::Value::String(path)),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "import_capability_pack" => {
+                let archive_path: String = match deserialize_arg(&args, "archive_path", seam) {
+                    Ok(archive_path) => archive_path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.import_capability_pack(archive_path))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(message) => FrameResponse::success(serde_json::Value::String(message)),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "set_capability_pack_enabled" => {
+                let pack_id: String = match deserialize_arg(&args, "pack_id", seam) {
+                    Ok(pack_id) => pack_id,
+                    Err(response) => return response,
+                };
+                let enabled: bool = match deserialize_arg(&args, "enabled", seam) {
+                    Ok(enabled) => enabled,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.set_capability_pack_enabled(pack_id, enabled))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 出参 `()`：帧里与迁移前 Tauri 的 `Result<(), String>` 同形（`null`）。
+                    Ok(()) => FrameResponse::success(serde_json::Value::Null),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_content_asset" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_content_asset(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "market_list" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.market_list()) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -14321,6 +14417,10 @@ mod tests {
             "escalate_work_item",
             "work_item_unblock",
             "run_self_improving_work_item",
+            // #264 批 4b：域包与内容资产三条写 op（导出落盘 / 导入解包注册 / 启停写库）。
+            "export_capability_pack",
+            "import_capability_pack",
+            "set_capability_pack_enabled",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -14388,6 +14488,9 @@ mod tests {
             "get_rl_stats",
             // #264 批 4a：看板投影 —— 读 op（同批六条写 op 在写集）。
             "kanban_board",
+            // #264 批 4b：内容资产全文 + 市场域包列表 —— 读 op（同批三条写 op 在写集）。
+            "get_content_asset",
+            "market_list",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

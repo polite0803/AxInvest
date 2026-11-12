@@ -1680,6 +1680,53 @@ pub trait OpcStoreProvider: Send + Sync {
                 .into(),
         ))
     }
+
+    /// 导出域包为 `.opcip` 归档（`export_capability_pack` op）—— 写 op（在 `out_dir` 落一个新文件）。
+    ///
+    /// 包源固定取宿主 app data 目录下的域包根（迁移前命令传的也是 `Some(&app_data_dir)`，
+    /// 传 `None` 会回退进程级默认根 ⇒ 读错目录）；出参是导出归档的绝对路径。
+    async fn export_capability_pack(&self, _id: String, _out_dir: String) -> Result<String> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::export_capability_pack 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 导入 `.opcip` 域包（`import_capability_pack` op）—— 写 op（解包落盘 + 注册 seed）。
+    ///
+    /// 导入成功后跑一次全量能力对账，把该包的 missing / domain_proposals 摘要拼进返回串；
+    /// 文案与迁移前命令逐字一致（它同时是前端成功提示的一部分）。
+    async fn import_capability_pack(&self, _archive_path: String) -> Result<String> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::import_capability_pack 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 启用 / 停用域包（`set_capability_pack_enabled` op）—— 写 op。
+    ///
+    /// 权威存储是 DB 的 `opc_capability_packs.enabled`（manifest 仅首装生效）。
+    async fn set_capability_pack_enabled(&self, _pack_id: String, _enabled: bool) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::set_capability_pack_enabled 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 内容资产全文（`get_content_asset` op）—— 读 op。
+    ///
+    /// 列表读 op 走的是裁剪后的摘要视图（不含 `body`），编辑回读必须走本条拿全文。
+    async fn get_content_asset(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_content_asset 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 市场域包列表（`market_list` op）—— 读 op。
+    ///
+    /// 扫内置域包目录 + 已装状态，`enabled` 取 DB 权威值、未注册的包回退 manifest 默认。
+    async fn market_list(&self) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::market_list 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

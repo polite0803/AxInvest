@@ -146,6 +146,11 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_escalate_work_item",
   "opc_work_item_unblock",
   "run_self_improving_opc_work_item",
+  // #264 批 4b：域包与内容资产三条写命令（导出落盘 / 导入解包注册 / 启停写库）；
+  // `opc_get_content_asset` / `opc_market_list` 是读命令 ⇒ 不进本表。
+  "opc_export_capability_pack",
+  "opc_import_capability_pack",
+  "opc_set_capability_pack_enabled",
 ]);
 
 const spec = PLUGIN_SPECS[pluginName];
@@ -2552,6 +2557,63 @@ function opcManifest({ version, binaryName, sha256 }) {
           },
           required: ["task"],
         },
+      },
+      // ── #264 批 4b：域包与内容资产五命令（三写两读；宿主同名五条 Tauri 命令处于
+      // 双声明期，待前端半迁完再删）。三条写命令同批进 `OPC_WRITE_COMMANDS`
+      // （= 宿主 `required_permission_for` 的写 op 名单，两处必须同批改）。
+      {
+        name: "opc_export_capability_pack",
+        description: "导出域包为 .opcip 归档（写 op；返回落盘路径）",
+        command: "worker://opc_export_capability_pack",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "域包 ID" },
+            outDir: { type: "string", description: "导出目录" },
+          },
+          required: ["id", "outDir"],
+        },
+      },
+      {
+        name: "opc_import_capability_pack",
+        description: "导入 .opcip 域包并注册（写 op；返回能力闭合校验结论）",
+        command: "worker://opc_import_capability_pack",
+        inputSchema: {
+          type: "object",
+          properties: {
+            archivePath: { type: "string", description: "归档绝对路径" },
+          },
+          required: ["archivePath"],
+        },
+      },
+      {
+        name: "opc_set_capability_pack_enabled",
+        description: "启用 / 停用域包（写 op）",
+        command: "worker://opc_set_capability_pack_enabled",
+        inputSchema: {
+          type: "object",
+          properties: {
+            packId: { type: "string", description: "域包 ID" },
+            enabled: { type: "boolean", description: "是否启用" },
+          },
+          required: ["packId", "enabled"],
+        },
+      },
+      {
+        name: "opc_get_content_asset",
+        description: "取内容资产全文（读 op；含 body）",
+        command: "worker://opc_get_content_asset",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "内容资产 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_market_list",
+        description: "列出市场域包（读 op；扫内置目录 + 已装状态）",
+        command: "worker://opc_market_list",
+        inputSchema: { type: "object", properties: {} },
       },
       // ── #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写；宿主同名四条 Tauri
       // 命令已删）。`opc_run_automation_rules` 是写命令，同批进 `OPC_WRITE_COMMANDS`

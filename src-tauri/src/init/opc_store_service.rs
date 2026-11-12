@@ -43,6 +43,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
+use axagent_company_runtime::opc::capability_pack;
 use axagent_company_runtime::opc::{
     AnalyticsService, ContactSubmission, ContentAsset, ContentAssetService, Customer,
     CustomerFilter, CustomerService, CustomerStatus, CustomerType, DefaultAnalyticsService,
@@ -54,6 +55,7 @@ use axagent_company_runtime::opc::{
 use axagent_dao::repo::opc_blog_post::{BlogPostListRow, count_blog_posts, list_blog_posts};
 use axagent_dao::repo::{opc_delivery, opc_demand};
 use axagent_harness::DatabaseConnection;
+use axagent_harness::capability_pack_registry::CapabilityPackRegistry;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::opc_store::{
     BlogPostListOutcome, BlogPostView, ContactSummaryView, ContentAssetSummaryView,
@@ -542,6 +544,22 @@ impl OpcStoreProvider for HostOpcStore {
             AxAgentError::Provider(format!("opc.store::list_content_assets 取内容资产失败: {e}"))
         })?;
         Ok(rows.into_iter().map(content_asset_summary_view).collect())
+    }
+
+    /// 内容资产全文（迁移前 `opc_get_content_asset`）—— 读 op。
+    ///
+    /// 列表读 op 走的是裁剪后的摘要视图（不带 `body`），编辑回读必须走本条取全文。
+    /// 出参是域 DTO 的 JSON 投影：`ContentAsset` 没有 `serde(rename_all)`，所以键名与迁移前
+    /// 命令直出结构体**逐字一致**（仍是 snake_case），前端读点不需要任何改名。
+    async fn get_content_asset(&self, id: String) -> Result<serde_json::Value> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        // 全限定调用：`DefaultSiteService` 同时实现三个服务 trait，同名方法有歧义。
+        let asset = ContentAssetService::get_content_asset(&svc, &id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_content_asset 取内容资产失败: {e}"))
+        })?;
+        serde_json::to_value(asset).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_content_asset 序列化失败: {e}"))
+        })
     }
 
     async fn list_publish_schedules(&self) -> Result<Vec<PublishScheduleSummaryView>> {
@@ -2773,6 +2791,149 @@ impl OpcStoreProvider for HostOpcStore {
             "actionLabel": action.label,
             "domainPackId": capability_pack_id,
         }))
+    }
+
+    /// 导出域包为 `.opcip` 归档（迁移前 `opc_export_capability_pack`）—— 写 op。
+    ///
+    /// 包源与迁移前一致：`resolve_capability_packs_dir(Some(app_dir))`（不装配 app_dir 就
+    /// fail-closed，不许回退进程级默认根 —— 那会导出另一个目录的包）。
+    async fn export_capability_pack(&self, id: String, out_dir: String) -> Result<String> {
+        let app_dir = self.pack_app_dir("export_capability_pack")?;
+        let base = capability_pack::resolve_capability_packs_dir(Some(&app_dir));
+        let out_path = std::path::PathBuf::from(&out_dir);
+        capability_pack::export_capability_pack(&base, &id, &out_path).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::export_capability_pack 导出失败: {e}"))
+        })
+    }
+
+    /// 导入 `.opcip` 域包（迁移前 `opc_import_capability_pack`）—— 写 op。
+    ///
+    /// 三步与迁移前命令逐字同形：解包 + 注册 seed → 全量能力对账（非阻塞审计，坏只 warning）
+    /// → 取该包的闭合报告拼进成功串。`LocalCapabilityPackRegistry` 是**无状态 unit struct**
+    /// （`state.rs` 里的 `AppState.pack_registry` 也是它），所以就地建一份与共享实例行为等价，
+    /// 不为此新增装配口。
+    async fn import_capability_pack(&self, archive_path: String) -> Result<String> {
+        let app_dir = self.pack_app_dir("import_capability_pack")?;
+        let archive = std::path::PathBuf::from(&archive_path);
+        let id = capability_pack::import_capability_pack(&self.db, &app_dir, &archive)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::import_capability_pack 导入失败: {e}"))
+            })?;
+        // 期一·3 能力封闭校验：导入成功后全量对账一次（非阻塞审计，坏只 warning）。
+        // 期一·4：把刚导入域包的审计摘要（missing / domain_proposals）随成功信息带回前端展示。
+        let registry = capability_pack::LocalCapabilityPackRegistry;
+        let indexer = self.demand_pipeline("import_capability_pack")?.capability_indexer.as_ref();
+        let base = registry.resolve_packs_dir(Some(&app_dir));
+        crate::init::state::audit_and_log_capability_packs_capability(&registry, indexer, &base)
+            .await;
+        let reports = registry.audit_capability_closure(indexer, &base).await;
+        if let Some(report) = reports.into_iter().find(|r| r.domain_pack_id == id) {
+            if !report.closed {
+                let missing_detail = report
+                    .missing
+                    .iter()
+                    .map(|m| format!("{}:{}", m.source.as_str(), m.capability_type))
+                    .collect::<Vec<_>>()
+                    .join("、");
+                let proposal_detail = report
+                    .domain_proposals
+                    .iter()
+                    .map(|p| format!("{}（{}）", p.domain_id, p.suggestion))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Ok(format!(
+                    "域包 {id} 能力闭合校验未通过：缺失 {} 项（{}）{}",
+                    report.missing.len(),
+                    missing_detail,
+                    if proposal_detail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("；建议增加域：{proposal_detail}")
+                    },
+                ));
+            }
+        }
+        Ok(format!("{id}：能力闭合校验通过"))
+    }
+
+    /// 启用 / 停用域包（迁移前 `opc_set_capability_pack_enabled`）—— 写 op。
+    ///
+    /// 写 DB `opc_capability_packs.enabled`（权威存储，重启后生效）。
+    async fn set_capability_pack_enabled(&self, pack_id: String, enabled: bool) -> Result<()> {
+        capability_pack::set_capability_pack_enabled(&self.db, &pack_id, enabled).await.map_err(
+            |e| {
+                AxAgentError::Provider(format!(
+                    "opc.store::set_capability_pack_enabled 写失败: {e}"
+                ))
+            },
+        )
+    }
+
+    /// 市场域包列表（迁移前 `opc_market_list`）—— 读 op。
+    ///
+    /// 扫内置域包目录 + 已装状态；`enabled` 以 DB 为准（manifest 仅首装生效），未注册的包
+    /// 退回 manifest 默认。出参键名照抄迁移前命令的 `json!` 字面量（camelCase 混 `capabilityCount`）。
+    async fn market_list(&self) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("market_list")?;
+        let builtin = capability_pack::resolve_capability_packs_dir(Some(&app_dir));
+        let installed_root = app_dir.join(capability_pack::CAPABILITY_PACKS_DIR);
+
+        // P1-5：用户手动启用/停用状态以 DB `opc_capability_packs.enabled` 为准。
+        // DB 访问下沉到域层（`list_capability_pack_enabled_map`），不在本层拼实体查询。
+        let db_enabled =
+            capability_pack::list_capability_pack_enabled_map(&self.db).await.unwrap_or_default();
+
+        let mut items = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&builtin) {
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                if !dir.is_dir() {
+                    continue;
+                }
+                let manifest_path = dir.join("manifest.yaml");
+                let Ok(raw) = std::fs::read_to_string(&manifest_path) else { continue };
+                let Ok(manifest) =
+                    serde_yaml::from_str::<capability_pack::CapabilityPackManifest>(&raw)
+                else {
+                    continue;
+                };
+                let installed = installed_root.join(&manifest.id).is_dir();
+                items.push(serde_json::json!({
+                    "id": manifest.id,
+                    "name": manifest.name,
+                    "icon": manifest.icon,
+                    "version": manifest.version,
+                    "enabled": db_enabled.get(&manifest.id).copied().unwrap_or(manifest.enabled),
+                    "installed": installed,
+                    "path": dir.display().to_string(),
+                    // 期一·4：卡片展示归属本体域 + 能力承诺数
+                    // domain 缺失（旧 manifest）回退默认本体域 Automation，保证 UI 恒有值
+                    "domain": manifest
+                        .domain
+                        .as_ref()
+                        .map(|d| d.as_str().to_string())
+                        .unwrap_or_else(|| axagent_harness::CapabilityDomain::Automation.as_str().to_string()),
+                    "capabilityCount": manifest.capabilities.len(),
+                    // 期一·5：卡片展示具体承诺能力（predicate 解析出的可读 id 列表）
+                    "capabilities": manifest
+                        .capabilities
+                        .iter()
+                        .filter_map(|c| match &c.predicate {
+                            capability_pack::CapabilityMatchPredicate::IdExact { id } => {
+                                Some(id.clone())
+                            },
+                            capability_pack::CapabilityMatchPredicate::IdPrefix { prefix } => {
+                                Some(format!("id_prefix:{prefix}"))
+                            },
+                            capability_pack::CapabilityMatchPredicate::All => None,
+                        })
+                        .collect::<Vec<String>>(),
+                }));
+            }
+        }
+        serde_json::to_value(items)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::market_list 序列化失败: {e}")))
     }
 
     /// 域包学习指标（迁移前 `opc_get_learning_metrics`）—— 读 op。

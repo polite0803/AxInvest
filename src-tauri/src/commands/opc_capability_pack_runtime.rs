@@ -477,25 +477,7 @@ pub async fn opc_get_capability_pack_automation_rules(
 // `HostOpcStore::build_data_client`（`src-tauri/src/init/opc_store_service.rs`），`app_data_dir`
 // 用已装配的 `app_dir`（未装配 fail-closed，不回退进程级默认根）。
 
-/// 动态工作流执行（兼容旧接口）
-///
-/// 新架构下所有工作流均通过种子化到 DB → WorkEngine 执行，
-/// 此函数将旧的动态执行请求转发到标准执行通道。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "动态工作流执行（兼容旧接口）")]
-#[tauri::command]
-pub async fn opc_execute_dynamic_workflow(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    workflow_id: Option<String>,
-    days: Option<u32>,
-    user_input: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    crate::commands::opc_capability_pack_actions::opc_execute_workflow(
-        app_state,
-        capability_pack_id,
-        workflow_id,
-        days,
-        user_input,
-    )
-    .await
-}
+// `opc_execute_dynamic_workflow` 已随 #264 批 7 刀 B2 删除：插件侧同名命令走 `opc.store` 的
+// `execute_dynamic_workflow` 写 op。三级查找的正文只有一份 ——
+// `commands::opc_capability_pack_actions::execute_workflow_core`（宿主命令 `opc_execute_workflow`
+// 与接缝 provider 共用），本文件不再有第二条转调链。

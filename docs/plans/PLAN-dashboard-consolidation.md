@@ -11,7 +11,7 @@
 
 | v1 判断 | 实证 | 证据 |
 |---|---|---|
-| E/F 重复应合并 | **错**。跨域汇总 vs 单域包详情，字段零交集 | `commands/opc.rs:583-587` |
+| E/F 重复应合并 | **错**。跨域汇总 vs 单域包详情，字段零交集 | `src-tauri/src/commands/opc.rs:229-267` |
 | F 看板 UI 是死码 | **半错**。死的只有宿主 `DomainTabLayout.tsx`（自 `0963ffaac` 从未接线）；卡片层是活契约 | `DomainTabLayout.tsx:15`、`analytics.rs:125-145`↔`types.ts:143-156` |
 | CrossMarket 应删 | **错**。纵向链完整，只缺入口 | `CrossMarketPage.tsx` 无注册 |
 | commands[] 执行分发未做 | **已过时**（AGENTS.md 本身有误） | `manager.rs:452`、`commands/plugin.rs:448` |

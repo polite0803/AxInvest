@@ -2315,17 +2315,23 @@ pub(crate) async fn run_template_via_engine(
     Ok(Some(execution_result))
 }
 
-/// 执行域包工作流
+/// 三级查找的执行体内核（`opc_execute_workflow` 命令与 `opc.store::execute_dynamic_workflow`
+/// 写入面**共用这一份**，不许复制第二份）。
 ///
 /// 三级查找：① 传入的 template_id（前端 wf-* / config 映射）→ ② 域包 harness 模板
 /// （{domain_pack_id}_harness_workflow，seed 时写入 DB）→ ③ 从 adapter 一次性种子化到 DB
 /// （用户之后可在工作流编辑器修改）再执行。全部走 rt-workflow 引擎，不再运行时动态生成 DAG。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "执行域包工作流")]
-#[tauri::command]
-pub async fn opc_execute_workflow(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    workflow_id: Option<String>,
+///
+/// 入参是**宿主装配好的三项能力**（db / engine / app_dir）而不是 `AppState`：插件通道（T2 worker）
+/// 拿不到宿主 `AppState`，只有 `opc.store` 接缝给的那几个句柄。返回类型保持迁移前命令体的
+/// `std::result::Result<…, String>`，由调用方决定怎么落成各自的错误类型
+/// （命令侧原样返回；接缝侧由 provider 转 `AxAgentError`）。
+pub(crate) async fn execute_workflow_core(
+    db: &sea_orm::DatabaseConnection,
+    engine: &std::sync::Arc<axagent_runtime::work_engine::WorkEngine>,
+    app_dir: &std::path::Path,
+    capability_pack_id: &str,
+    workflow_id: Option<&str>,
     days: Option<u32>,
     user_input: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
@@ -2337,32 +2343,29 @@ pub async fn opc_execute_workflow(
     let domain_pack_id_normalized = capability_pack_id.replace('-', "_");
 
     // 1. 确定模板 ID：优先使用传入的 workflow_id，否则拼接默认模板 ID
-    let template_id = if let Some(ref wf_id) = workflow_id {
+    let template_id = if let Some(wf_id) = workflow_id {
         // 尝试从域包配置中找到对应的 template_id
-        let capability_pack_config = get_capability_pack_config(&capability_pack_id);
+        let capability_pack_config = get_capability_pack_config(capability_pack_id);
         if let Some(config) = &capability_pack_config {
             if let Some(wf_config) =
-                config.workflows.iter().find(|w| w.id == *wf_id || w.template_id == *wf_id)
+                config.workflows.iter().find(|w| w.id == wf_id || w.template_id == wf_id)
             {
                 wf_config.template_id.clone()
             } else {
-                wf_id.clone()
+                wf_id.to_string()
             }
         } else {
-            wf_id.clone()
+            wf_id.to_string()
         }
     } else {
         format!("{domain_pack_id_normalized}_harness_workflow")
     };
 
-    let db = app_state.harness.db();
-    let engine = Arc::clone(&app_state.work_engine);
-
     // 2a. 首选：传入的 template_id（前端 wf-* 或 config 映射的模板，均已 seed 进 DB）
     if let Some(result) = run_template_via_engine(
         db,
-        &engine,
-        &capability_pack_id,
+        engine,
+        capability_pack_id,
         &template_id,
         days,
         user_input.clone(),
@@ -2377,8 +2380,8 @@ pub async fn opc_execute_workflow(
     if harness_template_id != template_id {
         if let Some(result) = run_template_via_engine(
             db,
-            &engine,
-            &capability_pack_id,
+            engine,
+            capability_pack_id,
             &harness_template_id,
             days,
             user_input.clone(),
@@ -2398,7 +2401,7 @@ pub async fn opc_execute_workflow(
 
     // 从 analysis-engine 的域包配置获取工作流模板数据
     let capability_pack_engine_config =
-        engine_config::get_config(&domain_pack_id_normalized, Some(&app_state.app_data_dir))
+        engine_config::get_config(&domain_pack_id_normalized, Some(app_dir))
             .ok_or_else(|| format!("域包配置不存在: {capability_pack_id}"))?;
 
     // 组合工具解析器（域工具定义来自启动时注入的 domain_tools 槽位）
@@ -2422,8 +2425,8 @@ pub async fn opc_execute_workflow(
 
     if let Some(result) = run_template_via_engine(
         db,
-        &engine,
-        &capability_pack_id,
+        engine,
+        capability_pack_id,
         &harness_template_id,
         days,
         user_input,
@@ -2434,6 +2437,34 @@ pub async fn opc_execute_workflow(
     }
 
     Err(format!("工作流模板不存在且种子化失败: {template_id}"))
+}
+
+/// 执行域包工作流的宿主命令（实现体见 [`execute_workflow_core`]）。
+///
+/// 本命令只把 `AppState` 里的三项能力摘出来转调内核 —— 插件通道的
+/// `opc.store::execute_dynamic_workflow` 共享同一份正文，两侧不许各写一套三级查找。
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "执行域包工作流")]
+#[tauri::command]
+pub async fn opc_execute_workflow(
+    app_state: State<'_, AppState>,
+    capability_pack_id: String,
+    workflow_id: Option<String>,
+    days: Option<u32>,
+    user_input: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let db = app_state.harness.db();
+    let engine = Arc::clone(&app_state.work_engine);
+    let app_dir = app_state.app_data_dir.clone();
+    execute_workflow_core(
+        db,
+        &engine,
+        &app_dir,
+        &capability_pack_id,
+        workflow_id.as_deref(),
+        days,
+        user_input,
+    )
+    .await
 }
 
 /// 查询域包学习指标

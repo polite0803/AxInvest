@@ -91,6 +91,18 @@ pub struct HostOpcStore {
     /// OPC 种子模块）⇒ 默认是**空表**，`Protected` 分支由单测经 [`Self::protect_ids`] 注入取证。
     /// 将来有种子内容时在 wiring 同段登记，名单常量放种子模块 —— 不在本层拍一份字面量。
     protected: RwLock<HashSet<String>>,
+    /// 舰队仓储（#264 批 7 刀 B2）：`sync_fleet` op 建舰队 / 列成员 / 加成员 / 改成员状态。
+    ///
+    /// 与 `AppState.fleet_repository` 是**同一个** `Arc`（生产由 `state.rs` 经
+    /// [`Self::with_fleet_repository`] 装配）。未装配 ⇒ `Provider` 错、**不回退内存实现**
+    /// （测试替身里的舰队表与生产库是两份数据，回落会让「同步成功」变成一句谎）。
+    fleet: Option<std::sync::Arc<dyn axagent_harness::fleet::FleetRepository>>,
+    /// 宿主独占的工作流引擎（#264 批 7 刀 B2）：`execute_dynamic_workflow` op 跑 rt-workflow DAG。
+    ///
+    /// 与 `AppState.work_engine` 是**同一个** `Arc`（生产由 `state.rs` 经
+    /// [`Self::with_work_engine`] 装配）。未装配 ⇒ `Provider` 错；**不新建第二个引擎** ——
+    /// 第二个引擎没有 agent turn runner / 事件总线 / 域约束，跑出来的执行既没有工具也没有进度外发。
+    work_engine: Option<std::sync::Arc<axagent_runtime::work_engine::WorkEngine>>,
 }
 
 /// 需求实现链的宿主服务句柄（#264 批 3）。
@@ -101,7 +113,14 @@ struct DemandPipeline {
 
 impl HostOpcStore {
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db, demand: None, app_dir: None, protected: RwLock::new(HashSet::new()) }
+        Self {
+            db,
+            demand: None,
+            app_dir: None,
+            protected: RwLock::new(HashSet::new()),
+            fleet: None,
+            work_engine: None,
+        }
     }
 
     /// 装配需求实现链的两项宿主服务（生产唯一装配口，`state.rs` 调用）。
@@ -126,6 +145,27 @@ impl HostOpcStore {
     /// 装配域包配置根目录（生产唯一装配口，`state.rs` 调用）。
     pub fn with_app_dir(mut self, app_dir: std::path::PathBuf) -> Self {
         self.app_dir = Some(app_dir);
+        self
+    }
+
+    /// 装配舰队仓储（`sync_fleet` 的唯一装配口，`state.rs` 调用）。
+    ///
+    /// 传 `AppState.fleet_repository` 的同一个 `Arc`：`sync_fleet` 的判重读的就是调度器 /
+    /// 办公室视图看到的那份成员表，另建一个仓储等于同步到别处。
+    pub fn with_fleet_repository(
+        mut self,
+        fleet: std::sync::Arc<dyn axagent_harness::fleet::FleetRepository>,
+    ) -> Self {
+        self.fleet = Some(fleet);
+        self
+    }
+
+    /// 装配宿主工作流引擎（`execute_dynamic_workflow` 的唯一装配口，`state.rs` 调用）。
+    pub fn with_work_engine(
+        mut self,
+        work_engine: std::sync::Arc<axagent_runtime::work_engine::WorkEngine>,
+    ) -> Self {
+        self.work_engine = Some(work_engine);
         self
     }
 
@@ -1979,6 +2019,422 @@ impl OpcStoreProvider for HostOpcStore {
             "health": health,
         }))
     }
+
+    // ── #264 批 7 刀 B2：域包单据面十二 op（六读六写）────────────────────────
+    //
+    // 十二条的真实来源是 `commands::opc` 的十一条宿主命令 + `commands::opc_capability_pack_runtime`
+    // 的 `opc_execute_dynamic_workflow`（本批删）。**迁≠改**：服务构造、错误映射、出参键名
+    // 与顺序逐字保留，只把「读哪个 db / 哪个 app_dir / 哪个 engine」换成 `self` 上的句柄。
+    //
+    // 载荷一律 `serde_json::Value`（域 DTO 的 serde 线格式：这几份域模型都没加
+    // `rename_all` ⇒ 键是 snake_case），与迁移前命令 `Result<Invoice, String>` 经 Tauri IPC
+    // 序列化出的 JSON 逐字段同形。入参 `input` 在**本层**用 `from_value` 解码：形状非法落
+    // `Validation`（fail-closed、带定位文案），不让一个缺键的 payload 变成一次「静默不改」的写。
+
+    /// 取一张发票（迁移前 `opc_get_invoice`）—— 读 op。
+    async fn get_invoice(&self, id: String) -> Result<serde_json::Value> {
+        let svc = DefaultInvoiceService::new(self.db.clone());
+        let invoice = svc.get_invoice(&id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_invoice 取发票失败: {e}"))
+        })?;
+        serde_json::to_value(invoice)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::get_invoice 序列化失败: {e}")))
+    }
+
+    /// 更新发票（迁移前 `opc_update_invoice`）—— 写 op。
+    async fn update_invoice(
+        &self,
+        id: String,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let input = serde_json::from_value::<UpdateInvoiceInput>(input).map_err(|e| {
+            AxAgentError::Validation(format!("opc.store::update_invoice input 形状非法: {e}"))
+        })?;
+        let svc = DefaultInvoiceService::new(self.db.clone());
+        let invoice = svc.update_invoice(&id, input).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::update_invoice 更新失败: {e}"))
+        })?;
+        serde_json::to_value(invoice).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::update_invoice 序列化失败: {e}"))
+        })
+    }
+
+    /// 取一个客户（迁移前 `opc_get_customer`）—— 读 op。
+    async fn get_customer(&self, id: String) -> Result<serde_json::Value> {
+        let svc = DefaultCustomerService::new(self.db.clone());
+        let customer = svc.get_customer(&id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_customer 取客户失败: {e}"))
+        })?;
+        serde_json::to_value(customer)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::get_customer 序列化失败: {e}")))
+    }
+
+    /// 按邮箱查客户（迁移前 `opc_find_customer_by_email`）—— 读 op。
+    ///
+    /// `None` 落成 `Value::Null`（迁移前命令返回 `Option<Customer>`）：查无此邮箱是**正常结果**，
+    /// 翻成 `NotFound` 会让「新客户录入」这条路径报错。
+    async fn find_customer_by_email(&self, email: String) -> Result<serde_json::Value> {
+        let svc = DefaultCustomerService::new(self.db.clone());
+        let customer = svc.find_by_email(&email).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::find_customer_by_email 查询失败: {e}"))
+        })?;
+        serde_json::to_value(customer).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::find_customer_by_email 序列化失败: {e}"))
+        })
+    }
+
+    /// 记录一条 KPI（迁移前 `opc_record_kpi`）—— 写 op。
+    async fn record_kpi(&self, input: serde_json::Value) -> Result<serde_json::Value> {
+        let input = serde_json::from_value::<CreateKpiInput>(input).map_err(|e| {
+            AxAgentError::Validation(format!("opc.store::record_kpi input 形状非法: {e}"))
+        })?;
+        let svc = DefaultAnalyticsService::new(self.db.clone());
+        let record = svc
+            .record_kpi(input)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::record_kpi 记录失败: {e}")))?;
+        serde_json::to_value(record)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::record_kpi 序列化失败: {e}")))
+    }
+
+    /// 列出收入记录（迁移前 `opc_list_revenue`）—— 读 op。两个过滤键均可缺省。
+    async fn list_revenue(
+        &self,
+        category: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        let svc = DefaultAnalyticsService::new(self.db.clone());
+        let rows = svc.list_revenue(category, limit).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::list_revenue 取收入记录失败: {e}"))
+        })?;
+        serde_json::to_value(rows)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::list_revenue 序列化失败: {e}")))
+    }
+
+    /// 按周期给投资建议（迁移前 `opc_get_investment_advice`）—— 读 op（纯计算不落库）。
+    ///
+    /// 两步仍是「先出报表、再据报表出建议」（迁移前命令体同序）：建议是报表的派生量，
+    /// 拆成两个读 op 只会多一次帧往返。
+    async fn get_investment_advice(&self, period: String) -> Result<serde_json::Value> {
+        let svc = DefaultFinanceService::new(self.db.clone());
+        let report = FinanceService::get_financial_report(&svc, &period).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_investment_advice 生成报表失败: {e}"))
+        })?;
+        let advice = FinanceService::get_investment_advice(&svc, &report).await;
+        serde_json::to_value(advice).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_investment_advice 序列化失败: {e}"))
+        })
+    }
+
+    /// 导入人才库（迁移前 `opc_import_talent_library`）—— 写 op。
+    ///
+    /// 正文自迁移前命令体**整体搬入**（目录遍历 + 幂等判重 + `tt-{dir}-{stem}` 命名，
+    /// 判据一处不落）：`agency-agents-src` 的专家 md 逐个落一行 `opc_talent_templates`。
+    /// 「目录不存在」属**入参非法**（`Validation`，落到 `SEAM_CALL_INVALID_ARGS`），
+    /// 与「目录在但某个 md 读不出来」的 `Provider` 分开 —— 前者调用方改参数即可，后者是环境问题。
+    async fn import_talent_library(&self, path: String) -> Result<serde_json::Value> {
+        use axagent_company_runtime::org::{NewTalentTemplate, OrgService};
+
+        let base = std::path::PathBuf::from(&path);
+        if !base.is_dir() {
+            return Err(AxAgentError::Validation(format!(
+                "opc.store::import_talent_library 目录不存在: {path}"
+            )));
+        }
+        let org = OrgService::new(&self.db);
+
+        let mut imported: u32 = 0;
+        let mut skipped: u32 = 0;
+
+        // 一次性加载现有模板 id 集合（迁移前 P2-1 的改动：此前每个 md 都全表查询，
+        // 274 个专家 → 274 次全表扫描；改为一次加载 + HashSet 判重）。
+        let existing = org.list_talent_templates(None).await.map_err(|e| {
+            AxAgentError::Provider(format!(
+                "opc.store::import_talent_library 读取既有模板失败: {e}"
+            ))
+        })?;
+        let mut existing_ids: std::collections::HashSet<String> =
+            existing.into_iter().map(|t| t.id).collect();
+
+        // 遍历分类目录（跳过非专家目录）
+        for entry in std::fs::read_dir(&base).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::import_talent_library 读取目录失败: {e}"))
+        })? {
+            let entry = entry.map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "opc.store::import_talent_library 读取目录项失败: {e}"
+                ))
+            })?;
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let dir_name = entry.file_name().to_string_lossy().to_string();
+            if dir_name.starts_with('.')
+                || dir_name == "scripts"
+                || dir_name == "examples"
+                || dir_name == "integrations"
+            {
+                continue;
+            }
+            // 读目录下每个 md 的 frontmatter（name/description）
+            for md in std::fs::read_dir(&dir).map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "opc.store::import_talent_library 读取分类目录失败: {e}"
+                ))
+            })? {
+                let md = md.map_err(|e| {
+                    AxAgentError::Provider(format!(
+                        "opc.store::import_talent_library 读取目录项失败: {e}"
+                    ))
+                })?;
+                let md_path = md.path();
+                if md_path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let stem = md_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                let content = std::fs::read_to_string(&md_path).map_err(|e| {
+                    AxAgentError::Provider(format!(
+                        "opc.store::import_talent_library 读取 {} 失败: {e}",
+                        md_path.display()
+                    ))
+                })?;
+                let (name, description) = parse_frontmatter_brief(&content, &stem);
+                let tid = format!("tt-{dir_name}-{stem}");
+
+                // 幂等：已存在跳过
+                if existing_ids.contains(&tid) {
+                    skipped += 1;
+                    continue;
+                }
+                existing_ids.insert(tid.clone());
+                org.add_talent_template(NewTalentTemplate {
+                    id: tid.clone(),
+                    category: dir_name.clone(),
+                    name: name.clone(),
+                    description: description.clone(),
+                    source_repo: "agency-agents-src".to_string(),
+                    prompt_refs: Some(vec![format!("agency-agents-src/{dir_name}/{stem}.md")]),
+                    skill_refs: None,
+                    tags: Some(vec![dir_name.clone()]),
+                })
+                .await
+                .map_err(|e| {
+                    AxAgentError::Provider(format!(
+                        "opc.store::import_talent_library 写入模板 {tid} 失败: {e}"
+                    ))
+                })?;
+                imported += 1;
+            }
+        }
+
+        Ok(serde_json::json!({ "imported": imported, "skipped": skipped }))
+    }
+
+    /// 同步 OPC 员工为舰队成员（迁移前 `opc_sync_fleet`）—— 写 op，零入参、幂等。
+    ///
+    /// 读库部分（在册员工 / 每个角色最新工作项 phase）走 dao 的两个读口
+    /// （`axagent_dao::repo::opc_org`，本层不写 SQL）；舰队读写走装配的 `fleet`。
+    async fn sync_fleet(&self) -> Result<serde_json::Value> {
+        use axagent_dao::repo::opc_org;
+        use axagent_harness::fleet::{
+            Fleet, FleetMember, FleetMemberStatus, FleetMetadata, FleetStatus,
+        };
+
+        let fleet_repo = self.fleet.as_ref().ok_or_else(|| {
+            AxAgentError::Provider(
+                "opc.store::sync_fleet 未装配舰队仓库（宿主 wiring 缺 with_fleet_repository）"
+                    .into(),
+            )
+        })?;
+
+        // 1. 找/建默认舰队（迁移前命令体逐字搬移：名字是这个函数的**唯一**识别键）
+        let fleet_id = {
+            let fleets = fleet_repo.list_fleets(None).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::sync_fleet 列出舰队失败: {e}"))
+            })?;
+            match fleets.into_iter().find(|f| f.name == "OPC 一人公司") {
+                Some(f) => f.id,
+                None => {
+                    let fleet = Fleet {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: "OPC 一人公司".to_string(),
+                        scene_template_slug: None,
+                        status: FleetStatus::Active,
+                        created_at: chrono::Utc::now().timestamp_millis(),
+                        updated_at: chrono::Utc::now().timestamp_millis(),
+                        metadata: FleetMetadata {
+                            description: "一人公司 6 角色（OpenOPC 三机制）".to_string(),
+                            max_members: 16,
+                            strategy: None,
+                            tags: vec!["opc".to_string()],
+                        },
+                    };
+                    fleet_repo
+                        .create_fleet(fleet)
+                        .await
+                        .map_err(|e| {
+                            AxAgentError::Provider(format!(
+                                "opc.store::sync_fleet 创建舰队失败: {e}"
+                            ))
+                        })?
+                        .id
+                },
+            }
+        };
+
+        // 2. 扫描 active 员工
+        let employees = opc_org::list_active_opc_employees(&self.db).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::sync_fleet 查询员工失败: {e}"))
+        })?;
+
+        // 已有成员（按 agent_slug 判重）
+        let members = fleet_repo.list_members(&fleet_id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::sync_fleet 列出成员失败: {e}"))
+        })?;
+
+        let mut synced = 0u32;
+        let mut updated = 0u32;
+
+        let role_ids: Vec<String> = employees.iter().map(|(role_id, _)| role_id.clone()).collect();
+        // 迁移前 `opc_batch_role_status` 在查询失败时静默回空 map（全员 Idle）；本处保持同一降级，
+        // 但把吞掉的错误打出来 —— 返回值与迁移前逐字相同，可观测性不丢。
+        let phase_by_role = opc_org::latest_work_item_phase_by_role(&self.db, &role_ids)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "[opc.store::sync_fleet] 工作项状态聚合失败（降级为全员 Idle）: {e}"
+                );
+                std::collections::HashMap::new()
+            });
+
+        for (role_id, employee_id) in &employees {
+            let slug = role_id.clone();
+            // phase → 成员状态：三个「在办」态算 Busy、两个「坏了」态算 Error、其余（含无工作项）
+            // Idle —— 与迁移前 `opc_batch_role_status` 的 match 逐字同表。
+            let status = match phase_by_role.get(&slug).map(String::as_str).unwrap_or("") {
+                "IN_PROGRESS" | "REVIEW" | "APPROVED" => FleetMemberStatus::Busy,
+                "BLOCKED" | "FAILED" => FleetMemberStatus::Error,
+                _ => FleetMemberStatus::Idle,
+            };
+            match members.iter().find(|m| m.agent_slug == slug) {
+                Some(existing) => {
+                    if existing.status != status {
+                        fleet_repo.update_member_status(&existing.id, status).await.map_err(
+                            |e| {
+                                AxAgentError::Provider(format!(
+                                    "opc.store::sync_fleet 更新成员状态失败: {e}"
+                                ))
+                            },
+                        )?;
+                        updated += 1;
+                    }
+                },
+                None => {
+                    let member = FleetMember {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        fleet_id: fleet_id.clone(),
+                        agent_id: employee_id.clone(),
+                        agent_slug: slug.clone(),
+                        display_name: employee_id.clone(),
+                        role: slug.clone(),
+                        agent_profile_id: None,
+                        room_id: "default".to_string(),
+                        status,
+                        joined_at: chrono::Utc::now().timestamp_millis(),
+                        today_tokens: 0,
+                        total_tokens: 0,
+                    };
+                    fleet_repo.add_member(member).await.map_err(|e| {
+                        AxAgentError::Provider(format!("opc.store::sync_fleet 新增成员失败: {e}"))
+                    })?;
+                    synced += 1;
+                },
+            }
+        }
+
+        let total = fleet_repo
+            .list_members(&fleet_id)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::sync_fleet 列出成员失败: {e}"))
+            })?
+            .len();
+        Ok(serde_json::json!({
+            "fleetId": fleet_id,
+            "synced": synced,
+            "updatedStatus": updated,
+            "totalMembers": total,
+        }))
+    }
+
+    /// 取单个发布计划（迁移前 `opc_get_publish_schedule`）—— 读 op。
+    async fn get_publish_schedule(&self, id: String) -> Result<serde_json::Value> {
+        let svc = DefaultSiteService::new(self.db.clone());
+        // 全限定调用：`DefaultSiteService` 同时实现 `SiteService` / `ContentAssetService` /
+        // `PublishScheduleService`，同名方法在导入多个 trait 时会有歧义。
+        let schedule =
+            PublishScheduleService::get_publish_schedule(&svc, &id).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::get_publish_schedule 查询失败: {e}"))
+            })?;
+        serde_json::to_value(schedule).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::get_publish_schedule 序列化失败: {e}"))
+        })
+    }
+
+    /// 更新发布计划（迁移前 `opc_update_publish_schedule`）—— 写 op。
+    async fn update_publish_schedule(
+        &self,
+        id: String,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let input = serde_json::from_value::<UpdatePublishScheduleInput>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "opc.store::update_publish_schedule input 形状非法: {e}"
+            ))
+        })?;
+        let svc = DefaultSiteService::new(self.db.clone());
+        let schedule = PublishScheduleService::update_publish_schedule(&svc, &id, input)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::update_publish_schedule 更新失败: {e}"))
+            })?;
+        serde_json::to_value(schedule).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::update_publish_schedule 序列化失败: {e}"))
+        })
+    }
+
+    /// 动态工作流执行（迁移前 `opc_execute_dynamic_workflow`）—— 写 op。
+    ///
+    /// 三级查找 / 按需种子化 / DAG 执行全在
+    /// [`crate::commands::opc_capability_pack_actions::execute_workflow_core`]（与宿主命令
+    /// `opc_execute_workflow` 共用一份正文，本层只做「摘句柄 + 错误类型转换」）。
+    async fn execute_dynamic_workflow(
+        &self,
+        capability_pack_id: String,
+        workflow_id: Option<String>,
+        days: Option<u32>,
+        user_input: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let engine = self.work_engine.clone().ok_or_else(|| {
+            AxAgentError::Provider(
+                "opc.store::execute_dynamic_workflow 未装配工作流引擎（宿主 wiring 缺 with_work_engine）"
+                    .into(),
+            )
+        })?;
+        let app_dir = self.pack_app_dir("execute_dynamic_workflow")?;
+        opc_capability_pack_actions::execute_workflow_core(
+            &self.db,
+            &engine,
+            &app_dir,
+            &capability_pack_id,
+            workflow_id.as_deref(),
+            days,
+            user_input,
+        )
+        .await
+        .map_err(AxAgentError::Provider)
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────
@@ -2603,6 +3059,41 @@ fn passport_to_entry(
             "sub_category": p.sub_category,
         }),
     }
+}
+
+// ── #264 批 7 刀 B2 写面三 op 的入参 / 解析器 ────────────────────────────────
+//
+// 同前几批的理由：`impl OpcStoreProvider for HostOpcStore` 行被登记表与 PLAN 按行号引用，
+// 模块级 `use` 在任意 item 位置都生效 ⇒ 一律追加在 impl 之后。
+//
+// 三份入参 DTO 的权威定义在 `company-runtime`（implementor）：harness 是 foundation，
+// 按依赖铁律不得反向依赖 ⇒ 接缝载荷用 `Value`，解码只在本层发生一次（判据见接缝模块头）。
+use axagent_company_runtime::opc::{
+    CreateKpiInput, UpdateInvoiceInput, UpdatePublishScheduleInput,
+};
+
+/// 解析专家 md 的 frontmatter（name/description）。
+///
+/// 自宿主命令模块 `commands/opc.rs` 迁入（随 `opc_import_talent_library` 命令删除）：
+/// 只看前 20 行、`name:` / `description:` 取裸值并去引号，`name` 缺失时回落文件名去连字符。
+/// 逐字保留 —— 这个函数决定 274 条人才库模板的展示名，改一处判据就是整库改名。
+fn parse_frontmatter_brief(content: &str, fallback_stem: &str) -> (String, String) {
+    let mut name = String::new();
+    let mut description = String::new();
+    for line in content.lines().take(20) {
+        if let Some(v) = line.strip_prefix("name:") {
+            name = v.trim().trim_matches('"').to_string();
+        } else if let Some(v) = line.strip_prefix("description:") {
+            description = v.trim().trim_matches('"').to_string();
+        }
+        if !name.is_empty() && !description.is_empty() {
+            break;
+        }
+    }
+    if name.is_empty() {
+        name = fallback_stem.replace('-', " ");
+    }
+    (name, description)
 }
 
 #[cfg(test)]

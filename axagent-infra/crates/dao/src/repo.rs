@@ -53,6 +53,7 @@ pub mod opc_blog_post;
 pub mod opc_capability_gap;
 pub mod opc_delivery;
 pub mod opc_demand;
+pub mod opc_org;
 pub mod paper_overviews;
 pub mod platform_config;
 pub mod price_alert;

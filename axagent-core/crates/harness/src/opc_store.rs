@@ -1193,6 +1193,146 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::get_capability_pack_health 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── #264 批 7 刀 B2：域包单据面十二 op（六读六写，薄层透传）─────────────────
+    //
+    // 迁移前是宿主 `commands::opc` 的十一条 `#[agent_command]` + `opc_capability_pack_runtime`
+    // 的 `opc_execute_dynamic_workflow` 包装器（本批删）。十二条的载荷一律 `serde_json::Value`：
+    // 入参是域模型 DTO（`UpdateInvoiceInput` / `CreateKpiInput` / `UpdatePublishScheduleInput`），
+    // 出参是 `Invoice` / `Customer` / `KpiRecord` / `RevenueRecord` / `InvestmentAdvice` /
+    // `PublishSchedule` 的序列化结果。这些 DTO 的权威定义在 `company-runtime`（implementor），
+    // 而 harness 是 foundation、不得依赖 implementor ⇒ 接缝侧不收这些类型，反序列化与
+    // 序列化都钉在实现方（宿主 provider 调 service 时完成）。**不是**漏了类型：为十二条各造
+    // 一份视图才是新增面积（禁区 12），也会让「迁移前命令体逐字同形」这条判据失去锚点。
+    //
+    // 六条写 op（`update_invoice` / `record_kpi` / `import_talent_library` / `sync_fleet` /
+    // `update_publish_schedule` / `execute_dynamic_workflow`）在 `worker.rs` 的
+    // `required_permission_for` 登记 `Write`；六条读 op 必须仍是 `None`（`READ_OPS` 钉住）。
+
+    /// 取一张发票（`get_invoice` op）—— 读 op。查无回 `NotFound`。
+    async fn get_invoice(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_invoice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新发票（`update_invoice` op）—— 写 op，要 `write` 权限。
+    ///
+    /// `input` 按 `UpdateInvoiceInput` 的 serde 约束反序列化：三键皆 `Option` 且**没有**
+    /// `#[serde(default)]` 之外的缺省语义 —— 缺键 = 不改该字段，类型不符整条拒。
+    async fn update_invoice(
+        &self,
+        _id: String,
+        _input: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_invoice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取一个客户（`get_customer` op）—— 读 op。查无回 `NotFound`。
+    async fn get_customer(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_customer 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 按邮箱查客户（`find_customer_by_email` op）—— 读 op。
+    ///
+    /// 「查无此邮箱」回 `Value::Null`（**不是**错误）：迁移前命令体返回 `Option<Customer>`，
+    /// 前端拿 `null` 表示未匹配。翻成 `NotFound` 会让「新客户录入」这条正常路径报错。
+    async fn find_customer_by_email(&self, _email: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::find_customer_by_email 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 记录一条 KPI（`record_kpi` op）—— 写 op，要 `write` 权限。
+    ///
+    /// `input.domain_pack_id` 是必填（`CreateKpiInput` 无 `#[serde(default)]`，且该 DTO 未加
+    /// `rename_all` ⇒ 键就是 snake_case）；空值 / 空白由
+    /// 域包归属闸拒收（`canonical_domain_pack_id`），两处判据都留在实现方，接缝层不复制。
+    async fn record_kpi(&self, _input: serde_json::Value) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::record_kpi 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出收入记录（`list_revenue` op）—— 读 op。两个过滤键均可缺省。
+    async fn list_revenue(
+        &self,
+        _category: Option<String>,
+        _limit: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_revenue 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 按周期给投资建议（`get_investment_advice` op）—— 读 op（纯计算不落库）。
+    async fn get_investment_advice(&self, _period: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_investment_advice 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 导入人才库（`import_talent_library` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 「目录不存在 / 不可读」的判定在实现方（迁移前命令体的 `is_dir` 前置闸）；
+    /// 幂等判据（已存在的 `template id` 跳过）同样钉在实现方。
+    async fn import_talent_library(&self, _path: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::import_talent_library 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 同步 OPC 员工为舰队成员（`sync_fleet` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 零入参、幂等：按 `agent_slug` 判重，成员状态由该角色最新 work item 的 phase 驱动。
+    /// 舰队仓储由实现方自备（宿主 = 装配的 `fleet_repository`，未装配 fail-closed）。
+    async fn sync_fleet(&self) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::sync_fleet 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取单个发布计划（`get_publish_schedule` op）—— 读 op。查无回 `NotFound`。
+    async fn get_publish_schedule(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_publish_schedule 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新发布计划（`update_publish_schedule` op）—— 写 op，要 `write` 权限。
+    ///
+    /// `input` 按 `UpdatePublishScheduleInput` 反序列化：两键皆 `Option`，缺键 = 不改；
+    /// 状态机合法值与时间戳量纲由实现方判。
+    async fn update_publish_schedule(
+        &self,
+        _id: String,
+        _input: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::update_publish_schedule 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 动态工作流执行（`execute_dynamic_workflow` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 三级模板查找 + 按需种子化 + `WorkEngine` 执行全在实现方（迁移前
+    /// `opc_execute_workflow` 的自由函数体原样下沉，见 `execute_workflow_core`）。
+    /// `days = None` ⇒ 30（迁移前命令体的缺省）。
+    async fn execute_dynamic_workflow(
+        &self,
+        _capability_pack_id: String,
+        _workflow_id: Option<String>,
+        _days: Option<u32>,
+        _user_input: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::execute_dynamic_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

@@ -39,7 +39,7 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 - `DomainRegistrationProposal`：`uncovered` 中归属域未落现存业务域的，聚合成「提示增加域」提案（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:990-1015`）；
 - 报告由 `audit_capability_packs_capability` 装配（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1098-1122`）。
 
-**实际处置口径是「审计性质、非硬失败」**（代码注释原文见 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1097`）：启动索引重建、`opc_import_capability_pack`、`ensure_opc_workflows_seeded` 三处调用只写日志/前端提示，不阻断流程；导入命令即使校验不通过也返回 `Ok(...)` 的成功信息串（`src-tauri/src/commands/opc.rs:662-699`）。因此任务描述里的「seed 期阻塞 / 增量期告警」在当前实现中**并未落地为两档处置**，仅有统一的非阻塞审计。
+**实际处置口径是「审计性质、非硬失败」**（代码注释原文见 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1097`）：启动索引重建、`opc_import_capability_pack`、`ensure_opc_workflows_seeded` 三处调用只写日志/前端提示，不阻断流程；导入命令即使校验不通过也返回 `Ok(...)` 的成功信息串（`src-tauri/src/commands/opc.rs:106-155`）。因此任务描述里的「seed 期阻塞 / 增量期告警」在当前实现中**并未落地为两档处置**，仅有统一的非阻塞审计。
 
 （对应版本：v2.9.9；能力承诺对账随域包卡片增强引入，证据 0963ffaac）
 
@@ -88,11 +88,11 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 ## 关键代码入口
 
 - 后端命令：
-  - 导出 `src-tauri/src/commands/opc.rs:635`
-  - 导入 `src-tauri/src/commands/opc.rs:651`
-  - 启停 `src-tauri/src/commands/opc.rs:706`
+  - 导出 `src-tauri/src/commands/opc.rs:90`
+  - 导入 `src-tauri/src/commands/opc.rs:106`
+  - 启停 `src-tauri/src/commands/opc.rs:161`
   - 配置查询 / 动作 / 学习指标三条读口（2026-11-11 #264 批 7 刀 A 起，原宿主 `opc_capability_pack_actions.rs` 里的这三条 Tauri 命令已删除，命令面由插件命名命令逐字续用原名 `opc_list_industries` / `opc_get_capability_pack_config` / `opc_list_capability_pack_actions`，实现落回 `opc.store` 接缝的宿主服务）：
-    `axagent-plugins/crates/plugin-opc/src/main.rs:2376`（`list_industries`）、`:2384`（`get_capability_pack_config`）、`:2417`（`list_capability_pack_actions`）
+    `axagent-plugins/crates/plugin-opc/src/main.rs:2499`（`list_industries`）、`:2507`（`get_capability_pack_config`）、`:2540`（`list_capability_pack_actions`）
 - 引擎/业务层：
   - 封闭校验 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:925`
   - 审计装配 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1098`
@@ -109,7 +109,7 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 ## 配置与开关
 
 - 域包根目录：`CAPABILITY_PACKS_DIR = "config/opc/domain_packs"`，旧目录回退常量 `LEGACY_CAPABILITY_PACKS_DIR`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:22`、`:33`）。
-- 包级开关：`manifest.enabled` + DB 表 `opc_domain_packs.enabled`；两者以 DB 为准（`src-tauri/src/commands/opc.rs:702`）。
+- 包级开关：`manifest.enabled` + DB 表 `opc_domain_packs.enabled`；两者以 DB 为准（`src-tauri/src/commands/opc.rs:161`）。
 - 包级版本：`manifest.version`，域包间互不影响，取代旧的全局 `OPC_TEMPLATE_VERSION`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:11-12`）。
 - 域开关：运行时覆盖层 `capability_domain_overrides` 只改「启用 / 追加别名」，不新增域（`axagent-core/crates/harness/src/domain_registry.rs:40-90`）。
 - i18n：域标签 key 由 `DomainNode::label_key()` 与前端 `domainLabelKey()` 同公式派生（`scripts/check-domain-single-source.mjs:18`）。
@@ -119,8 +119,8 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 
 1. **`domain` 缺省回退口径不一致**：manifest 字段注释写「缺省 `None` 回退 `Automation`」（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:71-74`），但「提示增加域」提案的兜底实际用 `general`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:999`）。写新包时不要依赖注释里的 `automation`。
 2. **`domain` 的「业务域子集」未被运行时校验**：注释称由 `assert_capability_pack_capability_closed` 保证（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:74`），但该函数只用 `existing_user_domains` 过滤提案（`:994-996`），并不拒绝 `domain: system`。类型层面能挡住拼写错误的自造域，挡不住把系统域写成归属域。
-3. **能力集封闭是审计而非门禁**：三处调用均为非阻塞（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1097`），导入失败也以 `Ok` 返回提示串（`src-tauri/src/commands/opc.rs:687-696`）。因此「seed 期阻塞 / 增量期告警」两档处置目前无代码对应。
-4. **表名与注释漂移**：启用开关注释写「写 DB `opc_capability_packs.enabled`」（`src-tauri/src/commands/opc.rs:702`），实体真实表名是 `opc_domain_packs`（`axagent-core/crates/entities/src/opc_capability_packs.rs:9`）。排查 SQL 时以实体为准。
+3. **能力集封闭是审计而非门禁**：三处调用均为非阻塞（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1097`），导入失败也以 `Ok` 返回提示串（`src-tauri/src/commands/opc.rs:142-155`）。因此「seed 期阻塞 / 增量期告警」两档处置目前无代码对应。
+4. **表名与注释漂移**：启用开关注释写「写 DB `opc_capability_packs.enabled`」（`src-tauri/src/commands/opc.rs:161`），实体真实表名是 `opc_domain_packs`（`axagent-core/crates/entities/src/opc_capability_packs.rs:9`）。排查 SQL 时以实体为准。
 5. **旧目录回退只能读不能写**：`LEGACY_CAPABILITY_PACKS_DIR` 仅用于存量读取，写路径一律走新常量（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:26-33`）。
 6. **谓词能力未被数据覆盖**：`All` / `IdPrefix` 有实现与单测，但 14 个内置包全部用 `IdExact`（见上表），实战中前缀/整来源封闭口径尚未被真实 manifest 验证。
 

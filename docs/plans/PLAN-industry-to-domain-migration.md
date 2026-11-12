@@ -1292,7 +1292,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 | `declared_kpi_thresholds` | `runtime.rs:93` | `pub(crate) fn` | 读域包 `runtime.yaml` 声明阈值 | **analysis-engine**（须先核 runtime schema 落点） |
 | `find_repo_config_dir` | `opc_workflows/mod.rs:237` | `pub fn` | 纯 `fs` / `path` | analysis-engine 或公共 utils |
 | `upsert_template` | `opc_workflows/mod.rs:538` | `pub(crate) async fn` | **DB 写 `workflow_templates`** | **dao 层**（不宜落 analysis-engine） |
-| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2325` | `pub async fn`（**Tauri 命令**） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
+| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2448` | `pub async fn`（**Tauri 命令**） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
 
 ⇒ 后 2 项（`upsert_template` / `opc_execute_workflow`）**超出「机械替换」范畴**，待获批后单独立项。
 

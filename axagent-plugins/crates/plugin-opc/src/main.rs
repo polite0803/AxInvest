@@ -203,6 +203,26 @@ const OPC_STORE_GET_CAPABILITY_PACK_DATA: &str = "get_capability_pack_data";
 const OPC_STORE_GET_CAPABILITY_PACK_PRECHECK: &str = "get_capability_pack_precheck";
 const OPC_STORE_GET_CAPABILITY_PACK_HEALTH: &str = "get_capability_pack_health";
 
+/// #264 批 7 刀 B2：域包单据面十二 op（薄层透传）。
+///
+/// 六条写 op（`update_invoice` / `record_kpi` / `import_talent_library` / `sync_fleet` /
+/// `update_publish_schedule` / `execute_dynamic_workflow`）在宿主权限表登记 `Write`；
+/// 六条读 op（`get_invoice` / `get_customer` / `find_customer_by_email` / `list_revenue` /
+/// `get_investment_advice` / `get_publish_schedule`）一条闸都不登记 —— 两侧同批改，判据在
+/// `worker.rs` 的 `required_permission_for` 与 `READ_OPS` / `WRITE_OPS` 用例。
+const OPC_STORE_GET_INVOICE: &str = "get_invoice";
+const OPC_STORE_UPDATE_INVOICE: &str = "update_invoice";
+const OPC_STORE_GET_CUSTOMER: &str = "get_customer";
+const OPC_STORE_FIND_CUSTOMER_BY_EMAIL: &str = "find_customer_by_email";
+const OPC_STORE_RECORD_KPI: &str = "record_kpi";
+const OPC_STORE_LIST_REVENUE: &str = "list_revenue";
+const OPC_STORE_GET_INVESTMENT_ADVICE: &str = "get_investment_advice";
+const OPC_STORE_IMPORT_TALENT_LIBRARY: &str = "import_talent_library";
+const OPC_STORE_SYNC_FLEET: &str = "sync_fleet";
+const OPC_STORE_GET_PUBLISH_SCHEDULE: &str = "get_publish_schedule";
+const OPC_STORE_UPDATE_PUBLISH_SCHEDULE: &str = "update_publish_schedule";
+const OPC_STORE_EXECUTE_DYNAMIC_WORKFLOW: &str = "execute_dynamic_workflow";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -355,6 +375,23 @@ const COMMAND_COMPUTE_KPIS: &str = "opc_compute_kpis";
 const COMMAND_GET_CAPABILITY_PACK_DATA: &str = "opc_get_capability_pack_data";
 const COMMAND_GET_CAPABILITY_PACK_PRECHECK: &str = "opc_get_capability_pack_precheck";
 const COMMAND_GET_CAPABILITY_PACK_HEALTH: &str = "opc_get_capability_pack_health";
+
+/// #264 批 7 刀 B2：域包单据面十二命令（清单 `commands[].name` 必须逐字一致）。宿主同名
+/// 十二条 Tauri 命令随本批删除 —— 六读六写都按 #273 裁定迁 T2 收口，插件命令保持 `opc_*`
+/// 原名（智能体工具名与出参形状不变）。六条写命令还需同批进 `scripts/build-plugin-bundle.mjs`
+/// 的 `OPC_WRITE_COMMANDS`（否则智能体面按未声明 = 只读档暴露）。
+const COMMAND_GET_INVOICE: &str = "opc_get_invoice";
+const COMMAND_UPDATE_INVOICE: &str = "opc_update_invoice";
+const COMMAND_GET_CUSTOMER: &str = "opc_get_customer";
+const COMMAND_FIND_CUSTOMER_BY_EMAIL: &str = "opc_find_customer_by_email";
+const COMMAND_RECORD_KPI: &str = "opc_record_kpi";
+const COMMAND_LIST_REVENUE: &str = "opc_list_revenue";
+const COMMAND_GET_INVESTMENT_ADVICE: &str = "opc_get_investment_advice";
+const COMMAND_IMPORT_TALENT_LIBRARY: &str = "opc_import_talent_library";
+const COMMAND_SYNC_FLEET: &str = "opc_sync_fleet";
+const COMMAND_GET_PUBLISH_SCHEDULE: &str = "opc_get_publish_schedule";
+const COMMAND_UPDATE_PUBLISH_SCHEDULE: &str = "opc_update_publish_schedule";
+const COMMAND_EXECUTE_DYNAMIC_WORKFLOW: &str = "opc_execute_dynamic_workflow";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -1022,6 +1059,92 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_GET_CAPABILITY_PACK_HEALTH => {
             match get_capability_pack_health(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 批 7 刀 B2：域包单据面十二命令（六读六写，每条一次接缝调用直投影；命令层只做
+        // 形状判，非空 / 存在性 / 状态机合法性 / 目录可读全在宿主 provider）。
+        COMMAND_GET_INVOICE => match get_invoice(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_UPDATE_INVOICE => match update_invoice(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_CUSTOMER => match get_customer(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_FIND_CUSTOMER_BY_EMAIL => {
+            match find_customer_by_email(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_RECORD_KPI => match record_kpi(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LIST_REVENUE => match list_revenue(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_INVESTMENT_ADVICE => {
+            match get_investment_advice(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_IMPORT_TALENT_LIBRARY => {
+            match import_talent_library(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_SYNC_FLEET => match sync_fleet(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GET_PUBLISH_SCHEDULE => {
+            match get_publish_schedule(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_UPDATE_PUBLISH_SCHEDULE => {
+            match update_publish_schedule(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_EXECUTE_DYNAMIC_WORKFLOW => {
+            match execute_dynamic_workflow(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2622,6 +2745,200 @@ fn get_capability_pack_health(
         json!({ "domain_pack_id": pack_id }),
         call_chain,
     )
+}
+
+// ── #264 批 7 刀 B2：域包单据面十二命令（六读六写）─────────────────────────────
+//
+// 迁移前是宿主 `commands::opc` 的同名 `#[agent_command]`（`opc_execute_dynamic_workflow` 在
+// `commands::opc_capability_pack_runtime`）；本命令只做入参形状 + 透传，语义闸（非空 / 存在性 /
+// 目录可读 / 状态机合法性）全在宿主 provider。键名分档同前批：命令面 camelCase，接缝面
+// snake_case；`input` 是域模型 DTO，内部键沿用迁移前的 snake_case，**不转换**。
+
+/// `opc_get_invoice`：取一张域包发票（读 op，`id` 必填；查无回未找到）。
+fn get_invoice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_invoice";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_GET_INVOICE, json!({ "id": id }), call_chain)
+}
+
+/// `opc_update_invoice`：更新一张域包发票（写 op，`id` 必填 + `input` 必填对象）。
+///
+/// 命令层只判 `input` 是不是对象：`line_items` / `notes` / `due_at` 的逐字段类型由宿主
+/// `from_value` 反序列化 fail-closed（缺键按默认值，类型不符整条拒）。
+fn update_invoice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_invoice";
+    let id = require_str(input, OP, "id")?;
+    let payload = require_object(input, OP, "input")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_INVOICE,
+        json!({ "id": id, "input": payload }),
+        call_chain,
+    )
+}
+
+/// `opc_get_customer`：取一个客户（读 op，`id` 必填；查无回未找到）。
+fn get_customer(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_customer";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_GET_CUSTOMER, json!({ "id": id }), call_chain)
+}
+
+/// `opc_find_customer_by_email`：按邮箱查客户（读 op，`email` 必填；查无回 `null`，
+/// 与「查库失败」分属两种结果，插件侧不许把 `null` 翻成错误）。
+fn find_customer_by_email(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_find_customer_by_email";
+    let email = require_str(input, OP, "email")?;
+    call_opc_store(peer, OPC_STORE_FIND_CUSTOMER_BY_EMAIL, json!({ "email": email }), call_chain)
+}
+
+/// `opc_record_kpi`：记录一条 KPI（写 op，`input` 必填对象）。
+///
+/// `domain_pack_id` 的必填与「空串 / 空白即拒」都在宿主 provider（迁移前就是
+/// `CreateKpiInput` 的 serde 约束 + `canonical_domain_pack_id` 的语义闸），命令层不越界。
+fn record_kpi(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_record_kpi";
+    let payload = require_object(input, OP, "input")?;
+    call_opc_store(peer, OPC_STORE_RECORD_KPI, json!({ "input": payload }), call_chain)
+}
+
+/// `opc_list_revenue`：列出收入记录（读 op，`category` / `limit` 可选）。
+///
+/// 两个可选键缺省都**不转发**（不塞 null）：宿主侧是 `Option`，缺键即 `None`，塞 null 会
+/// 多造一个「调用方显式传了 null」的假信号。`limit` 给了必须是数值（非整数由宿主 `u32`
+/// 反序列化 fail-closed 拒）。
+fn list_revenue(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_list_revenue";
+    let mut args = serde_json::Map::new();
+    copy_optional_strings(input, OP, &mut args, &["category"])?;
+    copy_optional_f64(input, OP, &mut args, &["limit"])?;
+    call_opc_store(peer, OPC_STORE_LIST_REVENUE, Value::Object(args), call_chain)
+}
+
+/// `opc_get_investment_advice`：按周期给投资建议（读 op，`period` 必填；纯计算不落库）。
+fn get_investment_advice(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_investment_advice";
+    let period = require_str(input, OP, "period")?;
+    call_opc_store(peer, OPC_STORE_GET_INVESTMENT_ADVICE, json!({ "period": period }), call_chain)
+}
+
+/// `opc_import_talent_library`：导入人才库（写 op，`path` 必填 —— 扫描目录并落模板表）。
+///
+/// 「目录不存在 / 不可读」的判定留在宿主 provider（迁移前命令体里就有一条 `is_dir` 前置闸）：
+/// 插件进程不该拿到一条可绕过的路径判据副本（两侧各判一半必然漂移）。
+fn import_talent_library(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_import_talent_library";
+    let path = require_str(input, OP, "path")?;
+    call_opc_store(peer, OPC_STORE_IMPORT_TALENT_LIBRARY, json!({ "path": path }), call_chain)
+}
+
+/// `opc_sync_fleet`：把 OPC 员工同步为舰队成员（写 op，零入参，幂等）。
+fn sync_fleet(call_chain: &[String], peer: &mut WorkerPeer) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_SYNC_FLEET, json!({}), call_chain)
+}
+
+/// `opc_get_publish_schedule`：取单个发布计划（读 op，`id` 必填；查无回未找到）。
+fn get_publish_schedule(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_publish_schedule";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_GET_PUBLISH_SCHEDULE, json!({ "id": id }), call_chain)
+}
+
+/// `opc_update_publish_schedule`：更新发布计划（写 op，`id` 必填 + `input` 必填对象）。
+///
+/// `scheduled_at` / `status` 的取值域（状态机合法值、时间戳量纲）全在宿主 provider；命令层
+/// 只判 `input` 是对象。
+fn update_publish_schedule(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_update_publish_schedule";
+    let id = require_str(input, OP, "id")?;
+    let payload = require_object(input, OP, "input")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_UPDATE_PUBLISH_SCHEDULE,
+        json!({ "id": id, "input": payload }),
+        call_chain,
+    )
+}
+
+/// `opc_execute_dynamic_workflow`：动态工作流执行（写 op，兼容旧接口）。
+///
+/// 命令面 `capabilityPackId` 必填，`workflowId` / `days` / `userInput` 可选；接缝键改为
+/// snake_case（`capability_pack_id` / `workflow_id` / `days` / `user_input`），可选键缺省
+/// **不传**（不塞 null —— 宿主侧是 `Option`，缺键即 `None`）。三级模板查找与引擎装配在宿主
+/// provider，命令层不复制。
+fn execute_dynamic_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_execute_dynamic_workflow";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("capability_pack_id".to_string(), json!(pack_id));
+    match input.get("workflowId") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(workflow_id)) => {
+            args.insert("workflow_id".to_string(), Value::String(workflow_id.clone()));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `workflowId` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    match input.get("days") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.is_number() => {
+            args.insert("days".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `days` 必须是数值（形状判在命令层）")));
+        },
+    }
+    if let Some(user_input) = input.get("userInput").filter(|value| !value.is_null()) {
+        args.insert("user_input".to_string(), user_input.clone());
+    }
+    call_opc_store(peer, OPC_STORE_EXECUTE_DYNAMIC_WORKFLOW, Value::Object(args), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

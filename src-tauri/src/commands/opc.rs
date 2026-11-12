@@ -10,13 +10,7 @@ use crate::AppState;
 use sea_orm::ActiveModelTrait;
 use tauri::State;
 
-use axagent_company_runtime::opc::{
-    AnalyticsService, ContentAsset, ContentAssetService, CreateKpiInput, Customer, CustomerService,
-    DefaultAnalyticsService, DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService,
-    DefaultSiteService, FinanceService, InvestmentAdvice, Invoice, InvoiceService, KpiRecord,
-    PublishSchedule, PublishScheduleService, RevenueRecord, UpdateInvoiceInput,
-    UpdatePublishScheduleInput,
-};
+use axagent_company_runtime::opc::{ContentAsset, ContentAssetService, DefaultSiteService};
 
 use axagent_company_runtime::opc::capability_pack::{
     CAPABILITY_PACKS_DIR, CapabilityMatchPredicate, CapabilityPackManifest, export_capability_pack,
@@ -24,64 +18,16 @@ use axagent_company_runtime::opc::capability_pack::{
     set_capability_pack_enabled,
 };
 
-// ── Invoice Commands ──────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取发票")]
-#[tauri::command]
-pub async fn opc_get_invoice(state: State<'_, AppState>, id: String) -> Result<Invoice, String> {
-    let svc = DefaultInvoiceService::new(state.harness.db().clone());
-    svc.get_invoice(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "更新发票")]
-#[tauri::command]
-pub async fn opc_update_invoice(
-    state: State<'_, AppState>,
-    id: String,
-    input: UpdateInvoiceInput,
-) -> Result<Invoice, String> {
-    let svc = DefaultInvoiceService::new(state.harness.db().clone());
-    svc.update_invoice(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-// ── Customer Commands ─────────────────────────────────────────────
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取客户")]
-#[tauri::command]
-pub async fn opc_get_customer(state: State<'_, AppState>, id: String) -> Result<Customer, String> {
-    let svc = DefaultCustomerService::new(state.harness.db().clone());
-    svc.get_customer(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "按邮箱查找客户")]
-#[tauri::command]
-pub async fn opc_find_customer_by_email(
-    state: State<'_, AppState>,
-    email: String,
-) -> Result<Option<Customer>, String> {
-    let svc = DefaultCustomerService::new(state.harness.db().clone());
-    svc.find_by_email(&email).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// ── Invoice / Customer Commands（本段六条已随 #264 批 7 刀 B2 删除）──────────
+//
+// `opc_get_invoice` / `opc_update_invoice` / `opc_get_customer` /
+// `opc_find_customer_by_email` / `opc_get_investment_advice` 与同批的
+// `opc_record_kpi` / `opc_list_revenue` / `opc_import_talent_library` / `opc_sync_fleet` /
+// `opc_get_publish_schedule` / `opc_update_publish_schedule` 十一条宿主命令已删：
+// 插件 `axagent-plugins/crates/plugin-opc` 逐条声明同名命令并走 `opc.store` 接缝
+// （宿主实现 `src-tauri/src/init/opc_store_service.rs` 的 `HostOpcStore`）。
+// 删前经穷举取证：前端 0 处 `invoke`、`axagent-runtime/crates/tools` 0 处直连
+// （工具面走 `call_opc_command` 插件命令桥，fail-closed 不回落直连）、宿主内部 0 处转调。
 
 // ── Project Commands ──────────────────────────────────────────────
 //
@@ -109,77 +55,32 @@ pub async fn opc_find_customer_by_email(
 // `opc_list_landing_pages` / `opc_list_contacts` / `opc_create_landing_page` 等插件命令
 // 走 worker 通道（先例 #144 的双声明收口：宿主侧随接缝补齐同批删除）。
 
-// ── Analytics Commands ──────────────────────────────────────────────
-
-/// 记录一条 KPI。
-///
-/// `input.domain_pack_id` 是**必填**（`CreateKpiInput` 里没有 `#[serde(default)]`）：
-/// 缺键会在反序列化阶段响亮报错，而不是落一行「无归属」的记录。
-/// 归属**必须由调用方从运行上下文提供**，不得由 LLM 自报 ——
-/// 自报的域包要么是幻觉（落进不存在的域包桶）、要么是猜的（落进别人的桶）。
-/// 空值/空白同样被拒（见 `opc::analytics::canonical_domain_pack_id`）。
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "记录 KPI")]
-#[tauri::command]
-pub async fn opc_record_kpi(
-    state: State<'_, AppState>,
-    input: CreateKpiInput,
-) -> Result<KpiRecord, String> {
-    let svc = DefaultAnalyticsService::new(state.harness.db().clone());
-    svc.record_kpi(input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// ── Analytics Commands（本段两条已随 #264 批 7 刀 B2 删除）──────────────
+//
+// `opc_record_kpi` / `opc_list_revenue` 两条宿主命令已删：插件
+// `axagent-plugins/crates/plugin-opc` 声明同名命令，读 / 写分别走 `opc.store` 的
+// `record_kpi`（写）与 `list_revenue`（读）两条 op。`domain_pack_id` 的必填与
+// 「空值 / 空白即拒」两条判据原样留在域服务（`CreateKpiInput` 无 `#[serde(default)]` +
+// `opc::analytics::canonical_domain_pack_id`），接缝层不复制。
 
 // `opc_list_kpis` 已随 #266 删除：插件侧同名命令走 `opc.store` 的 KPI 列表读 op
 // （`axagent-plugins/crates/plugin-opc`），宿主本文件侧零消费；`axagent-runtime/crates/tools`
 // 的 KPI 工具改走 `call_opc_command` 插件命令桥（fail-closed，不回落直连）。
 // 域包范围内的 KPI 仍走 `opc_get_capability_pack_dashboard` 链路，不受本条删除影响。
 
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出收入记录")]
-#[tauri::command]
-pub async fn opc_list_revenue(
-    state: State<'_, AppState>,
-    category: Option<String>,
-    limit: Option<u32>,
-) -> Result<Vec<RevenueRecord>, String> {
-    let svc = DefaultAnalyticsService::new(state.harness.db().clone());
-    svc.list_revenue(category, limit).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 // `opc_get_dashboard_summary` 已随 #267 删除：插件侧同名命令走 `opc.store` 的
 // `dashboard_summary` 读 op（宿主按整表聚合，见 `init/opc_store_service.rs`），宿主侧
 // 唯一消费方 `DashboardTab.tsx` 已切 `invokePluginCommand`。域包范围内的摘要仍走
 // `opc_get_capability_pack_dashboard`，不受本条删除影响。
 
-// ── Finance Commands ────────────────────────────────────────────────
+// ── Finance Commands（本段一条已随 #264 批 7 刀 B2 删除）────────────────
 //
 // `opc_get_financial_report` 已随 #266 删除：插件侧同名命令走 `opc.store` 只读接缝
 // （`axagent-plugins/crates/plugin-opc`），宿主侧零消费（`axagent-runtime/crates/tools`
 // 的财务报表工具走 `call_opc_command` 插件命令桥）。
-
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取投资建议")]
-#[tauri::command]
-pub async fn opc_get_investment_advice(
-    state: State<'_, AppState>,
-    period: String,
-) -> Result<InvestmentAdvice, String> {
-    let svc = DefaultFinanceService::new(state.harness.db().clone());
-    let report = svc.get_financial_report(&period).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    Ok(svc.get_investment_advice(&report).await)
-}
+// `opc_get_investment_advice` 已随 #264 批 7 刀 B2 删除：插件侧同名命令走 `opc.store` 的
+// `get_investment_advice` 读 op（「先出报表、再据报表出建议」两步仍在一处，见
+// `init/opc_store_service.rs` 的同名方法）。
 
 // ── Domain Pack .opcip 导出/导入 ──────────────────────────────
 
@@ -534,139 +435,9 @@ pub async fn opc_work_item_unblock(
 
 // ── P4-1：人才库导入 + 市场包 ─────────────────────────────────
 
-/// 导入人才库：扫描 agency-agents-src 目录 → 填充 opc_talent_templates。
-/// 每个专家 md 生成一条 talent template（分类 = 目录名）。
-/// 幂等：已存在的 template id 跳过。
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "导入人才库")]
-#[tauri::command]
-pub async fn opc_import_talent_library(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_company_runtime::org::OrgService;
-
-    let base = std::path::PathBuf::from(&path);
-    if !base.is_dir() {
-        return Err(format!("目录不存在: {path}"));
-    }
-    let db = state.harness.db().clone();
-    let org = OrgService::new(&db);
-
-    let mut imported: u32 = 0;
-    let mut skipped: u32 = 0;
-
-    // P2-1：一次性加载现有模板 id 集合（此前每个 md 文件都全表查询 list_talent_templates，
-    // 274 个专家 → 274 次全表扫描；改为一次加载 + HashSet 判重）
-    let existing = org.list_talent_templates(None).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    let mut existing_ids: std::collections::HashSet<String> =
-        existing.into_iter().map(|t| t.id).collect();
-
-    // 遍历分类目录（跳过非专家目录）
-    for entry in std::fs::read_dir(&base).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })? {
-        let entry = entry.map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let dir_name = entry.file_name().to_string_lossy().to_string();
-        if dir_name.starts_with('.')
-            || dir_name == "scripts"
-            || dir_name == "examples"
-            || dir_name == "integrations"
-        {
-            continue;
-        }
-        // 读目录下每个 md 的 frontmatter（name/description）
-        for md in std::fs::read_dir(&dir).map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })? {
-            let md = md.map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })?;
-            let md_path = md.path();
-            if md_path.extension().and_then(|e| e.to_str()) != Some("md") {
-                continue;
-            }
-            let stem = md_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let content = std::fs::read_to_string(&md_path).map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })?;
-            let (name, description) = parse_frontmatter_brief(&content, &stem);
-            let tid = format!("tt-{dir_name}-{stem}");
-
-            // 幂等：已存在跳过（P2-1：用预加载的 HashSet 判重）
-            if existing_ids.contains(&tid) {
-                skipped += 1;
-                continue;
-            }
-            existing_ids.insert(tid.clone());
-            org.add_talent_template(axagent_company_runtime::org::NewTalentTemplate {
-                id: tid.clone(),
-                category: dir_name.clone(),
-                name: name.clone(),
-                description: description.clone(),
-                source_repo: "agency-agents-src".to_string(),
-                prompt_refs: Some(vec![format!("agency-agents-src/{dir_name}/{stem}.md")]),
-                skill_refs: None,
-                tags: Some(vec![dir_name.clone()]),
-            })
-            .await
-            .map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })?;
-            imported += 1;
-        }
-    }
-
-    Ok(serde_json::json!({ "imported": imported, "skipped": skipped }))
-}
-
-/// 解析专家 md 的 frontmatter（name/description）。
-fn parse_frontmatter_brief(content: &str, fallback_stem: &str) -> (String, String) {
-    let mut name = String::new();
-    let mut description = String::new();
-    for line in content.lines().take(20) {
-        if let Some(v) = line.strip_prefix("name:") {
-            name = v.trim().trim_matches('"').to_string();
-        } else if let Some(v) = line.strip_prefix("description:") {
-            description = v.trim().trim_matches('"').to_string();
-        }
-        if !name.is_empty() && !description.is_empty() {
-            break;
-        }
-    }
-    if name.is_empty() {
-        name = fallback_stem.replace('-', " ");
-    }
-    (name, description)
-}
+// `opc_import_talent_library` 已随 #264 批 7 刀 B2 删除：插件侧同名命令走 `opc.store` 的
+// `import_talent_library` 写 op（正文逐字搬入 `HostOpcStore`，含它曾用到的私有辅助
+// `parse_frontmatter_brief` —— 展示名的解析判据只有那一份）。
 
 /// 市场包列表：扫描内置域包目录 + app_dir 已装状态。
 /// 返回 [{id, name, icon, version, enabled, installed, path, domain, capabilityCount}]
@@ -772,221 +543,19 @@ pub async fn run_self_improving_opc_work_item(
     }
 }
 
-// ── 方案 B：OPC 角色进 Fleet（办公室接真实 Agent 状态）────────────
+// ── 方案 B：OPC 角色进 Fleet（本条已随 #264 批 7 刀 B2 删除）────────────
+//
+// `opc_sync_fleet` 已删：插件侧同名命令走 `opc.store` 的 `sync_fleet` 写 op。正文（找/建默认
+// 舰队 → 扫 active 员工 → 按 `agent_slug` 判重 → 成员状态由最新 work item phase 驱动）逐字
+// 搬入 `init/opc_store_service.rs`；两段直连 sea_orm 的查询（员工扫描、工作项状态聚合）按
+// 分层纪律下沉 dao（`axagent-infra/crates/dao/src/repo/opc_org.rs`），私有辅助
+// `opc_batch_role_status` 随之下沉、本文件不再有第二份。
 
-/// 同步 OPC 员工为舰队成员（幂等）：扫描 opc_org_employees(active) →
-/// 注册/更新到 Fleet，成员状态由该角色最新 work item phase 驱动。
-/// 办公室（Fleet 视图）从此显示真实角色状态，与看板形成"人/事"互补。
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "同步员工到舰队")]
-#[tauri::command]
-pub async fn opc_sync_fleet(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_org_employees;
-    use axagent_harness::fleet::{Fleet, FleetMember, FleetMetadata, FleetStatus};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-    let db = state.harness.db().clone();
-    let fleet_repo = state.fleet_repository.clone();
-
-    // 1. 找/建默认舰队
-    let fleet_id = {
-        let fleets = fleet_repo.list_fleets(None).await.map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-        match fleets.into_iter().find(|f| f.name == "OPC 一人公司") {
-            Some(f) => f.id,
-            None => {
-                let fleet = Fleet {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    name: "OPC 一人公司".to_string(),
-                    scene_template_slug: None,
-                    status: FleetStatus::Active,
-                    created_at: chrono::Utc::now().timestamp_millis(),
-                    updated_at: chrono::Utc::now().timestamp_millis(),
-                    metadata: FleetMetadata {
-                        description: "一人公司 6 角色（OpenOPC 三机制）".to_string(),
-                        max_members: 16,
-                        strategy: None,
-                        tags: vec!["opc".to_string()],
-                    },
-                };
-                fleet_repo
-                    .create_fleet(fleet)
-                    .await
-                    .map_err(|e| {
-                        String::from(crate::commands::error::ErrorResponse::from_error(
-                            e,
-                            crate::commands::error::ErrorCategory::Unrecoverable,
-                        ))
-                    })?
-                    .id
-            },
-        }
-    };
-
-    // 2. 扫描 active 员工
-    let employees = opc_org_employees::Entity::find()
-        .filter(opc_org_employees::Column::Status.eq("active"))
-        .all(&db)
-        .await
-        .map_err(|e| format!("查询员工失败: {e}"))?;
-
-    // 已有成员（按 agent_slug 判重）
-    let members = fleet_repo.list_members(&fleet_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    let mut synced = 0u32;
-    let mut updated = 0u32;
-
-    let role_ids: Vec<String> = employees.iter().map(|e| e.role_id.clone()).collect();
-    let role_status_map = opc_batch_role_status(&db, &role_ids).await;
-
-    for emp in &employees {
-        let slug = emp.role_id.clone();
-        let status = role_status_map
-            .get(&slug)
-            .cloned()
-            .unwrap_or(axagent_harness::fleet::FleetMemberStatus::Idle);
-        match members.iter().find(|m| m.agent_slug == slug) {
-            Some(existing) => {
-                if existing.status != status {
-                    fleet_repo.update_member_status(&existing.id, status).await.map_err(|e| {
-                        String::from(crate::commands::error::ErrorResponse::from_error(
-                            e,
-                            crate::commands::error::ErrorCategory::Unrecoverable,
-                        ))
-                    })?;
-                    updated += 1;
-                }
-            },
-            None => {
-                let member = FleetMember {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    fleet_id: fleet_id.clone(),
-                    agent_id: emp.employee_id.clone(),
-                    agent_slug: slug.clone(),
-                    display_name: emp.employee_id.clone(),
-                    role: slug.clone(),
-                    agent_profile_id: None,
-                    room_id: "default".to_string(),
-                    status,
-                    joined_at: chrono::Utc::now().timestamp_millis(),
-                    today_tokens: 0,
-                    total_tokens: 0,
-                };
-                fleet_repo.add_member(member).await.map_err(|e| {
-                    String::from(crate::commands::error::ErrorResponse::from_error(
-                        e,
-                        crate::commands::error::ErrorCategory::Unrecoverable,
-                    ))
-                })?;
-                synced += 1;
-            },
-        }
-    }
-
-    let total = fleet_repo
-        .list_members(&fleet_id)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?
-        .len();
-    Ok(serde_json::json!({
-        "fleetId": fleet_id,
-        "synced": synced,
-        "updatedStatus": updated,
-        "totalMembers": total,
-    }))
-}
-
-/// 批量查询多个角色的成员状态（避免 N+1 查询）。
-/// 一次性加载所有相关 work items，在内存中按 role_id 分组取最新一条。
-async fn opc_batch_role_status(
-    db: &sea_orm::DatabaseConnection,
-    role_ids: &[String],
-) -> std::collections::HashMap<String, axagent_harness::fleet::FleetMemberStatus> {
-    use axagent_entities::opc_work_items;
-    use axagent_harness::fleet::FleetMemberStatus;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-
-    let mut map = std::collections::HashMap::new();
-
-    if role_ids.is_empty() {
-        return map;
-    }
-
-    let work_items = opc_work_items::Entity::find()
-        .filter(opc_work_items::Column::OwnerRoleId.is_in(role_ids.iter().map(|s| s.as_str())))
-        .order_by_desc(opc_work_items::Column::UpdatedAt)
-        .all(db)
-        .await
-        .unwrap_or_default();
-
-    for w in work_items {
-        if let Some(role_id) = &w.owner_role_id {
-            if role_id.is_empty() || map.contains_key(role_id) {
-                continue;
-            }
-            let status = match w.phase.as_str() {
-                "IN_PROGRESS" | "REVIEW" | "APPROVED" => FleetMemberStatus::Busy,
-                "BLOCKED" | "FAILED" => FleetMemberStatus::Error,
-                _ => FleetMemberStatus::Idle,
-            };
-            map.insert(role_id.clone(), status);
-        }
-    }
-
-    for rid in role_ids {
-        map.entry(rid.clone()).or_insert(FleetMemberStatus::Idle);
-    }
-
-    map
-}
-
-// ── 发布计划 Tauri 命令 ─────────────────────────────────────────
-
-/// 获取单个发布计划
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "获取发布计划详情")]
-#[tauri::command]
-pub async fn opc_get_publish_schedule(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<PublishSchedule, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.get_publish_schedule(&id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 更新发布计划
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "更新发布计划")]
-#[tauri::command]
-pub async fn opc_update_publish_schedule(
-    state: State<'_, AppState>,
-    id: String,
-    input: UpdatePublishScheduleInput,
-) -> Result<PublishSchedule, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.update_publish_schedule(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// ── 发布计划 Tauri 命令（本段两条已随 #264 批 7 刀 B2 删除）────────────────
+//
+// `opc_get_publish_schedule` / `opc_update_publish_schedule` 两条宿主命令已删：插件侧
+// 同名命令走 `opc.store` 的 `get_publish_schedule`（读）/ `update_publish_schedule`（写）
+// 两条 op，状态机合法值与时间戳量纲的判据仍在域服务（`PublishScheduleService`）。
 
 // `opc_process_due_schedules` 已随 #266 删除：插件侧同名命令（写 op，`axagent-plugins/crates/plugin-opc`）
 // 是唯一通道；宿主侧零消费 —— `axagent-runtime/crates/tools` 的到期处理工具走

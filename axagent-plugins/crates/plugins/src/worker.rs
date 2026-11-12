@@ -560,7 +560,19 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             // `get_capability_pack_precheck` / `get_capability_pack_health`）——
             // 同样全是只读，写分支**一条都不加**，锁在 READ_OPS 用例。
             | "save_subscription"
-            | "delete_subscription",
+            | "delete_subscription"
+            // #264 批 7 刀 B2：域包单据面**六条写 op**（更新发票 / 记录 KPI / 导入人才库 /
+            // 同步舰队 / 更新发布计划 / 动态工作流执行）—— 全都改库，其中导入人才库与动态
+            // 工作流执行还会触发批量的落库 / 引擎执行。同批另**六条读 op**（`get_invoice` /
+            // `get_customer` / `find_customer_by_email` / `list_revenue` /
+            // `get_investment_advice` / `get_publish_schedule`）**必须仍是 `None`**，
+            // 锁在 READ_OPS 用例（给读缝加闸会把只读插件无端拒掉）。
+            | "update_invoice"
+            | "record_kpi"
+            | "import_talent_library"
+            | "sync_fleet"
+            | "update_publish_schedule"
+            | "execute_dynamic_workflow",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -4556,6 +4568,238 @@ impl HostPeer {
                 let Some(result) =
                     self.block_on(provider.get_capability_pack_health(domain_pack_id))
                 else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── #264 批 7 刀 B2：域包单据面十二 op（六读六写，薄层透传）─────────────
+            //
+            // 六条写 op（`update_invoice` / `record_kpi` / `import_talent_library` /
+            // `sync_fleet` / `update_publish_schedule` / `execute_dynamic_workflow`）已在
+            // `required_permission_for` 登记 `Write`；六条读 op 仍 `None`（`READ_OPS` 钉住）。
+            // 入参键一律接缝 snake_case（`id` / `email` / `period` / `path` / `input`）；
+            // `input` 是域模型 DTO，内部键沿用迁移前的 snake_case —— 本层只反序列化、不映射。
+            "opc.store" if op == "get_invoice" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_invoice(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(invoice) => to_value("Invoice", &invoice),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "update_invoice" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                // 入参 DTO（`UpdateInvoiceInput`）权威定义在 company-runtime（implementor），
+                // harness 是 foundation 不得引用 ⇒ 本层按 `Value` 透传，字段校验在宿主 provider。
+                let input: Value = match deserialize_arg(&args, "input", seam) {
+                    Ok(input) => input,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_invoice(id, input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(invoice) => to_value("Invoice", &invoice),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_customer" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_customer(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(customer) => to_value("Customer", &customer),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "find_customer_by_email" => {
+                let email: String = match deserialize_arg(&args, "email", seam) {
+                    Ok(email) => email,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.find_customer_by_email(email)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 「查无此邮箱」是**正常结果**（`None` → `null`），不许翻成错误码。
+                    Ok(customer) => to_value("Option<Customer>", &customer),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "record_kpi" => {
+                let input: Value = match deserialize_arg(&args, "input", seam) {
+                    Ok(input) => input,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.record_kpi(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(record) => to_value("KpiRecord", &record),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_revenue" => {
+                let category: Option<String> =
+                    match deserialize_optional_arg(&args, "category", seam) {
+                        Ok(category) => category,
+                        Err(response) => return response,
+                    };
+                let limit: Option<u32> = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_revenue(category, limit)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(rows) => to_value("Vec<RevenueRecord>", &rows),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_investment_advice" => {
+                let period: String = match deserialize_arg(&args, "period", seam) {
+                    Ok(period) => period,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_investment_advice(period)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(advice) => to_value("InvestmentAdvice", &advice),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "import_talent_library" => {
+                let path: String = match deserialize_arg(&args, "path", seam) {
+                    Ok(path) => path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.import_talent_library(path)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "sync_fleet" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.sync_fleet()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_publish_schedule" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_publish_schedule(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(schedule) => to_value("PublishSchedule", &schedule),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "update_publish_schedule" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let input: Value = match deserialize_arg(&args, "input", seam) {
+                    Ok(input) => input,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_publish_schedule(id, input))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(schedule) => to_value("PublishSchedule", &schedule),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "execute_dynamic_workflow" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let workflow_id: Option<String> =
+                    match deserialize_optional_arg(&args, "workflow_id", seam) {
+                        Ok(workflow_id) => workflow_id,
+                        Err(response) => return response,
+                    };
+                let days: Option<u32> = match deserialize_optional_arg(&args, "days", seam) {
+                    Ok(days) => days,
+                    Err(response) => return response,
+                };
+                let user_input: Option<Value> =
+                    match deserialize_optional_arg(&args, "user_input", seam) {
+                        Ok(user_input) => user_input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.execute_dynamic_workflow(
+                    capability_pack_id,
+                    workflow_id,
+                    days,
+                    user_input,
+                )) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -13377,6 +13621,14 @@ mod tests {
             // #264 批 7 刀 A：订阅面两条写 op
             "save_subscription",
             "delete_subscription",
+            // #264 批 7 刀 B2：域包单据面六条写 op（更新发票 / 记录 KPI / 导入人才库 /
+            // 同步舰队 / 更新发布计划 / 动态工作流执行）。
+            "update_invoice",
+            "record_kpi",
+            "import_talent_library",
+            "sync_fleet",
+            "update_publish_schedule",
+            "execute_dynamic_workflow",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -13420,6 +13672,14 @@ mod tests {
             "get_capability_pack_data",
             "get_capability_pack_precheck",
             "get_capability_pack_health",
+            // #264 批 7 刀 B2：域包单据面六条读 op（取发票 / 取客户 / 按邮箱查客户 /
+            // 列出收入 / 取投资建议 / 取发布计划详情）—— 全只读，写分支一条不加。
+            "get_invoice",
+            "get_customer",
+            "find_customer_by_email",
+            "list_revenue",
+            "get_investment_advice",
+            "get_publish_schedule",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

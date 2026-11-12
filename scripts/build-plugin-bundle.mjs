@@ -1053,16 +1053,28 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_delete_landing_page",
   "opc_delete_project",
   "opc_delete_subscription",
+  // #264 批 7 刀 B2：动态工作流执行（写 op —— 会起引擎跑工作流）。
+  "opc_execute_dynamic_workflow",
+  // #264 批 7 刀 B2：导入人才库（写 op —— 批量落人才模板）。
+  "opc_import_talent_library",
   "opc_mark_contact_read",
   "opc_process_due_schedules",
   "opc_proactive_evaluate_leads",
   "opc_publish_blog_post",
   "opc_publish_landing_page",
+  // #264 批 7 刀 B2：记录 KPI（写 op）。
+  "opc_record_kpi",
   "opc_save_subscription",
+  // #264 批 7 刀 B2：同步员工到舰队（写 op —— 建 / 改舰队与成员）。
+  "opc_sync_fleet",
   "opc_transition_invoice",
   "opc_update_content_asset",
   "opc_update_customer",
+  // #264 批 7 刀 B2：更新发票（写 op）。
+  "opc_update_invoice",
   "opc_update_project",
+  // #264 批 7 刀 B2：更新发布计划（写 op）。
+  "opc_update_publish_schedule",
 ]);
 
 function withRequiredPermission(commands) {
@@ -1077,7 +1089,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 85 条命名命令（读 56 条 · 写 29 条）",
+      "OPC 域功能包（#36）：worker 通道 + 97 条命名命令（读 62 条 · 写 35 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2155,6 +2167,178 @@ function opcManifest({ version, binaryName, sha256 }) {
         inputSchema: {
           type: "object",
           properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      // ── #264 批 7 刀 B2：域包单据面十二命令（六读六写；宿主同名十二条 Tauri 命令已删，
+      // 智能体工具面经本清单续用 `opc_*` 原名）。六条写命令同批进 `OPC_WRITE_COMMANDS`
+      // （= 宿主 `required_permission_for` 的写 op 名单，两处必须同批改）。
+      // `input` 子对象的键是**域模型 DTO 的 snake_case**（与宿主 serde 反序列化一致），
+      // 不转成 camelCase —— 与命令面平铺键（camelCase）分属两层。
+      {
+        name: "opc_get_invoice",
+        description: "获取发票（读 op；查无回未找到）",
+        command: "worker://opc_get_invoice",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "发票 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_update_invoice",
+        description: "更新发票（写 op；input 内只改给定字段，缺省字段不动）",
+        command: "worker://opc_update_invoice",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "发票 ID" },
+            input: {
+              type: "object",
+              description: "更新字段（snake_case，与域模型 DTO 一致；三个键都可选）",
+              properties: {
+                line_items: {
+                  type: "array",
+                  items: { type: "object" },
+                  description: "明细行；元素含 description / quantity / unit_price / tax_rate / total",
+                },
+                notes: { type: "string", description: "备注" },
+                due_at: {
+                  type: "integer",
+                  description: "到期时间戳（秒级 epoch）；传 null 表示清空",
+                },
+              },
+            },
+          },
+          required: ["id", "input"],
+        },
+      },
+      {
+        name: "opc_get_customer",
+        description: "获取客户（读 op；查无回未找到）",
+        command: "worker://opc_get_customer",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "客户 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_find_customer_by_email",
+        description: "按邮箱查找客户（读 op；查无回 null，不是错误）",
+        command: "worker://opc_find_customer_by_email",
+        inputSchema: {
+          type: "object",
+          properties: { email: { type: "string", description: "客户邮箱" } },
+          required: ["email"],
+        },
+      },
+      {
+        name: "opc_record_kpi",
+        description: "记录 KPI（写 op；归属域包由调用方从运行上下文提供，不自行编造）",
+        command: "worker://opc_record_kpi",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              description: "KPI 记录字段（snake_case，与域模型 DTO 一致；五个键全必填）",
+              properties: {
+                domain_pack_id: { type: "string", description: "归属域包 ID（空串 / 空白由宿主拒）" },
+                name: { type: "string", description: "指标名" },
+                value: { type: "number", description: "指标值" },
+                unit: { type: "string", description: "单位" },
+                period: { type: "string", description: "统计周期（YYYY-MM）" },
+              },
+              required: ["domain_pack_id", "name", "value", "unit", "period"],
+            },
+          },
+          required: ["input"],
+        },
+      },
+      {
+        name: "opc_list_revenue",
+        description: "列出收入记录（读 op；category 可选过滤，limit 缺省由宿主取默认上限）",
+        command: "worker://opc_list_revenue",
+        inputSchema: {
+          type: "object",
+          properties: {
+            category: { type: "string", description: "收入分类（可选）" },
+            limit: { type: "number", description: "返回条数上限（可选整数）" },
+          },
+        },
+      },
+      {
+        name: "opc_get_investment_advice",
+        description: "获取投资建议（读 op；按周期现算，不落库）",
+        command: "worker://opc_get_investment_advice",
+        inputSchema: {
+          type: "object",
+          properties: { period: { type: "string", description: "统计周期" } },
+          required: ["period"],
+        },
+      },
+      {
+        name: "opc_import_talent_library",
+        description: "导入人才库（写 op；扫描目录填充人才模板，已存在的模板 id 跳过 —— 幂等）",
+        command: "worker://opc_import_talent_library",
+        inputSchema: {
+          type: "object",
+          properties: { path: { type: "string", description: "专家目录路径（不存在 / 不可读由宿主拒）" } },
+          required: ["path"],
+        },
+      },
+      {
+        name: "opc_sync_fleet",
+        description: "同步员工到舰队（写 op，零入参；幂等地把 OPC 员工注册 / 更新为舰队成员）",
+        command: "worker://opc_sync_fleet",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_get_publish_schedule",
+        description: "获取发布计划详情（读 op；查无回未找到）",
+        command: "worker://opc_get_publish_schedule",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "发布计划 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_update_publish_schedule",
+        description: "更新发布计划（写 op；input 内只改给定字段，缺省字段不动）",
+        command: "worker://opc_update_publish_schedule",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "发布计划 ID" },
+            input: {
+              type: "object",
+              description: "更新字段（snake_case，与域模型 DTO 一致；两个键都可选）",
+              properties: {
+                scheduled_at: {
+                  type: "integer",
+                  description: "计划发布时间戳（秒级 epoch）；传 null 表示清空",
+                },
+                status: { type: "string", description: "计划状态（合法值由宿主状态机判；传 null 表示清空）" },
+              },
+            },
+          },
+          required: ["id", "input"],
+        },
+      },
+      {
+        name: "opc_execute_dynamic_workflow",
+        description: "动态工作流执行（写 op，兼容旧接口；转标准执行通道，三级模板查找在宿主）",
+        command: "worker://opc_execute_dynamic_workflow",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            workflowId: { type: "string", description: "工作流 ID（可选；缺省按域包默认工作流）" },
+            days: { type: "number", description: "统计天数（可选整数）" },
+            userInput: { type: "object", description: "调用方输入（可选任意对象，原样透传）" },
+          },
           required: ["capabilityPackId"],
         },
       },

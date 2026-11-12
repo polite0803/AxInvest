@@ -5126,6 +5126,31 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #264 刀 C 批 2：域包分析执行（读 op）。风控阈值与数据服务装配在宿主 provider，
+            // 本层只做入参解包（`days` 可选；缺省 30 天由宿主补）。
+            "opc.store" if op == "execute_analysis" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let days: Option<u32> = match deserialize_optional_arg(&args, "days", seam) {
+                    Ok(days) => days,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.execute_analysis(capability_pack_id, days))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
                 let Some(adapter) = self.registry.get_platform_adapter(platform) else {
@@ -14015,6 +14040,8 @@ mod tests {
             "get_learning_metrics",
             "get_learning_config",
             "list_learning_configs",
+            // #264 刀 C 批 2：域包分析执行 —— 读 op（写 `execute_dynamic_workflow` 已在写集）。
+            "execute_analysis",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

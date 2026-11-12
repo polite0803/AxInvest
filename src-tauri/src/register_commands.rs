@@ -748,8 +748,6 @@ macro_rules! register_all_commands {
             commands::opc::opc_work_item_unblock,
             commands::opc::run_self_improving_opc_work_item,
             commands::opc_capability_pack_actions::opc_evolve_workflow,
-            commands::opc_capability_pack_actions::opc_execute_analysis,
-            commands::opc_capability_pack_actions::opc_execute_workflow,
             commands::opc_capability_pack_actions::opc_get_rl_stats,
             commands::opc_capability_pack_actions::opc_record_rl_experience,
             commands::opc_capability_pack_actions::opc_reflect_on_workflow,

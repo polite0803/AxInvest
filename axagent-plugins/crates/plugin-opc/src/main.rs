@@ -223,6 +223,10 @@ const OPC_STORE_GET_PUBLISH_SCHEDULE: &str = "get_publish_schedule";
 const OPC_STORE_UPDATE_PUBLISH_SCHEDULE: &str = "update_publish_schedule";
 const OPC_STORE_EXECUTE_DYNAMIC_WORKFLOW: &str = "execute_dynamic_workflow";
 
+/// #264 刀 C 批 2：域包分析执行（读 op）。风控阈值取域包 `runtime.yaml` 声明、
+/// 数据服务与时间窗装配都在宿主 provider，本层零权限闸。
+const OPC_STORE_EXECUTE_ANALYSIS: &str = "execute_analysis";
+
 /// #264 批 7 刀 B3：域包自动规则 / 仪表盘四 op（三读一写）。
 ///
 /// `run_automation_rules` 在宿主权限表登记 `Write`（规则动作会改库）；另三条
@@ -429,6 +433,10 @@ const COMMAND_SYNC_FLEET: &str = "opc_sync_fleet";
 const COMMAND_GET_PUBLISH_SCHEDULE: &str = "opc_get_publish_schedule";
 const COMMAND_UPDATE_PUBLISH_SCHEDULE: &str = "opc_update_publish_schedule";
 const COMMAND_EXECUTE_DYNAMIC_WORKFLOW: &str = "opc_execute_dynamic_workflow";
+
+/// #264 刀 C 批 2：域包分析执行（读命令，宿主同名 `#[agent_command]` 随本批删除 ⇒
+/// 命令名续用原名，智能体工具面与前端调用名不变）。读命令 ⇒ 不进 `OPC_WRITE_COMMANDS`。
+const COMMAND_EXECUTE_ANALYSIS: &str = "opc_execute_analysis";
 
 /// #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写，宿主同名 Tauri 命令随本批删除）。
 /// `opc_run_automation_rules` 是写命令，同批进 `scripts/build-plugin-bundle.mjs` 的
@@ -1213,6 +1221,16 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_EXECUTE_DYNAMIC_WORKFLOW => {
             match execute_dynamic_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 刀 C 批 2：域包分析执行（读命令；风控阈值与数据服务装配在宿主 provider，
+        // 命令层只做形状判与接缝调用）。
+        COMMAND_EXECUTE_ANALYSIS => {
+            match execute_analysis(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -3118,6 +3136,24 @@ fn execute_dynamic_workflow(
         args.insert("user_input".to_string(), user_input.clone());
     }
     call_opc_store(peer, OPC_STORE_EXECUTE_DYNAMIC_WORKFLOW, Value::Object(args), call_chain)
+}
+
+/// `opc_execute_analysis`：执行域包分析（读 op）。
+///
+/// 命令面 `capabilityPackId` 必填、`days` 可选（缺省 30 天由宿主补）；接缝键用 snake_case，
+/// `days` 缺省**不传**（宿主侧是 `Option`，缺键即 `None`）。风控阈值取域包 `runtime.yaml`
+/// 的声明、数据服务与时间窗装配全在宿主 provider，命令层不复制。
+fn execute_analysis(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_execute_analysis";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("capability_pack_id".to_string(), json!(pack_id));
+    copy_optional_i64(input, OP, &mut args, &["days"])?;
+    call_opc_store(peer, OPC_STORE_EXECUTE_ANALYSIS, Value::Object(args), call_chain)
 }
 
 /// `opc_get_capability_pack_dashboard`：域包仪表盘（读 op；`days` 缺省由宿主按 30 天取）。

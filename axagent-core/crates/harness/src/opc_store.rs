@@ -1511,6 +1511,22 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::list_learning_configs 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 执行域包分析（`execute_analysis` op）—— 读 op。
+    ///
+    /// 迁移前 `opc_execute_analysis` 命令体逐字下沉：按 `days`（缺省 30）建时间窗 →
+    /// 用 `DefaultDataService` 建分析轮 → 取域包 runtime.yaml **声明的**风控阈值
+    /// （未声明即不启用，不用默认值兜底）→ 出参是决策 DTO 原样序列化。
+    /// 域包目录解析（`app_data_dir`）在宿主装配层，插件进程够不着。
+    async fn execute_analysis(
+        &self,
+        _capability_pack_id: String,
+        _days: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::execute_analysis 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

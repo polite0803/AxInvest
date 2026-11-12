@@ -1096,7 +1096,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 110 条命名命令（读 71 条 · 写 39 条）",
+      "OPC 域功能包（#36）：worker 通道 + 111 条命名命令（读 72 条 · 写 39 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2345,6 +2345,21 @@ function opcManifest({ version, binaryName, sha256 }) {
             workflowId: { type: "string", description: "工作流 ID（可选；缺省按域包默认工作流）" },
             days: { type: "number", description: "统计天数（可选整数）" },
             userInput: { type: "object", description: "调用方输入（可选任意对象，原样透传）" },
+          },
+          required: ["capabilityPackId"],
+        },
+      },
+      // ── #264 刀 C 批 2：域包分析执行（读命令；宿主同名 Tauri 命令已删，
+      // 原命令名与智能体工具面逐字续用）。读命令 ⇒ 不进 `OPC_WRITE_COMMANDS`。
+      {
+        name: "opc_execute_analysis",
+        description: "执行域包分析（读 op；风控阈值取域包 runtime.yaml 声明，未声明即不启用）",
+        command: "worker://opc_execute_analysis",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            days: { type: "integer", description: "统计天数（可选；缺省 30 天）" },
           },
           required: ["capabilityPackId"],
         },

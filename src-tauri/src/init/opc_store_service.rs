@@ -2821,6 +2821,37 @@ impl OpcStoreProvider for HostOpcStore {
         serde_json::to_value(configs)
             .map_err(|e| AxAgentError::Provider(format!("opc.store::list_learning_configs {e}")))
     }
+
+    /// 执行域包分析（迁移前 `opc_execute_analysis`）—— 读 op。
+    ///
+    /// 风控阈值取域包 `runtime.yaml` 的**声明**（未声明即不启用，不用默认值兜底 ——
+    /// 与迁移前命令体同一判据）；数据服务与时间窗（缺省 30 天）装配也逐字同形。
+    async fn execute_analysis(
+        &self,
+        capability_pack_id: String,
+        days: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("execute_analysis")?;
+        let time_range = TimeRange::days(days.unwrap_or(30) as i64);
+        let data_service: std::sync::Arc<dyn OpcDataService> =
+            std::sync::Arc::new(DefaultDataService::new(self.db.clone()));
+        let declared = opc_capability_pack_runtime::declared_kpi_thresholds(
+            Some(app_dir.as_path()),
+            &capability_pack_id,
+        );
+        let round =
+            axagent_company_runtime::opc::OpcCapabilityPackAnalysisRound::with_declared_thresholds(
+                capability_pack_id,
+                data_service,
+                declared,
+            );
+        let decision = round.analyze(&time_range).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::execute_analysis 分析执行失败: {e}"))
+        })?;
+        serde_json::to_value(decision).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::execute_analysis 序列化失败: {e}"))
+        })
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────

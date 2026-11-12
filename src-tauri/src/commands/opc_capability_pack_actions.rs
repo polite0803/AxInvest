@@ -9,7 +9,6 @@ use tauri::State;
 
 use crate::AppState;
 use axagent_agent_macro::agent_command;
-use axagent_company_runtime::opc::OpcCapabilityPackAnalysisRound;
 use axagent_orchestrator::{ReinforcementLearningConfig, RewardWeightConfig};
 
 // 域包配置的四个数据类型已上收 harness（`axagent-core/crates/harness/src/opc_store.rs`，
@@ -2014,45 +2013,12 @@ pub fn get_workflow_config(
 // 同一装配（取 action → `{{input}}` 替换 → camelCase 五键信封）。`get_action_config` 自由函数
 // 保留 —— 它同时是桥接 LLM 工具 `opc_build_capability_pack_prompt` 臂与本接缝 op 的数据源（禁区 12）。
 
-// ── 域包分析引擎命令 ──────────────────────────────────────────
+// ── 域包执行口（#264 刀 C 批 2 已全部迁 T2） ──────────────────────
 
-/// 执行域包分析（使用新的分析引擎）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "执行域包分析")]
-#[tauri::command]
-pub async fn opc_execute_analysis(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    days: Option<u32>,
-) -> Result<serde_json::Value, String> {
-    use axagent_company_runtime::opc::DefaultDataService;
-    use axagent_company_runtime::opc::data_service::TimeRange;
-
-    let days = days.unwrap_or(30);
-    let time_range = TimeRange::days(days as i64);
-
-    let db = app_state.harness.db();
-    let data_service: std::sync::Arc<dyn axagent_company_runtime::opc::OpcDataService> =
-        std::sync::Arc::new(DefaultDataService::new(db.clone()));
-    // 域包 runtime.yaml 声明的风控阈值（**未声明 = 不启用**，不用默认值兜底）。
-    // 阈值住在域包而不是 Rust：本项目的硬编码阈值是既有状态，不是该照抄的规范。
-    let declared = crate::commands::opc_capability_pack_runtime::declared_kpi_thresholds(
-        Some(&app_state.app_data_dir),
-        &capability_pack_id,
-    );
-    let round = OpcCapabilityPackAnalysisRound::with_declared_thresholds(
-        capability_pack_id.clone(),
-        data_service,
-        declared,
-    );
-    let decision = round.analyze(&time_range).await.map_err(|e| format!("分析执行失败: {e}"))?;
-
-    serde_json::to_value(decision).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// #264 刀 C 批 2 退役 `opc_execute_analysis`（前端 1 处 + `#[agent_command]` 工具面 ⇒ 只能迁
+// 不能删，判据 #273）：调用方走 plugin-opc 同名命名命令，宿主侧经 `opc.store` 的
+// `execute_analysis` 读 op 由 `HostOpcStore` 续用同一份装配（时间窗 → `DefaultDataService`
+// → 域包 `runtime.yaml` 声明的风控阈值 → 分析轮 → 决策 DTO 原样序列化）。
 
 /// 解析模板声明的 `hooks_config`（JSON 文本）为引擎类型。
 ///
@@ -2395,33 +2361,11 @@ pub(crate) async fn execute_workflow_core(
     Err(format!("工作流模板不存在且种子化失败: {template_id}"))
 }
 
-/// 执行域包工作流的宿主命令（实现体见 [`execute_workflow_core`]）。
-///
-/// 本命令只把 `AppState` 里的三项能力摘出来转调内核 —— 插件通道的
-/// `opc.store::execute_dynamic_workflow` 共享同一份正文，两侧不许各写一套三级查找。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "执行域包工作流")]
-#[tauri::command]
-pub async fn opc_execute_workflow(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    workflow_id: Option<String>,
-    days: Option<u32>,
-    user_input: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    let db = app_state.harness.db();
-    let engine = Arc::clone(&app_state.work_engine);
-    let app_dir = app_state.app_data_dir.clone();
-    execute_workflow_core(
-        db,
-        &engine,
-        &app_dir,
-        &capability_pack_id,
-        workflow_id.as_deref(),
-        days,
-        user_input,
-    )
-    .await
-}
+// #264 刀 C 批 2 退役 `opc_execute_workflow`：前端与工具面统一走 plugin-opc 的
+// `opc_execute_dynamic_workflow`（刀 B2 已迁，`opc.store::execute_dynamic_workflow` 写 op）。
+// 两侧共用下方 `execute_workflow_core` 同一份正文 —— 同名同义的双执行口合并为一条
+// （留名会让插件侧出现两个只差名字的命令臂）。`execute_workflow_core` 保留：它是
+// `HostOpcStore::execute_dynamic_workflow` 的唯一数据源（禁区 12）。
 
 // #264 刀 C 退役 `opc_get_learning_metrics`：调用方走 plugin-opc 同名命名命令，宿主侧经
 // `opc.store` 的 `get_learning_metrics` 读 op 由 `HostOpcStore` 续用同一算指标路径（每次现建

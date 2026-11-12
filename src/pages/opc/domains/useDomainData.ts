@@ -219,14 +219,14 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
   }, [capabilityPackId, setSectionError]);
 
-  // 加载决策（使用 opc_execute_analysis 命令）
+  // 加载决策（走 plugin-opc 的 `opc_execute_analysis` 命名命令）
   const loadDecision = useCallback(async () => {
     if (!capabilityPackId) {
       return;
     }
     setDecisionLoading(true);
     try {
-      const result = await invoke<OpcDomainDecision>("opc_execute_analysis", {
+      const result = await invokePluginCommand<OpcDomainDecision>("opc_execute_analysis", {
         capabilityPackId,
         days: decisionDays,
       });
@@ -316,12 +316,12 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
   }, [capabilityPackId]);
 
-  // 执行工作流（使用 opc_execute_workflow 命令，传递 workflow_id + capability_pack_id + days + userInput）
+  // 执行工作流（走 plugin-opc 的 `opc_execute_dynamic_workflow`；宿主侧同名旧命令已退役）
   const executeWorkflow = useCallback(
     async (workflowId: string, userInput?: Record<string, unknown>): Promise<WorkflowExecutionResult> => {
       setWorkflowExecuting(true);
       try {
-        const result = await invoke<WorkflowExecutionResult>("opc_execute_workflow", {
+        const result = await invokePluginCommand<WorkflowExecutionResult>("opc_execute_dynamic_workflow", {
           capabilityPackId,
           workflowId,
           days: 30,

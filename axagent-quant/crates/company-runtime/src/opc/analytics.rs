@@ -398,7 +398,7 @@ pub trait AnalyticsService: Send + Sync {
 /// 归一真源只有这一处：写侧（post_exec 钩子、`opc_record_kpi` 命令）与
 /// 读侧（`opc::data_service::DefaultDataService::latest_kpi` 等）**都必须**过这个函数。
 /// 先例同 `capability_pack_kpi_service::kpi_source`（`:187` 的 `replace('-', "_")`）
-/// 与 `opc_capability_pack_actions::opc_execute_workflow`（`:2494` 的「归一化域包 ID」）。
+/// 与 `opc_capability_pack_actions::capability_pack_learning_config_path`（`:2494` 的 `replace('-', "_")`）。
 ///
 /// 空值直接 `Err`：`''` 在存量行里表示「未标注」（v230 迁移的回填值），
 /// 它**不是**一个域包 id —— 允许它当查询条件会造出一个看起来合法的假域包桶。

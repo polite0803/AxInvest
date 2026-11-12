@@ -72,9 +72,12 @@ const DOMAINS = {
   OPC: {
     crates: ['axagent-company-runtime'],
     useRe: /axagent_company_runtime::/,
-    ownedRe: /^src-tauri\/src\/(commands|init)\/(opc|capability_pack|agency|domain_pack|horizon|dojo|demand_discovery)/,
-    feRe: /opc|capability-?pack|agency|horizon|domain-?pack|dojo/i,
-    cmdRe: /^(opc|capability_pack|agency|domain|horizon|dojo|demand_)/,
+    // agency_expert 已改判平台资产（2026-11-13 #299）：Rust 侧零 OPC 域包依赖（只 dao/entities/harness）、
+    // 前端消费面横跨 5 个 feature 域（expertStore / stock-analysis×2 / workflow / settings / opc 人才市场）
+    // ⇒ 按本脚本「域自有文件随插件整体迁出」判据，它不随 plugin-opc 迁出，不计入 OPC 边界。
+    ownedRe: /^src-tauri\/src\/(commands|init)\/(opc|capability_pack|domain_pack|horizon|dojo|demand_discovery)/,
+    feRe: /opc|capability-?pack|horizon|domain-?pack|dojo/i,
+    cmdRe: /^(opc|capability_pack|domain|horizon|dojo|demand_)/,
   },
 };
 
@@ -335,7 +338,7 @@ const countKeys = (o, re, p) => {
 const zh = fs.existsSync(zhPath) ? JSON.parse(fs.readFileSync(zhPath, 'utf8')) : {};
 const i18n = {
   STOCK: countKeys(zh, /stock|quote|kline|portfolio|quant|indicator/i, ''),
-  OPC: countKeys(zh, /opc|capability|agency|horizon|domainPack/i, ''),
+  OPC: countKeys(zh, /opc|capability|horizon|domainPack/i, ''),
   整段: Object.keys(zh).filter((k) => /stock|opc|invest|quant|trade/i.test(k)),
 };
 // 前端体量：域自有 .ts/.tsx 文件数与行数（PLAN §0.10.1 引用的 60 757 行等数字出自这里）

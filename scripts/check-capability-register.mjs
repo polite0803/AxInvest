@@ -266,9 +266,11 @@ const DOMAINS = {
   OPC: {
     crates: ["axagent-company-runtime"],
     useRe: /axagent_company_runtime::/,
-    ownedRe: /^src-tauri\/src\/(commands|init)\/(opc|capability_pack|agency|domain_pack|horizon|dojo|demand_discovery)/,
-    feRe: /opc|capability-?pack|agency|horizon|domain-?pack|dojo/i,
-    cmdRe: /^(opc|capability_pack|agency|domain|horizon|dojo|demand_)/,
+    // agency_expert 已改判平台资产（2026-11-13 #299，与 audit-l1-blockers.mjs 的 DOMAINS 同批逐字对齐）：
+    // Rust 侧零 OPC 域包依赖、前端消费面横跨 5 个 feature 域 ⇒ 不随 plugin-opc 迁出，不计入 OPC 边界。
+    ownedRe: /^src-tauri\/src\/(commands|init)\/(opc|capability_pack|domain_pack|horizon|dojo|demand_discovery)/,
+    feRe: /opc|capability-?pack|horizon|domain-?pack|dojo/i,
+    cmdRe: /^(opc|capability_pack|domain|horizon|dojo|demand_)/,
   },
 };
 

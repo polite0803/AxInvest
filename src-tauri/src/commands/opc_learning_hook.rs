@@ -15,21 +15,47 @@
 //!
 //! # 使用方式
 //!
-//! 在任何工作流执行完成的地方调用：
+//! 插件命令 `opc_auto_learn_workflow` 经 `opc.store::auto_learn_workflow` 接缝调回宿主，
+//! 宿主 provider 用 [`AutoLearnHandles::from_state`] 取同一份学习引擎后调用：
 //! ```ignore
 //! crate::commands::opc_learning_hook::try_auto_learn_workflow(
-//!     &template_id, &result, &learning_state,
+//!     &template_id, &result, &handles,
 //! ).await;
 //! ```
+//!
+//! ⚠ 本模块**没有** Tauri 命令（#264 批 7 刀 B3）：命令面已迁 plugin-opc
+//! `opc_auto_learn_workflow`，自由函数保留给宿主 provider 复用 —— 学习引擎只在宿主装配，
+//! 插件进程够不着，故按 #273 走接缝回宿主，而不是把命令当死命令删。
 
-use axagent_agent_macro::agent_command;
-use tauri::State;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-use crate::AppState;
 use crate::commands::opc_capability_pack_actions::load_rl_config;
 use crate::state::learning::LearningEngineState;
-use axagent_orchestrator::{EvolutionRequest, ReflectionRequest, SelfImprovementRequest};
+use axagent_orchestrator::{
+    CapabilityPackAdapterRegistry, CapabilityPackLearningEngine, EvolutionRequest,
+    ReflectionRequest, SelfImprovementRequest,
+};
+
+/// 自动学习需要的两个宿主句柄（都是 `LearningEngineState` 里的 `Arc` 克隆）。
+///
+/// 不直接存 `LearningEngineState`：它不是 `Clone`，而宿主 provider 只需要这两项；
+/// 存整份状态会逼着 `AppState` 改字段类型（波及全部 `state.learning` 读点）。
+#[derive(Clone)]
+pub struct AutoLearnHandles {
+    pub engine: Arc<CapabilityPackLearningEngine>,
+    pub adapter_registry: Arc<Mutex<CapabilityPackAdapterRegistry>>,
+}
+
+impl AutoLearnHandles {
+    pub fn from_state(state: &LearningEngineState) -> Self {
+        Self {
+            engine: state.capability_pack_learning_engine.clone(),
+            adapter_registry: state.capability_pack_adapter_registry.clone(),
+        }
+    }
+}
 
 // ── 域包映射：模板 ID → 域包 ID ──────────────────────────
 
@@ -162,7 +188,7 @@ pub fn compute_quality_score(result: &serde_json::Value) -> f64 {
 pub async fn try_auto_learn_workflow(
     template_id: &str,
     result: &serde_json::Value,
-    state: &LearningEngineState,
+    handles: &AutoLearnHandles,
     app_dir: Option<&std::path::Path>,
 ) {
     let domain_pack_id = match identify_capability_pack_from_template(template_id, app_dir) {
@@ -202,7 +228,7 @@ pub async fn try_auto_learn_workflow(
     // 步骤 1：记录 RL 经验（尊重 rl 开关）
     if rl_enabled {
         if let Err(e) =
-            record_experience(&domain_pack_id, template_id, quality_score, result, state, app_dir)
+            record_experience(&domain_pack_id, template_id, quality_score, result, handles, app_dir)
                 .await
         {
             warn!("[opc-auto-learn] RL 经验记录失败: {}", e);
@@ -213,7 +239,7 @@ pub async fn try_auto_learn_workflow(
     let mut reflection_result = None;
     if config.reflection_enabled {
         reflection_result =
-            Some(trigger_reflection(&domain_pack_id, template_id, result, state).await);
+            Some(trigger_reflection(&domain_pack_id, template_id, result, handles).await);
     }
 
     // 步骤 3：如果反思质量分低于阈值，触发进化（尊重 evolution 开关）
@@ -224,7 +250,7 @@ pub async fn try_auto_learn_workflow(
                 &domain_pack_id,
                 template_id,
                 &format!("反思质量分较低 ({:.1})，自动触发进化", reflection.quality_score),
-                state,
+                handles,
             )
             .await
             {
@@ -235,14 +261,14 @@ pub async fn try_auto_learn_workflow(
 
     // 步骤 4：自我改进（尊重 self_improvement 开关）
     if config.self_improvement_enabled {
-        if let Err(e) = trigger_self_improvement(&domain_pack_id, template_id, state).await {
+        if let Err(e) = trigger_self_improvement(&domain_pack_id, template_id, handles).await {
             warn!("[opc-auto-learn] 自我改进失败: {}", e);
         }
     }
 
     // 步骤 5：RL 策略优化（尊重 rl 开关；经验不足时静默跳过）
     if rl_enabled {
-        if let Err(e) = trigger_rl_optimization(&domain_pack_id, state, app_dir).await {
+        if let Err(e) = trigger_rl_optimization(&domain_pack_id, handles, app_dir).await {
             debug!("[opc-auto-learn] RL 策略优化（可能经验不足）: {}", e);
         }
     }
@@ -260,13 +286,13 @@ async fn record_experience(
     workflow_id: &str,
     quality_score: f64,
     result: &serde_json::Value,
-    state: &LearningEngineState,
+    handles: &AutoLearnHandles,
     app_dir: Option<&std::path::Path>,
 ) -> Result<(), String> {
     let rl_config = load_rl_config(domain_pack_id, app_dir)
         .ok_or_else(|| format!("域包 {} 的 RL 配置不存在", domain_pack_id))?;
 
-    let engine = &state.capability_pack_learning_engine;
+    let engine = &handles.engine;
     engine
         .record_experience(domain_pack_id, workflow_id, quality_score, result, &rl_config)
         .await?;
@@ -282,9 +308,9 @@ async fn trigger_reflection(
     domain_pack_id: &str,
     workflow_id: &str,
     result: &serde_json::Value,
-    state: &LearningEngineState,
+    handles: &AutoLearnHandles,
 ) -> Result<axagent_orchestrator::ReflectionResult, String> {
-    let registry = state.capability_pack_adapter_registry.lock().await;
+    let registry = handles.adapter_registry.lock().await;
     let adapter = registry
         .get(domain_pack_id)
         .ok_or_else(|| format!("域包适配器不存在: {}", domain_pack_id))?;
@@ -292,7 +318,7 @@ async fn trigger_reflection(
     let template = adapter.reflection_template().clone();
     drop(registry);
 
-    let engine = &state.capability_pack_learning_engine;
+    let engine = &handles.engine;
     let request = ReflectionRequest {
         domain_pack_id: domain_pack_id.to_string(),
         workflow_id: workflow_id.to_string(),
@@ -307,9 +333,9 @@ async fn trigger_evolution(
     domain_pack_id: &str,
     workflow_id: &str,
     reason: &str,
-    state: &LearningEngineState,
+    handles: &AutoLearnHandles,
 ) -> Result<axagent_orchestrator::EvolutionResult, String> {
-    let registry = state.capability_pack_adapter_registry.lock().await;
+    let registry = handles.adapter_registry.lock().await;
     let adapter = registry
         .get(domain_pack_id)
         .ok_or_else(|| format!("域包适配器不存在: {}", domain_pack_id))?;
@@ -317,7 +343,7 @@ async fn trigger_evolution(
     let constraints = adapter.evolution_constraints().clone();
     drop(registry);
 
-    let engine = &state.capability_pack_learning_engine;
+    let engine = &handles.engine;
     let request = EvolutionRequest {
         domain_pack_id: domain_pack_id.to_string(),
         workflow_id: workflow_id.to_string(),
@@ -330,9 +356,9 @@ async fn trigger_evolution(
 async fn trigger_self_improvement(
     domain_pack_id: &str,
     _workflow_id: &str,
-    state: &LearningEngineState,
+    handles: &AutoLearnHandles,
 ) -> Result<axagent_orchestrator::SelfImprovementResult, String> {
-    let engine = &state.capability_pack_learning_engine;
+    let engine = &handles.engine;
     let request = SelfImprovementRequest {
         domain_pack_id: domain_pack_id.to_string(),
         // P4-4 修复：target 由畸形 `workflow_{workflow_id}_optimization`
@@ -345,46 +371,13 @@ async fn trigger_self_improvement(
 
 async fn trigger_rl_optimization(
     domain_pack_id: &str,
-    state: &LearningEngineState,
+    handles: &AutoLearnHandles,
     app_dir: Option<&std::path::Path>,
 ) -> Result<(), String> {
     let rl_config = load_rl_config(domain_pack_id, app_dir)
         .ok_or_else(|| format!("域包 {} 的 RL 配置不存在", domain_pack_id))?;
 
-    let engine = &state.capability_pack_learning_engine;
+    let engine = &handles.engine;
     engine.optimize_policy(domain_pack_id, &rl_config).await?;
     Ok(())
-}
-
-// ── Tauri 命令 ──────────────────────────────────────
-
-/// 手动触发自动学习（可由前端或 Agent 显式调用）
-#[agent_command(domain = opc, safety = Safe, call_mode = StateInput, description = "触发 OPC 域包工作流的自动学习管线")]
-#[tauri::command]
-pub async fn opc_auto_learn_workflow(
-    state: State<'_, AppState>,
-    template_id: String,
-    workflow_result: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let domain_pack_id =
-        identify_capability_pack_from_template(&template_id, Some(&state.app_data_dir))
-            .ok_or_else(|| format!("模板 {} 不是 OPC 域包工作流", template_id))?;
-
-    let quality_score = compute_quality_score(&workflow_result);
-
-    try_auto_learn_workflow(
-        &template_id,
-        &workflow_result,
-        &state.learning,
-        Some(&state.app_data_dir),
-    )
-    .await;
-
-    Ok(serde_json::json!({
-        "success": true,
-        "domainPackId": domain_pack_id,
-        "templateId": template_id,
-        "qualityScore": quality_score,
-        "message": "自动学习已触发",
-    }))
 }

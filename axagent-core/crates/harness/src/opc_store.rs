@@ -1333,6 +1333,124 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::execute_dynamic_workflow 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 域包仪表盘（`capability_pack_dashboard` op）—— 读 op。
+    ///
+    /// 出参形状钉在实现方（迁移前命令体的 `{ domainPackId, dashboard }` 信封原样透传）。
+    /// `days = None` ⇒ 30 天（迁移前命令体的缺省），非法天数由实现方判。
+    async fn capability_pack_dashboard(
+        &self,
+        _capability_pack_id: String,
+        _days: Option<i64>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::capability_pack_dashboard 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 域包工作流步骤（`capability_pack_workflow_steps` op）—— 读 op。
+    ///
+    /// 今天实现方恒回空列表（迁移前命令体同形：步骤由前端从模板表加载）。
+    async fn capability_pack_workflow_steps(
+        &self,
+        _capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::capability_pack_workflow_steps 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 域包已启用的自动化规则（`capability_pack_automation_rules` op）—— 读 op。
+    ///
+    /// 只回 `enabled = true` 的规则（迁移前命令体同一过滤器）。
+    async fn capability_pack_automation_rules(
+        &self,
+        _capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::capability_pack_automation_rules 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 触发域包自动化规则（`run_automation_rules` op）—— **写 op**，要 `write` 权限。
+    ///
+    /// 规则条件求值与动作执行在实现方（迁移前命令体原样下沉）；返回触发规则 id 列表 +
+    /// 计数。实体不存在 / 域包配置缺失由实现方判。
+    async fn run_automation_rules(
+        &self,
+        _capability_pack_id: String,
+        _entity_type: String,
+        _entity_id: String,
+        _status: Option<String>,
+        _overdue_days: Option<u32>,
+        _created_days: Option<u32>,
+        _fields: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::run_automation_rules 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 需求订阅扫描（`run_subscription_scan` op）—— **写 op**，要 `write` 权限。
+    ///
+    /// 扫描会把命中的线索入库并推进订阅到期时间（迁移前命令体原样下沉）。
+    /// `only_due = None` ⇒ `true`（只扫到期订阅）；`false` = 强制全量重扫。
+    /// 单个订阅词失败不影响其他词，失败记进对应的 outcome。
+    async fn run_subscription_scan(
+        &self,
+        _only_due: Option<bool>,
+    ) -> Result<crate::types::opc_demand::SubscriptionScanSummary> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::run_subscription_scan 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 幂等装配需求扫描定时任务（`ensure_demand_scan_job` op）—— **写 op**，要 `write` 权限。
+    ///
+    /// 出参形状钉在实现方（迁移前命令体返回的 `ScheduledTaskDto`，camelCase 序列化）。
+    /// 未给 cron 用实现方缺省；投递渠道两者都不给 ⇒ 不推送（只写执行历史）。
+    async fn ensure_demand_scan_job(
+        &self,
+        _cron_expression: Option<String>,
+        _webhook_url: Option<String>,
+        _file_path: Option<String>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::ensure_demand_scan_job 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 单条线索的能力匹配（`match_lead_capabilities` op）—— 读 op。
+    ///
+    /// `top_k = None` ⇒ 实现方缺省；越界由实现方夹取（迁移前命令体同一 `clamp`）。
+    /// 检索失败**不是错误** ⇒ 降级为「无命中」（迁移前命令体同一降级）。
+    async fn match_lead_capabilities(
+        &self,
+        _lead_id: String,
+        _top_k: Option<usize>,
+    ) -> Result<crate::types::opc_demand::LeadCapabilityMatch> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::match_lead_capabilities 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 触发 OPC 域包工作流的自动学习管线（`auto_learn_workflow` op）—— **写 op**。
+    ///
+    /// 学习引擎与域包适配器注册表只在宿主装配（插件进程够不着），故本 op 必须走接缝回宿主；
+    /// 迁移前命令体原样下沉（识别域包 → 质量分 → RL 经验 → 反思/进化/自我改进/策略优化）。
+    /// 出参是迁移前命令体同一信封（`{ success, domainPackId, templateId, qualityScore, message }`）；
+    /// 模板不属于任何 OPC 域包 ⇒ `Validation` 错（迁移前命令体同一报错文案）。
+    async fn auto_learn_workflow(
+        &self,
+        _template_id: String,
+        _workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::auto_learn_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

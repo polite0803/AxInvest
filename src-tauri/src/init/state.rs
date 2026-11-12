@@ -1798,12 +1798,24 @@ pub async fn create_app_state_with_resource_dir(
         // `with_fleet_repository` / `with_work_engine`（#264 批 7 刀 B2）：`sync_fleet` 要
         // 改到调度器 / 办公室视图看到的那份成员表，`execute_dynamic_workflow` 要在既有
         // 引擎上跑 DAG —— 两者都是 `Arc::clone`，装配的是同一份实例，不是第二个。
+        // `with_cron_job_store` / `with_capability_retriever`（#264 批 7 刀 B3）：
+        // `ensure_demand_scan_job` 要写调度器看到的那张任务表，`match_lead_capabilities`
+        // 要用与 AppState 同一份检索器 —— 同样是 `Arc::clone`，不另建实例。
+        // `with_learning_handles`（刀 B3）：`auto_learn_workflow` 的学习引擎与域包适配器
+        // 只在宿主装配，句柄从下面即将移入 `AppState` 的 `learning_state` 派生（同一组 `Arc`）。
         let provider: Arc<dyn axagent_harness::OpcStoreProvider> = Arc::new(
             crate::init::opc_store_service::HostOpcStore::new(sea_db.clone())
                 .with_demand_pipeline(work_engine.clone(), capability_indexer_trait.clone())
                 .with_app_dir(app_dir.clone())
                 .with_fleet_repository(fleet_repository.clone())
-                .with_work_engine(work_engine.clone()),
+                .with_work_engine(work_engine.clone())
+                .with_cron_job_store(cron_job_store.clone())
+                .with_capability_retriever(capability_router.retriever.clone())
+                .with_learning_handles(
+                    crate::commands::opc_learning_hook::AutoLearnHandles::from_state(
+                        &learning_state,
+                    ),
+                ),
         );
         match axagent_harness::get_capability_registry().register_opc_store(provider) {
             Ok(_) => tracing::info!("opc.store 接缝已注册 (BuiltIn)"),

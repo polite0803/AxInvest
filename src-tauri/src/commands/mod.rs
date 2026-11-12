@@ -175,6 +175,8 @@ pub mod opc_capability_pack_bridge;
 pub mod opc_capability_pack_logic;
 pub mod opc_capability_pack_runtime;
 pub mod opc_data;
+// #264 批 7 刀 B3：本模块已无 Tauri 命令（`opc_auto_learn_workflow` 迁 plugin-opc），
+// 自由函数保留给宿主 provider 复用 —— 学习引擎只在宿主装配，插件够不着。
 pub mod opc_learning_hook;
 pub mod opc_workflow_kpi_hook;
 pub mod opc_workflows;

@@ -7,13 +7,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use axagent_agent_macro::agent_command;
-use tauri::State;
-
 use axagent_company_runtime::opc::*;
 use axagent_dao::db::DatabaseConnection;
 
-use crate::AppState;
 use crate::commands::opc_capability_pack_logic;
 use axagent_company_runtime::opc::capability_pack;
 
@@ -373,101 +369,12 @@ pub fn has_capability_pack(app_dir: Option<&Path>, domain_pack_id: &str) -> bool
 // `opc_capability_pack_actions` 的注册表列表是**两个不同的数据源**，接缝侧分别落在
 // `list_runtime_industries` 与 `list_industries` 两个 op 上，不得混同。
 
-/// 运行域包自动化规则（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "运行域包自动化规则")]
-#[tauri::command]
-pub async fn opc_run_automation_rules(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    entity_type: String,
-    entity_id: String,
-    status: Option<String>,
-    overdue_days: Option<u32>,
-    created_days: Option<u32>,
-    fields: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    let mut ctx = RuleContext::new(&entity_type, &entity_id);
-    if let Some(s) = status {
-        ctx = ctx.with_status(s);
-    }
-    if let Some(d) = overdue_days {
-        ctx = ctx.with_overdue_days(d);
-    }
-    if let Some(d) = created_days {
-        ctx = ctx.with_created_days(d);
-    }
-    if let Some(f) = fields {
-        ctx.fields = f;
-    }
-    let db = app_state.harness.db();
-    let triggered =
-        run_automation_rules(db, Some(&app_state.app_data_dir), &capability_pack_id, ctx).await?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "triggeredRules": triggered,
-        "triggeredCount": triggered.len(),
-    }))
-}
-
-/// 获取域包仪表盘（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包仪表盘")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_dashboard(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-    days: Option<i64>,
-) -> Result<serde_json::Value, String> {
-    let range = match days {
-        Some(d) => TimeRange::days(d),
-        None => TimeRange::days(30),
-    };
-    let db = app_state.harness.db();
-    let dashboard =
-        get_dashboard(Some(&app_state.app_data_dir), db, &capability_pack_id, range).await?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "dashboard": dashboard,
-    }))
-}
-
-/// 获取域包工作流步骤（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包工作流步骤")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_workflow_steps(
-    _app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let steps = get_workflow_steps(&capability_pack_id)?;
-    let step_infos: Vec<serde_json::Value> = steps
-        .into_iter()
-        .map(|s| {
-            serde_json::json!({
-                "id": s.id,
-                "name": s.name,
-                "description": s.description,
-                "stepOrder": s.order,
-            })
-        })
-        .collect();
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "steps": step_infos,
-    }))
-}
-
-/// 获取域包自动化规则（Tauri 命令）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包自动化规则")]
-#[tauri::command]
-pub async fn opc_get_capability_pack_automation_rules(
-    app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let rules = get_enabled_rules(Some(&app_state.app_data_dir), &capability_pack_id)?;
-    Ok(serde_json::json!({
-        "domainPackId": capability_pack_id,
-        "rules": rules,
-    }))
-}
+// #264 批 7 刀 B3 删除四条包装命令（`opc_run_automation_rules` /
+// `opc_get_capability_pack_dashboard` / `opc_get_capability_pack_workflow_steps` /
+// `opc_get_capability_pack_automation_rules`）：调用方走 plugin-opc 的同名命名命令，
+// 宿主侧经 `opc.store` 的四个同名 op 由 `HostOpcStore` 转调本文件的四个 helper
+// （`run_automation_rules` / `get_dashboard` / `get_workflow_steps` / `get_enabled_rules`，
+// 签名不变）。信封逐字沿用迁移前命令体（`domainPackId` + 载荷）。
 
 // ── Phase 1 数据接入命令（OpCapabilityPackClient 直读域包 analysis.yaml） ──
 //

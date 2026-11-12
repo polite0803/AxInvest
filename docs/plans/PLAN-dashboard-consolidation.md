@@ -86,7 +86,7 @@ DTO 注释里记下一处不对称：`PluginManifest` 结构体无 `rename_all` 
 
 - `DashboardPluginsSettings.tsx:23` 本地重定义 `DashboardPluginInfo` ⇒ 移入 `src/types/`，
   与后端 `crates/plugins/src/types.rs:163`（serde camelCase）逐字段对齐，消费方从 `@/types` 导入
-- 后端信封键错配：`opc_capability_pack_runtime.rs:406` 下发 `domainPackId`，
+- 后端信封键错配：`init/opc_store_service.rs:2539` 下发 `domainPackId`，
   前端 `domains/types.ts:201` 声明 `capabilityPackId`（今日因只读 `.dashboard` 无症状）⇒ 统一为 camelCase 一处
 
 ## 6. P4 — ②″ 真 React 组件注册表（**闸门已过，但 §6.2 前提自相矛盾，需重定**）

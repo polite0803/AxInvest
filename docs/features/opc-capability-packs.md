@@ -14,7 +14,7 @@ OPC（业务标签 `axopc`）的「域包」是**纯数据资产包**而非代�
 
 全局域的唯一权威是编译期枚举 `CapabilityDomain`（9 个变体），见 `axagent-core/crates/harness/src/capability.rs:104-126`，字符串化在 `axagent-core/crates/harness/src/capability.rs:129-141`。`DOMAIN_NODES`（`axagent-core/crates/harness/src/domain_registry.rs:143-206`）在其上补 `nav_path` / `nav_order` / 历史别名，是 L1 域元数据的声明处。
 
-域包对域的归属是**多对一**：14 个包映射到 5 个业务域，映射表硬编码在 `src-tauri/src/commands/opc_workflows/mod.rs:397-412`（`OPC_CAPABILITY_PACK_DOMAIN`），读取函数在 `src-tauri/src/commands/opc_workflows/mod.rs:449-451`。
+域包对域的归属是**多对一**：14 个包映射到 5 个业务域，映射表硬编码在 `src-tauri/src/commands/opc_workflows/mod.rs:396-411`（`OPC_CAPABILITY_PACK_DOMAIN`），读取函数在 `src-tauri/src/commands/opc_workflows/mod.rs:449-451`。
 
 「禁止自造域」由三层共同保证：
 
@@ -92,7 +92,7 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
   - 导入 `src-tauri/src/commands/opc.rs:106`
   - 启停 `src-tauri/src/commands/opc.rs:161`
   - 配置查询 / 动作 / 学习指标三条读口（2026-11-11 #264 批 7 刀 A 起，原宿主 `opc_capability_pack_actions.rs` 里的这三条 Tauri 命令已删除，命令面由插件命名命令逐字续用原名 `opc_list_industries` / `opc_get_capability_pack_config` / `opc_list_capability_pack_actions`，实现落回 `opc.store` 接缝的宿主服务）：
-    `axagent-plugins/crates/plugin-opc/src/main.rs:2499`（`list_industries`）、`:2507`（`get_capability_pack_config`）、`:2540`（`list_capability_pack_actions`）
+    `axagent-plugins/crates/plugin-opc/src/main.rs:2616`（`list_industries`）、`:2624`（`get_capability_pack_config`）、`:2657`（`list_capability_pack_actions`）
 - 引擎/业务层：
   - 封闭校验 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:925`
   - 审计装配 `axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1098`

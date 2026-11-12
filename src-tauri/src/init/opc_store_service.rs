@@ -49,7 +49,7 @@ use axagent_company_runtime::opc::{
     DefaultCustomerService, DefaultInvoiceService, DefaultProjectService, DefaultSiteService,
     Invoice, InvoiceFilter, InvoiceService, InvoiceStatus, KpiRecord, LandingPage, MilestoneStatus,
     Project, ProjectFilter, ProjectService, ProjectStatus, PublishSchedule, PublishScheduleService,
-    RevenueRecord, SiteService,
+    RevenueRecord, RuleContext, SiteService, TimeRange,
 };
 use axagent_dao::repo::opc_blog_post::{BlogPostListRow, count_blog_posts, list_blog_posts};
 use axagent_dao::repo::{opc_delivery, opc_demand};
@@ -103,6 +103,22 @@ pub struct HostOpcStore {
     /// [`Self::with_work_engine`] 装配）。未装配 ⇒ `Provider` 错；**不新建第二个引擎** ——
     /// 第二个引擎没有 agent turn runner / 事件总线 / 域约束，跑出来的执行既没有工具也没有进度外发。
     work_engine: Option<std::sync::Arc<axagent_runtime::work_engine::WorkEngine>>,
+    /// 调度器任务表（#264 批 7 刀 B3）：`ensure_demand_scan_job` op 幂等建/改 `opc_demand_scan` 任务。
+    ///
+    /// 与 `AppState.cron_job_store` 是**同一个** `Arc`（生产由 `state.rs` 经
+    /// [`Self::with_cron_job_store`] 装配）—— 另建一份的话扫描任务会建在调度器看不见的表里。
+    cron_job_store: Option<std::sync::Arc<axagent_runtime_core::CronJobStore>>,
+    /// 能力检索器（#264 批 7 刀 B3）：`match_lead_capabilities` op 用。
+    ///
+    /// 与 `AppState.capability_router.retriever` 是**同一个** `Arc` 的克隆（生产由
+    /// `state.rs` 经 [`Self::with_capability_retriever`] 装配），不另建索引。
+    capability_retriever:
+        Option<std::sync::Arc<dyn axagent_harness::capability_retriever::CapabilityRetriever>>,
+    /// 自动学习句柄（#264 批 7 刀 B3）：`auto_learn_workflow` op 用。
+    ///
+    /// 学习引擎与域包适配器注册表只在宿主装配（`AppState.learning`），插件进程够不着 ——
+    /// 生产由 `state.rs` 经 [`Self::with_learning_handles`] 装配，未装配 ⇒ `Provider` 错。
+    learning: Option<AutoLearnHandles>,
 }
 
 /// 需求实现链的宿主服务句柄（#264 批 3）。
@@ -120,6 +136,9 @@ impl HostOpcStore {
             protected: RwLock::new(HashSet::new()),
             fleet: None,
             work_engine: None,
+            cron_job_store: None,
+            capability_retriever: None,
+            learning: None,
         }
     }
 
@@ -167,6 +186,64 @@ impl HostOpcStore {
     ) -> Self {
         self.work_engine = Some(work_engine);
         self
+    }
+
+    /// 装配调度器任务表（`ensure_demand_scan_job` 的唯一装配口，`state.rs` 调用）。
+    pub fn with_cron_job_store(
+        mut self,
+        store: std::sync::Arc<axagent_runtime_core::CronJobStore>,
+    ) -> Self {
+        self.cron_job_store = Some(store);
+        self
+    }
+
+    /// 装配能力检索器（`match_lead_capabilities` 的唯一装配口，`state.rs` 调用）。
+    pub fn with_capability_retriever(
+        mut self,
+        retriever: std::sync::Arc<dyn axagent_harness::capability_retriever::CapabilityRetriever>,
+    ) -> Self {
+        self.capability_retriever = Some(retriever);
+        self
+    }
+
+    /// 装配自动学习句柄（`auto_learn_workflow` 的唯一装配口，`state.rs` 调用）。
+    ///
+    /// 传 `AppState.learning` 派生出的同一组 `Arc`：学习引擎持有已加载的域包适配器与经验库，
+    /// 另建一份等于在一个空引擎上「自动学习」。
+    pub fn with_learning_handles(mut self, handles: AutoLearnHandles) -> Self {
+        self.learning = Some(handles);
+        self
+    }
+
+    /// 取自动学习句柄；未装配即回 `Provider` 错（本层 fail-closed）。
+    fn learning_handles(&self, op: &str) -> Result<&AutoLearnHandles> {
+        self.learning.as_ref().ok_or_else(|| {
+            AxAgentError::Provider(format!(
+                "opc.store::{op} 未装配学习引擎（宿主 wiring 缺 with_learning_handles）"
+            ))
+        })
+    }
+
+    /// 取调度器任务表；未装配即回 `Provider` 错（本层 fail-closed）。
+    fn cron_jobs(&self, op: &str) -> Result<&std::sync::Arc<axagent_runtime_core::CronJobStore>> {
+        self.cron_job_store.as_ref().ok_or_else(|| {
+            AxAgentError::Provider(format!(
+                "opc.store::{op} 未装配调度器任务表（宿主 wiring 缺 with_cron_job_store）"
+            ))
+        })
+    }
+
+    /// 取能力检索器；未装配即回 `Provider` 错（本层 fail-closed）。
+    fn retriever(
+        &self,
+        op: &str,
+    ) -> Result<&std::sync::Arc<dyn axagent_harness::capability_retriever::CapabilityRetriever>>
+    {
+        self.capability_retriever.as_ref().ok_or_else(|| {
+            AxAgentError::Provider(format!(
+                "opc.store::{op} 未装配能力检索器（宿主 wiring 缺 with_capability_retriever）"
+            ))
+        })
     }
 
     /// 取域包配置根目录；未装配即回 `Provider` 错（本层 fail-closed，**不回退进程级默认根**）。
@@ -2435,6 +2512,216 @@ impl OpcStoreProvider for HostOpcStore {
         .await
         .map_err(AxAgentError::Provider)
     }
+
+    /// 域包仪表盘（迁移前 `opc_get_capability_pack_dashboard`）—— 读 op。
+    ///
+    /// 出参信封与迁移前命令体逐字同形（`{ domainPackId, dashboard }`）：信封不是 DTO，
+    /// 也没有 camelCase 归一要求 —— 键名照抄命令体，不做二次映射（禁区 12）。
+    async fn capability_pack_dashboard(
+        &self,
+        capability_pack_id: String,
+        days: Option<i64>,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("capability_pack_dashboard")?;
+        let range = match days {
+            Some(d) => TimeRange::days(d),
+            None => TimeRange::days(30),
+        };
+        let dashboard = opc_capability_pack_runtime::get_dashboard(
+            Some(&app_dir),
+            &self.db,
+            &capability_pack_id,
+            range,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("opc.store::capability_pack_dashboard {e}")))?;
+        Ok(serde_json::json!({
+            "domainPackId": capability_pack_id,
+            "dashboard": dashboard,
+        }))
+    }
+
+    /// 域包工作流步骤（迁移前 `opc_get_capability_pack_workflow_steps`）—— 读 op。
+    async fn capability_pack_workflow_steps(
+        &self,
+        capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        let steps =
+            opc_capability_pack_runtime::get_workflow_steps(&capability_pack_id).map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::capability_pack_workflow_steps {e}"))
+            })?;
+        let step_infos: Vec<serde_json::Value> = steps
+            .into_iter()
+            .map(|s| {
+                serde_json::json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "stepOrder": s.order,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "domainPackId": capability_pack_id,
+            "steps": step_infos,
+        }))
+    }
+
+    /// 域包已启用自动化规则（迁移前 `opc_get_capability_pack_automation_rules`）—— 读 op。
+    async fn capability_pack_automation_rules(
+        &self,
+        capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("capability_pack_automation_rules")?;
+        let rules =
+            opc_capability_pack_runtime::get_enabled_rules(Some(&app_dir), &capability_pack_id)
+                .map_err(|e| {
+                    AxAgentError::Provider(format!(
+                        "opc.store::capability_pack_automation_rules {e}"
+                    ))
+                })?;
+        Ok(serde_json::json!({
+            "domainPackId": capability_pack_id,
+            "rules": rules,
+        }))
+    }
+
+    /// 触发域包自动化规则（迁移前 `opc_run_automation_rules`）—— 写 op。
+    ///
+    /// `fields` 原样塞进 `RuleContext.fields`（迁移前命令体同形：不做形状校验，
+    /// 规则条件求值器按缺失键视为不命中）。
+    async fn run_automation_rules(
+        &self,
+        capability_pack_id: String,
+        entity_type: String,
+        entity_id: String,
+        status: Option<String>,
+        overdue_days: Option<u32>,
+        created_days: Option<u32>,
+        fields: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("run_automation_rules")?;
+        let mut ctx = RuleContext::new(&entity_type, &entity_id);
+        if let Some(s) = status {
+            ctx = ctx.with_status(s);
+        }
+        if let Some(d) = overdue_days {
+            ctx = ctx.with_overdue_days(d);
+        }
+        if let Some(d) = created_days {
+            ctx = ctx.with_created_days(d);
+        }
+        if let Some(f) = fields {
+            ctx.fields = f;
+        }
+        let triggered = opc_capability_pack_runtime::run_automation_rules(
+            &self.db,
+            Some(&app_dir),
+            &capability_pack_id,
+            ctx,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("opc.store::run_automation_rules {e}")))?;
+        Ok(serde_json::json!({
+            "domainPackId": capability_pack_id,
+            "triggeredRules": triggered,
+            "triggeredCount": triggered.len(),
+        }))
+    }
+
+    /// 需求订阅扫描（迁移前 `opc_run_subscription_scan`）—— 写 op。
+    ///
+    /// 体在 `commands::opc_demand_subscription::run_subscription_scan`：本层只把 `State`
+    /// 换成已有的 `db` 句柄，`only_due` 缺省语义（`true`）与错误映射逐字不变。
+    async fn run_subscription_scan(
+        &self,
+        only_due: Option<bool>,
+    ) -> Result<axagent_harness::types::opc_demand::SubscriptionScanSummary> {
+        crate::commands::opc_demand_subscription::run_subscription_scan(&self.db, only_due)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::run_subscription_scan {e}")))
+    }
+
+    /// 装配需求扫描定时任务（迁移前 `opc_ensure_demand_scan_job`）—— 写 op。
+    ///
+    /// 出参是迁移前命令体的 `ScheduledTaskDto`（camelCase 序列化逐字同形）。
+    async fn ensure_demand_scan_job(
+        &self,
+        cron_expression: Option<String>,
+        webhook_url: Option<String>,
+        file_path: Option<String>,
+    ) -> Result<serde_json::Value> {
+        let store = self.cron_jobs("ensure_demand_scan_job")?.clone();
+        let dto = crate::commands::opc_demand_subscription::ensure_demand_scan_job(
+            &store,
+            cron_expression,
+            webhook_url,
+            file_path,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("opc.store::ensure_demand_scan_job {e}")))?;
+        serde_json::to_value(dto).map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::ensure_demand_scan_job 序列化失败: {e}"))
+        })
+    }
+
+    /// 单条线索的能力匹配（迁移前 `opc_match_lead_capabilities`）—— 读 op。
+    ///
+    /// 检索器与 `AppState.capability_router.retriever` 是同一个实例（wiring 传同一个
+    /// `Arc` 的克隆）；检索失败在自由函数内降级为「无命中」，不冒泡成错误。
+    async fn match_lead_capabilities(
+        &self,
+        lead_id: String,
+        top_k: Option<usize>,
+    ) -> Result<axagent_harness::types::opc_demand::LeadCapabilityMatch> {
+        let retriever = self.retriever("match_lead_capabilities")?.clone();
+        crate::commands::opc_demand_capability::match_lead_capabilities(
+            &self.db,
+            retriever.as_ref(),
+            lead_id,
+            top_k,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("opc.store::match_lead_capabilities {e}")))
+    }
+
+    /// 触发 OPC 域包工作流的自动学习管线（迁移前 `opc_auto_learn_workflow`）—— 写 op。
+    ///
+    /// 实现体 = 迁移前命令体逐字下沉：先识别域包（不是 OPC 域包 ⇒ `Validation`，报错文案不变），
+    /// 再算质量分，最后把反思/进化/自我改进/RL 交给 `try_auto_learn_workflow`（内部失败只记日志）。
+    /// 出参是同一个信封；学习引擎未装配走 fail-closed。
+    async fn auto_learn_workflow(
+        &self,
+        template_id: String,
+        workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("auto_learn_workflow")?;
+        let handles = self.learning_handles("auto_learn_workflow")?;
+        let domain_pack_id =
+            crate::commands::opc_learning_hook::identify_capability_pack_from_template(
+                &template_id,
+                Some(&app_dir),
+            )
+            .ok_or_else(|| {
+                AxAgentError::Validation(format!("模板 {} 不是 OPC 域包工作流", template_id))
+            })?;
+        let quality_score =
+            crate::commands::opc_learning_hook::compute_quality_score(&workflow_result);
+        crate::commands::opc_learning_hook::try_auto_learn_workflow(
+            &template_id,
+            &workflow_result,
+            handles,
+            Some(&app_dir),
+        )
+        .await;
+        Ok(serde_json::json!({
+            "success": true,
+            "domainPackId": domain_pack_id,
+            "templateId": template_id,
+            "qualityScore": quality_score,
+            "message": "自动学习已触发",
+        }))
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────
@@ -2444,13 +2731,14 @@ impl OpcStoreProvider for HostOpcStore {
 // 在任意 item 位置都生效）。
 use crate::commands::opc_capability_pack_actions;
 use crate::commands::opc_capability_pack_runtime;
+// 刀 B3：`auto_learn_workflow` op 的句柄类型（同段追加，避免移动被按行号引用的 impl 行）。
+use crate::commands::opc_learning_hook::AutoLearnHandles;
 use axagent_company_runtime::opc::vendors::{
     AnalysisDataSource, CacheVendor, DbVendor, FileVendor, OpCapabilityPackClient,
     OpCapabilityPackVendor, WebVendor,
 };
 use axagent_company_runtime::opc::{
-    DefaultDataService, OpcDataService, TimeRange, capability_pack_kpi_service,
-    capability_pack_validator,
+    DefaultDataService, OpcDataService, capability_pack_kpi_service, capability_pack_validator,
 };
 use axagent_harness::opc_store::{
     CapabilityPackActionConfig, CapabilityPackConfig, CapabilityPackWorkflowConfig,

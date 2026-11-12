@@ -5,7 +5,8 @@
 //! 需求「响应」环节的回答机器：给定一条线索，用现有能力库（CapabilityPassport，
 //! 100+ 实现，混合检索 = 向量 + BM25 + 标签）判定**能不能接、缺什么**。
 //!
-//! - `opc_match_lead_capabilities`：单条线索的能力匹配结论
+//! - `match_lead_capabilities`：单条线索的能力匹配结论（#264 批 7 刀 B3 起调用方走
+//!   plugin-opc 的同名命名命令，宿主命令包装器已退役，本文件只留自由函数）
 //!
 //! ## 判定口径
 //!
@@ -22,14 +23,11 @@
 //! 这里用**需求类型 → 必需能力域**的静态映射 + 检索命中的域做差集，结论确定、
 //! 可单测、可解释；`gap_hint` 只做描述性拼接，不发明新能力。
 
-use crate::AppState;
-use axagent_agent_macro::agent_command;
 use axagent_harness::capability::CapabilityDomain;
 use axagent_harness::capability_retriever::CapabilityQuery;
 use axagent_harness::types::{CapabilityMatchItem, DemandLeadDto, LeadCapabilityMatch};
 use axagent_harness::util_fns::truncate_to_char_boundary;
 use axagent_tools::tools::marketplace_scanner::DemandType;
-use tauri::State;
 
 /// 判定为「可直接接」的综合分门槛
 const READY_SCORE: f64 = 0.65;
@@ -47,15 +45,17 @@ const MATCH_TEXT_BYTES: usize = 1200;
 /// 从能力库检索与该需求最匹配的能力，输出「能接/部分/缺失」结论与缺失的能力域。
 /// 检索失败不报错 —— 能力库不可用时应降级为「未知」（missing），而不是让「响应」
 /// 环节整体崩掉；错误只记日志。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "为需求匹配能力")]
-#[tauri::command]
-pub async fn opc_match_lead_capabilities(
-    state: State<'_, AppState>,
+///
+/// #264 批 7 刀 B3：`#[agent_command]` / `#[tauri::command]` 包装器已退役，调用方走
+/// plugin-opc 的 `opc_match_lead_capabilities` 命名命令（`opc.store::match_lead_capabilities`
+/// 读 op 经 `HostOpcStore` 转调本函数，`State` 换成 db + 检索器两个入参）。
+pub async fn match_lead_capabilities(
+    db: &sea_orm::DatabaseConnection,
+    retriever: &dyn axagent_harness::capability_retriever::CapabilityRetriever,
     lead_id: String,
     top_k: Option<usize>,
 ) -> Result<LeadCapabilityMatch, String> {
-    let lead =
-        axagent_dao::repo::opc_demand::get_lead(state.harness.db(), &lead_id).await.map_err(err)?;
+    let lead = axagent_dao::repo::opc_demand::get_lead(db, &lead_id).await.map_err(err)?;
 
     // 复用 DemandType 枚举（marketplace_scanner 落库同源），识别不了的类型不猜缺口
     let demand_type: DemandType = lead.demand_type.parse().unwrap_or(DemandType::Unknown);
@@ -69,7 +69,7 @@ pub async fn opc_match_lead_capabilities(
         ..Default::default()
     };
 
-    let candidates = match state.capability_router.retriever.retrieve(&query).await {
+    let candidates = match retriever.retrieve(&query).await {
         Ok(result) => result.candidates,
         Err(e) => {
             tracing::warn!(

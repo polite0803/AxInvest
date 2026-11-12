@@ -8,6 +8,7 @@
 
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { DomainLearningConfig } from "@/types";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -157,7 +158,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     try {
       const days = Number(kpiTimeRange);
       // 后端返回信封 { capabilityPackId, dashboard }，仪表盘本体在 dashboard 字段内
-      const result = await invoke<DomainDashboardResponse>(
+      const result = await invokePluginCommand<DomainDashboardResponse>(
         "opc_get_capability_pack_dashboard",
         { capabilityPackId, days },
       );
@@ -179,7 +180,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
     setStepsLoading(true);
     try {
-      const result = await invoke<{ steps: WorkflowStepInfo[] }>(
+      const result = await invokePluginCommand<{ steps: WorkflowStepInfo[] }>(
         "opc_get_capability_pack_workflow_steps",
         { capabilityPackId },
       );
@@ -202,7 +203,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
     setRulesLoading(true);
     try {
-      const result = await invoke<{ rules: AutomationRuleInfo[] }>(
+      const result = await invokePluginCommand<{ rules: AutomationRuleInfo[] }>(
         "opc_get_capability_pack_automation_rules",
         { capabilityPackId },
       );
@@ -297,11 +298,18 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
     setRulesRunning(true);
     try {
-      return await invoke<string[]>("opc_run_automation_rules", {
-        capabilityPackId,
-        entityType: "customer",
-        entityId: "manual_trigger",
-      });
+      // 出参是信封（`{ domainPackId, triggeredRules, triggeredCount }`），触发到的规则 id
+      // 在 `triggeredRules` 里 —— 直接把它当数组消费会恒得 `undefined`（`.length` 也只是
+      // `undefined`），失败与「没命中」就分不开了。
+      const result = await invokePluginCommand<{ triggeredRules: string[] }>(
+        "opc_run_automation_rules",
+        {
+          capabilityPackId,
+          entityType: "customer",
+          entityId: "manual_trigger",
+        },
+      );
+      return result.triggeredRules ?? [];
     } finally {
       setRulesRunning(false);
     }

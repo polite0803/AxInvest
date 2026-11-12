@@ -223,6 +223,32 @@ const OPC_STORE_GET_PUBLISH_SCHEDULE: &str = "get_publish_schedule";
 const OPC_STORE_UPDATE_PUBLISH_SCHEDULE: &str = "update_publish_schedule";
 const OPC_STORE_EXECUTE_DYNAMIC_WORKFLOW: &str = "execute_dynamic_workflow";
 
+/// #264 批 7 刀 B3：域包自动规则 / 仪表盘四 op（三读一写）。
+///
+/// `run_automation_rules` 在宿主权限表登记 `Write`（规则动作会改库）；另三条
+/// （仪表盘 / 工作流步骤 / 启用规则清单）是纯读，宿主侧无权限闸 —— 两侧同批改，
+/// 判据在 `worker.rs` 的 `required_permission_for` 与 `READ_OPS` / `WRITE_OPS` 用例。
+const OPC_STORE_CAPABILITY_PACK_DASHBOARD: &str = "capability_pack_dashboard";
+const OPC_STORE_CAPABILITY_PACK_WORKFLOW_STEPS: &str = "capability_pack_workflow_steps";
+const OPC_STORE_CAPABILITY_PACK_AUTOMATION_RULES: &str = "capability_pack_automation_rules";
+const OPC_STORE_RUN_AUTOMATION_RULES: &str = "run_automation_rules";
+
+/// #264 批 7 刀 B3（后三条）：订阅扫描 / 扫描任务装配（两写）+ 能力匹配（一读）。
+///
+/// 前两条在宿主权限表登记 `Write`（扫描落库并推进到期时间、幂等建改调度任务）；
+/// `match_lead_capabilities` 是纯读 ⇒ 无闸。两侧同批改，判据在 `worker.rs` 的
+/// `required_permission_for` 与 `READ_OPS` / `WRITE_OPS` 用例。
+const OPC_STORE_RUN_SUBSCRIPTION_SCAN: &str = "run_subscription_scan";
+const OPC_STORE_ENSURE_DEMAND_SCAN_JOB: &str = "ensure_demand_scan_job";
+const OPC_STORE_MATCH_LEAD_CAPABILITIES: &str = "match_lead_capabilities";
+
+/// 刀 B3 收尾：自动学习（写 op —— 落 RL 经验并触发反思/进化/策略优化）。
+///
+/// 学习引擎与域包适配器注册表只在宿主装配，插件进程够不着 ⇒ 必须走接缝回宿主；
+/// 宿主权限表同批登记 `Write`，判据在 `worker.rs` 的 `required_permission_for` 与
+/// `WRITE_OPS` 用例。
+const OPC_STORE_AUTO_LEARN_WORKFLOW: &str = "auto_learn_workflow";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -392,6 +418,28 @@ const COMMAND_SYNC_FLEET: &str = "opc_sync_fleet";
 const COMMAND_GET_PUBLISH_SCHEDULE: &str = "opc_get_publish_schedule";
 const COMMAND_UPDATE_PUBLISH_SCHEDULE: &str = "opc_update_publish_schedule";
 const COMMAND_EXECUTE_DYNAMIC_WORKFLOW: &str = "opc_execute_dynamic_workflow";
+
+/// #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写，宿主同名 Tauri 命令随本批删除）。
+/// `opc_run_automation_rules` 是写命令，同批进 `scripts/build-plugin-bundle.mjs` 的
+/// `OPC_WRITE_COMMANDS`（否则智能体面按未声明 = 只读档暴露）。
+const COMMAND_GET_CAPABILITY_PACK_DASHBOARD: &str = "opc_get_capability_pack_dashboard";
+const COMMAND_GET_CAPABILITY_PACK_WORKFLOW_STEPS: &str = "opc_get_capability_pack_workflow_steps";
+const COMMAND_GET_CAPABILITY_PACK_AUTOMATION_RULES: &str =
+    "opc_get_capability_pack_automation_rules";
+const COMMAND_RUN_AUTOMATION_RULES: &str = "opc_run_automation_rules";
+
+/// #264 批 7 刀 B3（后三条）：订阅扫描 / 扫描任务装配（两写）+ 能力匹配（一读）。
+///
+/// 宿主同名三条 Tauri 命令随本批删除（`opc_demand_subscription.rs` /
+/// `opc_demand_capability.rs` 只留自由函数，供 `HostOpcStore` 转调）。两条写命令还需
+/// 同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`。
+const COMMAND_RUN_SUBSCRIPTION_SCAN: &str = "opc_run_subscription_scan";
+const COMMAND_ENSURE_DEMAND_SCAN_JOB: &str = "opc_ensure_demand_scan_job";
+const COMMAND_MATCH_LEAD_CAPABILITIES: &str = "opc_match_lead_capabilities";
+
+/// 刀 B3 收尾：自动学习命令（宿主同名 `#[agent_command]` 已随本批改走接缝；
+/// 命令名续用原名，智能体工具面按名单续用）。写命令 ⇒ 同批进 `OPC_WRITE_COMMANDS`。
+const COMMAND_OPC_AUTO_LEARN_WORKFLOW: &str = "opc_auto_learn_workflow";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -1145,6 +1193,75 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_EXECUTE_DYNAMIC_WORKFLOW => {
             match execute_dynamic_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写，每条一次接缝调用直投影；
+        // 命令层只做形状判，规则装配与仪表盘聚合全在宿主 provider）。
+        COMMAND_GET_CAPABILITY_PACK_DASHBOARD => {
+            match get_capability_pack_dashboard(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_CAPABILITY_PACK_WORKFLOW_STEPS => {
+            match get_capability_pack_workflow_steps(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_CAPABILITY_PACK_AUTOMATION_RULES => {
+            match get_capability_pack_automation_rules(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_RUN_AUTOMATION_RULES => {
+            match run_automation_rules(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 批 7 刀 B3（后三条）：订阅扫描 / 扫描任务装配 / 能力匹配（每条一次接缝
+        // 调用直投影；命令层只做形状判，业务语义全在宿主 provider）。
+        COMMAND_RUN_SUBSCRIPTION_SCAN => {
+            match run_subscription_scan(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_ENSURE_DEMAND_SCAN_JOB => {
+            match ensure_demand_scan_job(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_MATCH_LEAD_CAPABILITIES => {
+            match match_lead_capabilities(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // 刀 B3 收尾：自动学习（一次接缝调用直投影；学习语义全在宿主 provider）。
+        COMMAND_OPC_AUTO_LEARN_WORKFLOW => {
+            match auto_learn_workflow(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2939,6 +3056,196 @@ fn execute_dynamic_workflow(
         args.insert("user_input".to_string(), user_input.clone());
     }
     call_opc_store(peer, OPC_STORE_EXECUTE_DYNAMIC_WORKFLOW, Value::Object(args), call_chain)
+}
+
+/// `opc_get_capability_pack_dashboard`：域包仪表盘（读 op；`days` 缺省由宿主按 30 天取）。
+fn get_capability_pack_dashboard(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_dashboard";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("capability_pack_id".to_string(), json!(pack_id));
+    copy_optional_i64(input, OP, &mut args, &["days"])?;
+    call_opc_store(peer, OPC_STORE_CAPABILITY_PACK_DASHBOARD, Value::Object(args), call_chain)
+}
+
+/// `opc_get_capability_pack_workflow_steps`：域包工作流步骤（读 op）。
+fn get_capability_pack_workflow_steps(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_workflow_steps";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CAPABILITY_PACK_WORKFLOW_STEPS,
+        json!({ "capability_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_get_capability_pack_automation_rules`：域包启用的自动化规则（读 op）。
+fn get_capability_pack_automation_rules(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack_automation_rules";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CAPABILITY_PACK_AUTOMATION_RULES,
+        json!({ "capability_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_run_automation_rules`：触发域包自动化规则（写 op）。
+///
+/// 命令面平铺 camelCase（`capabilityPackId` / `entityType` / `entityId` / `overdueDays` /
+/// `createdDays`），接缝键改 snake_case；可选键缺省**不传**（宿主侧是 `Option`，缺键即
+/// `None`）。`fields` 是任意对象，原样透传。
+fn run_automation_rules(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_run_automation_rules";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let entity_type = require_str(input, OP, "entityType")?;
+    let entity_id = require_str(input, OP, "entityId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("capability_pack_id".to_string(), json!(pack_id));
+    args.insert("entity_type".to_string(), json!(entity_type));
+    args.insert("entity_id".to_string(), json!(entity_id));
+    copy_optional_strings(input, OP, &mut args, &["status"])?;
+    // 命令面键是 camelCase、接缝键是 snake_case，故逐键改名而不是批量复制。
+    for (from, to) in [("overdueDays", "overdue_days"), ("createdDays", "created_days")] {
+        match input.get(from) {
+            None | Some(Value::Null) => {},
+            Some(value) if value.as_u64().is_some_and(|n| n <= u64::from(u32::MAX)) => {
+                args.insert(to.to_string(), value.clone());
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!(
+                    "{OP} 的 `{from}` 必须是非负整数（形状判在命令层）"
+                )));
+            },
+        }
+    }
+    match input.get("fields") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.is_object() => {
+            args.insert("fields".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `fields` 必须是对象（形状判在命令层）")));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_RUN_AUTOMATION_RULES, Value::Object(args), call_chain)
+}
+
+/// `opc_run_subscription_scan`：批量扫描需求订阅（写 op）。
+///
+/// 唯一的可选键 `onlyDue` 缺省不传（宿主侧 `Option<bool>`，缺键即「只扫到期订阅」）；
+/// 到期判定、命中过滤、到期时间推进全在宿主 provider。
+fn run_subscription_scan(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_run_subscription_scan";
+    let mut args = serde_json::Map::new();
+    match input.get("onlyDue") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.is_boolean() => {
+            args.insert("only_due".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `onlyDue` 必须是布尔（形状判在命令层）")));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_RUN_SUBSCRIPTION_SCAN, Value::Object(args), call_chain)
+}
+
+/// `opc_ensure_demand_scan_job`：幂等装配需求扫描定时任务（写 op）。
+///
+/// 三个可选键都是字符串，缺省**不传**（宿主侧 `Option<String>`）；cron 合法性由宿主
+/// 校验，投递渠道两个都不给 ⇒ 只写执行历史不推送。
+fn ensure_demand_scan_job(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_ensure_demand_scan_job";
+    let mut args = serde_json::Map::new();
+    // 命令面键是 camelCase、接缝键是 snake_case，故逐键改名而不是批量复制。
+    for (from, to) in [
+        ("cronExpression", "cron_expression"),
+        ("webhookUrl", "webhook_url"),
+        ("filePath", "file_path"),
+    ] {
+        match input.get(from) {
+            None | Some(Value::Null) => {},
+            Some(Value::String(value)) => {
+                args.insert(to.to_string(), Value::String(value.clone()));
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!(
+                    "{OP} 的 `{from}` 必须是字符串（形状判在命令层）"
+                )));
+            },
+        }
+    }
+    call_opc_store(peer, OPC_STORE_ENSURE_DEMAND_SCAN_JOB, Value::Object(args), call_chain)
+}
+
+/// `opc_match_lead_capabilities`：单条线索的能力匹配（读 op）。
+///
+/// `leadId` 必填；`topK` 缺省不传（宿主按实现方缺省，越界由宿主夹取）。
+fn match_lead_capabilities(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_match_lead_capabilities";
+    let lead_id = require_str(input, OP, "leadId")?;
+    let mut args = serde_json::Map::new();
+    args.insert("lead_id".to_string(), json!(lead_id));
+    match input.get("topK") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.as_u64().is_some_and(|n| n <= u64::from(u32::MAX)) => {
+            args.insert("top_k".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `topK` 必须是非负整数（形状判在命令层）")));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_MATCH_LEAD_CAPABILITIES, Value::Object(args), call_chain)
+}
+
+/// `opc_auto_learn_workflow`：触发 OPC 域包工作流的自动学习管线（写 op）。
+///
+/// `templateId` 必填字符串；`workflowResult` 必填但**形状不限**（迁移前命令参数就是
+/// `serde_json::Value`，可以是任何 JSON 含 `null`）—— 识别域包与算质量分的判据在宿主。
+fn auto_learn_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_auto_learn_workflow";
+    let template_id = require_str(input, OP, "templateId")?;
+    let Some(workflow_result) = input.get("workflowResult") else {
+        return Err(invalid_shape(format!("{OP} 需要 `workflowResult` 参数（形状判在命令层）")));
+    };
+    let mut args = serde_json::Map::new();
+    args.insert("template_id".to_string(), json!(template_id));
+    args.insert("workflow_result".to_string(), workflow_result.clone());
+    call_opc_store(peer, OPC_STORE_AUTO_LEARN_WORKFLOW, Value::Object(args), call_chain)
 }
 
 /// `opc_create_project`：创建项目（写 op）。

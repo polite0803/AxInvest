@@ -29,7 +29,7 @@
 | 域包「零代码扩展」已有先例：`load_capability_pack_adapters` 动态扫 `domain_packs/*/learning.yaml` | `src-tauri/src/commands/opc_workflows/mod.rs:335-376` |
 | 场景模板纯前端 TS 硬编码；`registerSceneTemplate` 是唯一注入点（仅投研模板用过） | `src/components/office/phaser/sceneTemplates.ts:906`、`src/main.tsx:43` |
 | 阶段 3 门禁已立 slug↔域包↔i18n 数据契约 | `scripts/check-office-scene-align.mjs` |
-| `opc_sync_fleet` 同步的是 OPC 组织员工，非域包专家，`agent_profile_id: None` ⇒ 不可复用 | `src-tauri/src/init/opc_store_service.rs:2334-2341` |
+| `opc_sync_fleet` 同步的是 OPC 组织员工，非域包专家，`agent_profile_id: None` ⇒ 不可复用 | `src-tauri/src/init/opc_store_service.rs:2418` |
 
 ## 2. 目标 / 非目标
 

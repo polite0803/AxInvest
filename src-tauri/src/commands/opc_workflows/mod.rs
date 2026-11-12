@@ -355,8 +355,7 @@ pub fn load_capability_pack_adapters(
         };
         let m = &bundle.manifest;
         // 域包 ID 双轨归一：manifest.id 是下划线（software_dev），orchestrator
-        // 学习/编排侧约定连字符（software-dev）——与 learning hook 的
-        // `identify_capability_pack_from_template` 转换一致（P4-4）。
+        // 学习/编排侧约定连字符（software-dev）。
         let domain_pack_id = m.id.replace('_', "-");
         let learning_path = dir.join(&m.learning);
         let adapter_cfg = std::fs::read_to_string(&learning_path)

@@ -156,9 +156,8 @@ const ANALYZE_CAPABILITY_GAPS_COMMAND = "opc_analyze_capability_gaps";
 
 // 需求订阅三条命令：前端调用点先行切插件命令通道（T2 接缝，经 `invokePluginCommand`：真机
 // 按命令名解析提供它的启用插件 ⇒ `plugin_execute_command` 派发并解析回执 JSON，浏览器模式
-// 直达 `browserMock` 同名分支）。宿主 `opc_demand_subscription.rs` 双声明期未退役，插件侧
-// 命令同名同形（出/入参形状不变）；`opc_run_subscription_scan` / `opc_ensure_demand_scan_job`
-// 两条扫描装配命令本批未迁，仍走宿主 invoke。
+// 直达 `browserMock` 同名分支）。宿主 `opc_demand_subscription.rs` 的同名命令已退役
+// （#264 批 7 刀 B3），插件侧命令同名同形（出/入参形状不变）。
 const LIST_SUBSCRIPTIONS_COMMAND = "opc_list_subscriptions";
 const SAVE_SUBSCRIPTION_COMMAND = "opc_save_subscription";
 const DELETE_SUBSCRIPTION_COMMAND = "opc_delete_subscription";
@@ -786,9 +785,10 @@ export function DemandDiscoveryPage() {
   const runSubscriptionScan = useCallback(async () => {
     setSubScanning(true);
     try {
-      const result = await invoke<SubscriptionScanSummary>("opc_run_subscription_scan", {
-        onlyDue: false,
-      });
+      const result = await invokePluginCommand<SubscriptionScanSummary>(
+        "opc_run_subscription_scan",
+        { onlyDue: false },
+      );
       setSubSummary(result);
       await loadSubscriptions();
       await loadLeads();
@@ -808,7 +808,7 @@ export function DemandDiscoveryPage() {
   /** 装配/更新定时扫描任务（幂等） */
   const ensureScanJob = useCallback(async () => {
     try {
-      await invoke("opc_ensure_demand_scan_job", { cronExpression: scanCron });
+      await invokePluginCommand("opc_ensure_demand_scan_job", { cronExpression: scanCron });
       message.success(t("opc.demand.scanJobReady"));
     } catch (e) {
       message.error(t("opc.demand.saveFailed", { error: String(e) }));
@@ -868,9 +868,10 @@ export function DemandDiscoveryPage() {
       setCapMatch(null);
       setCapModalOpen(true);
       try {
-        const result = await invoke<LeadCapabilityMatch>("opc_match_lead_capabilities", {
-          leadId: row.id,
-        });
+        const result = await invokePluginCommand<LeadCapabilityMatch>(
+          "opc_match_lead_capabilities",
+          { leadId: row.id },
+        );
         setCapMatch(result ?? null);
       } catch (e) {
         setCapMatch(null);

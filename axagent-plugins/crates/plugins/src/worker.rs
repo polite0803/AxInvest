@@ -572,7 +572,19 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "import_talent_library"
             | "sync_fleet"
             | "update_publish_schedule"
-            | "execute_dynamic_workflow",
+            | "execute_dynamic_workflow"
+            // #264 批 7 刀 B3：域包规则触发（写 op —— 规则动作会改库）。同批另三条
+            // （`capability_pack_dashboard` / `capability_pack_workflow_steps` /
+            // `capability_pack_automation_rules`）全是只读，写分支一条都不加，
+            // 锁在 READ_OPS 用例。
+            | "run_automation_rules"
+            // #264 批 7 刀 B3（后三条）：订阅扫描落库 + 幂等建/改调度任务 —— 都改库，
+            // 扫描还会推进订阅到期时间。`match_lead_capabilities` 是纯读 ⇒ 必须仍
+            // `None`（锁在 READ_OPS 用例）。
+            | "run_subscription_scan"
+            | "ensure_demand_scan_job"
+            // 刀 B3 收尾：自动学习会写 RL 经验库并触发进化 —— 写 op。
+            | "auto_learn_workflow",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -4807,7 +4819,214 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
-            // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
+            // #264 批 7 刀 B3：域包自动规则 / 仪表盘四 op（三读一写，出参都是宿主组好的
+            // JSON 信封，本层逐字透传；`run_automation_rules` 的 `fields` 是任意对象）。
+            "opc.store" if op == "capability_pack_dashboard" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let days: Option<i64> = match deserialize_optional_arg(&args, "days", seam) {
+                    Ok(days) => days,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.capability_pack_dashboard(capability_pack_id, days))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "capability_pack_workflow_steps" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.capability_pack_workflow_steps(capability_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "capability_pack_automation_rules" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.capability_pack_automation_rules(capability_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "run_automation_rules" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let entity_type: String = match deserialize_arg(&args, "entity_type", seam) {
+                    Ok(entity_type) => entity_type,
+                    Err(response) => return response,
+                };
+                let entity_id: String = match deserialize_arg(&args, "entity_id", seam) {
+                    Ok(entity_id) => entity_id,
+                    Err(response) => return response,
+                };
+                let status: Option<String> = match deserialize_optional_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                let overdue_days: Option<u32> =
+                    match deserialize_optional_arg(&args, "overdue_days", seam) {
+                        Ok(overdue_days) => overdue_days,
+                        Err(response) => return response,
+                    };
+                let created_days: Option<u32> =
+                    match deserialize_optional_arg(&args, "created_days", seam) {
+                        Ok(created_days) => created_days,
+                        Err(response) => return response,
+                    };
+                let fields: Option<Value> = match deserialize_optional_arg(&args, "fields", seam) {
+                    Ok(fields) => fields,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.run_automation_rules(
+                    capability_pack_id,
+                    entity_type,
+                    entity_id,
+                    status,
+                    overdue_days,
+                    created_days,
+                    fields,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #264 批 7 刀 B3：需求订阅扫描 / 扫描任务装配 / 能力匹配三条。
+            // 前两条是写 op（扫描入库 + 建/改调度任务），`match_lead_capabilities` 是读 op。
+            "opc.store" if op == "run_subscription_scan" => {
+                let only_due: Option<bool> = match deserialize_optional_arg(&args, "only_due", seam)
+                {
+                    Ok(only_due) => only_due,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.run_subscription_scan(only_due)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(summary) => to_value("SubscriptionScanSummary", &summary),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "ensure_demand_scan_job" => {
+                let cron_expression: Option<String> =
+                    match deserialize_optional_arg(&args, "cron_expression", seam) {
+                        Ok(cron_expression) => cron_expression,
+                        Err(response) => return response,
+                    };
+                let webhook_url: Option<String> =
+                    match deserialize_optional_arg(&args, "webhook_url", seam) {
+                        Ok(webhook_url) => webhook_url,
+                        Err(response) => return response,
+                    };
+                let file_path: Option<String> =
+                    match deserialize_optional_arg(&args, "file_path", seam) {
+                        Ok(file_path) => file_path,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.ensure_demand_scan_job(
+                    cron_expression,
+                    webhook_url,
+                    file_path,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "match_lead_capabilities" => {
+                let lead_id: String = match deserialize_arg(&args, "lead_id", seam) {
+                    Ok(lead_id) => lead_id,
+                    Err(response) => return response,
+                };
+                let top_k: Option<usize> = match deserialize_optional_arg(&args, "top_k", seam) {
+                    Ok(top_k) => top_k,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.match_lead_capabilities(lead_id, top_k))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(matched) => to_value("LeadCapabilityMatch", &matched),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 刀 B3 收尾：自动学习（学习引擎只在宿主装配，本层只做入参解包与错误映射）。
+            "opc.store" if op == "auto_learn_workflow" => {
+                let template_id: String = match deserialize_arg(&args, "template_id", seam) {
+                    Ok(template_id) => template_id,
+                    Err(response) => return response,
+                };
+                let workflow_result: Value = match deserialize_arg(&args, "workflow_result", seam) {
+                    Ok(workflow_result) => workflow_result,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.auto_learn_workflow(template_id, workflow_result))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => FrameResponse::success(outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
                 let Some(adapter) = self.registry.get_platform_adapter(platform) else {
@@ -13629,6 +13848,13 @@ mod tests {
             "sync_fleet",
             "update_publish_schedule",
             "execute_dynamic_workflow",
+            // #264 批 7 刀 B3：域包规则触发（写 op）；同批三条域包读 op 在 READ_OPS。
+            "run_automation_rules",
+            // #264 批 7 刀 B3（后三条）：订阅扫描落库 + 幂等建/改调度任务。
+            "run_subscription_scan",
+            "ensure_demand_scan_job",
+            // 刀 B3 收尾：自动学习（写 RL 经验 + 反思/进化）。
+            "auto_learn_workflow",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -13680,6 +13906,10 @@ mod tests {
             "list_revenue",
             "get_investment_advice",
             "get_publish_schedule",
+            // #264 批 7 刀 B3：域包自动规则 / 仪表盘三条读 op —— 全只读，写分支一条不加。
+            "capability_pack_dashboard",
+            "capability_pack_workflow_steps",
+            "capability_pack_automation_rules",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

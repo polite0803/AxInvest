@@ -1075,6 +1075,13 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_update_project",
   // #264 批 7 刀 B2：更新发布计划（写 op）。
   "opc_update_publish_schedule",
+  // #264 批 7 刀 B3：触发域包自动化规则（写 op —— 规则动作会改库）。
+  "opc_run_automation_rules",
+  // #264 批 7 刀 B3：订阅扫描落库 / 幂等建改扫描调度任务（写 op —— 都改库）。
+  "opc_run_subscription_scan",
+  "opc_ensure_demand_scan_job",
+  // 刀 B3 收尾：自动学习（写 op —— 落 RL 经验并触发反思/进化）。
+  "opc_auto_learn_workflow",
 ]);
 
 function withRequiredPermission(commands) {
@@ -1089,7 +1096,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 97 条命名命令（读 62 条 · 写 35 条）",
+      "OPC 域功能包（#36）：worker 通道 + 105 条命名命令（读 66 条 · 写 39 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2340,6 +2347,114 @@ function opcManifest({ version, binaryName, sha256 }) {
             userInput: { type: "object", description: "调用方输入（可选任意对象，原样透传）" },
           },
           required: ["capabilityPackId"],
+        },
+      },
+      // ── #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写；宿主同名四条 Tauri
+      // 命令已删）。`opc_run_automation_rules` 是写命令，同批进 `OPC_WRITE_COMMANDS`
+      // （= 宿主 `required_permission_for` 的写 op 名单，两处必须同批改）。
+      {
+        name: "opc_get_capability_pack_dashboard",
+        description: "获取域包仪表盘（读 op；days 缺省由宿主按 30 天取）",
+        command: "worker://opc_get_capability_pack_dashboard",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            days: { type: "integer", description: "统计天数（可选）" },
+          },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_get_capability_pack_workflow_steps",
+        description: "获取域包工作流步骤（读 op）",
+        command: "worker://opc_get_capability_pack_workflow_steps",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_get_capability_pack_automation_rules",
+        description: "获取域包自动化规则（读 op；只回启用的规则）",
+        command: "worker://opc_get_capability_pack_automation_rules",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_run_automation_rules",
+        description: "运行域包自动化规则（写 op；规则动作会改库）",
+        command: "worker://opc_run_automation_rules",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            entityType: { type: "string", description: "实体类型（如 customer）" },
+            entityId: { type: "string", description: "实体 ID" },
+            status: { type: "string", description: "实体状态（可选）" },
+            overdueDays: { type: "integer", description: "逾期天数（可选）" },
+            createdDays: { type: "integer", description: "创建天数（可选）" },
+            fields: { type: "object", description: "规则上下文字段（可选任意对象，原样透传）" },
+          },
+          required: ["capabilityPackId", "entityType", "entityId"],
+        },
+      },
+      // ── #264 批 7 刀 B3（后三条）：需求订阅扫描 / 扫描任务装配 / 能力匹配。前两条是写
+      // 命令（同批进 `OPC_WRITE_COMMANDS`），能力匹配是读命令。
+      {
+        name: "opc_run_subscription_scan",
+        description: "批量扫描需求订阅（写 op；命中线索入库并推进订阅到期时间）",
+        command: "worker://opc_run_subscription_scan",
+        inputSchema: {
+          type: "object",
+          properties: {
+            onlyDue: { type: "boolean", description: "只扫到期订阅（可选；缺省 true，false = 强制全量重扫）" },
+          },
+        },
+      },
+      {
+        name: "opc_ensure_demand_scan_job",
+        description: "幂等装配需求扫描定时任务（写 op；已有同任务类型则更新）",
+        command: "worker://opc_ensure_demand_scan_job",
+        inputSchema: {
+          type: "object",
+          properties: {
+            cronExpression: { type: "string", description: "cron 表达式（可选；缺省按宿主默认）" },
+            webhookUrl: { type: "string", description: "推送 webhook 地址（可选）" },
+            filePath: { type: "string", description: "推送落盘路径（可选，支持 ~/ 前缀）" },
+          },
+        },
+      },
+      {
+        name: "opc_match_lead_capabilities",
+        description: "为需求线索匹配能力（读 op；检索失败降级为无命中）",
+        command: "worker://opc_match_lead_capabilities",
+        inputSchema: {
+          type: "object",
+          properties: {
+            leadId: { type: "string", description: "线索 ID" },
+            topK: { type: "integer", description: "返回候选数上限（可选；越界由宿主夹取）" },
+          },
+          required: ["leadId"],
+        },
+      },
+      // 刀 B3 收尾：自动学习（写命令，同批进 `OPC_WRITE_COMMANDS`）。
+      // `workflowResult` 是任意 JSON（迁移前宿主参数就是 `serde_json::Value`，含 null）。
+      {
+        name: "opc_auto_learn_workflow",
+        description: "触发 OPC 域包工作流的自动学习管线（写 op；识别域包 → 质量分 → 反思/进化/RL）",
+        command: "worker://opc_auto_learn_workflow",
+        inputSchema: {
+          type: "object",
+          properties: {
+            templateId: { type: "string", description: "工作流模板 ID" },
+            workflowResult: { description: "工作流结果（任意 JSON，形状由宿主判）" },
+          },
+          required: ["templateId", "workflowResult"],
         },
       },
     ]),

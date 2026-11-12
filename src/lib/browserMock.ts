@@ -7081,6 +7081,35 @@ async function executeCommand<T>(
         revenueTrend: [],
       } as unknown as T;
 
+    // ── OPC 域包级四命令（#264 批 7 刀 B3：宿主同名命令已迁入 OPC 插件）──
+    // 浏览器模式没有域包配置目录、也没有规则引擎 ⇒ 回零值形状而非 `undefined`：
+    // 仪表盘给 `dashboard: null`（消费端 `result?.dashboard ?? null` 落空态），
+    // 步骤 / 规则给空数组，规则触发回**信封**（`triggeredRules` 才是数组本体）。
+    // ⚠ 逐条显式登记：三个读命令各自「以 s 结尾」看似能被 default 兜成 `[]`，
+    // 但兜底给的是数组本体、而调用方读的是 `result.steps` / `result.rules` 字段
+    // （恒 undefined）；`opc_get_capability_pack_dashboard` 三者都不命中，兜底
+    // 直接给 undefined。仪表盘真值一旦非空，消费端会读 `summary.*` 字段 ⇒ 崩。
+    case "opc_get_capability_pack_dashboard": {
+      const packId = readMockReqField<string>(args, "capabilityPackId") ?? "";
+      return { domainPackId: packId, dashboard: null } as unknown as T;
+    }
+    case "opc_get_capability_pack_workflow_steps": {
+      const packId = readMockReqField<string>(args, "capabilityPackId") ?? "";
+      return { domainPackId: packId, steps: [] } as unknown as T;
+    }
+    case "opc_get_capability_pack_automation_rules": {
+      const packId = readMockReqField<string>(args, "capabilityPackId") ?? "";
+      return { domainPackId: packId, rules: [] } as unknown as T;
+    }
+    case "opc_run_automation_rules": {
+      const packId = readMockReqField<string>(args, "capabilityPackId") ?? "";
+      return {
+        domainPackId: packId,
+        triggeredRules: [],
+        triggeredCount: 0,
+      } as unknown as T;
+    }
+
     case "kb_connect_vault":
       return { success: true, vault_id: (args as { vault_id?: string })?.vault_id ?? "" } as T;
     case "kb_disconnect_vault":

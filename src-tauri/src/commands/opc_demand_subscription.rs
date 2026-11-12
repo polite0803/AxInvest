@@ -8,10 +8,12 @@
 //!   `opc_delete_subscription`）已由 #264 批 7 刀 A 删除，调用方走 plugin-opc 的同名命名命令，
 //!   宿主侧由 `HostOpcStore` 经 `opc.store` 的三个同名 op 直调 dao —— 关键词必填、`interval_hours`
 //!   / `min_score` 钳位、缺行 `NotFound` 全部沿用 dao 既有语义，接缝侧不新增校验闸。
-//! - 批量扫描：`opc_run_subscription_scan`（挑出到期订阅 → 复用 [`run_discovery_scan`]
-//!   → 按 `min_score` 过滤高价值命中 → 推进到期时间）
-//! - 定时任务装配：`opc_ensure_demand_scan_job`（幂等创建/更新
-//!   `task_type = "opc_demand_scan"` 的 CronJob，带 delivery 推送配置）
+//! - 批量扫描：`run_subscription_scan`（挑出到期订阅 → 复用 [`run_discovery_scan`]
+//!   → 按 `min_score` 过滤高价值命中 → 推进到期时间）。`#[tauri::command]` 包装器已由
+//!   #264 批 7 刀 B3 删除，调用方走 plugin-opc 的同名命名命令（`opc.store` 同名 op）。
+//! - 定时任务装配：`ensure_demand_scan_job`（幂等创建/更新
+//!   `task_type = "opc_demand_scan"` 的 CronJob，带 delivery 推送配置）。同样已迁
+//!   plugin-opc 命令通道，宿主侧只留本自由函数。
 //!
 //! ## 设计决策
 //!
@@ -24,7 +26,6 @@
 //! - **定时启停用既有命令**：`pause_scheduled_task` / `resume_scheduled_task` 已足够，
 //!   不新增停止命令。
 
-use crate::AppState;
 use crate::commands::error_code::common as common_err;
 use crate::commands::scheduled_task::{ScheduledTaskDto, cron_to_dto, validate_cron_expression};
 use axagent_harness::cron_delivery::{CronDeliveryChannel, CronDeliveryConfig};
@@ -32,7 +33,6 @@ use axagent_harness::types::{DemandSubscription, KeywordScanOutcome, Subscriptio
 use axagent_harness::util_fns::now_ts;
 use axagent_runtime_core::{CronJob, CronJobStatus};
 use axagent_tools::tools::opc_demand_scan::run_discovery_scan;
-use tauri::State;
 
 /// `opc_demand_scan` 定时任务的 task_type 标识（scheduler 分支键）
 pub const SCAN_JOB_TASK_TYPE: &str = "opc_demand_scan";
@@ -45,12 +45,14 @@ pub const DEFAULT_SCAN_CRON: &str = "0 */6 * * *";
 /// 全量重扫（前端「立即扫描」按钮用）。
 ///
 /// 单个订阅词扫描失败不影响其他词 —— 失败会记入对应 outcome 的 `error` 字段。
-#[tauri::command]
-pub async fn opc_run_subscription_scan(
-    state: State<'_, AppState>,
+///
+/// #264 批 7 刀 B3：`#[tauri::command]` 包装器已退役，调用方走 plugin-opc 的
+/// `opc_run_subscription_scan` 命名命令（`opc.store::run_subscription_scan` 写 op
+/// 经 `HostOpcStore` 转调本函数，签名只把 `State` 换成 `db`）。
+pub async fn run_subscription_scan(
+    db: &sea_orm::DatabaseConnection,
     only_due: Option<bool>,
 ) -> Result<SubscriptionScanSummary, String> {
-    let db = state.harness.db();
     let now = now_ts();
     let subs = if only_due.unwrap_or(true) {
         axagent_dao::repo::opc_demand::list_due_subscriptions(db, now).await
@@ -241,9 +243,12 @@ async fn scan_one_subscription(
 /// - File：追加到本地文件（支持 `~/` 前缀）
 ///
 /// 未配置任何渠道时 `delivery.channels` 为空 → 不推送，扫描结果只写执行历史。
-#[tauri::command]
-pub async fn opc_ensure_demand_scan_job(
-    state: State<'_, AppState>,
+///
+/// #264 批 7 刀 B3：`#[tauri::command]` 包装器已退役，调用方走 plugin-opc 的
+/// `opc_ensure_demand_scan_job` 命名命令（`opc.store::ensure_demand_scan_job` 写 op
+/// 经 `HostOpcStore` 转调本函数，`State` 换成调度器存储句柄）。
+pub async fn ensure_demand_scan_job(
+    store: &std::sync::Arc<axagent_runtime_core::CronJobStore>,
     cron_expression: Option<String>,
     webhook_url: Option<String>,
     file_path: Option<String>,
@@ -252,7 +257,6 @@ pub async fn opc_ensure_demand_scan_job(
     validate_cron_expression(&cron)?;
 
     let delivery = build_delivery_config(webhook_url, file_path);
-    let store = state.cron_job_store.clone();
 
     let existing =
         store.list().await.into_iter().find(|j| j.task_type.as_deref() == Some(SCAN_JOB_TASK_TYPE));

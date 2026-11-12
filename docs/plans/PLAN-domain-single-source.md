@@ -857,7 +857,7 @@ CLIPPY_EXIT=101
 |---|---|---|---|
 | 1 | `commands/market_sim.rs` 的 MC 内核（4 DTO + `run_mc_core` + `run_mc_preset`，236 行 / 8230 B） | 逐字搬迁到新服务层 `src/market_sim_service.rs`（`pub(crate)`），命令层留薄壳 | 该内核有 **2 个命令层之外的消费者**（`stock_workflow/sim_hook.rs`、`stock_workflow/rhai_pm.rs`）⇒ 留在 `commands/` 会把依赖图**从树退化成网**；搬到 `src/` 顶层使横向边**真的消失** |
 | 2 | `stock_workflow/sim_hook.rs` 直连 `sea_orm` + `stock_analyses` 实体 | 新建 `crates/dao/src/repo/stock_analysis_snapshot.rs`（`read_/write_blackboard_snapshot`），命令层改为委托 | 实体与 `sea_query::Expr` **真的离开命令层**，且规则原文即要求「须经 dao / service」——这是规则的设计意图，不是绕过 |
-| 3 | `commands/opc_workflow_kpi_hook.rs` 的 `use sea_orm::DatabaseConnection;` | 改走 `axagent_dao::db::DatabaseConnection`（同批 `opc_capability_pack_runtime.rs:14` 既有出口） | 该模块**零 SQL**（唯一用法 `DefaultAnalyticsService::new(self.db.clone())`）⇒ 它从来不是「直连」，只是拿了 sea_orm 的类型名；且**未**把它塞进 `SHARED_INFRA_MODULES` 白名单（那才是刷分） |
+| 3 | `commands/opc_workflow_kpi_hook.rs` 的 `use sea_orm::DatabaseConnection;` | 改走 `axagent_dao::db::DatabaseConnection`（同批 `opc_capability_pack_runtime.rs:11` 既有出口） | 该模块**零 SQL**（唯一用法 `DefaultAnalyticsService::new(self.db.clone())`）⇒ 它从来不是「直连」，只是拿了 sea_orm 的类型名；且**未**把它塞进 `SHARED_INFRA_MODULES` 白名单（那才是刷分） |
 
 **修法 1 的搬迁安全取证**（搬迁前全仓 grep）：`McSimRequest` / `McScenarioSpec` / `McSimResult` /
 `McScenarioResultItem` / `run_mc_core` **零外部引用**；`run_mc_preset` 恰有 2 个命令层外消费者；

@@ -1031,7 +1031,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 
 **★ 施工踩到的 4 个坑（全部由静态自检拦下，未进编译）**：
 
-1. **可见性收窄**：`read_manifest` 原为 `pub(crate) fn`，而 `opc_learning_hook.rs:75` 要跨 crate 调它 ⇒ 必须改 `pub`。**判据 `#263`**：跨 crate 搬迁前必须逐项核对 `pub(crate)` / 私有项的**消费方是否跨 crate**。
+1. **可见性收窄**：`read_manifest` 原为 `pub(crate) fn`，而 `opc_learning_hook.rs:101` 要跨 crate 调它 ⇒ 必须改 `pub`。**判据 `#263`**：跨 crate 搬迁前必须逐项核对 `pub(crate)` / 私有项的**消费方是否跨 crate**。
 2. **脚本产生重复 re-export（E0252）**：「块替换」已把 `export_domain_pack, import_domain_pack` 写进新六行块，脚本**又**单独替换了紧随其后的两行 ⇒ 同一符号在同模块 re-export 两次。**判据 `#264`**：块替换与逐行替换**混用**时必须先算「重叠集」。
 3. **测试块内的跨模块调用漏改**：`opc_workflows/mod.rs` 的 `#[cfg(test)]` 块里有 3 处 `super::domain_pack::stock_tool_defs`（该函数已迁 tools crate）⇒ E0433。**检法**：搬迁后必须同时扫 `#[cfg(test)]` 块内的旧路径 —— **门禁不报它，只有 `--all-targets` 编译才报**。
 4. **注释里的陈旧路径**（2 处）：`tools/mod.rs:363` 与 `capability_pack_kpi_service.rs:146` 仍引用旧位置 ⇒ 已更新。
@@ -1059,7 +1059,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 
 | 项 | 处数 | 位置 | 说明 |
 |---|---|---|---|
-| `list_industries` | 8（**5 个定义**） | `analysis-engine/opc/capability_pack_config.rs:1078`、`opc/learning.rs:287`、`harness/domain_pack_orchestration/mod.rs:102`、`orchestrator/task_context.rs:263`、`commands/opc_capability_pack_runtime.rs:401` | 同名**四种返回类型**（`Vec<(String,String)>` / `Vec<&String>` / `Vec<&str>` / `Vec<String>`）⇒ 典型「一名多义」 |
+| `list_industries` | 8（**5 个定义**） | `analysis-engine/opc/capability_pack_config.rs:1078`、`opc/learning.rs:287`、`harness/domain_pack_orchestration/mod.rs:102`、`orchestrator/task_context.rs:263`、`commands/opc_capability_pack_runtime.rs:354` | 同名**四种返回类型**（`Vec<(String,String)>` / `Vec<&String>` / `Vec<&str>` / `Vec<String>`）⇒ 典型「一名多义」 |
 | `opc_list_industries` | 4 | `register_commands.rs:815`、`opc_capability_pack_bridge.rs:33/393`、`opc_capability_pack_actions.rs:2052` | **跨前后端契约**（Tauri 命令名 + LLM 工具名）⇒ 改名须同步前端 |
 | `opc_list_runtime_industries` | 已退役 | #264 批 7 刀 A（2026-11-11）三条只读包装器之一，退役注释见 `commands/opc_capability_pack_runtime.rs:369` | 调用方走 plugin-opc 同名命名命令 |
 | `LegacyIndustryPathRedirect` | 2 | `src/components/layout/ContentArea.tsx:114/304` | 前端「旧路径重定向」组件（批次②清了 `opc-industries` 路由 key，组件名未改） |

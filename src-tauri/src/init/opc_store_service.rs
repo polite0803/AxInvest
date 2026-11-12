@@ -3215,6 +3215,202 @@ impl OpcStoreProvider for HostOpcStore {
         serde_json::to_value(experience)
             .map_err(|e| AxAgentError::Provider(format!("opc.store::record_rl_experience {e}")))
     }
+
+    /// 创建工作项（`create_work_item` op）—— 写 op。
+    ///
+    /// 迁移前 `opc_create_work_item` 命令体逐句下沉：标题去空白后为空即拒（`Validation`），
+    /// id 由本层生成 `wi-<12 位 hex>`。
+    async fn create_work_item(
+        &self,
+        title: String,
+        owner_role_id: Option<String>,
+    ) -> Result<serde_json::Value> {
+        use axagent_company_runtime::WorkItemService;
+        use axagent_company_runtime::work_item_service::NewWorkItem;
+
+        if title.trim().is_empty() {
+            return Err(AxAgentError::Validation("工作项标题不能为空".into()));
+        }
+        let svc = WorkItemService::new(&self.db);
+        let id = format!("wi-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let mut input = NewWorkItem::new(id, title.trim().to_string());
+        if let Some(owner) = owner_role_id.filter(|s| !s.trim().is_empty()) {
+            input = input.owner(owner.trim().to_string());
+        }
+        let model = svc
+            .create(input)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::create_work_item {e}")))?;
+        serde_json::to_value(&model)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::create_work_item {e}")))
+    }
+
+    /// 看板投影（`kanban_board` op）—— 读 op，无入参。
+    ///
+    /// 与迁移前命令体同源：按 `phase` 归入 `kanban_column()` 的列名，列集合由 `BTreeMap`
+    /// 保证稳定顺序；`deps_json` 解析失败降级空数组（既有语义）。
+    async fn kanban_board(&self) -> Result<serde_json::Value> {
+        use axagent_company_runtime::WorkItemService;
+        use axagent_company_runtime::work_item::Phase;
+        use std::collections::BTreeMap;
+
+        let svc = WorkItemService::new(&self.db);
+        let items = svc
+            .list_by_phase(None)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::kanban_board {e}")))?;
+
+        let mut board: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
+        for it in &items {
+            let phase = it.phase.parse::<Phase>().unwrap_or(Phase::Queued);
+            let col = phase.kanban_column().to_string();
+            let entry = serde_json::json!({
+                "id": it.id,
+                "title": it.title,
+                "phase": it.phase,
+                "owner_role_id": it.owner_role_id,
+                "assignee_agent_id": it.assignee_agent_id,
+                "manager_role_id": it.manager_role_id,
+                "last_error": it.last_error,
+                "deps": serde_json::from_str::<Vec<String>>(&it.deps_json).unwrap_or_default(),
+                "created_at": it.created_at,
+                "updated_at": it.updated_at,
+            });
+            board.entry(col).or_default().push(entry);
+        }
+        serde_json::to_value(board)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::kanban_board {e}")))
+    }
+
+    /// 认领工作项（`work_item_start` op）—— 写 op。
+    async fn start_work_item(&self, id: String) -> Result<serde_json::Value> {
+        use axagent_company_runtime::WorkItemService;
+
+        let svc = WorkItemService::new(&self.db);
+        let model = svc
+            .start(&id)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::work_item_start {e}")))?;
+        serde_json::to_value(&model)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::work_item_start {e}")))
+    }
+
+    /// 提交评审（`work_item_review` op）—— 写 op；质量门前置。
+    ///
+    /// 与迁移前命令体同源：跑一轮 `OpcWorkItemRound` → 评估 → 评估落经验（归因 owner）
+    /// → 分数达线才进 REVIEW，未达线把缺口清单放进错误文本。准入线 `0.70` 沿用命令层常量
+    /// （收敛判定 0.85 在自改进循环内，语义不同）。
+    async fn review_work_item(&self, id: String) -> Result<serde_json::Value> {
+        use axagent_company_runtime::work_item::Transition;
+        use axagent_company_runtime::{OpcWorkItemRound, QualityGateService, WorkItemService};
+        use axagent_harness::self_improving_loop::SelfImprovingRound;
+
+        const QUALITY_THRESHOLD: f64 = 0.70;
+
+        let svc = WorkItemService::new(&self.db);
+        let item = svc.get(&id).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::work_item_review 加载失败: {e}"))
+        })?;
+
+        let mut round = OpcWorkItemRound::new(self.db.clone());
+        let result = round.execute_round(&id, None).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::work_item_review 自改进评估失败: {e}"))
+        })?;
+        let evaluation = round.evaluate_round(&id, &result).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::work_item_review 自改进评估失败: {e}"))
+        })?;
+
+        if let Some(owner) = &item.owner_role_id {
+            if !owner.is_empty() {
+                let gate = QualityGateService::new(&self.db);
+                let _ = gate.apply(owner, &id, owner, &evaluation, QUALITY_THRESHOLD).await;
+            }
+        }
+
+        if evaluation.score < QUALITY_THRESHOLD {
+            let pct = evaluation.score * 100.0;
+            return Err(AxAgentError::Validation(format!(
+                "质量门未通过（{pct:.0}% < {}%）。缺口：{}",
+                QUALITY_THRESHOLD * 100.0,
+                if evaluation.gaps.is_empty() {
+                    "综合质量不足".to_string()
+                } else {
+                    evaluation.gaps.join("；")
+                }
+            )));
+        }
+
+        let model = svc
+            .apply(&id, Transition::SubmitForReview)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::work_item_review {e}")))?;
+        serde_json::to_value(&model)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::work_item_review {e}")))
+    }
+
+    /// 升级阻塞工作项（`escalate_work_item` op）—— 写 op。
+    async fn escalate_work_item(&self, id: String, reason: String) -> Result<serde_json::Value> {
+        use axagent_company_runtime::WorkItemService;
+
+        let svc = WorkItemService::new(&self.db);
+        let updated = svc
+            .escalate(&id, &reason)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::escalate_work_item {e}")))?;
+
+        if let Some(mgr) = &updated.manager_role_id {
+            tracing::info!("[opc-escalate] {} 升级给 {}: {}", updated.id, mgr, reason);
+        } else {
+            tracing::warn!("[opc-escalate] {} 无 manager_role_id，升级仅记录", updated.id);
+        }
+
+        serde_json::to_value(&updated)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::escalate_work_item {e}")))
+    }
+
+    /// 解除阻塞（`unblock_work_item` op）—— 写 op。
+    async fn unblock_work_item(&self, id: String) -> Result<serde_json::Value> {
+        use axagent_company_runtime::WorkItemService;
+        use axagent_company_runtime::work_item::Transition;
+
+        let svc = WorkItemService::new(&self.db);
+        let model = svc
+            .apply(&id, Transition::Unblock)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::work_item_unblock {e}")))?;
+        serde_json::to_value(&model)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::work_item_unblock {e}")))
+    }
+
+    /// 自改进工作项循环（`run_self_improving_work_item` op）—— 写 op。
+    ///
+    /// 规则化回合制闭环（不调 LLM），出参投影与迁移前命令体逐字一致（`text` /
+    /// `totalRounds` / `finalScore` / `confidence` / `strengths` / `gaps`）。
+    async fn run_self_improving_work_item(
+        &self,
+        task: String,
+        max_rounds: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        use axagent_agent::self_improvement_executor::{
+            SelfImprovementConfig, SelfImprovementExecutor,
+        };
+
+        let round = axagent_company_runtime::OpcWorkItemRound::new(self.db.clone());
+        let config = SelfImprovementConfig::new(max_rounds.unwrap_or(3), 0.80, 3);
+        let mut executor = SelfImprovementExecutor::new(Box::new(round), config);
+
+        let output = executor.run(&task).await.map_err(|e| {
+            AxAgentError::Provider(format!("opc.store::run_self_improving_work_item {e}"))
+        })?;
+        Ok(serde_json::json!({
+            "text": output.text,
+            "totalRounds": output.total_rounds,
+            "finalScore": output.final_evaluation.score,
+            "confidence": output.final_evaluation.confidence,
+            "strengths": output.final_evaluation.strengths,
+            "gaps": output.final_evaluation.gaps,
+        }))
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────

@@ -157,6 +157,22 @@ impl<'a> WorkItemService<'a> {
         self.apply(id, Transition::Start).await
     }
 
+    /// 阻塞升级：走状态机置 BLOCKED，并记录升级原因到 `last_error`。
+    ///
+    /// 迁移前 `opc_escalate_work_item` 命令体在命令层直接改 `ActiveModel` 写这两列；
+    /// 命令退役后由服务层收口（`HostOpcStore` 不直连 sea_orm）。
+    pub async fn escalate(
+        &self,
+        id: &str,
+        reason: &str,
+    ) -> crate::CompanyResult<opc_work_items::Model> {
+        let blocked = self.apply(id, Transition::Block).await?;
+        let mut am: opc_work_items::ActiveModel = blocked.into();
+        am.last_error = Set(Some(reason.to_string()));
+        am.updated_at = Set(chrono::Utc::now().timestamp());
+        Ok(am.update(self.db).await?)
+    }
+
     /// 批量更新（供外部联动，如 rt-workflow 事件回调）。
     pub async fn set_phase(
         &self,

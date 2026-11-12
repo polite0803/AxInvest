@@ -1605,6 +1605,81 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::record_rl_experience 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 创建工作项（`create_work_item` op）—— 写 op。
+    ///
+    /// id 由宿主生成 `wi-<12 位 hex>`（与 `self_improving::OpcWorkItemRound` 的 task 契约
+    /// 一致）；标题去空白后不得为空，否则拒。
+    async fn create_work_item(
+        &self,
+        _title: String,
+        _owner_role_id: Option<String>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::create_work_item 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 看板投影（`kanban_board` op）—— 读 op，无入参。
+    ///
+    /// 按 `phase` 聚合成 `{列名: [item...]}`，列为 待办/进行中/阻塞/评审/已完成/终止。
+    async fn kanban_board(&self) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::kanban_board 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 认领工作项（`work_item_start` op）—— 写 op。
+    async fn start_work_item(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::start_work_item 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 提交评审（`work_item_review` op）—— 写 op；内部跑一轮自改进评估并过质量门。
+    ///
+    /// 执行一轮 `OpcWorkItemRound` → 5 维规则评估 → 评估经 `QualityGateService` 落经验
+    /// → 分数达线才 `SubmitForReview`。未达线返回 `Provider` 错（缺口清单在错误文本里），
+    /// 与迁移前命令层 `Err(format!(...))` 的用户可见语义一致。
+    async fn review_work_item(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::review_work_item 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 升级阻塞工作项（`escalate_work_item` op）—— 写 op。
+    ///
+    /// 状态机置 BLOCKED 并写入 `last_error`（升级原因）。
+    async fn escalate_work_item(&self, _id: String, _reason: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::escalate_work_item 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 解除阻塞（`unblock_work_item` op）—— 写 op。
+    async fn unblock_work_item(&self, _id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::unblock_work_item 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 自改进工作项循环（`run_self_improving_work_item` op）—— 写 op。
+    ///
+    /// 回合制闭环（执行 → 自评估 → 收敛/改进），`max_rounds` 缺省 3。
+    ///
+    /// 轮次实现是**纯规则 + 数据库**（`OpcWorkItemRound::evaluate_round` 五维规则，源码
+    /// 自述「不依赖 LLM」），正常毫秒级返回 ⇒ 命令帧 30 s 默认预算与接缝 15 s 默认预算
+    /// 都够用，不需要为该命令名单独放预算。
+    async fn run_self_improving_work_item(
+        &self,
+        _task: String,
+        _max_rounds: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::run_self_improving_work_item 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

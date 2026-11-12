@@ -277,6 +277,18 @@ const OPC_STORE_GET_RL_STATS: &str = "get_rl_stats";
 const OPC_STORE_TRIGGER_RL_OPTIMIZATION: &str = "trigger_rl_optimization";
 const OPC_STORE_RECORD_RL_EXPERIENCE: &str = "record_rl_experience";
 
+/// #264 批 4a：工作项六写一读（七 op）。
+///
+/// 工作项状态机与质量门都在宿主（`company-runtime` + 自改进执行器），插件进程够不着 ⇒
+/// 全部走接缝回宿主。六条写 op 在宿主权限表登记 `Write`；`kanban_board` 是纯读 ⇒ 无闸。
+const OPC_STORE_CREATE_WORK_ITEM: &str = "create_work_item";
+const OPC_STORE_KANBAN_BOARD: &str = "kanban_board";
+const OPC_STORE_WORK_ITEM_START: &str = "work_item_start";
+const OPC_STORE_WORK_ITEM_REVIEW: &str = "work_item_review";
+const OPC_STORE_ESCALATE_WORK_ITEM: &str = "escalate_work_item";
+const OPC_STORE_WORK_ITEM_UNBLOCK: &str = "work_item_unblock";
+const OPC_STORE_RUN_SELF_IMPROVING_WORK_ITEM: &str = "run_self_improving_work_item";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -494,6 +506,19 @@ const COMMAND_TRIGGER_CAPABILITY_PACK_LEARNING: &str = "opc_trigger_capability_p
 const COMMAND_GET_RL_STATS: &str = "opc_get_rl_stats";
 const COMMAND_TRIGGER_RL_OPTIMIZATION: &str = "opc_trigger_rl_optimization";
 const COMMAND_RECORD_RL_EXPERIENCE: &str = "opc_record_rl_experience";
+
+/// #264 批 4a：工作项七条命令（六写一读）。命令名续用宿主原名 ⇒ 前端调用名与智能体
+/// 工具面不变；宿主同名 `#[tauri::command]` 处于双声明期，待前端半迁完再删。
+///
+/// 六条写命令同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
+/// `opc_kanban_board` 是读命令 ⇒ 不进。
+const COMMAND_CREATE_WORK_ITEM: &str = "opc_create_work_item";
+const COMMAND_KANBAN_BOARD: &str = "opc_kanban_board";
+const COMMAND_WORK_ITEM_START: &str = "opc_work_item_start";
+const COMMAND_WORK_ITEM_REVIEW: &str = "opc_work_item_review";
+const COMMAND_ESCALATE_WORK_ITEM: &str = "opc_escalate_work_item";
+const COMMAND_WORK_ITEM_UNBLOCK: &str = "opc_work_item_unblock";
+const COMMAND_RUN_SELF_IMPROVING_WORK_ITEM: &str = "run_self_improving_opc_work_item";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -1311,6 +1336,60 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         COMMAND_RECORD_RL_EXPERIENCE => {
             match record_rl_experience(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 批 4a：工作项七命令（六写一读，每条一次接缝调用直投影；状态机、质量门与
+        // 自改进执行器全在宿主）。
+        COMMAND_CREATE_WORK_ITEM => {
+            match create_work_item(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_KANBAN_BOARD => match kanban_board(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_WORK_ITEM_START => match work_item_start(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_WORK_ITEM_REVIEW => {
+            match work_item_review(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_ESCALATE_WORK_ITEM => {
+            match escalate_work_item(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_WORK_ITEM_UNBLOCK => {
+            match work_item_unblock(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_RUN_SELF_IMPROVING_WORK_ITEM => {
+            match run_self_improving_work_item(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -3832,7 +3911,113 @@ fn require_object<'a>(
     }
 }
 
-/// 必需字符串字段。
+/// `opc_create_work_item`：创建工作项（写 op；id 由宿主生成 `wi-<12 位 hex>`）。
+fn create_work_item(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_work_item";
+    let title = require_str(input, OP, "title")?;
+    let mut args = serde_json::Map::new();
+    args.insert("title".to_string(), json!(title));
+    match input.get("ownerRoleId") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("owner_role_id".to_string(), json!(value));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `ownerRoleId` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_CREATE_WORK_ITEM, Value::Object(args), call_chain)
+}
+
+/// `opc_kanban_board`：看板投影（读 op，无入参）。
+fn kanban_board(
+    _input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_KANBAN_BOARD, Value::Object(serde_json::Map::new()), call_chain)
+}
+
+/// `opc_work_item_start`：认领工作项（写 op）。
+fn work_item_start(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_work_item_start";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_WORK_ITEM_START, json!({ "id": id }), call_chain)
+}
+
+/// `opc_work_item_review`：提交评审（写 op；质量门前置在宿主）。
+fn work_item_review(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_work_item_review";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_WORK_ITEM_REVIEW, json!({ "id": id }), call_chain)
+}
+
+/// `opc_escalate_work_item`：升级阻塞（写 op）。
+fn escalate_work_item(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_escalate_work_item";
+    let id = require_str(input, OP, "id")?;
+    let reason = require_str(input, OP, "reason")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_ESCALATE_WORK_ITEM,
+        json!({ "id": id, "reason": reason }),
+        call_chain,
+    )
+}
+
+/// `opc_work_item_unblock`：解除阻塞（写 op）。
+fn work_item_unblock(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_work_item_unblock";
+    let id = require_str(input, OP, "id")?;
+    call_opc_store(peer, OPC_STORE_WORK_ITEM_UNBLOCK, json!({ "id": id }), call_chain)
+}
+
+/// `run_self_improving_opc_work_item`：自改进回合制闭环（写 op；规则化评估，不调 LLM）。
+fn run_self_improving_work_item(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "run_self_improving_opc_work_item";
+    let task = require_str(input, OP, "task")?;
+    let mut args = serde_json::Map::new();
+    args.insert("task".to_string(), json!(task));
+    match input.get("maxRounds") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.as_u64().is_some_and(|n| u32::try_from(n).is_ok()) => {
+            args.insert("max_rounds".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `maxRounds` 必须是 u32 范围内的整数（形状判在命令层）"
+            )));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_RUN_SELF_IMPROVING_WORK_ITEM, Value::Object(args), call_chain)
+}
+
 fn require_str<'a>(input: &'a Value, op: &str, key: &str) -> Result<&'a str, (String, String)> {
     input
         .get(key)

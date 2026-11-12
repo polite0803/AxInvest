@@ -70,6 +70,84 @@ const PLUGIN_SPECS = {
   },
 };
 
+// 清单命令的智能体面授权档位（`requiredPermission`，见 `PluginCommandManifest`）：
+// **未声明 = 只读档** ⇒ 写命令在智能体面按 `Safe` 暴露（`plugin_command_safety(None)`
+// 的测试锁定），用户确认弹窗形同虚设。写命令名单以宿主
+// `axagent-plugins/crates/plugins/src/worker.rs` 的
+// `required_permission_for(("opc.store", …)) => Write` 为准 —— **两处必须同批改**
+// （那边加一条写 op，这里就要加一条命令）。
+// ⚠ 删除类（delete_blog_post / delete_content_asset / delete_customer / delete_invoice）
+// 的宿主等价命令是 `Dangerous`，但清单标 `danger-full-access` 会被
+// `PluginManager::check_command_gate` 拒（该档要求插件声明 `execute`）；为不扩张插件
+// 权限面，本表一律 `workspace-write`（= Caution）。升 Dangerous 需先裁定 execute 面
+// （插件整体获得该声明），属安全面变更，另立评审。
+const OPC_WRITE_COMMANDS = new Set([
+  "opc_add_milestone",
+  "opc_analyze_capability_gaps",
+  "opc_cancel_publish_schedule",
+  "opc_close_capability_gap",
+  "opc_complete_milestone",
+  "opc_create_blog_post",
+  "opc_create_content_asset",
+  "opc_create_customer",
+  "opc_create_invoice",
+  "opc_create_landing_page",
+  "opc_create_project",
+  "opc_create_publish_schedule",
+  "opc_delete_blog_post",
+  "opc_delete_content_asset",
+  "opc_delete_customer",
+  "opc_delete_invoice",
+  "opc_delete_landing_page",
+  "opc_delete_project",
+  "opc_delete_subscription",
+  // #264 批 7 刀 B2：动态工作流执行（写 op —— 会起引擎跑工作流）。
+  "opc_execute_dynamic_workflow",
+  // #264 批 7 刀 B2：导入人才库（写 op —— 批量落人才模板）。
+  "opc_import_talent_library",
+  "opc_mark_contact_read",
+  "opc_process_due_schedules",
+  "opc_proactive_evaluate_leads",
+  "opc_publish_blog_post",
+  "opc_publish_landing_page",
+  // #264 批 7 刀 B2：记录 KPI（写 op）。
+  "opc_record_kpi",
+  "opc_save_subscription",
+  // #264 批 7 刀 B2：同步员工到舰队（写 op —— 建 / 改舰队与成员）。
+  "opc_sync_fleet",
+  "opc_transition_invoice",
+  "opc_update_content_asset",
+  "opc_update_customer",
+  // #264 批 7 刀 B2：更新发票（写 op）。
+  "opc_update_invoice",
+  "opc_update_project",
+  // #264 批 7 刀 B2：更新发布计划（写 op）。
+  "opc_update_publish_schedule",
+  // #264 批 7 刀 B3：触发域包自动化规则（写 op —— 规则动作会改库）。
+  "opc_run_automation_rules",
+  // #264 批 7 刀 B3：订阅扫描落库 / 幂等建改扫描调度任务（写 op —— 都改库）。
+  "opc_run_subscription_scan",
+  "opc_ensure_demand_scan_job",
+  // 刀 B3 收尾：自动学习（写 op —— 落 RL 经验并触发反思/进化）。
+  "opc_auto_learn_workflow",
+  // #264 刀 C 批 3：学习面六条写命令（反思 / 进化 / 自我改进 / 学习闭环 /
+  // 手动 RL 优化 / 手动记录经验）；`opc_get_rl_stats` 是读命令 ⇒ 不进本表。
+  "opc_reflect_on_workflow",
+  "opc_evolve_workflow",
+  "opc_run_self_improvement",
+  "opc_trigger_capability_pack_learning",
+  "opc_trigger_rl_optimization",
+  "opc_record_rl_experience",
+  // #264 批 4a：工作项六条写命令（建 / 认领 / 提交评审 / 升级阻塞 / 解除阻塞 /
+  // 自改进循环）；`opc_kanban_board` 是读命令 ⇒ 不进本表。
+  "opc_create_work_item",
+  "opc_work_item_start",
+  "opc_work_item_review",
+  "opc_escalate_work_item",
+  "opc_work_item_unblock",
+  "run_self_improving_opc_work_item",
+]);
+
 const spec = PLUGIN_SPECS[pluginName];
 if (!spec) {
   fail(`未知插件 --plugin ${pluginName}（可选：${Object.keys(PLUGIN_SPECS).join(" | ")}）`);
@@ -1022,75 +1100,6 @@ function stockManifest({ version, binaryName, sha256 }) {
  * 仍**不写** `pages` / `taskSources` / `uiSchema`：OPC 的页面贡献属后续批。
  */
 
-// 清单命令的智能体面授权档位（`requiredPermission`，见 `PluginCommandManifest`）：
-// **未声明 = 只读档** ⇒ 写命令在智能体面按 `Safe` 暴露（`plugin_command_safety(None)`
-// 的测试锁定），用户确认弹窗形同虚设。写命令名单以宿主
-// `axagent-plugins/crates/plugins/src/worker.rs` 的
-// `required_permission_for(("opc.store", …)) => Write` 为准 —— **两处必须同批改**
-// （那边加一条写 op，这里就要加一条命令）。
-// ⚠ 删除类（delete_blog_post / delete_content_asset / delete_customer / delete_invoice）
-// 的宿主等价命令是 `Dangerous`，但清单标 `danger-full-access` 会被
-// `PluginManager::check_command_gate` 拒（该档要求插件声明 `execute`）；为不扩张插件
-// 权限面，本表一律 `workspace-write`（= Caution）。升 Dangerous 需先裁定 execute 面
-// （插件整体获得该声明），属安全面变更，另立评审。
-const OPC_WRITE_COMMANDS = new Set([
-  "opc_add_milestone",
-  "opc_analyze_capability_gaps",
-  "opc_cancel_publish_schedule",
-  "opc_close_capability_gap",
-  "opc_complete_milestone",
-  "opc_create_blog_post",
-  "opc_create_content_asset",
-  "opc_create_customer",
-  "opc_create_invoice",
-  "opc_create_landing_page",
-  "opc_create_project",
-  "opc_create_publish_schedule",
-  "opc_delete_blog_post",
-  "opc_delete_content_asset",
-  "opc_delete_customer",
-  "opc_delete_invoice",
-  "opc_delete_landing_page",
-  "opc_delete_project",
-  "opc_delete_subscription",
-  // #264 批 7 刀 B2：动态工作流执行（写 op —— 会起引擎跑工作流）。
-  "opc_execute_dynamic_workflow",
-  // #264 批 7 刀 B2：导入人才库（写 op —— 批量落人才模板）。
-  "opc_import_talent_library",
-  "opc_mark_contact_read",
-  "opc_process_due_schedules",
-  "opc_proactive_evaluate_leads",
-  "opc_publish_blog_post",
-  "opc_publish_landing_page",
-  // #264 批 7 刀 B2：记录 KPI（写 op）。
-  "opc_record_kpi",
-  "opc_save_subscription",
-  // #264 批 7 刀 B2：同步员工到舰队（写 op —— 建 / 改舰队与成员）。
-  "opc_sync_fleet",
-  "opc_transition_invoice",
-  "opc_update_content_asset",
-  "opc_update_customer",
-  // #264 批 7 刀 B2：更新发票（写 op）。
-  "opc_update_invoice",
-  "opc_update_project",
-  // #264 批 7 刀 B2：更新发布计划（写 op）。
-  "opc_update_publish_schedule",
-  // #264 批 7 刀 B3：触发域包自动化规则（写 op —— 规则动作会改库）。
-  "opc_run_automation_rules",
-  // #264 批 7 刀 B3：订阅扫描落库 / 幂等建改扫描调度任务（写 op —— 都改库）。
-  "opc_run_subscription_scan",
-  "opc_ensure_demand_scan_job",
-  // 刀 B3 收尾：自动学习（写 op —— 落 RL 经验并触发反思/进化）。
-  "opc_auto_learn_workflow",
-  // #264 刀 C 批 3：学习面六条写命令（反思 / 进化 / 自我改进 / 学习闭环 /
-  // 手动 RL 优化 / 手动记录经验）；`opc_get_rl_stats` 是读命令 ⇒ 不进本表。
-  "opc_reflect_on_workflow",
-  "opc_evolve_workflow",
-  "opc_run_self_improvement",
-  "opc_trigger_capability_pack_learning",
-  "opc_trigger_rl_optimization",
-  "opc_record_rl_experience",
-]);
 
 function withRequiredPermission(commands) {
   return commands.map((command) => ({
@@ -1104,7 +1113,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 118 条命名命令（读 73 条 · 写 45 条）",
+      "OPC 域功能包（#36）：worker 通道 + 125 条命名命令（读 74 条 · 写 51 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2464,6 +2473,84 @@ function opcManifest({ version, binaryName, sha256 }) {
             workflowResult: { description: "工作流执行结果（任意 JSON）" },
           },
           required: ["capabilityPackId", "workflowId", "qualityScore", "workflowResult"],
+        },
+      },
+      // ── #264 批 4a：工作项七命令（六写一读；宿主同名七条 Tauri 命令处于双声明期，待
+      // 前端半迁完再删）。六条写命令
+      // 同批进 `OPC_WRITE_COMMANDS`（= 宿主 `required_permission_for` 的写 op 名单）。
+      {
+        name: "opc_create_work_item",
+        description: "创建工作项（写 op；id 由宿主生成 wi-<12 位 hex>）",
+        command: "worker://opc_create_work_item",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "工作项标题" },
+            ownerRoleId: { type: "string", description: "负责角色 ID（可选）" },
+          },
+          required: ["title"],
+        },
+      },
+      {
+        name: "opc_kanban_board",
+        description: "获取看板投影（读 op；按 phase 聚合成列）",
+        command: "worker://opc_kanban_board",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_work_item_start",
+        description: "认领工作项（写 op；依赖 doomed 时拒）",
+        command: "worker://opc_work_item_start",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "工作项 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_work_item_review",
+        description: "提交评审（写 op；先跑自改进评估，质量门达标才进 REVIEW）",
+        command: "worker://opc_work_item_review",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "工作项 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "opc_escalate_work_item",
+        description: "升级阻塞工作项（写 op；置 BLOCKED 并记录原因）",
+        command: "worker://opc_escalate_work_item",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "工作项 ID" },
+            reason: { type: "string", description: "升级原因" },
+          },
+          required: ["id", "reason"],
+        },
+      },
+      {
+        name: "opc_work_item_unblock",
+        description: "解除工作项阻塞（写 op）",
+        command: "worker://opc_work_item_unblock",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "工作项 ID" } },
+          required: ["id"],
+        },
+      },
+      {
+        name: "run_self_improving_opc_work_item",
+        description: "自改进 OPC 工作项循环（写 op；规则化评估，毫秒级）",
+        command: "worker://run_self_improving_opc_work_item",
+        inputSchema: {
+          type: "object",
+          properties: {
+            task: { type: "string", description: "工作项 ID / 任务标识" },
+            maxRounds: { type: "integer", description: "最大轮次（缺省 3）" },
+          },
+          required: ["task"],
         },
       },
       // ── #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写；宿主同名四条 Tauri

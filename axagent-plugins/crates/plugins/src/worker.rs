@@ -593,7 +593,16 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "run_self_improvement"
             | "trigger_capability_pack_learning"
             | "trigger_rl_optimization"
-            | "record_rl_experience",
+            | "record_rl_experience"
+            // #264 批 4a：工作项六条写 op（建 / 认领 / 提交评审 / 升级阻塞 / 解除阻塞 /
+            // 自改进循环）—— 都改 `opc_work_items` 或写经验库。同批 `kanban_board` 是纯读
+            // ⇒ 必须仍 `None`（锁在 READ_OPS 用例）。
+            | "create_work_item"
+            | "work_item_start"
+            | "work_item_review"
+            | "escalate_work_item"
+            | "work_item_unblock"
+            | "run_self_improving_work_item",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -5335,6 +5344,132 @@ impl HostPeer {
                     quality_score,
                     workflow_result,
                 )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #264 批 4a：工作项六写一读（六条写 op 在权限表登记 `Write`；`kanban_board` 纯读）。
+            "opc.store" if op == "create_work_item" => {
+                let title: String = match deserialize_arg(&args, "title", seam) {
+                    Ok(title) => title,
+                    Err(response) => return response,
+                };
+                let owner_role_id: Option<String> =
+                    match deserialize_optional_arg(&args, "owner_role_id", seam) {
+                        Ok(owner_role_id) => owner_role_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_work_item(title, owner_role_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "kanban_board" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.kanban_board()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "work_item_start" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.start_work_item(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "work_item_review" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.review_work_item(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "escalate_work_item" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let reason: String = match deserialize_arg(&args, "reason", seam) {
+                    Ok(reason) => reason,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.escalate_work_item(id, reason)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "work_item_unblock" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.unblock_work_item(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "run_self_improving_work_item" => {
+                let task: String = match deserialize_arg(&args, "task", seam) {
+                    Ok(task) => task,
+                    Err(response) => return response,
+                };
+                let max_rounds: Option<u32> =
+                    match deserialize_optional_arg(&args, "max_rounds", seam) {
+                        Ok(max_rounds) => max_rounds,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.run_self_improving_work_item(task, max_rounds))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -14178,6 +14313,14 @@ mod tests {
             "trigger_capability_pack_learning",
             "trigger_rl_optimization",
             "record_rl_experience",
+            // #264 批 4a：工作项六条写 op（建 / 认领 / 提交评审 / 升级阻塞 / 解除阻塞 /
+            // 自改进循环）。
+            "create_work_item",
+            "work_item_start",
+            "work_item_review",
+            "escalate_work_item",
+            "work_item_unblock",
+            "run_self_improving_work_item",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -14243,6 +14386,8 @@ mod tests {
             "execute_analysis",
             // #264 刀 C 批 3：经验池统计 —— 读 op（同批六条写 op 在写集）。
             "get_rl_stats",
+            // #264 批 4a：看板投影 —— 读 op（同批六条写 op 在写集）。
+            "kanban_board",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

@@ -133,7 +133,8 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     const loadDomain = async () => {
       setLoading(true);
       try {
-        const result = await invoke<{ manifest: DomainManifest }>(
+        // #264 刀 C：宿主命令已迁 T2，manifest 摘要经 plugin-opc 命名命令 + opc.store 读 op
+        const result = await invokePluginCommand<{ manifest: DomainManifest }>(
           "opc_get_capability_pack",
           { capabilityPackId },
         );
@@ -248,7 +249,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
     setMetricsLoading(true);
     try {
-      const result = await invoke<DomainLearningMetrics>(
+      const result = await invokePluginCommand<DomainLearningMetrics>(
         "opc_get_learning_metrics",
         { capabilityPackId },
       );
@@ -271,7 +272,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     }
     setLearningLoading(true);
     try {
-      const result = await invoke<DomainLearningConfig>(
+      const result = await invokePluginCommand<DomainLearningConfig>(
         "opc_get_learning_config",
         { capabilityPackId },
       );

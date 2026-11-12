@@ -5027,6 +5027,105 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #264 刀 C 批 1：域包 manifest/prompt 装配 + 学习面三条，全读 op、全信封透传
+            // （出参形状钉在宿主 provider，本层只做入参解包与错误映射，同刀 B3 四条读 op）。
+            "opc.store" if op == "capability_pack_manifest" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.capability_pack_manifest(capability_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "build_capability_pack_prompt" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let action_key: String = match deserialize_arg(&args, "action_key", seam) {
+                    Ok(action_key) => action_key,
+                    Err(response) => return response,
+                };
+                let user_input: Option<String> =
+                    match deserialize_optional_arg(&args, "user_input", seam) {
+                        Ok(user_input) => user_input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.build_capability_pack_prompt(
+                    capability_pack_id,
+                    action_key,
+                    user_input,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_learning_metrics" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_learning_metrics(capability_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_learning_config" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_learning_config(capability_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "list_learning_configs" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_learning_configs()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
                 let Some(adapter) = self.registry.get_platform_adapter(platform) else {
@@ -13910,6 +14009,12 @@ mod tests {
             "capability_pack_dashboard",
             "capability_pack_workflow_steps",
             "capability_pack_automation_rules",
+            // #264 刀 C 批 1：域包 manifest / prompt 装配 + 学习面五条读 op —— 同样零写闸。
+            "capability_pack_manifest",
+            "build_capability_pack_prompt",
+            "get_learning_metrics",
+            "get_learning_config",
+            "list_learning_configs",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

@@ -1378,6 +1378,7 @@ pub trait OpcStoreProvider: Send + Sync {
     ///
     /// 规则条件求值与动作执行在实现方（迁移前命令体原样下沉）；返回触发规则 id 列表 +
     /// 计数。实体不存在 / 域包配置缺失由实现方判。
+    #[allow(clippy::too_many_arguments)]
     async fn run_automation_rules(
         &self,
         _capability_pack_id: String,
@@ -1449,6 +1450,65 @@ pub trait OpcStoreProvider: Send + Sync {
     ) -> Result<serde_json::Value> {
         Err(AxAgentError::Provider(
             "OpcStoreProvider::auto_learn_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 域包 manifest 摘要（`capability_pack_manifest` op）—— 读 op。
+    ///
+    /// 出参是迁移前 `opc_get_capability_pack` 命令体同一信封 `{ manifest: {…} }`：
+    /// 只投影 id/name/icon/description 四个真字段 + 两个常量（`version: 1`、`enabled: true`，
+    /// 迁移前命令体同样硬编码）。域包不在内建注册表 ⇒ `NotFound`。
+    async fn capability_pack_manifest(
+        &self,
+        _capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::capability_pack_manifest 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 域包操作的 prompt 装配（`build_capability_pack_prompt` op）—— 读 op。
+    ///
+    /// 迁移前 `opc_build_capability_pack_prompt` 命令体逐字下沉：取 action 配置 → 用
+    /// `{{input}}` 替换 user prompt 模板（空白输入等于不替换）。出参键名照抄命令体的
+    /// camelCase 信封（`systemPrompt` / `userPrompt` / `actionKey` / `actionLabel` /
+    /// `domainPackId`），不做二次映射。操作不存在 ⇒ `NotFound`。
+    async fn build_capability_pack_prompt(
+        &self,
+        _capability_pack_id: String,
+        _action_key: String,
+        _user_input: Option<String>,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::build_capability_pack_prompt 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 域包学习指标（`get_learning_metrics` op）—— 读 op。
+    ///
+    /// 迁移前 `opc_get_learning_metrics` 命令体同形：每次现建一个学习管理器（无跨调用缓存，
+    /// 与命令体一致），取其对该域包的引擎算指标。出参是指标 DTO 原样序列化。
+    async fn get_learning_metrics(&self, _capability_pack_id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_learning_metrics 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 单个域包的学习配置（`get_learning_config` op）—— 读 op。
+    ///
+    /// 配置文件不存在时**不报错**，返回默认配置并记 warn（迁移前 `opc_get_learning_config`
+    /// 命令体的既有语义：缺配置不得让页面打不开）。
+    async fn get_learning_config(&self, _capability_pack_id: String) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_learning_config 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 全部域包的学习配置（`list_learning_configs` op）—— 读 op，无入参。
+    async fn list_learning_configs(&self) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::list_learning_configs 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 }

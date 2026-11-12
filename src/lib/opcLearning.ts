@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
   AutoLearningResult,
   DomainLearningConfig,
@@ -19,7 +20,8 @@ import type {
 export async function getLearningConfig(
   capabilityPackId: string,
 ): Promise<DomainLearningConfig> {
-  return invoke<DomainLearningConfig>("opc_get_learning_config", {
+  // #264 刀 C：宿主命令已迁 plugin-opc 命名命令，走插件命令通道。
+  return invokePluginCommand<DomainLearningConfig>("opc_get_learning_config", {
     capabilityPackId,
   });
 }
@@ -28,7 +30,8 @@ export async function getLearningConfig(
  * 获取所有行业的学习配置列表
  */
 export async function listLearningConfigs(): Promise<DomainLearningConfigSummary[]> {
-  return invoke<DomainLearningConfigSummary[]>("opc_list_learning_configs");
+  // #264 刀 C：宿主命令已迁 plugin-opc 命名命令，走插件命令通道。
+  return invokePluginCommand<DomainLearningConfigSummary[]>("opc_list_learning_configs");
 }
 
 /**

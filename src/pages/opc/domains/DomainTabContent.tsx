@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 
 import { CodeRefactorSettingsModal } from "@/components/settings/CodeRefactorSettingsModal";
 import { LiteraryCreationSettingsModal } from "@/components/settings/LiteraryCreationSettingsModal";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { workflowEditorPath } from "@/lib/workspaceTabs";
 import { useConversationStore, useSettingsStore } from "@/stores";
 
@@ -112,16 +113,16 @@ export function DomainTabContent({ capabilityPackId, config, tabKey, data }: Dom
       return;
     }
 
-    const { invoke } = await import("@/lib/invoke");
     const actionLabel = action.label || action.key;
 
     try {
-      const promptConfig = await invoke<{
+      // #264 刀 C：宿主同名命令已迁 T2，prompt 装配走 plugin-opc 命名命令（信封五键由宿主 provider 组）
+      const promptConfig = await invokePluginCommand<{
         systemPrompt: string;
         userPrompt: string;
         actionKey: string;
         actionLabel: string;
-        capabilityPackId: string;
+        domainPackId: string;
       }>("opc_build_capability_pack_prompt", {
         capabilityPackId,
         actionKey: action.key,

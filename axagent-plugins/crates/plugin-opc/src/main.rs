@@ -249,6 +249,17 @@ const OPC_STORE_MATCH_LEAD_CAPABILITIES: &str = "match_lead_capabilities";
 /// `WRITE_OPS` 用例。
 const OPC_STORE_AUTO_LEARN_WORKFLOW: &str = "auto_learn_workflow";
 
+/// #264 刀 C 批 1：域包 manifest / prompt 装配 + 学习面五条读 op。
+///
+/// 全部纯读 ⇒ 宿主权限表一条闸都不加（`worker.rs` 的 `READ_OPS` 用例反向钉住「只读插件
+/// 不得被拒」）。出参形状与信封键名钉在宿主 provider（迁移前命令体逐字同形），本插件只做
+/// 入参解包与 camelCase→snake_case 的接缝键名转写。
+const OPC_STORE_CAPABILITY_PACK_MANIFEST: &str = "capability_pack_manifest";
+const OPC_STORE_BUILD_CAPABILITY_PACK_PROMPT: &str = "build_capability_pack_prompt";
+const OPC_STORE_GET_LEARNING_METRICS: &str = "get_learning_metrics";
+const OPC_STORE_GET_LEARNING_CONFIG: &str = "get_learning_config";
+const OPC_STORE_LIST_LEARNING_CONFIGS: &str = "list_learning_configs";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -440,6 +451,15 @@ const COMMAND_MATCH_LEAD_CAPABILITIES: &str = "opc_match_lead_capabilities";
 /// 刀 B3 收尾：自动学习命令（宿主同名 `#[agent_command]` 已随本批改走接缝；
 /// 命令名续用原名，智能体工具面按名单续用）。写命令 ⇒ 同批进 `OPC_WRITE_COMMANDS`。
 const COMMAND_OPC_AUTO_LEARN_WORKFLOW: &str = "opc_auto_learn_workflow";
+
+/// #264 刀 C 批 1：域包 manifest / prompt 装配 + 学习面五条命令（全读，宿主同名
+/// `#[agent_command]` 已随本批删除，命令名续用原名 ⇒ 智能体工具面与前端调用名不变）。
+/// 读命令 ⇒ **不进** `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`。
+const COMMAND_GET_CAPABILITY_PACK: &str = "opc_get_capability_pack";
+const COMMAND_BUILD_CAPABILITY_PACK_PROMPT: &str = "opc_build_capability_pack_prompt";
+const COMMAND_GET_LEARNING_METRICS: &str = "opc_get_learning_metrics";
+const COMMAND_GET_LEARNING_CONFIG: &str = "opc_get_learning_config";
+const COMMAND_LIST_LEARNING_CONFIGS: &str = "opc_list_learning_configs";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -1262,6 +1282,48 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         // 刀 B3 收尾：自动学习（一次接缝调用直投影；学习语义全在宿主 provider）。
         COMMAND_OPC_AUTO_LEARN_WORKFLOW => {
             match auto_learn_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 刀 C 批 1：域包 manifest / prompt 装配 + 学习面五条读命令（每条一次接缝调用
+        // 直投影；配置读取与 `{{input}}` 装配全在宿主 provider，命令层只做形状判与键名转写）。
+        COMMAND_GET_CAPABILITY_PACK => {
+            match get_capability_pack(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_BUILD_CAPABILITY_PACK_PROMPT => {
+            match build_capability_pack_prompt(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_LEARNING_METRICS => {
+            match get_learning_metrics(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_LEARNING_CONFIG => {
+            match get_learning_config(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_LEARNING_CONFIGS => {
+            match list_learning_configs(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -3226,6 +3288,92 @@ fn match_lead_capabilities(
         },
     }
     call_opc_store(peer, OPC_STORE_MATCH_LEAD_CAPABILITIES, Value::Object(args), call_chain)
+}
+
+/// `opc_get_capability_pack`：域包 manifest 摘要（读 op，`{ manifest }` 信封由宿主组）。
+fn get_capability_pack(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_capability_pack";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CAPABILITY_PACK_MANIFEST,
+        json!({ "capability_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_build_capability_pack_prompt`：域包操作的 prompt 装配（读 op）。
+///
+/// `capabilityPackId` / `actionKey` 必填，`userInput` 可选字符串（缺省或空白 ⇒ 宿主不替换
+/// 模板里的 `{{input}}`，与迁移前命令体同一判据）。出参五键信封由宿主 provider 组。
+fn build_capability_pack_prompt(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_build_capability_pack_prompt";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let action_key = require_str(input, OP, "actionKey")?;
+    let mut args = serde_json::Map::new();
+    args.insert("capability_pack_id".to_string(), json!(pack_id));
+    args.insert("action_key".to_string(), json!(action_key));
+    match input.get("userInput") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("user_input".to_string(), Value::String(value.clone()));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `userInput` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_BUILD_CAPABILITY_PACK_PROMPT, Value::Object(args), call_chain)
+}
+
+/// `opc_get_learning_metrics`：域包学习指标（读 op）。
+fn get_learning_metrics(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_learning_metrics";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_LEARNING_METRICS,
+        json!({ "capability_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_get_learning_config`：单个域包的学习配置（读 op；缺 learning.yaml 由宿主退回默认配置）。
+fn get_learning_config(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_learning_config";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_GET_LEARNING_CONFIG,
+        json!({ "capability_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_list_learning_configs`：全部域包的学习配置（读 op，无入参）。
+fn list_learning_configs(
+    _input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    call_opc_store(peer, OPC_STORE_LIST_LEARNING_CONFIGS, json!({}), call_chain)
 }
 
 /// `opc_auto_learn_workflow`：触发 OPC 域包工作流的自动学习管线（写 op）。

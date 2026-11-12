@@ -1096,7 +1096,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 105 条命名命令（读 66 条 · 写 39 条）",
+      "OPC 域功能包（#36）：worker 通道 + 110 条命名命令（读 71 条 · 写 39 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2455,6 +2455,61 @@ function opcManifest({ version, binaryName, sha256 }) {
             workflowResult: { description: "工作流结果（任意 JSON，形状由宿主判）" },
           },
           required: ["templateId", "workflowResult"],
+        },
+      },
+      // ── #264 刀 C 批 1：域包 manifest / prompt 装配 + 学习面五条命令（全读 ⇒ 五条都
+      // **不进** `OPC_WRITE_COMMANDS`；宿主同名五条 Tauri 命令已删，出参信封形状由宿主 provider 钉）。
+      {
+        name: "opc_get_capability_pack",
+        description: "获取域包 manifest 摘要（读 op；出参 { manifest }，version/enabled 为宿主常量）",
+        command: "worker://opc_get_capability_pack",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_build_capability_pack_prompt",
+        description: "构建域包上下文的对话 prompt（读 op；宿主装配 {{input}} 后回五键信封）",
+        command: "worker://opc_build_capability_pack_prompt",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            actionKey: { type: "string", description: "操作 key" },
+            userInput: { type: "string", description: "用户输入（可选；缺省或空白不替换模板）" },
+          },
+          required: ["capabilityPackId", "actionKey"],
+        },
+      },
+      {
+        name: "opc_get_learning_metrics",
+        description: "查询域包学习指标（读 op；指标由宿主学习引擎现算，无跨调用缓存）",
+        command: "worker://opc_get_learning_metrics",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_get_learning_config",
+        description: "获取域包学习配置（读 op；缺 learning.yaml 由宿主退回默认配置，不报错）",
+        command: "worker://opc_get_learning_config",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_list_learning_configs",
+        description: "获取全部域包学习配置（读 op，无入参；宿主动态扫描域包目录）",
+        command: "worker://opc_list_learning_configs",
+        inputSchema: {
+          type: "object",
+          properties: {},
         },
       },
     ]),

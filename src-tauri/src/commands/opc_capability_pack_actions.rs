@@ -9,7 +9,7 @@ use tauri::State;
 
 use crate::AppState;
 use axagent_agent_macro::agent_command;
-use axagent_company_runtime::opc::{CapabilityPackLearningManager, OpcCapabilityPackAnalysisRound};
+use axagent_company_runtime::opc::OpcCapabilityPackAnalysisRound;
 use axagent_orchestrator::{ReinforcementLearningConfig, RewardWeightConfig};
 
 // 域包配置的四个数据类型已上收 harness（`axagent-core/crates/harness/src/opc_store.rs`，
@@ -1999,64 +1999,20 @@ pub fn get_workflow_config(
 // （工具面入参按 `PLAN-shell-plus-plugins.md` §144.2 维持 snake_case，本批不动），
 // 也是接缝实现体的唯一数据源。
 
-/// 获取域包（manifest 基本信息）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包 manifest")]
-#[tauri::command]
-pub async fn opc_get_capability_pack(
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let config = get_capability_pack_config(&capability_pack_id)
-        .ok_or_else(|| format!("域包不存在: {}", capability_pack_id))?;
-
-    let manifest = serde_json::json!({
-        "id": config.id,
-        "name": config.name,
-        "icon": config.icon,
-        "description": config.description,
-        "version": 1,
-        "enabled": true,
-    });
-
-    serde_json::to_value(serde_json::json!({ "manifest": manifest })).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// #264 刀 C 退役 `opc_get_capability_pack`（前端 1 处 + `#[agent_command]` 工具面 ⇒ 只能迁
+// 不能删，判据 #273）：调用方走 plugin-opc 同名命名命令，宿主侧经 `opc.store` 的
+// `capability_pack_manifest` 读 op 由 `HostOpcStore` 提供同一份 `{ manifest }` 信封。
+// `get_capability_pack_config` 自由函数保留 —— 它同时是本接缝 op 与桥接 LLM 工具的数据源（禁区 12）。
 
 // #264 批 7 刀 B1 退役 `opc_get_workflow_config`（零前端调用，`#[agent_command]` 属工具面
 // ⇒ 迁 T2 插件通道）：调用方走 plugin-opc 同名命名命令，宿主侧经 `opc.store` 的
 // `get_workflow_config` op 由 `HostOpcStore` 提供同一份读数（`get_workflow_config` 自由
 // 函数保留 —— 它同时是 bridge LLM 工具实现体与本接缝的数据源，禁区 12）。
 
-/// 构建带域包上下文的对话 prompt
-/// 返回 system_prompt 和初始 user_prompt，供前端使用
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "构建域包上下文对话prompt")]
-#[tauri::command]
-pub async fn opc_build_capability_pack_prompt(
-    capability_pack_id: String,
-    action_key: String,
-    user_input: Option<String>,
-) -> Result<serde_json::Value, String> {
-    let action = get_action_config(&capability_pack_id, &action_key)
-        .ok_or_else(|| format!("操作不存在: {capability_pack_id}/{action_key}"))?;
-
-    let user_prompt = match user_input {
-        Some(input) if !input.trim().is_empty() => {
-            action.user_prompt_template.replace("{{input}}", &input)
-        },
-        _ => action.user_prompt_template.clone(),
-    };
-
-    Ok(serde_json::json!({
-        "systemPrompt": action.system_prompt,
-        "userPrompt": user_prompt,
-        "actionKey": action.key,
-        "actionLabel": action.label,
-        "domainPackId": capability_pack_id,
-    }))
-}
+// #264 刀 C 退役 `opc_build_capability_pack_prompt`：调用方走 plugin-opc 同名命名命令，
+// 宿主侧经 `opc.store` 的 `build_capability_pack_prompt` 读 op 由 `HostOpcStore` 逐字续用
+// 同一装配（取 action → `{{input}}` 替换 → camelCase 五键信封）。`get_action_config` 自由函数
+// 保留 —— 它同时是桥接 LLM 工具 `opc_build_capability_pack_prompt` 臂与本接缝 op 的数据源（禁区 12）。
 
 // ── 域包分析引擎命令 ──────────────────────────────────────────
 
@@ -2467,25 +2423,10 @@ pub async fn opc_execute_workflow(
     .await
 }
 
-/// 查询域包学习指标
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "查询域包学习指标")]
-#[tauri::command]
-pub async fn opc_get_learning_metrics(
-    _app_state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let mut manager = CapabilityPackLearningManager::new();
-    let engine = manager.get_or_create(&capability_pack_id).clone();
-
-    let metrics = engine.compute_metrics().await.map_err(|e| format!("指标计算失败: {e}"))?;
-
-    serde_json::to_value(metrics).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// #264 刀 C 退役 `opc_get_learning_metrics`：调用方走 plugin-opc 同名命名命令，宿主侧经
+// `opc.store` 的 `get_learning_metrics` 读 op 由 `HostOpcStore` 续用同一算指标路径（每次现建
+// 管理器，与迁移前一致 —— 它没进 `LearningEngineState`，不是跨调用有状态对象）。
+// 迁移前 `State` 参数是 `_app_state`（未使用），本条属 A 档：无注入点、无新依赖。
 
 #[cfg(test)]
 mod tests {
@@ -2660,7 +2601,11 @@ pub struct CapabilityPackLearningConfigView {
 
 impl CapabilityPackLearningConfigView {
     /// 创建默认的学习配置（当 learning.yaml 不存在时使用）
-    fn default_for(domain_pack_id: &str) -> Self {
+    ///
+    /// `pub(crate)`：#264 刀 C 起，缺配置的退回语义随 `opc_get_learning_config` 命令迁入
+    /// 宿主接缝实现体（`init/opc_store_service.rs` 的 `get_learning_config` op），本模块之外
+    /// 也要构造默认视图。
+    pub(crate) fn default_for(domain_pack_id: &str) -> Self {
         let capability_pack_names: std::collections::HashMap<&str, &str> = [
             ("ai-research", "人工智能研究"),
             ("software-dev", "软件开发"),
@@ -2841,47 +2786,11 @@ pub fn get_all_capability_pack_learning_configs(
 
 // ── Tauri 命令（学习配置） ──────────────────────────────────
 
-/// 获取域包学习配置
-///
-/// 当配置文件不存在时返回默认配置，确保系统可以正常运行
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取域包学习配置")]
-#[tauri::command]
-pub async fn opc_get_learning_config(
-    state: State<'_, AppState>,
-    capability_pack_id: String,
-) -> Result<serde_json::Value, String> {
-    let config = get_capability_pack_learning_config(
-        &capability_pack_id,
-        Some(&state.app_data_dir),
-    )
-    .unwrap_or_else(|| {
-        tracing::warn!(
-            "[opc_get_learning_config] 域包学习配置不存在，返回默认配置: {capability_pack_id}"
-        );
-        CapabilityPackLearningConfigView::default_for(&capability_pack_id)
-    });
-    serde_json::to_value(config).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-/// 获取所有域包学习配置
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "获取所有域包学习配置")]
-#[tauri::command]
-pub async fn opc_list_learning_configs(
-    state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let configs = get_all_capability_pack_learning_configs(Some(&state.app_data_dir));
-    serde_json::to_value(configs).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// #264 刀 C 退役 `opc_get_learning_config` / `opc_list_learning_configs`：调用方走 plugin-opc
+// 同名命名命令，宿主侧经 `opc.store` 的 `get_learning_config` / `list_learning_configs` 两条读 op
+// 由 `HostOpcStore` 续用同一份 `app_data_dir` 解析（`get_capability_pack_learning_config` /
+// `get_all_capability_pack_learning_configs` 两条自由函数保留 —— 桥接 LLM 工具臂同样在用它，禁区 12）。
+// 「缺 learning.yaml 退回默认配置 + 记 warn」的既有语义随本批下沉，`default_for` 同批改 `pub(crate)`。
 
 /// 触发工作流反思
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "触发工作流反思")]

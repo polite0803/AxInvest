@@ -2590,6 +2590,7 @@ impl OpcStoreProvider for HostOpcStore {
     ///
     /// `fields` 原样塞进 `RuleContext.fields`（迁移前命令体同形：不做形状校验，
     /// 规则条件求值器按缺失键视为不命中）。
+    #[allow(clippy::too_many_arguments)]
     async fn run_automation_rules(
         &self,
         capability_pack_id: String,
@@ -2722,6 +2723,104 @@ impl OpcStoreProvider for HostOpcStore {
             "message": "自动学习已触发",
         }))
     }
+
+    /// 域包 manifest 摘要（迁移前 `opc_get_capability_pack`）—— 读 op。
+    ///
+    /// `version` / `enabled` 两个常量是迁移前命令体原样硬编码的（内建注册表没有这两个维度），
+    /// 不在这里发明新语义；信封键名照抄命令体（`{ manifest }`）。
+    async fn capability_pack_manifest(
+        &self,
+        capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        let config = opc_capability_pack_actions::get_capability_pack_config(&capability_pack_id)
+            .ok_or_else(|| {
+            AxAgentError::NotFound(format!("域包不存在: {capability_pack_id}"))
+        })?;
+        Ok(serde_json::json!({
+            "manifest": {
+                "id": config.id,
+                "name": config.name,
+                "icon": config.icon,
+                "description": config.description,
+                "version": 1,
+                "enabled": true,
+            }
+        }))
+    }
+
+    /// 域包操作 prompt 装配（迁移前 `opc_build_capability_pack_prompt`）—— 读 op。
+    async fn build_capability_pack_prompt(
+        &self,
+        capability_pack_id: String,
+        action_key: String,
+        user_input: Option<String>,
+    ) -> Result<serde_json::Value> {
+        let action =
+            opc_capability_pack_actions::get_action_config(&capability_pack_id, &action_key)
+                .ok_or_else(|| {
+                    AxAgentError::NotFound(format!("操作不存在: {capability_pack_id}/{action_key}"))
+                })?;
+        let user_prompt = match user_input {
+            Some(input) if !input.trim().is_empty() => {
+                action.user_prompt_template.replace("{{input}}", &input)
+            },
+            _ => action.user_prompt_template.clone(),
+        };
+        Ok(serde_json::json!({
+            "systemPrompt": action.system_prompt,
+            "userPrompt": user_prompt,
+            "actionKey": action.key,
+            "actionLabel": action.label,
+            "domainPackId": capability_pack_id,
+        }))
+    }
+
+    /// 域包学习指标（迁移前 `opc_get_learning_metrics`）—— 读 op。
+    ///
+    /// 每次现建管理器、不跨调用缓存：与迁移前命令体逐字同形（它同样没有把管理器放进
+    /// `LearningEngineState`，指标每次从引擎自身数据算）。
+    async fn get_learning_metrics(&self, capability_pack_id: String) -> Result<serde_json::Value> {
+        let mut manager = CapabilityPackLearningManager::new();
+        let engine = manager.get_or_create(&capability_pack_id).clone();
+        let metrics = engine
+            .compute_metrics()
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::get_learning_metrics {e}")))?;
+        serde_json::to_value(metrics)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::get_learning_metrics {e}")))
+    }
+
+    /// 单个域包的学习配置（迁移前 `opc_get_learning_config`）—— 读 op。
+    ///
+    /// 缺 learning.yaml **不报错**，退回默认配置并记 warn（迁移前命令体的既有语义）。
+    async fn get_learning_config(&self, capability_pack_id: String) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("get_learning_config")?;
+        let config =
+            opc_capability_pack_actions::get_capability_pack_learning_config(
+                &capability_pack_id,
+                Some(app_dir.as_path()),
+            )
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    "[opc.store::get_learning_config] 域包学习配置不存在，返回默认配置: {capability_pack_id}"
+                );
+                opc_capability_pack_actions::CapabilityPackLearningConfigView::default_for(
+                    &capability_pack_id,
+                )
+            });
+        serde_json::to_value(config)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::get_learning_config {e}")))
+    }
+
+    /// 全部域包的学习配置（迁移前 `opc_list_learning_configs`）—— 读 op，无入参。
+    async fn list_learning_configs(&self) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("list_learning_configs")?;
+        let configs = opc_capability_pack_actions::get_all_capability_pack_learning_configs(Some(
+            app_dir.as_path(),
+        ));
+        serde_json::to_value(configs)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::list_learning_configs {e}")))
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────
@@ -2738,7 +2837,8 @@ use axagent_company_runtime::opc::vendors::{
     OpCapabilityPackVendor, WebVendor,
 };
 use axagent_company_runtime::opc::{
-    DefaultDataService, OpcDataService, capability_pack_kpi_service, capability_pack_validator,
+    CapabilityPackLearningManager, DefaultDataService, OpcDataService, capability_pack_kpi_service,
+    capability_pack_validator,
 };
 use axagent_harness::opc_store::{
     CapabilityPackActionConfig, CapabilityPackConfig, CapabilityPackWorkflowConfig,

@@ -32,6 +32,7 @@ const LIST_CONTENT_ASSETS_COMMAND = "opc_list_content_assets";
 const CREATE_CONTENT_ASSET_COMMAND = "opc_create_content_asset";
 const UPDATE_CONTENT_ASSET_COMMAND = "opc_update_content_asset";
 const DELETE_CONTENT_ASSET_COMMAND = "opc_delete_content_asset";
+const GET_CONTENT_ASSET_COMMAND = "opc_get_content_asset";
 const LIST_PUBLISH_SCHEDULES_COMMAND = "opc_list_publish_schedules";
 const CREATE_PUBLISH_SCHEDULE_COMMAND = "opc_create_publish_schedule";
 const CANCEL_PUBLISH_SCHEDULE_COMMAND = "opc_cancel_publish_schedule";
@@ -199,15 +200,18 @@ function ContentAssetsPanel() {
       status: asset.status,
     });
     setEditOpen(true);
-    // 正文不在列表摘要视图里（接缝裁剪，不过线）⇒ 编辑必须回读全文：宿主
-    // `opc_get_content_asset`（本批不删）返回完整 `ContentAsset`（含 body）。
+    // 正文不在列表摘要视图里（接缝裁剪，不过线）⇒ 编辑必须回读全文：插件命令
+    // `opc_get_content_asset`（宿主同名 Tauri 命令本批仍在，另一批负责删除与登记表收口，
+    // 前端统一走插件通道）返回完整 `ContentAsset`（含 body）。⚠ 域 DTO 无 `serde(rename_all)`
+    // ⇒ 出参线格式是 snake_case 键（`content_type` / `created_at` / …）；本读点只取 `id` /
+    // `body` 两个单词键，snake/camel 同形，消费端无需改名。
     // 取失败不阻塞编辑 —— 正文框保持空且 `bodyDirty=false`，用户不动就不覆盖原文；
     // 序号比对防止慢响应把值回填到已切行/已关闭的弹窗。
     void (async () => {
       try {
-        const full = await invoke<{ id: string; body?: string | null }>("opc_get_content_asset", {
-          id: asset.id,
-        });
+        const full = JSON.parse(
+          await execPluginCommand(GET_CONTENT_ASSET_COMMAND, { id: asset.id }),
+        ) as { id: string; body?: string | null };
         if (editSeqRef.current === seq) {
           form.setFieldsValue({ body: full.body ?? "" });
         }

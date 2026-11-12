@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { PlusOutlined, ProjectOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Descriptions, Empty, message, Modal, Row, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -23,7 +23,7 @@ export function KanbanTab() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke<KanbanBoard>("opc_kanban_board");
+      const data = await invokePluginCommand<KanbanBoard>("opc_kanban_board");
       setBoard(data);
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
@@ -40,7 +40,7 @@ export function KanbanTab() {
   const act = async (id: string, cmd: string, extra?: Record<string, unknown>) => {
     setActing(id);
     try {
-      await invoke(cmd, { id, ...extra });
+      await invokePluginCommand(cmd, { id, ...extra });
       message.success(t("opc.kanban.opSuccess", { cmd }));
       refresh();
     } catch (e) {
@@ -54,7 +54,7 @@ export function KanbanTab() {
     setActing(id);
     setSirRunning(true);
     try {
-      const result = await invoke<SirResult>("run_self_improving_opc_work_item", {
+      const result = await invokePluginCommand<SirResult>("run_self_improving_opc_work_item", {
         task: id,
         maxRounds: 3,
       });
@@ -73,7 +73,7 @@ export function KanbanTab() {
     if (!title || !title.trim()) { return; }
     setActing("new");
     try {
-      await invoke("opc_create_work_item", { title: title.trim() });
+      await invokePluginCommand("opc_create_work_item", { title: title.trim() });
       message.success(t("opc.kanban.createSuccess"));
       refresh();
     } catch (e) {

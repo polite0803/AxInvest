@@ -2049,6 +2049,13 @@ const SNAKE_CASE_RESPONSE_COMMANDS = new Set<string>([
   // ReplaySweepResult 内层键（stock_code / as_of_date / return_rate 等）按
   // snake_case 契约消费（见 ReplaySweep.tsx 接口定义），不可被出口 camel 转换。
   "run_replay_backtest",
+  // #264 批 4：五条工作项写命令的真机出参 = opc.store 接缝 WorkItem 结构体直出
+  // （snake 键，前端 KanbanItem 同型），不可被出口 camel 转换（同 run_replay_backtest 判据）。
+  "opc_create_work_item",
+  "opc_work_item_start",
+  "opc_work_item_review",
+  "opc_escalate_work_item",
+  "opc_work_item_unblock",
 ]);
 
 /**
@@ -7173,6 +7180,61 @@ async function executeCommand<T>(
         default:
           return { success: false, message: "Mock mode not enabled" } as unknown as T;
       }
+    }
+
+    // ── OPC 工作项与域包面十二命令（#264 批 4：宿主同名命令已迁入 OPC 插件，双声明期）──
+    // 浏览器模式没有 opc.store 接缝 / 域包配置目录 ⇒ 一律回**零值形状**：看板空板、
+    // 工作项写面回零值 WorkItem（组件不消费返回值，看板状态以 opc_kanban_board 刷新为准，
+    // phase 取初始 QUEUED、不假装状态变迁成功）、SIR 回全零 SirResult、域包面回零值。
+    // 键形逐字对齐真机插件出口：work_item 五命令出参 = 接缝 WorkItem 结构体直出（snake 键，
+    // 已登记 SNAKE_CASE_RESPONSE_COMMANDS 保形）；SIR 出参 = 接缝 json! 投影（真 camel 键，
+    // 出口 camel 转换对它 no-op）；market_list 出参键 `capabilityCount` 无下划线，转换同样 no-op。
+    case "opc_kanban_board":
+      return {} as unknown as T;
+    case "opc_create_work_item":
+    case "opc_work_item_start":
+    case "opc_work_item_review":
+    case "opc_escalate_work_item":
+    case "opc_work_item_unblock": {
+      const req = args as { id?: string; title?: string };
+      return {
+        id: req?.id ?? "",
+        title: req?.title ?? "",
+        phase: "QUEUED",
+        owner_role_id: null,
+        assignee_agent_id: null,
+        manager_role_id: null,
+        last_error: null,
+        deps: [],
+        created_at: 0,
+        updated_at: 0,
+      } as unknown as T;
+    }
+    case "run_self_improving_opc_work_item":
+      // SirResult 全字段零值：组件读 finalScore（乘 100）/totalRounds/strengths/gaps/text，
+      // 缺任一字段就是 NaN / undefined（confidence 同在类型里，一并补齐）。
+      return {
+        text: "Mock mode not enabled",
+        totalRounds: 0,
+        finalScore: 0,
+        confidence: 0,
+        strengths: [],
+        gaps: [],
+      } as unknown as T;
+    case "opc_market_list":
+      return [] as unknown as T;
+    case "opc_export_capability_pack":
+    case "opc_import_capability_pack":
+      // 真机回输出路径 / 导入结果串（浏览器模式无域包目录，消费按钮早退不命中，补 case 仅为形态完整）。
+      return "" as unknown as T;
+    case "opc_set_capability_pack_enabled":
+      // 真机 `Ok(())` ⇒ worker 回执 JSON `null` ⇒ JSON.parse → null（与 plugin_execute_command 对 () 同形）。
+      return null as unknown as T;
+    case "opc_get_content_asset": {
+      // 真机出参 = ContentAsset 结构体直出（snake 键投影）；消费方读 `full.body`，回最小形状，
+      // `id` / `body` 均为单词键，出口 camel 转换 no-op，与真机键形一致。
+      const id = (args as { id?: string })?.id ?? "";
+      return { id, body: "" } as unknown as T;
     }
 
     case "kb_connect_vault":

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { invoke, isTauri } from "@/lib/invoke";
+import { isTauri } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Button, Card, Col, message, Row, Space, Switch, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,7 +18,7 @@ export function MarketPackTab() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke<MarketPack[]>("opc_market_list");
+      const data = await invokePluginCommand<MarketPack[]>("opc_market_list", {});
       setPacks(data);
     } catch (e) {
       message.error(t("opc.common.loadFailed", { error: String(e) }));
@@ -42,7 +43,7 @@ export function MarketPackTab() {
         return;
       }
       try {
-        const outPath = await invoke<string>("opc_export_capability_pack", {
+        const outPath = await invokePluginCommand<string>("opc_export_capability_pack", {
           id: p.id,
           outDir: filePath.replace(/[^/\\]+$/, ""),
         });
@@ -71,7 +72,7 @@ export function MarketPackTab() {
       }
       const filePath = Array.isArray(chosen) ? chosen[0] : chosen;
       try {
-        const auditMsg = await invoke<string>("opc_import_capability_pack", {
+        const auditMsg = await invokePluginCommand<string>("opc_import_capability_pack", {
           archivePath: filePath,
         });
         message.success(
@@ -164,7 +165,10 @@ export function MarketPackTab() {
                     checked={p.enabled}
                     onChange={async (checked) => {
                       try {
-                        await invoke("opc_set_capability_pack_enabled", { packId: p.id, enabled: checked });
+                        await invokePluginCommand("opc_set_capability_pack_enabled", {
+                          packId: p.id,
+                          enabled: checked,
+                        });
                         message.success(t("opc.market.toggleSuccess", { name: p.name }));
                         refresh();
                       } catch (e) {

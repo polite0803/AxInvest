@@ -148,6 +148,30 @@ const COMMAND_GET_INDEX_QUOTES: &str = "stock_get_index_quotes";
 const COMMAND_GET_MARKET_DRAGON_TIGER: &str = "stock_get_market_dragon_tiger";
 /// 获取北向资金（宿主 `get_north_bound_flow`，零入参）。
 const COMMAND_GET_NORTH_BOUND_FLOW: &str = "stock_get_north_bound_flow";
+// ── 候选 A（#35 行情资讯直映批）：十条宿主只读命令迁 T2，全部经 market.quote ──
+// 入参形态（多键 / 可选键 / 无复权参）由路由表 `optional` 档、`kline_route` 表与
+// `fetch_search_news` 分摊承接；`search_stock` 的宿主 `market` 过滤参不在接缝 op 上
+// ⇒ 插件面不开放（与接缝能力对齐，不承诺一条取不到数的通道）。
+/// 搜索股票（宿主 `search_stock`，keyword 必填）。
+const COMMAND_SEARCH_STOCK: &str = "stock_search_stock";
+/// 搜索财经新闻（宿主 `search_news`，keyword 必填 + limit 可选缺省 20 上限 100）。
+const COMMAND_SEARCH_NEWS: &str = "stock_search_news";
+/// 搜索概念板块（宿主 `search_concept_boards`，keyword 必填）。
+const COMMAND_SEARCH_CONCEPT_BOARDS: &str = "stock_search_concept_boards";
+/// 获取社交舆情（宿主 `get_social_sentiment`，stockCode 必填）。
+const COMMAND_GET_SOCIAL_SENTIMENT: &str = "stock_get_social_sentiment";
+/// 获取涨停池（宿主 `get_limit_up_pool`，date 可选；接缝参数名是 `requested_date`）。
+const COMMAND_GET_LIMIT_UP_POOL: &str = "stock_get_limit_up_pool";
+/// 获取国际个股实时行情（宿主 `get_international_stock_quote`，stockCode 必填）。
+const COMMAND_GET_INTERNATIONAL_STOCK_QUOTE: &str = "stock_get_international_stock_quote";
+/// 获取国际个股 K 线（宿主 `get_international_stock_kline`；宿主 adj 固定未复权 ⇒ 不收 adjType）。
+const COMMAND_GET_INTERNATIONAL_STOCK_KLINE: &str = "stock_get_international_stock_kline";
+/// 获取外汇 K 线（宿主 `get_forex_kline`，pair + period + limit）。
+const COMMAND_GET_FOREX_KLINE: &str = "stock_get_forex_kline";
+/// 获取基准指数 K 线（宿主 `get_benchmark_kline`，benchmarkCode + period + limit）。
+const COMMAND_GET_BENCHMARK_KLINE: &str = "stock_get_benchmark_kline";
+/// 获取一致预期 EPS（宿主 `get_stock_consensus_eps`，stockCode 必填）。
+const COMMAND_GET_STOCK_CONSENSUS_EPS: &str = "stock_get_consensus_eps";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
@@ -215,10 +239,10 @@ fn handle_command(
     }
 
     let outcome = match frame.command.as_str() {
-        // K 线是四入参 op，套不进下方「单标的」行情路由表，单独一个臂。
-        // `stock_get_quote`（批 2b 起）不再走 `fetch_quote` —— 它与其余行情命令同形，
-        // 收进路由表后命令面入参改读 camelCase；`fetch_quote` 只服务工具面。
-        COMMAND_GET_KLINE => match fetch_kline(&frame.input, &request.call_chain, peer) {
+        // 新闻搜索是多键 op（keyword 必填 + limit 可选缺省），套不进下方单键路由表，单独一臂。
+        // `stock_get_kline`（候选 A 起）与其余三条 K 线族命令同走 `kline_route` 表
+        // （K 线四键入参与单标的路由表不同形），不再独立成臂。
+        COMMAND_SEARCH_NEWS => match fetch_search_news(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -350,34 +374,43 @@ fn handle_command(
         // 三条 create 回建好的任务、九条管理面回 `null`（与宿主命令的 `()` 一致）；
         // 插件只透传入参，配置归一/响应形状的权威在宿主无 State 核心里。
         // 十二段转发用表驱动（`cron_seam_op`）而非逐条复制 —— 每个臂的形态完全一致。
-        other => match market_read_route(other) {
-            // 批 2a（#35）十一条 + 批 2b quote + 批 2c（#262）五条全市场榜单/盘面命令，
-            // 一律经宿主 `market.quote` 接缝，形态由路由表决定。
-            Some(route) => {
-                match fetch_market_read(route, &frame.input, &request.call_chain, peer) {
-                    Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                    Err((code, message)) => {
-                        CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                    },
-                }
-            },
-            None => match cron_seam_op(other) {
-                Some(op) => match call_analysis_seam(
-                    peer,
-                    &request.call_chain,
-                    op,
-                    stock_analysis_request(&frame.input),
-                ) {
-                    Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                    Err((code, message)) => {
-                        CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                    },
+        other => match kline_route(other) {
+            // K 线族四条（批 2b A 股 + 候选 A 国际/外汇/基准）：多键入参，独立路由表。
+            Some(route) => match fetch_kline(route, &frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
-                None => CommandOutcome::Fault(CommandFault::for_frame(
-                    &frame,
-                    error_codes::PLUGIN_COMMAND_UNKNOWN,
-                    format!("股票插件没有命令 `{other}` 的实现"),
-                )),
+            },
+            None => match market_read_route(other) {
+                // 批 2a（#35）十一条 + 批 2b quote + 批 2c（#262）五条全市场榜单/盘面命令 +
+                // 候选 A 六条行情资讯直映命令，一律经宿主 `market.quote` 接缝，形态由路由表决定。
+                Some(route) => {
+                    match fetch_market_read(route, &frame.input, &request.call_chain, peer) {
+                        Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                        Err((code, message)) => {
+                            CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                        },
+                    }
+                },
+                None => match cron_seam_op(other) {
+                    Some(op) => match call_analysis_seam(
+                        peer,
+                        &request.call_chain,
+                        op,
+                        stock_analysis_request(&frame.input),
+                    ) {
+                        Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                        Err((code, message)) => {
+                            CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                        },
+                    },
+                    None => CommandOutcome::Fault(CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_UNKNOWN,
+                        format!("股票插件没有命令 `{other}` 的实现"),
+                    )),
+                },
             },
         },
     };
@@ -783,44 +816,69 @@ fn stock_analysis_request(input: &Value) -> Value {
 struct MarketReadRoute {
     op: &'static str,
     keys: Option<(&'static str, &'static str)>,
+    /// 可选键档（§145 未做③）：存在且非空白才透传（camelCase 命令面键， snake_case 接缝键）。
+    /// `get_limit_up_pool` 的宿主参数名是 `date`，接缝 op 参数名是 `requested_date` ——
+    /// 两名不同源，靠这一档翻译；缺省时不插键，接缝侧落「取当下」。
+    optional: Option<(&'static str, &'static str)>,
 }
 
-/// 插件命令名 → `market.quote` 路由（批 2a 十一条 + 批 2b 的 `stock_get_quote` +
-/// 批 2c 五条全市场榜单/盘面命令，共十七条）。
+impl MarketReadRoute {
+    /// 常规只读路由：无可选键。op 必须逐条写死（不按命令名机械剥前缀）。
+    fn read(op: &'static str, keys: Option<(&'static str, &'static str)>) -> Self {
+        MarketReadRoute { op, keys, optional: None }
+    }
+}
+
+/// 插件命令名 → `market.quote` 路由（批 2a 十一条 + 批 2b quote + 批 2c 五条全市场榜单/盘面
+/// 命令 + 候选 A 六条行情资讯直映，共二十三条）。
 ///
 /// 表驱动而非逐段复制：转发形态完全一致，只有 op 与入参键不同；但 op 必须逐条写死
 /// （不按 `stock_` 前缀机械剥离），否则改名时命令会静默打到相邻的数据面上。
 fn market_read_route(command: &str) -> Option<MarketReadRoute> {
     let stock = Some(("stockCode", "stock_code"));
+    let keyword = Some(("keyword", "keyword"));
     Some(match command {
-        COMMAND_GET_QUOTE => MarketReadRoute { op: "get_quote", keys: stock },
-        COMMAND_GET_RESEARCH_REPORTS => MarketReadRoute { op: "get_research_reports", keys: stock },
-        COMMAND_GET_CONCEPT_BLOCKS => MarketReadRoute { op: "get_concept_blocks", keys: stock },
-        COMMAND_GET_ANNOUNCEMENTS => MarketReadRoute { op: "get_announcements", keys: stock },
-        COMMAND_GET_EARNINGS_CALENDAR => {
-            MarketReadRoute { op: "get_earnings_calendar", keys: stock }
+        COMMAND_GET_QUOTE => MarketReadRoute::read("get_quote", stock),
+        COMMAND_GET_RESEARCH_REPORTS => MarketReadRoute::read("get_research_reports", stock),
+        COMMAND_GET_CONCEPT_BLOCKS => MarketReadRoute::read("get_concept_blocks", stock),
+        COMMAND_GET_ANNOUNCEMENTS => MarketReadRoute::read("get_announcements", stock),
+        COMMAND_GET_EARNINGS_CALENDAR => MarketReadRoute::read("get_earnings_calendar", stock),
+        COMMAND_GET_CONCEPT_BOARD_MEMBERS => {
+            MarketReadRoute::read("get_concept_board_members", Some(("boardCode", "board_code")))
         },
-        COMMAND_GET_CONCEPT_BOARD_MEMBERS => MarketReadRoute {
-            op: "get_concept_board_members",
-            keys: Some(("boardCode", "board_code")),
-        },
-        COMMAND_GET_CLS_FLASH => MarketReadRoute { op: "get_cls_flash", keys: None },
-        COMMAND_GET_PEERS => MarketReadRoute { op: "get_peers", keys: stock },
-        COMMAND_GET_OPTION_PCR => MarketReadRoute { op: "get_option_pcr", keys: stock },
-        COMMAND_GET_LOCKUP_SCHEDULE => MarketReadRoute { op: "get_lockup_schedule", keys: stock },
-        COMMAND_GET_DIVIDEND_RECORDS => MarketReadRoute { op: "get_dividend_records", keys: stock },
-        COMMAND_GET_FINANCIALS => MarketReadRoute { op: "get_financials", keys: stock },
+        COMMAND_GET_CLS_FLASH => MarketReadRoute::read("get_cls_flash", None),
+        COMMAND_GET_PEERS => MarketReadRoute::read("get_peers", stock),
+        COMMAND_GET_OPTION_PCR => MarketReadRoute::read("get_option_pcr", stock),
+        COMMAND_GET_LOCKUP_SCHEDULE => MarketReadRoute::read("get_lockup_schedule", stock),
+        COMMAND_GET_DIVIDEND_RECORDS => MarketReadRoute::read("get_dividend_records", stock),
+        COMMAND_GET_FINANCIALS => MarketReadRoute::read("get_financials", stock),
         // ── 批 2c（#262）：五条全市场榜单/盘面命令，零入参 ⇒ `keys: None`（与 `get_cls_flash` 同形）。
         // `stock_get_index_quotes` 的 op 是 `get_index_quotes_outcome`，**不按命令名剥前缀**：
         // 宿主命令 `get_index_quotes` 体内调的 trait 方法 / `worker.rs` 分派臂都叫 `*_outcome`
         // （返回 `DataOutcome` 信封而非裸数组）；机械剥成 `get_index_quotes` 会打到不存在的 op 上。
-        COMMAND_GET_HOT_STOCKS => MarketReadRoute { op: "get_hot_stocks", keys: None },
-        COMMAND_GET_INDUSTRY_RANKING => MarketReadRoute { op: "get_industry_ranking", keys: None },
-        COMMAND_GET_INDEX_QUOTES => MarketReadRoute { op: "get_index_quotes_outcome", keys: None },
-        COMMAND_GET_MARKET_DRAGON_TIGER => {
-            MarketReadRoute { op: "get_market_dragon_tiger", keys: None }
+        COMMAND_GET_HOT_STOCKS => MarketReadRoute::read("get_hot_stocks", None),
+        COMMAND_GET_INDUSTRY_RANKING => MarketReadRoute::read("get_industry_ranking", None),
+        COMMAND_GET_INDEX_QUOTES => MarketReadRoute::read("get_index_quotes_outcome", None),
+        COMMAND_GET_MARKET_DRAGON_TIGER => MarketReadRoute::read("get_market_dragon_tiger", None),
+        COMMAND_GET_NORTH_BOUND_FLOW => MarketReadRoute::read("get_north_bound_flow", None),
+        // ── 候选 A（#35 行情资讯直映批）：五条单必填键 + 一条可选键 ──
+        // `search_stock` / `search_concept_boards` / `get_social_sentiment` /
+        // `get_international_stock_quote` / `get_consensus_eps` 五条 op 的 as_of 一律缺省
+        // （插件命令不开放，与宿主同名命令的调用面等价）。
+        COMMAND_SEARCH_STOCK => MarketReadRoute::read("search_stock", keyword),
+        COMMAND_SEARCH_CONCEPT_BOARDS => MarketReadRoute::read("search_concept_boards", keyword),
+        COMMAND_GET_SOCIAL_SENTIMENT => MarketReadRoute::read("get_social_sentiment", stock),
+        COMMAND_GET_INTERNATIONAL_STOCK_QUOTE => {
+            MarketReadRoute::read("get_international_quote", stock)
         },
-        COMMAND_GET_NORTH_BOUND_FLOW => MarketReadRoute { op: "get_north_bound_flow", keys: None },
+        COMMAND_GET_STOCK_CONSENSUS_EPS => MarketReadRoute::read("get_consensus_eps", stock),
+        // `get_limit_up_pool`：宿主参数名 `date`（camelCase 面同名），接缝参数名
+        // `requested_date` —— 路由表唯一一条走可选键档的命令。
+        COMMAND_GET_LIMIT_UP_POOL => MarketReadRoute {
+            op: "get_limit_up_pool",
+            keys: None,
+            optional: Some(("date", "requested_date")),
+        },
         _ => return None,
     })
 }
@@ -849,6 +907,15 @@ fn fetch_market_read(
         };
         args.insert(seam_key.to_string(), json!(value));
     }
+    // 可选键档：存在且非空白才插键 —— 缺省 / null / 空白都表示「用接缝侧缺省语义」
+    // （如 `get_limit_up_pool` 的「取当下」），与宿主命令不传该参同形。
+    if let Some((input_key, seam_key)) = route.optional {
+        if let Some(value) =
+            input.get(input_key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+        {
+            args.insert(seam_key.to_string(), json!(value));
+        }
+    }
 
     let reply = peer
         .call_seam(MARKET_SEAM, route.op, Value::Object(args), call_chain.to_vec())
@@ -868,15 +935,21 @@ fn fetch_market_read(
     }
 }
 
-/// K 线命令面入参 → 接缝 `get_klines` 载荷：命令面 camelCase 翻成接缝面 snake_case。
+/// K 线族命令面入参 → 接缝 K 线 op 载荷：命令面 camelCase 翻成接缝面 snake_case。
 ///
-/// 拆成纯函数（不碰 `Peer`）是因为四条入参的翻译与拒绝判据需要单测钉住 —— 接缝调用
-/// 本身要子进程管道，测不到「缺 `period` 时报什么」。
-/// `adjType` 与宿主 `get_stock_kline` 的 `adj` 同档：`auto` 与缺省都落「未复权」，其余只
-/// 接受 `none` / `forward` / `backward`（`harness::AdjType` 的 serde 是小写变体名）。
-/// `as_of_date` 不开放 —— 宿主命令有该入参，但接缝 `get_klines` 没有 ⇒ 多开一条入参等于
+/// 拆成纯函数（不碰 `Peer`）是因为多键入参的翻译与拒绝判据需要单测钉住 —— 接缝调用
+/// 本身要子进程管道，测不到「缺 `period` 时报什么」。候选 A 把单标的 K 线泛化成
+/// K 线族共用：差异只剩「标的键名」（A 股 `stockCode` / 外汇 `pair` / 基准
+/// `benchmarkCode`）与 op 名，period / limit 三键判据完全一致。
+/// `with_adj = false`（国际/外汇/基准）：宿主同名命令不收复权参 ⇒ 插件面也不收
+/// —— 不插 `adj_type` 键，接缝侧 `deserialize_optional_arg` 对缺失键落 `None`。
+/// `as_of_date` 不开放 —— 宿主命令有该入参，但接缝 K 线 op 没有 ⇒ 多开一条入参等于
 /// 承诺一条接缝给不了的通道。
-fn kline_seam_args(input: &Value) -> Result<Value, (String, String)> {
+fn kline_seam_args(
+    input: &Value,
+    asset: (&str, &str),
+    with_adj: bool,
+) -> Result<Value, (String, String)> {
     fn invalid(message: String) -> (String, String) {
         (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), message)
     }
@@ -890,44 +963,137 @@ fn kline_seam_args(input: &Value) -> Result<Value, (String, String)> {
             .ok_or_else(|| invalid(format!("`{key}` 缺失或为空白")))
     }
 
+    let (asset_key, seam_key) = asset;
     let mut args = serde_json::Map::new();
-    args.insert("stock_code".to_string(), json!(required_str(input, "stockCode")?));
+    args.insert(seam_key.to_string(), json!(required_str(input, asset_key)?));
     args.insert("period".to_string(), json!(required_str(input, "period")?));
     let Some(limit) = input.get("limit").and_then(Value::as_u64) else {
         return Err(invalid("`limit` 必须是整数".to_string()));
     };
     args.insert("limit".to_string(), json!(limit));
-    let adj_type = match input.get("adjType") {
-        None | Some(Value::Null) => Value::Null,
-        Some(Value::String(raw)) => match raw.as_str() {
-            "auto" => Value::Null,
-            "none" | "forward" | "backward" => json!(raw),
-            other => {
-                return Err(invalid(format!(
-                    "`adjType` 只接受 auto / none / forward / backward，收到 `{other}`"
-                )));
+    if with_adj {
+        let adj_type = match input.get("adjType") {
+            None | Some(Value::Null) => Value::Null,
+            Some(Value::String(raw)) => match raw.as_str() {
+                "auto" => Value::Null,
+                "none" | "forward" | "backward" => json!(raw),
+                other => {
+                    return Err(invalid(format!(
+                        "`adjType` 只接受 auto / none / forward / backward，收到 `{other}`"
+                    )));
+                },
             },
-        },
-        Some(other) => return Err(invalid(format!("`adjType` 必须是字符串，收到 {other}"))),
-    };
-    args.insert("adj_type".to_string(), adj_type);
+            Some(other) => return Err(invalid(format!("`adjType` 必须是字符串，收到 {other}"))),
+        };
+        args.insert("adj_type".to_string(), adj_type);
+    }
     Ok(Value::Object(args))
 }
 
-/// 调宿主 `market.quote` 的 `get_klines` 取一段 K 线（批 2b）。
+/// K 线族命令名 → `market.quote` 路由（批 2b A 股 K 线 + 候选 A 三条国际/外汇/基准）。
+///
+/// `stock_get_international_stock_kline` 的 op 是 `get_international_klines` —— 命令名跟
+/// 宿主 Tauri 命令（单数），op 跟接缝协议（复数），两套名并存；同理 `get_forex_klines` /
+/// `get_benchmark_klines`。
+#[derive(Clone, Copy)]
+struct KlineRoute {
+    op: &'static str,
+    /// (命令面 camelCase 标的键， 接缝面 snake_case 标的键)。
+    asset: (&'static str, &'static str),
+    /// A 股 K 线宿主命令有 `adj` 参 ⇒ 翻译 `adjType`；其余三条宿主固定未复权 ⇒ false。
+    with_adj: bool,
+}
+
+fn kline_route(command: &str) -> Option<KlineRoute> {
+    Some(match command {
+        COMMAND_GET_KLINE => {
+            KlineRoute { op: "get_klines", asset: ("stockCode", "stock_code"), with_adj: true }
+        },
+        COMMAND_GET_INTERNATIONAL_STOCK_KLINE => KlineRoute {
+            op: "get_international_klines",
+            asset: ("stockCode", "stock_code"),
+            with_adj: false,
+        },
+        COMMAND_GET_FOREX_KLINE => {
+            KlineRoute { op: "get_forex_klines", asset: ("pair", "pair"), with_adj: false }
+        },
+        COMMAND_GET_BENCHMARK_KLINE => KlineRoute {
+            op: "get_benchmark_klines",
+            asset: ("benchmarkCode", "benchmark_code"),
+            with_adj: false,
+        },
+        _ => return None,
+    })
+}
+
+/// 调宿主 `market.quote` 的 K 线族 op 取一段 K 线（批 2b 起）。
 ///
 /// 与 `fetch_market_read` 同一纪律：凭证 / provider / 限流都在宿主侧，插件只传标的与档位。
 fn fetch_kline(
+    route: KlineRoute,
     input: &Value,
     call_chain: &[String],
     peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
 ) -> Result<Value, (String, String)> {
-    let args = kline_seam_args(input)?;
+    let args = kline_seam_args(input, route.asset, route.with_adj)?;
+    let reply = peer.call_seam(MARKET_SEAM, route.op, args, call_chain.to_vec()).map_err(|e| {
+        (
+            error_codes::PLUGIN_CALL_FAILED.to_string(),
+            format!("行情接缝（{}）调用失败：{e}", route.op),
+        )
+    })?;
+
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "行情接缝返回了错误但没有说明".to_string()),
+        )),
+    }
+}
+
+/// `search_news` 命令面入参 → 接缝 `search_news` 载荷：keyword 必填，limit 可选。
+///
+/// limit 缺省 20、上限钳 100，与宿主 `search_news` 命令体的 `unwrap_or(20).min(100)`
+/// 同档 —— 插件不造第二个缺省数。接缝 op 的 `limit` 是必填 u32 ⇒ 缺省时也必须显式传，
+/// 不能省键。`as_of` 不开放（与宿主命令调用面等价）。
+fn search_news_seam_args(input: &Value) -> Result<Value, (String, String)> {
+    fn invalid(message: String) -> (String, String) {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), message)
+    }
+    let keyword = input
+        .get("keyword")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("`keyword` 缺失或为空白".to_string()))?;
+    let limit = match input.get("limit") {
+        None | Some(Value::Null) => 20,
+        Some(raw) => {
+            let value =
+                raw.as_u64().ok_or_else(|| invalid("`limit` 必须是非负整数".to_string()))?;
+            u32::try_from(value)
+                .map_err(|_| invalid("`limit` 超出 u32 上限".to_string()))
+                .map(|v| v.min(100))?
+        },
+    };
+    Ok(json!({ "keyword": keyword, "limit": limit }))
+}
+
+/// 调宿主 `market.quote` 的 `search_news` 取一批新闻（候选 A）。
+///
+/// 与 `fetch_market_read` 同一纪律：凭证 / provider / 限流都在宿主侧。
+fn fetch_search_news(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let args = search_news_seam_args(input)?;
     let reply =
-        peer.call_seam(MARKET_SEAM, "get_klines", args, call_chain.to_vec()).map_err(|e| {
+        peer.call_seam(MARKET_SEAM, "search_news", args, call_chain.to_vec()).map_err(|e| {
             (
                 error_codes::PLUGIN_CALL_FAILED.to_string(),
-                format!("行情接缝（get_klines）调用失败：{e}"),
+                format!("行情接缝（search_news）调用失败：{e}"),
             )
         })?;
 
@@ -995,9 +1161,9 @@ fn call_analysis_seam(
 #[cfg(test)]
 mod tests {
     use super::{
-        cron_seam_op, kline_seam_args, map_analysis_state_to_run_state,
-        map_execution_state_to_run_state, market_read_route, stock_analysis_request,
-        task_run_row_from_analysis_record, task_run_row_from_execution,
+        cron_seam_op, kline_route, kline_seam_args, map_analysis_state_to_run_state,
+        map_execution_state_to_run_state, market_read_route, search_news_seam_args,
+        stock_analysis_request, task_run_row_from_analysis_record, task_run_row_from_execution,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, error_codes, is_plugin_task_run_state};
     use serde_json::{Value, json};
@@ -1300,8 +1466,9 @@ mod tests {
         assert_eq!(cron_seam_op("stock_unknown_cron"), None, "未知命令不得落到任何 op");
     }
 
-    /// 批 2a（#35）十一条 + 批 2b quote + 批 2c（#262）五条榜单/盘面命令，
-    /// 共十七条行情只读命令 → (`market.quote` op, 入参键) 必须逐条正确。
+    /// 批 2a（#35）十一条 + 批 2b quote + 批 2c（#262）五条榜单/盘面命令 +
+    /// 候选 A 六条行情资讯直映命令，共二十三条行情只读命令 → (`market.quote` op, 入参键)
+    /// 必须逐条正确。
     ///
     /// 同 `cron_seam_op` 的理由：表里错一行不会有任何编译错误，命令照样回成功，
     /// 只是把「财务数据」打到了「同行业对比」的 op 上。入参键也一并锁住 ——
@@ -1309,41 +1476,60 @@ mod tests {
     #[test]
     fn market_read_commands_map_to_their_own_ops_and_keys() {
         let stock = Some(("stockCode", "stock_code"));
+        let keyword = Some(("keyword", "keyword"));
         let cases = [
-            ("stock_get_quote", "get_quote", stock),
-            ("stock_get_research_reports", "get_research_reports", stock),
-            ("stock_get_concept_blocks", "get_concept_blocks", stock),
-            ("stock_get_announcements", "get_announcements", stock),
-            ("stock_get_earnings_calendar", "get_earnings_calendar", stock),
+            ("stock_get_quote", "get_quote", stock, None),
+            ("stock_get_research_reports", "get_research_reports", stock, None),
+            ("stock_get_concept_blocks", "get_concept_blocks", stock, None),
+            ("stock_get_announcements", "get_announcements", stock, None),
+            ("stock_get_earnings_calendar", "get_earnings_calendar", stock, None),
             (
                 "stock_get_concept_board_members",
                 "get_concept_board_members",
                 Some(("boardCode", "board_code")),
+                None,
             ),
-            ("stock_get_cls_flash", "get_cls_flash", None),
-            ("stock_get_peers", "get_peers", stock),
-            ("stock_get_option_pcr", "get_option_pcr", stock),
-            ("stock_get_lockup_schedule", "get_lockup_schedule", stock),
-            ("stock_get_dividend_records", "get_dividend_records", stock),
-            ("stock_get_financials", "get_financials", stock),
+            ("stock_get_cls_flash", "get_cls_flash", None, None),
+            ("stock_get_peers", "get_peers", stock, None),
+            ("stock_get_option_pcr", "get_option_pcr", stock, None),
+            ("stock_get_lockup_schedule", "get_lockup_schedule", stock, None),
+            ("stock_get_dividend_records", "get_dividend_records", stock, None),
+            ("stock_get_financials", "get_financials", stock, None),
             // 批 2c（#262）：五条全市场榜单/盘面命令，零入参 ⇒ keys = None；
             // `stock_get_index_quotes` 的 op 带 `_outcome` 后缀（与命令名不同源），逐条钉死。
-            ("stock_get_hot_stocks", "get_hot_stocks", None),
-            ("stock_get_industry_ranking", "get_industry_ranking", None),
-            ("stock_get_index_quotes", "get_index_quotes_outcome", None),
-            ("stock_get_market_dragon_tiger", "get_market_dragon_tiger", None),
-            ("stock_get_north_bound_flow", "get_north_bound_flow", None),
+            ("stock_get_hot_stocks", "get_hot_stocks", None, None),
+            ("stock_get_industry_ranking", "get_industry_ranking", None, None),
+            ("stock_get_index_quotes", "get_index_quotes_outcome", None, None),
+            ("stock_get_market_dragon_tiger", "get_market_dragon_tiger", None, None),
+            ("stock_get_north_bound_flow", "get_north_bound_flow", None, None),
+            // 候选 A（#35 行情资讯直映批）：五条单必填键 + 一条可选键。
+            // `stock_get_international_stock_quote` 的 op 是 `get_international_quote`
+            // （命令名跟宿主 Tauri 命令，op 跟接缝协议），`stock_get_consensus_eps` 的 op
+            // 是 `get_consensus_eps`（宿主命令名带 stock_ 中缀），两套名并存逐条钉死；
+            // `stock_get_limit_up_pool` 的宿主参数名 `date` ≠ 接缝参数名 `requested_date`。
+            ("stock_search_stock", "search_stock", keyword, None),
+            ("stock_search_concept_boards", "search_concept_boards", keyword, None),
+            ("stock_get_social_sentiment", "get_social_sentiment", stock, None),
+            ("stock_get_international_stock_quote", "get_international_quote", stock, None),
+            ("stock_get_consensus_eps", "get_consensus_eps", stock, None),
+            (
+                "stock_get_limit_up_pool",
+                "get_limit_up_pool",
+                None,
+                Some(("date", "requested_date")),
+            ),
         ];
         let mut ops: Vec<&str> = Vec::new();
-        for (command, expected_op, expected_keys) in cases {
+        for (command, expected_op, expected_keys, expected_optional) in cases {
             let route = market_read_route(command).unwrap_or_else(|| panic!("`{command}` 未映射"));
             assert_eq!(route.op, expected_op, "`{command}` 必须打自己的 op");
-            assert_eq!(route.keys, expected_keys, "`{command}` 的入参键不对");
+            assert_eq!(route.keys, expected_keys, "`{command}` 的必填入参键不对");
+            assert_eq!(route.optional, expected_optional, "`{command}` 的可选入参键不对");
             ops.push(route.op);
         }
         ops.sort_unstable();
         ops.dedup();
-        assert_eq!(ops.len(), cases.len(), "十七条命令必须映射到十七个不同 op：{ops:?}");
+        assert_eq!(ops.len(), cases.len(), "二十三条命令必须映射到二十三个不同 op：{ops:?}");
 
         assert!(market_read_route("stock_unknown_market_read").is_none(), "未知命令不得落到行情表");
         assert!(
@@ -1352,18 +1538,58 @@ mod tests {
         );
         assert!(
             market_read_route("stock_get_kline").is_none(),
-            "K 线走独立分派臂，不得被单标的路由表吞掉"
+            "K 线走 kline_route 表，不得被单标的路由表吞掉"
         );
+    }
+
+    /// K 线族四条命令（批 2b A 股 + 候选 A 国际/外汇/基准）→ (op, 标的键, 是否翻译复权档)
+    /// 必须逐条正确。国际/外汇/基准的宿主命令不收复权参 ⇒ `with_adj = false`；
+    /// 国际 K 线命令名跟宿主（单数）而 op 跟接缝协议（复数），两套名并存逐条钉死。
+    #[test]
+    fn kline_commands_map_to_their_own_ops_and_asset_keys() {
+        let cases = [
+            ("stock_get_kline", "get_klines", ("stockCode", "stock_code"), true),
+            (
+                "stock_get_international_stock_kline",
+                "get_international_klines",
+                ("stockCode", "stock_code"),
+                false,
+            ),
+            ("stock_get_forex_kline", "get_forex_klines", ("pair", "pair"), false),
+            (
+                "stock_get_benchmark_kline",
+                "get_benchmark_klines",
+                ("benchmarkCode", "benchmark_code"),
+                false,
+            ),
+        ];
+        let mut ops: Vec<&str> = Vec::new();
+        for (command, expected_op, expected_asset, expected_adj) in cases {
+            let route = kline_route(command).unwrap_or_else(|| panic!("`{command}` 未映射"));
+            assert_eq!(route.op, expected_op, "`{command}` 必须打自己的 op");
+            assert_eq!(route.asset, expected_asset, "`{command}` 的标的键不对");
+            assert_eq!(route.with_adj, expected_adj, "`{command}` 的复权档开关不对");
+            ops.push(route.op);
+        }
+        ops.sort_unstable();
+        ops.dedup();
+        assert_eq!(ops.len(), cases.len(), "四条命令必须映射到四个不同 op：{ops:?}");
+        assert!(kline_route("stock_unknown_kline").is_none(), "未知命令不得落到 K 线表");
+        assert!(kline_route("stock_get_quote").is_none(), "单标的行情命令不得被 K 线表吞掉");
     }
 
     #[test]
     fn kline_seam_args_translates_camel_input_and_rejects_bad_arms() {
-        let full = kline_seam_args(&json!({
-            "stockCode": " 600519 ",
-            "period": "daily",
-            "limit": 250,
-            "adjType": "forward"
-        }))
+        let full = kline_seam_args(
+            &json!({
+                "stockCode": " 600519 ",
+                "period": "daily",
+                "limit": 250,
+                "adjType": "forward"
+            }),
+            ("stockCode", "stock_code"),
+            true,
+        )
         .expect("完整入参应能翻成接缝载荷");
         assert_eq!(full["stock_code"], "600519", "标的键要翻成 snake 并 trim");
         assert_eq!(full["period"], "daily");
@@ -1378,8 +1604,8 @@ mod tests {
             json!({ "stockCode": "600519", "period": "daily", "limit": 1, "adjType": Value::Null }),
             json!({ "stockCode": "600519", "period": "daily", "limit": 1 }),
         ] {
-            let args =
-                kline_seam_args(&input).unwrap_or_else(|e| panic!("{input} 应当合法：{e:?}"));
+            let args = kline_seam_args(&input, ("stockCode", "stock_code"), true)
+                .unwrap_or_else(|e| panic!("{input} 应当合法：{e:?}"));
             assert!(args["adj_type"].is_null(), "`{input}` 的 adj_type 必须落 null：{args}");
         }
 
@@ -1395,7 +1621,73 @@ mod tests {
             json!({ "stockCode": "600519", "period": "daily", "limit": 1, "adjType": 3 }),
         ];
         for input in bad {
-            let outcome = kline_seam_args(&input);
+            let outcome = kline_seam_args(&input, ("stockCode", "stock_code"), true);
+            let Err((code, message)) = outcome else {
+                panic!("`{input}` 必须被拒在接缝之前，实际放行：{outcome:?}");
+            };
+            assert_eq!(
+                code,
+                error_codes::SEAM_CALL_INVALID_ARGS,
+                "`{input}` 的拒绝码不对：{message}"
+            );
+        }
+    }
+
+    /// 候选 A 泛化钉点：K 线族的标的键随路由传入（外汇 `pair` / 基准 `benchmarkCode`），
+    /// `with_adj = false` 时不读 `adjType` 也不插 `adj_type` 键 —— 接缝侧
+    /// `deserialize_optional_arg` 对缺失键落 `None`，与宿主命令「固定未复权」同形。
+    #[test]
+    fn kline_seam_args_variants_and_adjless_routes() {
+        let forex = kline_seam_args(
+            &json!({ "pair": " USD/JPY ", "period": "daily", "limit": 5 }),
+            ("pair", "pair"),
+            false,
+        )
+        .expect("外汇入参应能翻成接缝载荷");
+        assert_eq!(forex["pair"], "USD/JPY", "外汇标的键要 trim");
+        assert_eq!(forex["period"], "daily");
+        assert_eq!(forex["limit"], 5);
+        assert!(forex.get("adj_type").is_none(), "无复权路由不得插 adj_type 键");
+        assert!(forex.get("stock_code").is_none(), "标的键必须随路由传入，不得残留 A 股键名");
+
+        // 命令面就算带了 adjType，无复权路由也不翻译不透传（拒绝一条接缝给不了的通道）。
+        let adjless = kline_seam_args(
+            &json!({ "benchmarkCode": "HSI", "period": "weekly", "limit": 10, "adjType": "forward" }),
+            ("benchmarkCode", "benchmark_code"),
+            false,
+        )
+        .expect("基准入参应能翻成接缝载荷");
+        assert_eq!(adjless["benchmark_code"], "HSI");
+        assert!(adjless.get("adj_type").is_none(), "adjType 在无复权路由上必须被丢弃");
+    }
+
+    /// `search_news` 载荷翻译：keyword 必填，limit 缺省 20 / 上限钳 100 ——
+    /// 与宿主 `search_news` 命令体的 `unwrap_or(20).min(100)` 同档，不造第二个缺省数。
+    #[test]
+    fn search_news_seam_args_defaults_and_clamps_limit() {
+        let args = search_news_seam_args(&json!({ "keyword": " 贵州白酒 " }))
+            .expect("缺省 limit 应当合法");
+        assert_eq!(args["keyword"], "贵州白酒", "keyword 要 trim");
+        assert_eq!(args["limit"], 20, "缺省 limit 必须与宿主命令的 20 同档");
+
+        let args = search_news_seam_args(&json!({ "keyword": "新能源", "limit": 100 }))
+            .expect("显式 100 应当合法");
+        assert_eq!(args["limit"], 100);
+
+        let args = search_news_seam_args(&json!({ "keyword": "新能源", "limit": 500 }))
+            .expect("超限入参应当被钳而不是被拒（与宿主命令一致）");
+        assert_eq!(args["limit"], 100, "超 100 必须钳到 100");
+
+        // 拒绝面：keyword 缺失 / 空白 / limit 非法 —— 一律 INVALID_ARGS，不发帧。
+        let bad = [
+            json!({}),
+            json!({ "keyword": "   " }),
+            json!({ "keyword": "新能源", "limit": -1 }),
+            json!({ "keyword": "新能源", "limit": "20" }),
+            json!({ "keyword": "新能源", "limit": 1.5 }),
+        ];
+        for input in bad {
+            let outcome = search_news_seam_args(&input);
             let Err((code, message)) = outcome else {
                 panic!("`{input}` 必须被拒在接缝之前，实际放行：{outcome:?}");
             };

@@ -1081,6 +1081,137 @@ function stockManifest({ version, binaryName, sha256 }) {
         command: "worker://stock_get_north_bound_flow",
         inputSchema: { type: "object", additionalProperties: false, properties: {} },
       },
+      // ── 候选 A（#35 行情资讯直映批）：十条宿主只读命令，全部经宿主 market.quote 接缝 ──
+      // 不声明 requiredPermission ⇒ 投影 Safe，与宿主同名命令的 `safety = Safe` 逐条等阶。
+      // 宿主 `search_stock` 的 `market` 过滤参不在接缝 op 上 ⇒ 清单不声明该键；
+      // 国际/外汇/基准 K 线与宿主命令同不收复权参（接缝 adj_type 缺省）。
+      {
+        name: "stock_search_stock",
+        description: "搜索股票（按关键词匹配代码与名称；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_search_stock",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { keyword: { type: "string", description: "搜索关键词，如「茅台」或 600519" } },
+          required: ["keyword"],
+        },
+      },
+      {
+        name: "stock_search_news",
+        description: "搜索财经新闻（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_search_news",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            keyword: { type: "string", description: "搜索关键词" },
+            limit: { type: "integer", minimum: 1, description: "取多少条，缺省 20，上限 100" },
+          },
+          required: ["keyword"],
+        },
+      },
+      {
+        name: "stock_search_concept_boards",
+        description: "搜索概念板块（按关键词匹配板块名；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_search_concept_boards",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { keyword: { type: "string", description: "搜索关键词，如「人工智能」" } },
+          required: ["keyword"],
+        },
+      },
+      {
+        name: "stock_get_social_sentiment",
+        description: "获取社交舆情（股吧/雪球讨论热度与情感倾向；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_social_sentiment",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_limit_up_pool",
+        description: "获取涨停池（date 缺省取当下；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_limit_up_pool",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { date: { type: "string", description: "交易日 YYYY-MM-DD，缺省=当下" } },
+        },
+      },
+      {
+        name: "stock_get_international_stock_quote",
+        description: "获取国际个股实时行情（美股/港股等；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_international_stock_quote",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "国际标的代码，如 AAPL / 00700" },
+          },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_get_international_stock_kline",
+        description:
+          "获取国际个股 K 线序列（固定未复权，与宿主命令同档；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_international_stock_kline",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "国际标的代码，如 AAPL / 00700" },
+            period: { type: "string", description: "周期，如 daily / weekly / 60min" },
+            limit: { type: "integer", minimum: 1, description: "取多少根" },
+          },
+          required: ["stockCode", "period", "limit"],
+        },
+      },
+      {
+        name: "stock_get_forex_kline",
+        description: "获取外汇 K 线序列（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_forex_kline",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            pair: { type: "string", description: "货币对，如 USD/JPY" },
+            period: { type: "string", description: "周期，如 daily / weekly / 60min" },
+            limit: { type: "integer", minimum: 1, description: "取多少根" },
+          },
+          required: ["pair", "period", "limit"],
+        },
+      },
+      {
+        name: "stock_get_benchmark_kline",
+        description: "获取基准指数 K 线序列（经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_benchmark_kline",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            benchmarkCode: { type: "string", description: "基准指数代码，如 HSI / SPX" },
+            period: { type: "string", description: "周期，如 daily / weekly / 60min" },
+            limit: { type: "integer", minimum: 1, description: "取多少根" },
+          },
+          required: ["benchmarkCode", "period", "limit"],
+        },
+      },
+      {
+        name: "stock_get_consensus_eps",
+        description: "获取一致预期 EPS（分析师盈利预测汇总；经宿主 market.quote 接缝，只读）",
+        command: "worker://stock_get_consensus_eps",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stockCode"],
+        },
+      },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
     // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，

@@ -7746,10 +7746,10 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 
 | 插件命令 | 分派形态 | 接缝 op | 命令面入参（camelCase） | 接缝载荷（snake_case） |
 |---|---|---|---|---|
-| `stock_get_quote` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:793`） | `market.quote / get_quote` | `stockCode` | `stock_code` |
+| `stock_get_quote` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:837`） | `market.quote / get_quote` | `stockCode` | `stock_code` |
 | `stock_get_kline` | 独立分派臂（`axagent-plugins/crates/plugin-stock/src/main.rs:42` → `fetch_kline` 同文件 `:893`） | `market.quote / get_klines` | `stockCode` / `period` / `limit` / `adjType` | `stock_code` / `period` / `limit` / `adj_type` |
 
-`get_klines` 是四入参 op，套不进「单标的（+ 可选 as-of）」的 `MarketReadRoute` 形状 ⇒ 单独一条分派臂，入参翻译落在纯函数 `kline_seam_args`（`axagent-plugins/crates/plugin-stock/src/main.rs:879`）。拆纯函数的理由是判据可达：接缝调用本身要子进程管道，测不到「缺 `period` 报什么」，而翻译 + 8 条拒绝面（缺 `stockCode` / 全空白 / 缺 `period` / 缺 `limit` / `limit:-1` / `limit:"250"` / `adjType:"qfq"` / `adjType:3`）需要逐条钉成 `SEAM_CALL_INVALID_ARGS`。路由表测试追加负控 `market_read_route("stock_get_kline").is_none()`，钉住「K 线不得被单标的路由表吞掉」—— 这条负控是本批唯一能机械区分「两臂」与「误合并成一臂」的断言。
+`get_klines` 是四入参 op，套不进「单标的（+ 可选 as-of）」的 `MarketReadRoute` 形状 ⇒ 单独一条分派臂，入参翻译落在纯函数 `kline_seam_args`（`axagent-plugins/crates/plugin-stock/src/main.rs:948`）。拆纯函数的理由是判据可达：接缝调用本身要子进程管道，测不到「缺 `period` 报什么」，而翻译 + 8 条拒绝面（缺 `stockCode` / 全空白 / 缺 `period` / 缺 `limit` / `limit:-1` / `limit:"250"` / `adjType:"qfq"` / `adjType:3`）需要逐条钉成 `SEAM_CALL_INVALID_ARGS`。路由表测试追加负控 `market_read_route("stock_get_kline").is_none()`，钉住「K 线不得被单标的路由表吞掉」—— 这条负控是本批唯一能机械区分「两臂」与「误合并成一臂」的断言。
 
 ### 144.2 三面键名分档（本批裁定，后续批次照此口径）
 
@@ -7814,11 +7814,11 @@ Rust（`axagent-plugins` 根，`CARGO_TARGET_DIR=$HOME/.cargo/target-axagent`）
 
 | 插件命令 | 分派形态 | 接缝 op | 命令面入参 | 接缝载荷 |
 |---|---|---|---|---|
-| `stock_get_hot_stocks` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:793`） | `market.quote / get_hot_stocks` | 无 | 无 |
-| `stock_get_industry_ranking` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:818`） | `get_industry_ranking` | 无 | 无 |
-| `stock_get_index_quotes` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:819`） | `get_index_quotes_outcome` | 无 | 无 |
-| `stock_get_market_dragon_tiger` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:820`） | `get_market_dragon_tiger` | 无 | 无 |
-| `stock_get_north_bound_flow` | 同表（`axagent-plugins/crates/plugin-stock/src/main.rs:823`） | `get_north_bound_flow` | 无 | 无 |
+| `stock_get_hot_stocks` | `market_read_route` 表驱动（`axagent-plugins/crates/plugin-stock/src/main.rs:837`） | `market.quote / get_hot_stocks` | 无 | 无 |
+| `stock_get_industry_ranking` | 同表，常量（`axagent-plugins/crates/plugin-stock/src/main.rs:143`） | `get_industry_ranking` | 无 | 无 |
+| `stock_get_index_quotes` | 同表，常量（`axagent-plugins/crates/plugin-stock/src/main.rs:146`） | `get_index_quotes_outcome` | 无 | 无 |
+| `stock_get_market_dragon_tiger` | 同表，常量（`axagent-plugins/crates/plugin-stock/src/main.rs:148`） | `get_market_dragon_tiger` | 无 | 无 |
+| `stock_get_north_bound_flow` | 同表，常量（`axagent-plugins/crates/plugin-stock/src/main.rs:150`） | `get_north_bound_flow` | 无 | 无 |
 
 五条都是**零入参** op ⇒ `keys: None`，与先例 `get_cls_flash` 同构（`keys: None` 的语义是「不读 input 任何键」，不是「键可有可无」）。路由表由 12 条扩到 17 条；测试 `market_read_commands_map_to_their_own_ops_and_keys` 的 `cases` 同步 12 → 17（去重断言用的是 `cases.len()`，无需再改常数）。
 
@@ -8147,7 +8147,7 @@ PLAN 同批回写五处：`:366`（1475 条 / 162 模块）、`:514`（88 条 / 
 3. **宿主实现**：`src-tauri/src/init/opc_store_service.rs:1175` / `:1217` / `:1232` 三方法 + impl 闭合后五个 helper（`extract_domain_from_id` / `domain_id_to_name` / `parse_tags` / `parse_nodes_len` / `model_to_domain_response`）。逐字段保持迁移前语义：`description` 为 `None` 时空串、`step_count` 解析失败按 0、`list_domains` 去重后按 id 升序。`model_to_domain_response` 刻意不复用 dao 的 `workflow_template_response_from_model` —— 后者把 `tool_defs` 固定为 `None` 且 nodes/edges 解析失败降级为空数组，合并会静默改变出参。✅ 修一处真编译错误：该函数返回类型写作 `Result<…, String>` 时撞上本文件作用域的 `harness::core_error::Result<T>`（单泛型别名，E0107）⇒ 改为 `std::result::Result<WorkflowTemplateResponse, String>`。
 4. **worker 分派**：`axagent-plugins/crates/plugins/src/worker.rs` 的 `opc.store` 只读白名单追加三条（`:12798-12800`）；`:3926` / `:3949` / `:3965` 三分派臂 —— 列表用 `deserialize_optional_arg`（`domain_id` / `tag` 可省略），详情用 `deserialize_arg("workflow_id")`，`list_domains` 零入参。
 5. **插件命令**：`axagent-plugins/crates/plugin-opc/src/main.rs` 三组 `OPC_STORE_*`（`:153-155`）/ `COMMAND_*`（`:260-262`）常量 + 三分派臂（`:694-716`）+ 三函数（`:1796` / `:1817` / `:1833`）；命令面读 **camelCase**（`domainId` / `workflowId`），函数内转接缝 snake_case。
-6. **清单声明**：`scripts/build-plugin-bundle.mjs:1825-1854` 追加三条 `worker://`；`opc_list_domain_workflows` 两个过滤项均可选（无 `required`）、`opc_get_domain_workflow` required `["workflowId"]`、`opc_list_domains` 空 properties。
+6. **清单声明**：`scripts/build-plugin-bundle.mjs:1977-2004` 追加三条 `worker://`；`opc_list_domain_workflows` 两个过滤项均可选（无 `required`）、`opc_get_domain_workflow` required `["workflowId"]`、`opc_list_domains` 空 properties。
 7. **宿主删除**：删 `commands/opc_workflows/domain_workflows.rs` 与 `opc_workflows/mod.rs` 的 `pub mod` 声明（父模块仍在，只剩种子化与 re-export）；`register_commands.rs` 由 build.rs 重生成，恰 −3 行（未手改）。两处棘轮基线同批下调：`scripts/layer-discipline-allowlist.json` 删该模块条目（total 625→**623**）、`scripts/raw-map-err-baseline.json` 删该文件扁平键（−5 处）。
 8. **前端**：零改动 —— 前端本就零 `invoke`；`browserMock.ts` 无同名分支需要新增。
 
@@ -8194,7 +8194,7 @@ PLAN 同批回写五处：`:250`（2047→2046）、`:366`（1472 条 / 161 模�
 3. **宿主实现**：`execute_demand_workflow`（`src-tauri/src/init/opc_store_service.rs:1436`，起交付记录 → `tokio::spawn` 后台跑 `run_demand_delivery`，完成/失败路径各 `mark_*` 回写）+ 五只读与状态方法 `:1542` / `:1550` / `:1555` / `:1578` / `:1583`。
 4. **worker 分派**：`axagent-plugins/crates/plugins/src/worker.rs` 权限表：写 op 四条（`:546-549` execute/update/retry/cancel）加 `write` 闸，读 op 两条（list/get）不设闸；六分派臂 `:3983` / `:4006` / `:4028` / `:4043` / `:4090` / `:4106`（接缝侧入参 snake_case：`lead_id` / `delivery_id` / `workflow_template_id`）；权限表测试锁 `:12925` 起同批追加四写清单。
 5. **插件命令**：`axagent-plugins/crates/plugin-opc/src/main.rs` 六组常量（`:276-281` COMMAND_*）+ 六分派臂 + 六函数（`:1897` execute / `:1924` list / `:1996` retry 等）；命令面读 **camelCase**（`leadId` / `deliveryId`），函数内转接缝 snake_case。
-6. **清单声明**：`scripts/build-plugin-bundle.mjs:1826-1878` 追加六条 `worker://`；`opc_execute_demand_workflow` required `["leadId"]`（`workflowTemplateId` 可选）、`opc_list_deliveries` 两个过滤项均可选、get/update/retry/cancel required `["deliveryId"]`。
+6. **清单声明**：`scripts/build-plugin-bundle.mjs:2007-2073` 追加六条 `worker://`；`opc_execute_demand_workflow` required `["leadId"]`（`workflowTemplateId` 可选）、`opc_list_deliveries` 两个过滤项均可选、get/update/retry/cancel required `["deliveryId"]`。
 7. **宿主删除**：删 `demand_discovery.rs` 交付段六命令（文件 936→**587** 行）；`register_commands.rs` 由 build.rs 重生成，恰 −6 行（未手改）。该模块剩余五条发现面命令 + `run_demand_discovery_cron`（无 `#[tauri::command]`，供 `services.rs` CronExecutor 调用）留待批 6。
 8. **前端**：`DemandDiscoveryPage.tsx` 四处调用切 `invokePluginCommand` + 11 个 snake 消费点改 camel（`workflowTemplateId` / `startedAt` / `completedAt` / `resultSummary` 等）；`Delivery` 类型从 `pages/opc/utils/constants.ts` 上收 `src/types/opc.ts`（页面 + dev mock 双消费方同源，constants 经 `export type { Delivery }` re-export）；`browserMock.ts` 新增 `MOCK_DELIVERIES` 数组与六 case（execute 缺线索抛错 / list 双过滤 + 降序 / update completed 落 `completedAt` / retry 复位 pending / cancel 标 cancelled，全部镜像宿主 dao 语义）。
 
@@ -8421,7 +8421,7 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 
 ### 候选批次（推荐次序 A → B → C1；C2/C3 排后）
 
-**候选 A：行情资讯直映批 10 条**（收益/风险比最高）——`search_stock` / `search_news` / `search_concept_boards` / `get_social_sentiment` / `get_limit_up_pool` / `get_international_stock_quote` / `get_international_stock_kline` / `get_forex_kline` / `get_benchmark_kline` / `get_consensus_eps`（全 stock_analysis 模块）。关键实证：宿主 `worker.rs` 的 market.quote 分派**已实现全部 10 个 op**（:1003/:1287/:1312/:1333/:1469/:1493/:1515/:1602/:1675/:1755）⇒ **零宿主接缝改动**，纯插件路由表 17→27 行 + 清单声明；`get_limit_up_pool` 顺带执行 §145 未做③（可选键档）。验收：路由表用例 17→27（dedup 断言自动跟随）、`worker://stock_` 37→47、`build-plugin-bundle.mjs --check` EXIT=0、register_commands.rs 零变化（283/20 不动）、vitest 逐文件跑（避开 #141 worker 超时假绿形态）。
+**候选 A：行情资讯直映批 10 条**（收益/风险比最高）——`search_stock` / `search_news` / `search_concept_boards` / `get_social_sentiment` / `get_limit_up_pool` / `get_international_stock_quote` / `get_international_stock_kline` / `get_forex_kline` / `get_benchmark_kline` / `get_consensus_eps`（全 stock_analysis 模块）。关键实证：宿主 `worker.rs` 的 market.quote 分派**已实现全部 10 个 op**（:1003/:1287/:1312/:1333/:1469/:1493/:1515/:1602/:1675/:1755）⇒ **零宿主接缝改动**，纯插件路由表 17→27 行 + 清单声明；`get_limit_up_pool` 顺带执行 §145 未做③（可选键档）。验收：路由表用例 17→27（dedup 断言自动跟随）、`worker://stock_` 37→47、`build-plugin-bundle.mjs --check` EXIT=0、register_commands.rs 零变化（283/20 不动）、vitest 逐文件跑（避开 #141 worker 超时假绿形态）。**已落地 Rust 半（2026-11-13，#300；前端切调用点另批）**：实际路由形态为 market_read_route 23 条（17 既有 read 档 + 5 新单键 + 1 新 optional 档承接 `get_limit_up_pool` 的 `date→requested_date`，§145 未做③随批闭合）+ 新 `kline_route` 表 4 条（国际/外汇/基准 K 线固定不带复权，`with_adj=false`）+ `search_news` 独立臂（limit 缺省 20 钳 100，与宿主命令体同档）——非底册预估的 27 行单表。实测：fmt/check/test --bins **16 passed 0 failed**、`worker://stock_` **47**、`build-plugin-bundle.mjs --check` **EXIT=0**、register_commands.rs git status **零改动**（底册 283/20 为 `f71923da0` 快照，现值 277/18 漂移自批 1 删 9 条 cron 死命令，与本批无关）、vitest 定点 2 文件 16 passed（mock 测试逐命令显式形态，无清单遍历撞面）。
 
 **候选 B：trade_intent 整模块退役 8 条**（−8 ⇒ 275/19，照 #264 批 4/6 整文件退出形态）——前端全零；全仓引用仅 `init/services.rs:4185-4188`（调度器直调自由函数 `expire_intents_for_scheduler`，非命令）与 `init/stock_automation_cron_seed.rs:399/:668`（常量 `DEFAULT_INTENT_MAX_AGE_HOURS`）；5 条写命令全 `safety = Safe`（trade_intent.rs:58/:69/:80/:96/:121）。**自由函数与常量保留**（照 §156「必须保留」红线）。验收：register_commands.rs −8、`commandTotal`/`stockBoundaryCommands` 五锚回写、`grep -w "trade_intent::"` 全仓仅剩 init 两处 + mod.rs 声明删除。
 
@@ -8434,7 +8434,7 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 1. `batch_get_quotes/klines/financials` ↔ `market_snapshot_batch` 出参形状等价性（BatchResult 信封 vs op 侧）——若入批 A 需先做 §145.2 式信封裁定。
 2. trade_intent 8 条在**智能体命令面**（LLM 工具索引）的消费未查——退役前补 `stock_analysis_bridge` 类工具面 grep（#273 裁定：零前端调用 = 迁 T2 不退役；若工具面有消费同理，改为迁移而非退役）。
 3. `market_mainline_list_recent` 前端 1 处调用未定位到文件/行号（命中统计有，定位未做）。
-4. `get_stock_consensus_eps` ↔ `get_consensus_eps` op 是否同一 trait 实现体（vs 直连 vendor）未核——照候选 A 同构应核一条。
+4. ~~`get_stock_consensus_eps` ↔ `get_consensus_eps` op 是否同一 trait 实现体（vs 直连 vendor）未核——照候选 A 同构应核一条。~~ **已闭合（2026-11-13，#300）**：同一实现体——`impl MarketDataProvider for AStockClient` 的 trait 覆盖体（`axagent-quant/crates/astock-data/src/lib.rs:7176` 起 `with_optional_asof` 转发，覆盖体签名起于 :7168）转发到固有方法（同文件 :4851），非直连 vendor；宿主命令体（`src-tauri/src/commands/stock_analysis.rs:3648`）调的正是同一固有方法。
 5. ~~check-capability-register 现报 6 条硬失败均归 OPC 刀 B 写面（未提交改动），股票五锚未被牵连。~~ **已修绿（2026-11-12 对账批，见 §161 末）**：5 条硬失败三类根因（evidence 漂移 / planOld 出段同形不同物 / frontendFileCaliber 改名刀过期）全部修复，判定档 EXIT=0（`.capreg_verify2.log`）。
 
 ## §161 刀 B 实施记账：7 条 OPC `#[agent_command]` 迁 T2 worker 通道（#278，2026-11-12）

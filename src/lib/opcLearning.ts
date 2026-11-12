@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
   AutoLearningResult,
@@ -48,7 +47,7 @@ export async function reflectOnWorkflow(
   suggestions: string[];
   summary: string;
 }> {
-  return invoke("opc_reflect_on_workflow", {
+  return invokePluginCommand("opc_reflect_on_workflow", {
     capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     workflowResult: params.workflowResult,
@@ -69,7 +68,7 @@ export async function evolveWorkflow(
   suggestedOptimizations: string[];
   message: string;
 }> {
-  return invoke("opc_evolve_workflow", {
+  return invokePluginCommand("opc_evolve_workflow", {
     capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     reason: params.reason,
@@ -90,7 +89,7 @@ export async function runSelfImprovement(
   improvementsApplied: string[];
   message: string;
 }> {
-  return invoke("opc_run_self_improvement", {
+  return invokePluginCommand("opc_run_self_improvement", {
     capabilityPackId: params.capabilityPackId,
     target: params.target,
   });
@@ -100,7 +99,7 @@ export async function runSelfImprovement(
  * 获取 RL 经验池统计
  */
 export async function getRLStats(capabilityPackId?: string): Promise<ExperiencePoolStats> {
-  return invoke("opc_get_rl_stats", {
+  return invokePluginCommand("opc_get_rl_stats", {
     capabilityPackId,
   });
 }
@@ -116,7 +115,7 @@ export async function recordRLExperience(
     workflowResult: Record<string, unknown>;
   },
 ): Promise<{ success: boolean; experienceId?: string; totalReward?: number; message?: string }> {
-  return invoke("opc_record_rl_experience", {
+  return invokePluginCommand("opc_record_rl_experience", {
     capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     qualityScore: params.qualityScore,
@@ -130,7 +129,7 @@ export async function recordRLExperience(
 export async function triggerRLOptimization(
   params: TriggerRLOptimizationParams,
 ): Promise<RLPolicyUpdate> {
-  return invoke("opc_trigger_rl_optimization", {
+  return invokePluginCommand("opc_trigger_rl_optimization", {
     capabilityPackId: params.capabilityPackId,
   });
 }
@@ -143,7 +142,7 @@ export async function triggerAutoLearning(params: {
   workflowId: string;
   workflowResult: Record<string, unknown>;
 }): Promise<AutoLearningResult> {
-  return invoke("opc_trigger_capability_pack_learning", {
+  return invokePluginCommand("opc_trigger_capability_pack_learning", {
     capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     workflowResult: params.workflowResult,

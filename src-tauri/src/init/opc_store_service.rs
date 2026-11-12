@@ -2852,6 +2852,369 @@ impl OpcStoreProvider for HostOpcStore {
             AxAgentError::Provider(format!("opc.store::execute_analysis 序列化失败: {e}"))
         })
     }
+
+    /// 触发工作流反思（迁移前 `opc_reflect_on_workflow`）—— 写 op。
+    async fn reflect_on_workflow(
+        &self,
+        capability_pack_id: String,
+        workflow_id: String,
+        workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("reflect_on_workflow")?;
+        let config = opc_capability_pack_actions::get_capability_pack_learning_config(
+            &capability_pack_id,
+            Some(app_dir.as_path()),
+        )
+        .ok_or_else(|| {
+            AxAgentError::Validation(format!("域包学习配置不存在: {capability_pack_id}"))
+        })?;
+        if !config.reflection_enabled {
+            return Err(AxAgentError::Validation(format!(
+                "域包 {capability_pack_id} 的反思功能未启用"
+            )));
+        }
+        let handles = self.learning_handles("reflect_on_workflow")?;
+        let registry = handles.adapter_registry.lock().await;
+        let adapter = registry.get(&capability_pack_id).ok_or_else(|| {
+            AxAgentError::Validation(format!("域包适配器不存在: {capability_pack_id}"))
+        })?;
+        let template = adapter.reflection_template().clone();
+        drop(registry);
+        let request = axagent_orchestrator::ReflectionRequest {
+            domain_pack_id: capability_pack_id,
+            workflow_id,
+            workflow_result,
+            ..Default::default()
+        };
+        let result =
+            handles.engine.reflect_on_workflow(&template, &request).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::reflect_on_workflow {e}"))
+            })?;
+        serde_json::to_value(result)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::reflect_on_workflow {e}")))
+    }
+
+    /// 触发工作流进化（迁移前 `opc_evolve_workflow`）—— 写 op。
+    async fn evolve_workflow(
+        &self,
+        capability_pack_id: String,
+        workflow_id: String,
+        reason: String,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("evolve_workflow")?;
+        let config = opc_capability_pack_actions::get_capability_pack_learning_config(
+            &capability_pack_id,
+            Some(app_dir.as_path()),
+        )
+        .ok_or_else(|| {
+            AxAgentError::Validation(format!("域包学习配置不存在: {capability_pack_id}"))
+        })?;
+        if !config.evolution_enabled {
+            return Err(AxAgentError::Validation(format!(
+                "域包 {capability_pack_id} 的进化功能未启用"
+            )));
+        }
+        let handles = self.learning_handles("evolve_workflow")?;
+        let registry = handles.adapter_registry.lock().await;
+        let adapter = registry.get(&capability_pack_id).ok_or_else(|| {
+            AxAgentError::Validation(format!("域包适配器不存在: {capability_pack_id}"))
+        })?;
+        let constraints = adapter.evolution_constraints().clone();
+        drop(registry);
+        let request = axagent_orchestrator::EvolutionRequest {
+            domain_pack_id: capability_pack_id,
+            workflow_id,
+            reason,
+        };
+        let result = handles
+            .engine
+            .evolve_workflow(&constraints, &request)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::evolve_workflow {e}")))?;
+        serde_json::to_value(result)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::evolve_workflow {e}")))
+    }
+
+    /// 执行自我改进（迁移前 `opc_run_self_improvement`）—— 写 op。
+    async fn run_self_improvement(
+        &self,
+        capability_pack_id: String,
+        target: String,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("run_self_improvement")?;
+        let config = opc_capability_pack_actions::get_capability_pack_learning_config(
+            &capability_pack_id,
+            Some(app_dir.as_path()),
+        )
+        .ok_or_else(|| {
+            AxAgentError::Validation(format!("域包学习配置不存在: {capability_pack_id}"))
+        })?;
+        if !config.self_improvement_enabled {
+            return Err(AxAgentError::Validation(format!(
+                "域包 {capability_pack_id} 的自我改进功能未启用"
+            )));
+        }
+        let handles = self.learning_handles("run_self_improvement")?;
+        let request = axagent_orchestrator::SelfImprovementRequest {
+            domain_pack_id: capability_pack_id,
+            target,
+        };
+        let result =
+            handles.engine.run_self_improvement(&request).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::run_self_improvement {e}"))
+            })?;
+        serde_json::to_value(result)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::run_self_improvement {e}")))
+    }
+
+    /// 触发域包学习闭环（迁移前 `opc_trigger_capability_pack_learning`）—— 写 op。
+    ///
+    /// 迁移前命令体逐字下沉：按配置自动串反思 → 进化（低分触发）→ 自我改进 → RL，
+    /// 各段失败只写进对应信封字段（整体仍回 200），最终附 `triggeredAt`。
+    async fn trigger_capability_pack_learning(
+        &self,
+        capability_pack_id: String,
+        workflow_id: String,
+        workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("trigger_capability_pack_learning")?;
+        let config = opc_capability_pack_actions::get_capability_pack_learning_config(
+            &capability_pack_id,
+            Some(app_dir.as_path()),
+        )
+        .ok_or_else(|| {
+            AxAgentError::Validation(format!("域包学习配置不存在: {capability_pack_id}"))
+        })?;
+        let handles = self.learning_handles("trigger_capability_pack_learning")?;
+
+        let registry = handles.adapter_registry.lock().await;
+        let adapter = registry.get(&capability_pack_id).ok_or_else(|| {
+            AxAgentError::Validation(format!("域包适配器不存在: {capability_pack_id}"))
+        })?;
+        let template = adapter.reflection_template().clone();
+        let constraints = adapter.evolution_constraints().clone();
+        let rl_config_from_adapter = adapter.learning_config().reinforcement_learning.clone();
+        drop(registry);
+
+        let engine = &handles.engine;
+        let mut last_quality_score: f64 = 0.0;
+
+        let mut reflection_result = serde_json::json!({
+            "status": "skipped",
+        });
+        let mut evolution_result: Option<serde_json::Value> = None;
+        let mut self_improvement_result: Option<serde_json::Value> = None;
+        let mut rl_result: Option<serde_json::Value> = None;
+
+        // 1. 触发反思（如果启用）
+        if config.reflection_enabled {
+            let request = axagent_orchestrator::ReflectionRequest {
+                domain_pack_id: capability_pack_id.clone(),
+                workflow_id: workflow_id.clone(),
+                workflow_result: workflow_result.clone(),
+                ..Default::default()
+            };
+
+            match engine.reflect_on_workflow(&template, &request).await {
+                Ok(result) => {
+                    let quality_score = result.quality_score;
+                    last_quality_score = quality_score / 100.0; // 转换为 0.0-1.0 范围
+                    reflection_result = serde_json::json!({
+                        "status": "success",
+                        "qualityScore": quality_score / 100.0,
+                        "message": result.summary,
+                    });
+
+                    // 如果质量分数低于 70，自动触发进化
+                    if quality_score < 70.0 && config.evolution_enabled {
+                        let evolution_request = axagent_orchestrator::EvolutionRequest {
+                            domain_pack_id: capability_pack_id.clone(),
+                            workflow_id: workflow_id.clone(),
+                            reason: format!("质量分数较低 ({:.2})，触发进化优化", quality_score),
+                        };
+
+                        match engine.evolve_workflow(&constraints, &evolution_request).await {
+                            Ok(evo_result) => {
+                                evolution_result = Some(serde_json::json!({
+                                    "status": "success",
+                                    "reason": format!("质量分数较低 ({:.2})，触发进化优化", quality_score),
+                                    "message": evo_result.message,
+                                }));
+                            },
+                            Err(e) => {
+                                evolution_result = Some(serde_json::json!({
+                                    "status": "failed",
+                                    "reason": format!("质量分数较低 ({:.2})，触发进化优化", quality_score),
+                                    "message": format!("进化失败: {}", e),
+                                }));
+                            },
+                        }
+                    }
+                },
+                Err(e) => {
+                    reflection_result = serde_json::json!({
+                        "status": "failed",
+                        "message": format!("反思失败: {}", e),
+                    });
+                },
+            }
+        }
+
+        // 2. 触发自我改进（如果启用且反思未失败）
+        if config.self_improvement_enabled && reflection_result["status"] != "failed" {
+            let improvement_request = axagent_orchestrator::SelfImprovementRequest {
+                domain_pack_id: capability_pack_id.clone(),
+                target: format!("workflow_{}_optimization", workflow_id),
+            };
+
+            match engine.run_self_improvement(&improvement_request).await {
+                Ok(result) => {
+                    self_improvement_result = Some(serde_json::json!({
+                        "status": "success",
+                        "target": improvement_request.target,
+                        "message": result.message,
+                    }));
+                },
+                Err(e) => {
+                    self_improvement_result = Some(serde_json::json!({
+                        "status": "failed",
+                        "target": improvement_request.target,
+                        "message": format!("自我改进失败: {}", e),
+                    }));
+                },
+            }
+        }
+
+        // 3. 触发强化学习（如果启用）
+        let rl_config = rl_config_from_adapter;
+        if rl_config.enabled {
+            // 读取 YAML 配置中的完整 RL 参数
+            let full_rl_config = opc_capability_pack_actions::load_rl_config(
+                &capability_pack_id,
+                Some(app_dir.as_path()),
+            )
+            .unwrap_or(rl_config);
+
+            match engine
+                .run_reinforcement_learning(
+                    &capability_pack_id,
+                    &workflow_id,
+                    last_quality_score,
+                    &workflow_result,
+                    &full_rl_config,
+                )
+                .await
+            {
+                Ok(rl_data) => {
+                    let has_experience =
+                        rl_data.get("experienceRecorded").is_some_and(|v| !v.is_null());
+                    let pool_size = rl_data.get("poolSize").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let policy_optimized =
+                        rl_data.get("policyOptimized").and_then(|v| v.as_bool()).unwrap_or(false);
+                    rl_result = Some(serde_json::json!({
+                        "status": "success",
+                        "experienceRecorded": has_experience,
+                        "poolSize": pool_size,
+                        "policyOptimized": policy_optimized,
+                        "message": format!("RL 状态: {}", rl_data["status"]),
+                    }));
+                },
+                Err(e) => {
+                    rl_result = Some(serde_json::json!({
+                        "status": "failed",
+                        "message": format!("强化学习失败: {}", e),
+                    }));
+                },
+            }
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        Ok(serde_json::json!({
+            "reflection": reflection_result,
+            "evolution": evolution_result,
+            "selfImprovement": self_improvement_result,
+            "reinforcementLearning": rl_result,
+            "triggeredAt": now,
+        }))
+    }
+
+    /// 经验池统计（迁移前 `opc_get_rl_stats`）—— 读 op。
+    ///
+    /// `capability_pack_id` 空串按 `None` 处理（迁移前命令体的
+    /// `filter(|s| !s.trim().is_empty())` 同一口径）。
+    async fn get_rl_stats(&self, capability_pack_id: Option<String>) -> Result<serde_json::Value> {
+        let handles = self.learning_handles("get_rl_stats")?;
+        let stats = match capability_pack_id.filter(|s| !s.trim().is_empty()) {
+            Some(id) => handles.engine.get_capability_pack_experience_stats(&id).await,
+            None => Some(handles.engine.get_experience_pool_stats().await),
+        };
+        serde_json::to_value(stats)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::get_rl_stats {e}")))
+    }
+
+    /// 手动触发 RL 策略优化（迁移前 `opc_trigger_rl_optimization`）—— 写 op。
+    async fn trigger_rl_optimization(
+        &self,
+        capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("trigger_rl_optimization")?;
+        let rl_config = opc_capability_pack_actions::load_rl_config(
+            &capability_pack_id,
+            Some(app_dir.as_path()),
+        )
+        .ok_or_else(|| {
+            AxAgentError::Validation(format!("域包 {} 的 RL 配置不存在", capability_pack_id))
+        })?;
+        if !rl_config.enabled {
+            return Err(AxAgentError::Validation(format!(
+                "域包 {} 的强化学习未启用",
+                capability_pack_id
+            )));
+        }
+        let handles = self.learning_handles("trigger_rl_optimization")?;
+        let result =
+            handles.engine.optimize_policy(&capability_pack_id, &rl_config).await.map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::trigger_rl_optimization {e}"))
+            })?;
+        serde_json::to_value(result)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::trigger_rl_optimization {e}")))
+    }
+
+    /// 手动记录一条工作流执行经验（迁移前 `opc_record_rl_experience`）—— 写 op。
+    async fn record_rl_experience(
+        &self,
+        capability_pack_id: String,
+        workflow_id: String,
+        quality_score: f64,
+        workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let app_dir = self.pack_app_dir("record_rl_experience")?;
+        let rl_config = opc_capability_pack_actions::load_rl_config(
+            &capability_pack_id,
+            Some(app_dir.as_path()),
+        )
+        .ok_or_else(|| {
+            AxAgentError::Validation(format!("域包 {} 的 RL 配置不存在", capability_pack_id))
+        })?;
+        let handles = self.learning_handles("record_rl_experience")?;
+        let experience = handles
+            .engine
+            .record_experience(
+                &capability_pack_id,
+                &workflow_id,
+                quality_score,
+                &workflow_result,
+                &rl_config,
+            )
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::record_rl_experience {e}")))?;
+        serde_json::to_value(experience)
+            .map_err(|e| AxAgentError::Provider(format!("opc.store::record_rl_experience {e}")))
+    }
 }
 
 // ── #264 批 7 刀 A 订阅面与域包配置面十一 op 的依赖 ──────────────────────────

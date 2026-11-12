@@ -1527,6 +1527,84 @@ pub trait OpcStoreProvider: Send + Sync {
             "OpcStoreProvider::execute_analysis 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 触发工作流反思（`reflect_on_workflow` op）—— 写 op。
+    async fn reflect_on_workflow(
+        &self,
+        _capability_pack_id: String,
+        _workflow_id: String,
+        _workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::reflect_on_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 触发工作流进化（`evolve_workflow` op）—— 写 op。
+    async fn evolve_workflow(
+        &self,
+        _capability_pack_id: String,
+        _workflow_id: String,
+        _reason: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::evolve_workflow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 执行自我改进（`run_self_improvement` op）—— 写 op。
+    async fn run_self_improvement(
+        &self,
+        _capability_pack_id: String,
+        _target: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::run_self_improvement 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 触发域包学习闭环（`trigger_capability_pack_learning` op）—— 写 op。
+    async fn trigger_capability_pack_learning(
+        &self,
+        _capability_pack_id: String,
+        _workflow_id: String,
+        _workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::trigger_capability_pack_learning 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 经验池统计（`get_rl_stats` op）—— 读 op；`capability_pack_id` 为 `None` 时取全局池。
+    async fn get_rl_stats(&self, _capability_pack_id: Option<String>) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::get_rl_stats 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 手动触发 RL 策略优化（`trigger_rl_optimization` op）—— 写 op。
+    async fn trigger_rl_optimization(
+        &self,
+        _capability_pack_id: String,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::trigger_rl_optimization 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 手动记录一条工作流执行经验（`record_rl_experience` op）—— 写 op。
+    async fn record_rl_experience(
+        &self,
+        _capability_pack_id: String,
+        _workflow_id: String,
+        _quality_score: f64,
+        _workflow_result: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        Err(AxAgentError::Provider(
+            "OpcStoreProvider::record_rl_experience 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── 领域工作流读 op 的出参（#264 批 4；放在 trait 之后，理由同上节）──────────

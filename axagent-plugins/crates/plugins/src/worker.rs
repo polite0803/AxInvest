@@ -584,7 +584,16 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             | "run_subscription_scan"
             | "ensure_demand_scan_job"
             // 刀 B3 收尾：自动学习会写 RL 经验库并触发进化 —— 写 op。
-            | "auto_learn_workflow",
+            | "auto_learn_workflow"
+            // #264 刀 C 批 3：学习面六条写 op（反思 / 进化 / 自我改进 / 学习闭环 /
+            // 手动 RL 优化 / 手动记录经验）—— 都写经验库或改工作流 / 配置。同批
+            // `get_rl_stats` 是纯读 ⇒ 必须仍 `None`（锁在 READ_OPS 用例）。
+            | "reflect_on_workflow"
+            | "evolve_workflow"
+            | "run_self_improvement"
+            | "trigger_capability_pack_learning"
+            | "trigger_rl_optimization"
+            | "record_rl_experience",
         ) => Some(PluginPermission::Write),
         _ => None,
     }
@@ -5144,6 +5153,188 @@ impl HostPeer {
                 let Some(result) =
                     self.block_on(provider.execute_analysis(capability_pack_id, days))
                 else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #264 刀 C 批 3：学习面七 op（六写一读）。学习引擎与适配器注册表都在宿主
+            // provider，本层只做入参解包与权限闸判定。
+            "opc.store" if op == "reflect_on_workflow" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let workflow_id: String = match deserialize_arg(&args, "workflow_id", seam) {
+                    Ok(workflow_id) => workflow_id,
+                    Err(response) => return response,
+                };
+                let workflow_result: Value = match deserialize_arg(&args, "workflow_result", seam) {
+                    Ok(workflow_result) => workflow_result,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.reflect_on_workflow(
+                    capability_pack_id,
+                    workflow_id,
+                    workflow_result,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "evolve_workflow" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let workflow_id: String = match deserialize_arg(&args, "workflow_id", seam) {
+                    Ok(workflow_id) => workflow_id,
+                    Err(response) => return response,
+                };
+                let reason: String = match deserialize_arg(&args, "reason", seam) {
+                    Ok(reason) => reason,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.evolve_workflow(
+                    capability_pack_id,
+                    workflow_id,
+                    reason,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "run_self_improvement" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let target: String = match deserialize_arg(&args, "target", seam) {
+                    Ok(target) => target,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.run_self_improvement(capability_pack_id, target))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "trigger_capability_pack_learning" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let workflow_id: String = match deserialize_arg(&args, "workflow_id", seam) {
+                    Ok(workflow_id) => workflow_id,
+                    Err(response) => return response,
+                };
+                let workflow_result: Value = match deserialize_arg(&args, "workflow_result", seam) {
+                    Ok(workflow_result) => workflow_result,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.trigger_capability_pack_learning(
+                    capability_pack_id,
+                    workflow_id,
+                    workflow_result,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "get_rl_stats" => {
+                let capability_pack_id: Option<String> =
+                    match deserialize_optional_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_rl_stats(capability_pack_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "trigger_rl_optimization" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.trigger_rl_optimization(capability_pack_id))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(value) => FrameResponse::success(value),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "opc.store" if op == "record_rl_experience" => {
+                let capability_pack_id: String =
+                    match deserialize_arg(&args, "capability_pack_id", seam) {
+                        Ok(capability_pack_id) => capability_pack_id,
+                        Err(response) => return response,
+                    };
+                let workflow_id: String = match deserialize_arg(&args, "workflow_id", seam) {
+                    Ok(workflow_id) => workflow_id,
+                    Err(response) => return response,
+                };
+                let quality_score: f64 = match deserialize_arg(&args, "quality_score", seam) {
+                    Ok(quality_score) => quality_score,
+                    Err(response) => return response,
+                };
+                let workflow_result: Value = match deserialize_arg(&args, "workflow_result", seam) {
+                    Ok(workflow_result) => workflow_result,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.record_rl_experience(
+                    capability_pack_id,
+                    workflow_id,
+                    quality_score,
+                    workflow_result,
+                )) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -13979,6 +14170,14 @@ mod tests {
             "ensure_demand_scan_job",
             // 刀 B3 收尾：自动学习（写 RL 经验 + 反思/进化）。
             "auto_learn_workflow",
+            // #264 刀 C 批 3：学习面六条写 op（反思 / 进化 / 自我改进 / 学习闭环 /
+            // 手动 RL 优化 / 手动记录经验）。
+            "reflect_on_workflow",
+            "evolve_workflow",
+            "run_self_improvement",
+            "trigger_capability_pack_learning",
+            "trigger_rl_optimization",
+            "record_rl_experience",
         ];
         const READ_OPS: &[&str] = &[
             "list_blog_posts",
@@ -14042,6 +14241,8 @@ mod tests {
             "list_learning_configs",
             // #264 刀 C 批 2：域包分析执行 —— 读 op（写 `execute_dynamic_workflow` 已在写集）。
             "execute_analysis",
+            // #264 刀 C 批 3：经验池统计 —— 读 op（同批六条写 op 在写集）。
+            "get_rl_stats",
         ];
         for write_op in WRITE_OPS {
             assert_eq!(

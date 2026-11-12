@@ -7110,6 +7110,71 @@ async function executeCommand<T>(
       } as unknown as T;
     }
 
+    // ── OPC 学习面七命令（#264 刀 C 批 3：宿主同名命令已迁入 OPC 插件）──
+    // 浏览器模式没有学习引擎 / 经验池 / 域包适配器 ⇒ 一律回**零值 + 未执行**形态：
+    // 写面 `success: false` / `status: "skipped"`（不许声称跑过），读面回零值统计。
+    case "opc_reflect_on_workflow":
+    case "opc_evolve_workflow":
+    case "opc_run_self_improvement":
+    case "opc_trigger_capability_pack_learning":
+    case "opc_get_rl_stats":
+    case "opc_trigger_rl_optimization":
+    case "opc_record_rl_experience": {
+      const packId = readMockReqField<string>(args, "capabilityPackId") ?? "";
+      const workflowId = readMockReqField<string>(args, "workflowId") ?? "";
+      switch (cmd) {
+        case "opc_reflect_on_workflow":
+          return {
+            success: false,
+            capabilityPackId: packId,
+            workflowId,
+            qualityScore: 0,
+            suggestions: [],
+            summary: "Mock mode not enabled",
+          } as unknown as T;
+        case "opc_evolve_workflow":
+          return {
+            success: false,
+            capabilityPackId: packId,
+            workflowId,
+            status: "skipped",
+            suggestedOptimizations: [],
+            message: "Mock mode not enabled",
+          } as unknown as T;
+        case "opc_run_self_improvement":
+          return {
+            success: false,
+            capabilityPackId: packId,
+            target: readMockReqField<string>(args, "target") ?? "",
+            status: "skipped",
+            improvementsApplied: [],
+            message: "Mock mode not enabled",
+          } as unknown as T;
+        case "opc_trigger_capability_pack_learning":
+          return {
+            reflection: { status: "skipped" },
+            triggeredAt: Date.now(),
+          } as unknown as T;
+        case "opc_get_rl_stats":
+          return {
+            totalExperiences: 0,
+            capabilityPackCount: 0,
+            avgReward: 0,
+            successRate: 0,
+          } as unknown as T;
+        case "opc_trigger_rl_optimization":
+          return {
+            capabilityPackId: packId,
+            experiencesUsed: 0,
+            avgReward: 0,
+            rewardTrend: "stable",
+            suggestedAdjustments: [],
+          } as unknown as T;
+        default:
+          return { success: false, message: "Mock mode not enabled" } as unknown as T;
+      }
+    }
+
     case "kb_connect_vault":
       return { success: true, vault_id: (args as { vault_id?: string })?.vault_id ?? "" } as T;
     case "kb_disconnect_vault":

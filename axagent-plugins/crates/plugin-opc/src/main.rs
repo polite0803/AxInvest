@@ -264,6 +264,19 @@ const OPC_STORE_GET_LEARNING_METRICS: &str = "get_learning_metrics";
 const OPC_STORE_GET_LEARNING_CONFIG: &str = "get_learning_config";
 const OPC_STORE_LIST_LEARNING_CONFIGS: &str = "list_learning_configs";
 
+/// #264 刀 C 批 3：学习面七 op（六写一读）。
+///
+/// 学习引擎与域包适配器注册表只在宿主装配（`AutoLearnHandles`），插件进程够不着 ⇒
+/// 全部走接缝回宿主。六条写 op 在宿主权限表登记 `Write`（判据在 `worker.rs` 的
+/// `required_permission_for` 与 `WRITE_OPS` 用例）；`get_rl_stats` 是纯读 ⇒ 无闸。
+const OPC_STORE_REFLECT_ON_WORKFLOW: &str = "reflect_on_workflow";
+const OPC_STORE_EVOLVE_WORKFLOW: &str = "evolve_workflow";
+const OPC_STORE_RUN_SELF_IMPROVEMENT: &str = "run_self_improvement";
+const OPC_STORE_TRIGGER_CAPABILITY_PACK_LEARNING: &str = "trigger_capability_pack_learning";
+const OPC_STORE_GET_RL_STATS: &str = "get_rl_stats";
+const OPC_STORE_TRIGGER_RL_OPTIMIZATION: &str = "trigger_rl_optimization";
+const OPC_STORE_RECORD_RL_EXPERIENCE: &str = "record_rl_experience";
+
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
@@ -468,6 +481,19 @@ const COMMAND_BUILD_CAPABILITY_PACK_PROMPT: &str = "opc_build_capability_pack_pr
 const COMMAND_GET_LEARNING_METRICS: &str = "opc_get_learning_metrics";
 const COMMAND_GET_LEARNING_CONFIG: &str = "opc_get_learning_config";
 const COMMAND_LIST_LEARNING_CONFIGS: &str = "opc_list_learning_configs";
+
+/// #264 刀 C 批 3：学习面七条命令（六写一读，宿主同名 `#[tauri::command]` 随本批删除，
+/// 命令名续用原名 ⇒ 智能体工具面与前端调用名不变）。
+///
+/// 六条写命令同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
+/// `opc_get_rl_stats` 是读命令 ⇒ 不进。
+const COMMAND_REFLECT_ON_WORKFLOW: &str = "opc_reflect_on_workflow";
+const COMMAND_EVOLVE_WORKFLOW: &str = "opc_evolve_workflow";
+const COMMAND_RUN_SELF_IMPROVEMENT: &str = "opc_run_self_improvement";
+const COMMAND_TRIGGER_CAPABILITY_PACK_LEARNING: &str = "opc_trigger_capability_pack_learning";
+const COMMAND_GET_RL_STATS: &str = "opc_get_rl_stats";
+const COMMAND_TRIGGER_RL_OPTIMIZATION: &str = "opc_trigger_rl_optimization";
+const COMMAND_RECORD_RL_EXPERIENCE: &str = "opc_record_rl_experience";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -1231,6 +1257,60 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         // 命令层只做形状判与接缝调用）。
         COMMAND_EXECUTE_ANALYSIS => {
             match execute_analysis(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #264 刀 C 批 3：学习面七命令（六写一读，每条一次接缝调用直投影；学习引擎与
+        // 域包适配器注册表的装配全在宿主 provider）。
+        COMMAND_REFLECT_ON_WORKFLOW => {
+            match reflect_on_workflow(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_EVOLVE_WORKFLOW => match evolve_workflow(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_RUN_SELF_IMPROVEMENT => {
+            match run_self_improvement(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_TRIGGER_CAPABILITY_PACK_LEARNING => {
+            match trigger_capability_pack_learning(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_RL_STATS => match get_rl_stats(&frame.input, &request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_TRIGGER_RL_OPTIMIZATION => {
+            match trigger_rl_optimization(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_RECORD_RL_EXPERIENCE => {
+            match record_rl_experience(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -3154,6 +3234,160 @@ fn execute_analysis(
     args.insert("capability_pack_id".to_string(), json!(pack_id));
     copy_optional_i64(input, OP, &mut args, &["days"])?;
     call_opc_store(peer, OPC_STORE_EXECUTE_ANALYSIS, Value::Object(args), call_chain)
+}
+
+/// `opc_reflect_on_workflow`：触发工作流反思（写 op；反思模板由宿主从域包适配器取）。
+fn reflect_on_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_reflect_on_workflow";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let workflow_id = require_str(input, OP, "workflowId")?;
+    // `workflowResult` 形状不限（迁移前命令参数就是 `serde_json::Value`，可为 `null`）。
+    let Some(workflow_result) = input.get("workflowResult") else {
+        return Err(invalid_shape(format!("{OP} 需要 `workflowResult` 参数（形状判在命令层）")));
+    };
+    call_opc_store(
+        peer,
+        OPC_STORE_REFLECT_ON_WORKFLOW,
+        json!({
+            "capability_pack_id": pack_id,
+            "workflow_id": workflow_id,
+            "workflow_result": workflow_result,
+        }),
+        call_chain,
+    )
+}
+
+/// `opc_evolve_workflow`：触发工作流进化（写 op；进化约束由宿主从域包适配器取）。
+fn evolve_workflow(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_evolve_workflow";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let workflow_id = require_str(input, OP, "workflowId")?;
+    let reason = require_str(input, OP, "reason")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_EVOLVE_WORKFLOW,
+        json!({
+            "capability_pack_id": pack_id,
+            "workflow_id": workflow_id,
+            "reason": reason,
+        }),
+        call_chain,
+    )
+}
+
+/// `opc_run_self_improvement`：执行自我改进（写 op）。
+fn run_self_improvement(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_run_self_improvement";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let target = require_str(input, OP, "target")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_RUN_SELF_IMPROVEMENT,
+        json!({ "capability_pack_id": pack_id, "target": target }),
+        call_chain,
+    )
+}
+
+/// `opc_trigger_capability_pack_learning`：触发域包学习闭环（写 op；四段编排在宿主）。
+fn trigger_capability_pack_learning(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_trigger_capability_pack_learning";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let workflow_id = require_str(input, OP, "workflowId")?;
+    let Some(workflow_result) = input.get("workflowResult") else {
+        return Err(invalid_shape(format!("{OP} 需要 `workflowResult` 参数（形状判在命令层）")));
+    };
+    call_opc_store(
+        peer,
+        OPC_STORE_TRIGGER_CAPABILITY_PACK_LEARNING,
+        json!({
+            "capability_pack_id": pack_id,
+            "workflow_id": workflow_id,
+            "workflow_result": workflow_result,
+        }),
+        call_chain,
+    )
+}
+
+/// `opc_get_rl_stats`：经验池统计（读 op；`capabilityPackId` 可选，缺省取全局池）。
+fn get_rl_stats(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_get_rl_stats";
+    let mut args = serde_json::Map::new();
+    match input.get("capabilityPackId") {
+        None | Some(Value::Null) => {},
+        Some(Value::String(value)) => {
+            args.insert("capability_pack_id".to_string(), json!(value));
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!(
+                "{OP} 的 `capabilityPackId` 必须是字符串（形状判在命令层）"
+            )));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_GET_RL_STATS, Value::Object(args), call_chain)
+}
+
+/// `opc_trigger_rl_optimization`：手动触发 RL 策略优化（写 op；RL 配置由宿主读）。
+fn trigger_rl_optimization(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_trigger_rl_optimization";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    call_opc_store(
+        peer,
+        OPC_STORE_TRIGGER_RL_OPTIMIZATION,
+        json!({ "capability_pack_id": pack_id }),
+        call_chain,
+    )
+}
+
+/// `opc_record_rl_experience`：手动记录一条工作流执行经验（写 op）。
+fn record_rl_experience(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_record_rl_experience";
+    let pack_id = require_str(input, OP, "capabilityPackId")?;
+    let workflow_id = require_str(input, OP, "workflowId")?;
+    let Some(quality_score) = input.get("qualityScore").and_then(Value::as_f64) else {
+        return Err(invalid_shape(format!("{OP} 的 `qualityScore` 必须是数值（形状判在命令层）")));
+    };
+    let Some(workflow_result) = input.get("workflowResult") else {
+        return Err(invalid_shape(format!("{OP} 需要 `workflowResult` 参数（形状判在命令层）")));
+    };
+    call_opc_store(
+        peer,
+        OPC_STORE_RECORD_RL_EXPERIENCE,
+        json!({
+            "capability_pack_id": pack_id,
+            "workflow_id": workflow_id,
+            "quality_score": quality_score,
+            "workflow_result": workflow_result,
+        }),
+        call_chain,
+    )
 }
 
 /// `opc_get_capability_pack_dashboard`：域包仪表盘（读 op；`days` 缺省由宿主按 30 天取）。

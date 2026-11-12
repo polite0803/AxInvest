@@ -1082,6 +1082,14 @@ const OPC_WRITE_COMMANDS = new Set([
   "opc_ensure_demand_scan_job",
   // 刀 B3 收尾：自动学习（写 op —— 落 RL 经验并触发反思/进化）。
   "opc_auto_learn_workflow",
+  // #264 刀 C 批 3：学习面六条写命令（反思 / 进化 / 自我改进 / 学习闭环 /
+  // 手动 RL 优化 / 手动记录经验）；`opc_get_rl_stats` 是读命令 ⇒ 不进本表。
+  "opc_reflect_on_workflow",
+  "opc_evolve_workflow",
+  "opc_run_self_improvement",
+  "opc_trigger_capability_pack_learning",
+  "opc_trigger_rl_optimization",
+  "opc_record_rl_experience",
 ]);
 
 function withRequiredPermission(commands) {
@@ -1096,7 +1104,7 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36）：worker 通道 + 111 条命名命令（读 72 条 · 写 39 条）",
+      "OPC 域功能包（#36）：worker 通道 + 118 条命名命令（读 73 条 · 写 45 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -2362,6 +2370,100 @@ function opcManifest({ version, binaryName, sha256 }) {
             days: { type: "integer", description: "统计天数（可选；缺省 30 天）" },
           },
           required: ["capabilityPackId"],
+        },
+      },
+      // ── #264 刀 C 批 3：学习面七命令（六写一读；宿主同名 Tauri 命令已删，原命令名与
+      // 智能体工具面逐字续用）。六条写命令同批进 `OPC_WRITE_COMMANDS`
+      // （= 宿主 `required_permission_for` 的写 op 名单，两处必须同批改）。
+      {
+        name: "opc_reflect_on_workflow",
+        description: "触发工作流反思（写 op；反思模板由宿主从域包适配器取）",
+        command: "worker://opc_reflect_on_workflow",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            workflowId: { type: "string", description: "工作流 ID" },
+            workflowResult: { description: "工作流执行结果（任意 JSON）" },
+          },
+          required: ["capabilityPackId", "workflowId", "workflowResult"],
+        },
+      },
+      {
+        name: "opc_evolve_workflow",
+        description: "触发工作流进化（写 op；进化约束由宿主从域包适配器取）",
+        command: "worker://opc_evolve_workflow",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            workflowId: { type: "string", description: "工作流 ID" },
+            reason: { type: "string", description: "进化原因" },
+          },
+          required: ["capabilityPackId", "workflowId", "reason"],
+        },
+      },
+      {
+        name: "opc_run_self_improvement",
+        description: "执行自我改进（写 op）",
+        command: "worker://opc_run_self_improvement",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            target: { type: "string", description: "改进目标" },
+          },
+          required: ["capabilityPackId", "target"],
+        },
+      },
+      {
+        name: "opc_trigger_capability_pack_learning",
+        description: "触发域包学习闭环（写 op；反思 → 进化 → 自我改进 → RL 四段编排在宿主）",
+        command: "worker://opc_trigger_capability_pack_learning",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            workflowId: { type: "string", description: "工作流 ID" },
+            workflowResult: { description: "工作流执行结果（任意 JSON）" },
+          },
+          required: ["capabilityPackId", "workflowId", "workflowResult"],
+        },
+      },
+      {
+        name: "opc_get_rl_stats",
+        description: "获取经验池统计信息（读 op；capabilityPackId 缺省取全局池）",
+        command: "worker://opc_get_rl_stats",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID（可选；缺省取全局池）" },
+          },
+        },
+      },
+      {
+        name: "opc_trigger_rl_optimization",
+        description: "手动触发 RL 策略优化（写 op；RL 配置由宿主读取）",
+        command: "worker://opc_trigger_rl_optimization",
+        inputSchema: {
+          type: "object",
+          properties: { capabilityPackId: { type: "string", description: "域包 ID" } },
+          required: ["capabilityPackId"],
+        },
+      },
+      {
+        name: "opc_record_rl_experience",
+        description: "手动记录一条工作流执行经验（写 op）",
+        command: "worker://opc_record_rl_experience",
+        inputSchema: {
+          type: "object",
+          properties: {
+            capabilityPackId: { type: "string", description: "域包 ID" },
+            workflowId: { type: "string", description: "工作流 ID" },
+            qualityScore: { type: "number", description: "质量分" },
+            workflowResult: { description: "工作流执行结果（任意 JSON）" },
+          },
+          required: ["capabilityPackId", "workflowId", "qualityScore", "workflowResult"],
         },
       },
       // ── #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写；宿主同名四条 Tauri

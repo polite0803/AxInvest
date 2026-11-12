@@ -7,7 +7,6 @@
  */
 
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { DomainLearningConfig } from "@/types";
 import { useCallback, useEffect, useState } from "react";
@@ -356,7 +355,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
       try {
         const wfId = workflowId || `default_${capabilityPackId}`;
         const wfResult = workflowResult || { status: "completed", steps_completed: 0, steps_total: 0 };
-        await invoke("opc_reflect_on_workflow", {
+        await invokePluginCommand("opc_reflect_on_workflow", {
           capabilityPackId,
           workflowId: wfId,
           workflowResult: wfResult,
@@ -378,7 +377,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
       try {
         const wfId = workflowId || `default_${capabilityPackId}`;
         const reasonText = reason || t("opc.domain.learning.evolution.defaultReason");
-        await invoke("opc_evolve_workflow", {
+        await invokePluginCommand("opc_evolve_workflow", {
           capabilityPackId,
           workflowId: wfId,
           reason: reasonText,
@@ -399,7 +398,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
       }
       try {
         const targetText = target || "all";
-        await invoke("opc_run_self_improvement", {
+        await invokePluginCommand("opc_run_self_improvement", {
           capabilityPackId,
           target: targetText,
         });

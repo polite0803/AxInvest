@@ -1026,7 +1026,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 
 **保留 re-export 的取舍（明确决定，不是遗漏）**：
 `opc_workflows/mod.rs` **保留** `pub use` 指向新落点（含模块名 `domain_pack` 的转发）⇒
-`opc.rs`（5 处）、`opc_data.rs`（1 处）、`opc_capability_pack_actions.rs:2754/2756/2961`（测试块内）与 `mod.rs` 自身 4 处 helper 调用
+`opc.rs`（5 处）、`opc_data.rs`（1 处）、`opc_capability_pack_actions.rs`（当时测试块内 `:2754/2756/2961`）与 `mod.rs` 自身 4 处 helper 调用
 **全部零改动**。代价：`opc.rs` / `opc_data.rs` 的 6 处跨模块调用**仍是门禁命中**（均 ≤ 基线 ⇒ 不阻塞），**登记为后续批次**。
 
 **★ 施工踩到的 4 个坑（全部由静态自检拦下，未进编译）**：
@@ -1042,7 +1042,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 |---|---|
 | `#263` | 跨 crate 搬迁前，逐项核对被搬符号的**可见性**（`pub(crate)` 项若有跨 crate 消费方 ⇒ 必须开牌为 `pub`）。 |
 | `#264` | 批量替换脚本混用「块替换 + 逐行替换」时，必须先算两者**重叠集**，否则同一符号被写两次（E0252 型重复定义）。 |
-| `#265` | ★ **门禁 `driveLines` 的块过滤是 `i >= s` 而非区间**：文件里**第一个** `#[cfg(test)]` 之后的所有行**一律不计**（不是只跳过测试块区间）。⇒ 施工前必须查目标文件的测试起始行：**改在该行之后的代码，门禁计数不会变**（`opc_capability_pack_actions.rs:2959` 即因此不计）。 |
+| `#265` | ★ **门禁 `driveLines` 的块过滤是 `i >= s` 而非区间**：文件里**第一个** `#[cfg(test)]` 之后的所有行**一律不计**（不是只跳过测试块区间）。⇒ 施工前必须查目标文件的测试起始行：**改在该行之后的代码，门禁计数不会变**（当时 `opc_capability_pack_actions.rs` 的 `:2959` 即因此不计）。 |
 | `#266` | 判断「搬迁是否需要新依赖」不能只 grep `crate::`（内部路径）；必须逐项列**外部 crate**（`zip::` / `serde_yaml::` / `sea_query::`），其中 `sea_query::` 可被 `use sea_orm::*` 覆盖 ⇒ 无需新依赖。 |
 | `#267` | ★ **cargo 结论作废的第二种检测法**：日志里**报错文件的 mtime 晚于日志 `START`** ⇒ 该轮编译对象已漂移（不止是「日志 mtime 早于改动」）。实证：cargo7 报的是它启动后才创建的新文件。 |
 
@@ -1111,7 +1111,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 
 | 项 | crate 内使用者 | 判定 |
 |---|---|---|
-| `DOMAIN_PACKS_DIR` | `opc_capability_pack_actions.rs:2756/2767`（test 区，`--all-targets` 会编） | 保留 |
+| `DOMAIN_PACKS_DIR` | `opc_capability_pack_actions.rs`（当时 `:2756/2767`，test 区，`--all-targets` 会编） | 保留 |
 | `DomainPackManifest` | `opc.rs:1167` | 保留 |
 | `copy_dir_recursive` | `mod.rs:327/341` | 保留 |
 | `export_domain_pack` / `import_domain_pack` | `mod.rs:853/860`（test） | 保留 |
@@ -1129,7 +1129,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 
 - `super::domain_pack::` **5 处全在 `#[cfg(test)]` 块内**（`super` = `opc_workflows`，用 re-export 的模块名 ⇒ 合法）
 - `crate::commands::.*domain_pack` **17 处里 12 处是正则过宽**（`opc_domain_pack_actions` / `_bridge` / `_runtime` /
-  `constants::domain_pack` 等**无关文件**）；真 5 处（`opc.rs:632/634/647/1154`、`opc_capability_pack_actions.rs:2961`）走 re-export
+  `constants::domain_pack` 等**无关文件**）；真 5 处（`opc.rs:632/634/647/1154`、当时 `opc_capability_pack_actions.rs` 的 `:2961`）走 re-export
   **合法**（即 §12.4 已登记的后续批次，且 ≤ 基线不阻塞）
 
 #### 12.9.6 新增判据
@@ -1273,7 +1273,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 | `opc.rs` / `opc_data.rs` 的 `opc_workflows::` 残留 | **0** ✅ |
 | 新增 use 的 5 个符号是否都被使用（`unused_imports` 风险） | 使用 1/1/1/1/2 ⇒ **全部 > 0** ✅ |
 | 目标符号在 analysis-engine 的 `pub` 可见性 | 6/6 ✅（`DOMAIN_PACKS_DIR`:21 · `DomainPackManifest`:37 · `analysis_schema`:`pub mod`:125 · `export`:475 · `import`:526 · `resolve`:635 · `DomainPackAnalysisConfig`:140） |
-| 全项目还有谁经该门面引用 | `opc_capability_pack_actions.rs:2609/2766`（待下沉）+ **`init/services.rs:3287`**、**`init/state.rs:1087/1089`**（**不在门禁扫描面**） |
+| 全项目还有谁经该门面引用 | `opc_capability_pack_actions.rs`（当时 `:2609/2766`，待下沉）+ **`init/services.rs:3287`**、**`init/state.rs:1087/1089`**（**不在门禁扫描面**） |
 
 #### 12.10.4 门禁实测
 
@@ -1292,7 +1292,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 | `declared_kpi_thresholds` | `runtime.rs:93` | `pub(crate) fn` | 读域包 `runtime.yaml` 声明阈值 | **analysis-engine**（须先核 runtime schema 落点） |
 | `find_repo_config_dir` | `opc_workflows/mod.rs:237` | `pub fn` | 纯 `fs` / `path` | analysis-engine 或公共 utils |
 | `upsert_template` | `opc_workflows/mod.rs:538` | `pub(crate) async fn` | **DB 写 `workflow_templates`** | **dao 层**（不宜落 analysis-engine） |
-| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2364` | ~~`pub async fn`（**Tauri 命令**）~~ 已于 #264 刀 C 批 2 退役（该行是退役注释；内核 `execute_workflow_core` 现为 `:2251`） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
+| `opc_execute_workflow` | `opc_capability_pack_actions.rs:2361` | ~~`pub async fn`（**Tauri 命令**）~~ 已于 #264 刀 C 批 2 退役（该行是退役注释；内核 `execute_workflow_core` 现为 `:2248`） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
 
 ⇒ 后 2 项（`upsert_template` / `opc_execute_workflow`）**超出「机械替换」范畴**，待获批后单独立项。
 

@@ -7,7 +7,7 @@
  * **相对插件安装目录**的路径，而 `cargo build` 的产物在 target 目录 ⇒ 中间缺一步
  * 「把产物摆进插件目录」。本脚本就是那一步，产物落在 git 忽略的 `dist/plugins/<插件>/`。
  *
- * 用法：
+ * 用法（在 axagent-plugins 根下执行；主仓侧入口是 `npm run plugin:bundle`）：
  *   node scripts/build-plugin-bundle.mjs                 # 构建（debug）+ 打包 + 打印路径（缺省 stock）
  *   node scripts/build-plugin-bundle.mjs --plugin opc     # 打包 opc 插件（#36 骨架）
  *   node scripts/build-plugin-bundle.mjs --release       # 构建 release
@@ -28,8 +28,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-const repoRoot = path.resolve(import.meta.dirname, "..");
-const workspaceRoot = path.join(repoRoot, "axagent-plugins");
+// 本脚本权威位置在 axagent-plugins/scripts/（随 SDK 仓走，#281 判据③缺口③）：SDK 目录拷出后
+// 没有 axagent 主仓根，workspaceRoot 必须从脚本自身位置锚定，不得假设主仓布局。
+const workspaceRoot = path.resolve(import.meta.dirname, "..");
 const argv = process.argv.slice(2);
 const release = argv.includes("--release");
 const check = argv.includes("--check");
@@ -158,7 +159,7 @@ if (!spec) {
   fail(`未知插件 --plugin ${pluginName}（可选：${Object.keys(PLUGIN_SPECS).join(" | ")}）`);
 }
 const outRoot = path.resolve(
-  outFlag >= 0 && argv[outFlag + 1] ? argv[outFlag + 1] : path.join(repoRoot, "dist", "plugins", pluginName),
+  outFlag >= 0 && argv[outFlag + 1] ? argv[outFlag + 1] : path.join(workspaceRoot, "dist", "plugins", pluginName),
 );
 // 与宿主 `PANEL_ASSET_ALLOWED_EXTS`（axagent-plugins/crates/plugins/src/manager.rs）同口径：
 // 清单校验会拒掉白名单外的扩展名，产物自检必须在**打包期**就报出来，而不是等安装时才失败。
@@ -174,8 +175,8 @@ function fail(message) {
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: "inherit", windowsHide: true, ...options });
-  if (result.error) fail(`启动 ${command} 失败：${result.error.message}`);
-  if (result.status !== 0) fail(`${command} ${args.join(" ")} 退出码 ${result.status}`);
+  if (result.error) { fail(`启动 ${command} 失败：${result.error.message}`); }
+  if (result.status !== 0) { fail(`${command} ${args.join(" ")} 退出码 ${result.status}`); }
   return result;
 }
 
@@ -196,13 +197,13 @@ if (metadataRaw.status !== 0) {
 }
 const metadata = JSON.parse(metadataRaw.stdout);
 const workerPackage = metadata.packages.find((p) => p.name === spec.packageName);
-if (!workerPackage) fail(`cargo metadata 里找不到 ${spec.packageName}`);
+if (!workerPackage) { fail(`cargo metadata 里找不到 ${spec.packageName}`); }
 
 const targetDir = metadata.target_directory;
 const profileDir = release ? "release" : "debug";
 const binaryName = process.platform === "win32" ? `${spec.packageName}.exe` : spec.packageName;
 const builtBinary = path.join(targetDir, profileDir, binaryName);
-if (!fs.existsSync(builtBinary)) fail(`构建产物不存在：${builtBinary}`);
+if (!fs.existsSync(builtBinary)) { fail(`构建产物不存在：${builtBinary}`); }
 
 // 3) 摆放插件目录：worker 路径**必须**相对安装目录（宿主 resolve_worker_program 会拒绝
 //    绝对路径与 `..` 逃逸），所以这里用 `bin/<name>` 而不是复制到根。
@@ -219,12 +220,12 @@ const sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest
 //      `webDir = null` 的插件（#36 骨架期的 opc）没有前端贡献 ⇒ 整段跳过，不建空目录。
 let webFileCount = 0;
 if (webRoot) {
-  if (!fs.existsSync(webRoot)) fail(`前端源目录不存在：${webRoot}`);
+  if (!fs.existsSync(webRoot)) { fail(`前端源目录不存在：${webRoot}`); }
   for (const top of fs.readdirSync(webRoot, { withFileTypes: true })) {
-    if (top.isDirectory()) fs.rmSync(path.join(outRoot, top.name), { recursive: true, force: true });
+    if (top.isDirectory()) { fs.rmSync(path.join(outRoot, top.name), { recursive: true, force: true }); }
   }
   const webFiles = listFilesRecursive(webRoot);
-  if (webFiles.length === 0) fail(`前端源目录为空：${webRoot}`);
+  if (webFiles.length === 0) { fail(`前端源目录为空：${webRoot}`); }
   for (const file of webFiles) {
     const rel = path.relative(webRoot, file).split(path.sep).join("/");
     const ext = path.extname(rel).slice(1).toLowerCase();
@@ -246,7 +247,7 @@ if (webRoot) {
 //      而不是等宿主安装时才说「ui.json 不合法」。无 `ui.json` 的插件整段跳过。
 let uiSchemaKeyCount = 0;
 if (uiSchemaSource) {
-  if (!fs.existsSync(uiSchemaSource)) fail(`UI 声明文件不存在：${uiSchemaSource}`);
+  if (!fs.existsSync(uiSchemaSource)) { fail(`UI 声明文件不存在：${uiSchemaSource}`); }
   const uiSchemaRaw = fs.readFileSync(uiSchemaSource, "utf8");
   let uiSchemaKeys;
   try {
@@ -265,8 +266,8 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`[plugin-bundle] 产物目录：${outRoot}`);
 console.log(`[plugin-bundle] worker   ：${stagedBinary}`);
-if (webRoot) console.log(`[plugin-bundle] 前端资产 ：${webFileCount} 个文件（页面入口 ${PAGE_ENTRY}）`);
-if (uiSchemaSource) console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeyCount} 个 schema key）`);
+if (webRoot) { console.log(`[plugin-bundle] 前端资产 ：${webFileCount} 个文件（页面入口 ${PAGE_ENTRY}）`); }
+if (uiSchemaSource) { console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeyCount} 个 schema key）`); }
 console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
 console.log(`[plugin-bundle] sha256   ：${sha256}`);
 
@@ -286,7 +287,7 @@ async function checkStagedBundle(declared, root) {
   checkDeclaredTaskSources(declared, root);
 
   const program = path.join(root, declared.worker.program);
-  if (!fs.existsSync(program)) fail(`--check：清单声明的 worker 不存在：${program}`);
+  if (!fs.existsSync(program)) { fail(`--check：清单声明的 worker 不存在：${program}`); }
   const onDisk = createHash("sha256").update(fs.readFileSync(program)).digest("hex");
   if (onDisk !== declared.integrity.hash) {
     fail(`--check：integrity 不匹配（清单 ${declared.integrity.hash} / 盘上 ${onDisk}）`);
@@ -300,15 +301,15 @@ async function checkStagedBundle(declared, root) {
   const describeId = "bundle-check-describe";
   writeFrame(child.stdin, { op: "describe", args: { proto_version: 1 }, request_id: describeId });
   const describe = await reader.next();
-  if (describe.kind !== "success") fail(`--check：describe 失败：${JSON.stringify(describe)}`);
-  if (describe.request_id !== describeId) fail(`--check：describe 未回填 request_id：${JSON.stringify(describe)}`);
+  if (describe.kind !== "success") { fail(`--check：describe 失败：${JSON.stringify(describe)}`); }
+  if (describe.request_id !== describeId) { fail(`--check：describe 未回填 request_id：${JSON.stringify(describe)}`); }
   if (describe.value?.proto_version !== 1) {
     fail(`--check：声明协议版本不符：${JSON.stringify(describe.value)}`);
   }
 
   writeFrame(child.stdin, { op: "shutdown", args: {} });
   const shutdown = await reader.next();
-  if (shutdown.kind !== "success") fail(`--check：shutdown 回执失败：${JSON.stringify(shutdown)}`);
+  if (shutdown.kind !== "success") { fail(`--check：shutdown 回执失败：${JSON.stringify(shutdown)}`); }
 
   // `shutdown` 在协议里只是**回执**，真正的停机信号是 stdin EOF（worker 的 `serve` 循环
   // 靠对端关管道结束）。少这一步，自检会永远挂在 `child.on("exit")` 上 —— 2026-11-04 实测
@@ -322,8 +323,8 @@ async function checkStagedBundle(declared, root) {
     }),
   ]);
   clearTimeout(timer);
-  if (exitCode === null) fail("--check：stdin EOF 后 10 s 内未退出");
-  if (exitCode !== 0) fail(`--check：worker 退出码 ${exitCode}（应为 0）`);
+  if (exitCode === null) { fail("--check：stdin EOF 后 10 s 内未退出"); }
+  if (exitCode !== 0) { fail(`--check：worker 退出码 ${exitCode}（应为 0）`); }
 
   console.log("[plugin-bundle] --check ✅ describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致");
 }
@@ -353,9 +354,9 @@ function checkDeclaredTaskSources(declared, root) {
     if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(source.id ?? "")) {
       fail(`--check：任务源 id 形状非法（小写字母数字与 -）：${JSON.stringify(source.id)}`);
     }
-    if (seenIds.has(source.id)) fail(`--check：任务源 id 在本包内重复：${source.id}`);
+    if (seenIds.has(source.id)) { fail(`--check：任务源 id 在本包内重复：${source.id}`); }
     seenIds.add(source.id);
-    if (!source.title || !source.title.trim()) fail(`--check：任务源 ${source.id} 没有 title`);
+    if (!source.title || !source.title.trim()) { fail(`--check：任务源 ${source.id} 没有 title`); }
     if (!declaredCommands.has(source.command)) {
       fail(`--check：任务源 ${source.id} 的 command「${source.command}」不在 commands[] 里`);
     }
@@ -368,7 +369,9 @@ function checkDeclaredTaskSources(declared, root) {
       }
     }
   }
-  console.log(`[plugin-bundle] --check ✅ ${sources.length} 个任务源声明自洽（command ∈ commands[]，detailSchema ∈ ui.json）`);
+  console.log(
+    `[plugin-bundle] --check ✅ ${sources.length} 个任务源声明自洽（command ∈ commands[]，detailSchema ∈ ui.json）`,
+  );
 }
 
 /**
@@ -380,13 +383,13 @@ function checkDeclaredTaskSources(declared, root) {
  */
 function checkDeclaredPages(declared, root) {
   const pages = declared.pages ?? [];
-  if (pages.length === 0) fail("--check：清单没有 pages[]，前端 bundle 通道无从验证");
+  if (pages.length === 0) { fail("--check：清单没有 pages[]，前端 bundle 通道无从验证"); }
   let bundlePages = 0;
   for (const page of pages) {
     // `schema` 页的 entry 是动态 UI Schema 的 id，没有文件资产可查（宿主同样跳过形状校验）。
-    if (page.loading !== "bundle") continue;
+    if (page.loading !== "bundle") { continue; }
     bundlePages += 1;
-    if (!page.entry) fail(`--check：页面 ${page.id} 没有 entry`);
+    if (!page.entry) { fail(`--check：页面 ${page.id} 没有 entry`); }
     if (path.isAbsolute(page.entry) || page.entry.startsWith("/") || page.entry.startsWith("\\")) {
       fail(`--check：页面 ${page.id} 的 entry 必须是相对安装目录的路径：${page.entry}`);
     }
@@ -406,7 +409,7 @@ function checkDeclaredPages(declared, root) {
       fail(`--check：清单声明的页面资产不存在：${absolute}`);
     }
   }
-  if (bundlePages === 0) fail("--check：pages[] 里没有任何 bundle 页，通道未被验证");
+  if (bundlePages === 0) { fail("--check：pages[] 里没有任何 bundle 页，通道未被验证"); }
   console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
 }
 
@@ -415,8 +418,8 @@ function listFilesRecursive(dir) {
   const files = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...listFilesRecursive(full));
-    else if (entry.isFile()) files.push(full);
+    if (entry.isDirectory()) { files.push(...listFilesRecursive(full)); }
+    else if (entry.isFile()) { files.push(full); }
   }
   return files;
 }
@@ -437,9 +440,9 @@ function frameReader(stream) {
   stream.on("data", (chunk) => {
     buffered = Buffer.concat([buffered, chunk]);
     for (;;) {
-      if (buffered.length < 4) break;
+      if (buffered.length < 4) { break; }
       const length = buffered.readUInt32BE(0);
-      if (buffered.length < 4 + length) break;
+      if (buffered.length < 4 + length) { break; }
       const payload = buffered.subarray(4, 4 + length);
       buffered = buffered.subarray(4 + length);
       const parsed = JSON.parse(payload.toString("utf8"));
@@ -460,14 +463,14 @@ function frameReader(stream) {
   });
   return {
     next() {
-      if (pending.length > 0) return Promise.resolve(pending.shift());
+      if (pending.length > 0) { return Promise.resolve(pending.shift()); }
       return new Promise((resolve, reject) => {
         const waiter = {
           resolve,
           reject,
           timer: setTimeout(() => {
             const index = waiting.indexOf(waiter);
-            if (index >= 0) waiting.splice(index, 1);
+            if (index >= 0) { waiting.splice(index, 1); }
             reject(new Error("等回帧超时（5 s）"));
           }, 5000),
         };
@@ -694,7 +697,8 @@ function stockManifest({ version, binaryName, sha256 }) {
           additionalProperties: false,
           properties: {
             stock_codes: {
-              description: "股票代码清单（宽容形态）：字符串数组、{\"stockCode\"|\"code\"} 对象数组、或含 stocks 分组的信封",
+              description:
+                '股票代码清单（宽容形态）：字符串数组、{"stockCode"|"code"} 对象数组、或含 stocks 分组的信封',
             },
             as_of_date: { type: "string", description: "可选截止日（YYYY-MM-DD）" },
           },
@@ -748,7 +752,10 @@ function stockManifest({ version, binaryName, sha256 }) {
           additionalProperties: true,
           properties: {
             klines: { type: "array", description: "历史 K 线（Bar 数组，宿主拒空集）" },
-            wfConfig: { type: "object", description: "Walk-Forward 配置（trainDays/testDays/stepDays/riskFreeAnnual）" },
+            wfConfig: {
+              type: "object",
+              description: "Walk-Forward 配置（trainDays/testDays/stepDays/riskFreeAnnual）",
+            },
             desConfig: { type: "object", description: "DES 模拟配置" },
             strategyName: { type: "string", description: "策略名（当前仅 ma_cross）" },
           },
@@ -1105,7 +1112,6 @@ function stockManifest({ version, binaryName, sha256 }) {
  * 仍**不写** `pages` / `taskSources` / `uiSchema`：OPC 的页面贡献属后续批。
  */
 
-
 function withRequiredPermission(commands) {
   return commands.map((command) => ({
     ...command,
@@ -1117,8 +1123,7 @@ function opcManifest({ version, binaryName, sha256 }) {
   return {
     name: "opc",
     version,
-    description:
-      "OPC 域功能包（#36）：worker 通道 + 125 条命名命令（读 74 条 · 写 51 条）",
+    description: "OPC 域功能包（#36）：worker 通道 + 125 条命名命令（读 74 条 · 写 51 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -1207,7 +1212,7 @@ function opcManifest({ version, binaryName, sha256 }) {
             status: {
               type: "string",
               enum: ["draft", "sent", "paid", "overdue", "cancelled", "refunded"],
-              description: "目标状态（合法性由宿主 provider 判）"
+              description: "目标状态（合法性由宿主 provider 判）",
             },
           },
           required: ["id", "status"],
@@ -2134,8 +2139,7 @@ function opcManifest({ version, binaryName, sha256 }) {
       },
       {
         name: "opc_batch_validate_entities",
-        description:
-          "批量验证域包实体（读 op；元素内 entityType 为空的条目被宿主跳过，出参逐条带 valid/errors）",
+        description: "批量验证域包实体（读 op；元素内 entityType 为空的条目被宿主跳过，出参逐条带 valid/errors）",
         command: "worker://opc_batch_validate_entities",
         inputSchema: {
           type: "object",

@@ -8,7 +8,7 @@
 //! 锁的是「帧 + 宿主分派」；本文件锁的是**安装/启用链路**（相对路径、权限闸、清单命令表）。
 //!
 //! 门控：`AXAGENT_STOCK_BUNDLE_DIR=<打包产物目录>`（含 `plugin.json` 与 `bin/`）。
-//! 取法：`node scripts/build-plugin-bundle.mjs` 后指向 `dist/plugins/stock`。
+//! 取法：`node axagent-plugins/scripts/build-plugin-bundle.mjs` 后指向 `axagent-plugins/dist/plugins/stock`。
 
 mod common;
 
@@ -26,7 +26,7 @@ fn bundle_dir() -> Option<std::path::PathBuf> {
             eprintln!(
                 "SKIP: 未设置 AXAGENT_STOCK_BUNDLE_DIR，跳过「安装 → 启用 → 命令」端到端测试。\
                  \n      本测试**未通过，也未被验证** —— 跳过仅表示没有可用产物。\
-                 \n      跑法：node scripts/build-plugin-bundle.mjs，再指向 dist/plugins/stock。"
+                 \n      跑法：node axagent-plugins/scripts/build-plugin-bundle.mjs，再指向 axagent-plugins/dist/plugins/stock。"
             );
             None
         },

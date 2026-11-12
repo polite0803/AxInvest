@@ -444,7 +444,7 @@ const COMMAND_GET_CAPABILITY_PACK_HEALTH: &str = "opc_get_capability_pack_health
 
 /// #264 批 7 刀 B2：域包单据面十二命令（清单 `commands[].name` 必须逐字一致）。宿主同名
 /// 十二条 Tauri 命令随本批删除 —— 六读六写都按 #273 裁定迁 T2 收口，插件命令保持 `opc_*`
-/// 原名（智能体工具名与出参形状不变）。六条写命令还需同批进 `scripts/build-plugin-bundle.mjs`
+/// 原名（智能体工具名与出参形状不变）。六条写命令还需同批进 `axagent-plugins/scripts/build-plugin-bundle.mjs`
 /// 的 `OPC_WRITE_COMMANDS`（否则智能体面按未声明 = 只读档暴露）。
 const COMMAND_GET_INVOICE: &str = "opc_get_invoice";
 const COMMAND_UPDATE_INVOICE: &str = "opc_update_invoice";
@@ -464,7 +464,7 @@ const COMMAND_EXECUTE_DYNAMIC_WORKFLOW: &str = "opc_execute_dynamic_workflow";
 const COMMAND_EXECUTE_ANALYSIS: &str = "opc_execute_analysis";
 
 /// #264 批 7 刀 B3：域包自动规则 / 仪表盘四命令（三读一写，宿主同名 Tauri 命令随本批删除）。
-/// `opc_run_automation_rules` 是写命令，同批进 `scripts/build-plugin-bundle.mjs` 的
+/// `opc_run_automation_rules` 是写命令，同批进 `axagent-plugins/scripts/build-plugin-bundle.mjs` 的
 /// `OPC_WRITE_COMMANDS`（否则智能体面按未声明 = 只读档暴露）。
 const COMMAND_GET_CAPABILITY_PACK_DASHBOARD: &str = "opc_get_capability_pack_dashboard";
 const COMMAND_GET_CAPABILITY_PACK_WORKFLOW_STEPS: &str = "opc_get_capability_pack_workflow_steps";
@@ -476,7 +476,7 @@ const COMMAND_RUN_AUTOMATION_RULES: &str = "opc_run_automation_rules";
 ///
 /// 宿主同名三条 Tauri 命令随本批删除（`opc_demand_subscription.rs` /
 /// `opc_demand_capability.rs` 只留自由函数，供 `HostOpcStore` 转调）。两条写命令还需
-/// 同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`。
+/// 同批进 `axagent-plugins/scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`。
 const COMMAND_RUN_SUBSCRIPTION_SCAN: &str = "opc_run_subscription_scan";
 const COMMAND_ENSURE_DEMAND_SCAN_JOB: &str = "opc_ensure_demand_scan_job";
 const COMMAND_MATCH_LEAD_CAPABILITIES: &str = "opc_match_lead_capabilities";
@@ -487,7 +487,7 @@ const COMMAND_OPC_AUTO_LEARN_WORKFLOW: &str = "opc_auto_learn_workflow";
 
 /// #264 刀 C 批 1：域包 manifest / prompt 装配 + 学习面五条命令（全读，宿主同名
 /// `#[agent_command]` 已随本批删除，命令名续用原名 ⇒ 智能体工具面与前端调用名不变）。
-/// 读命令 ⇒ **不进** `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`。
+/// 读命令 ⇒ **不进** `axagent-plugins/scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`。
 const COMMAND_GET_CAPABILITY_PACK: &str = "opc_get_capability_pack";
 const COMMAND_BUILD_CAPABILITY_PACK_PROMPT: &str = "opc_build_capability_pack_prompt";
 const COMMAND_GET_LEARNING_METRICS: &str = "opc_get_learning_metrics";
@@ -497,7 +497,7 @@ const COMMAND_LIST_LEARNING_CONFIGS: &str = "opc_list_learning_configs";
 /// #264 刀 C 批 3：学习面七条命令（六写一读，宿主同名 `#[tauri::command]` 随本批删除，
 /// 命令名续用原名 ⇒ 智能体工具面与前端调用名不变）。
 ///
-/// 六条写命令同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
+/// 六条写命令同批进 `axagent-plugins/scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
 /// `opc_get_rl_stats` 是读命令 ⇒ 不进。
 const COMMAND_REFLECT_ON_WORKFLOW: &str = "opc_reflect_on_workflow";
 const COMMAND_EVOLVE_WORKFLOW: &str = "opc_evolve_workflow";
@@ -510,7 +510,7 @@ const COMMAND_RECORD_RL_EXPERIENCE: &str = "opc_record_rl_experience";
 /// #264 批 4a：工作项七条命令（六写一读）。命令名续用宿主原名 ⇒ 前端调用名与智能体
 /// 工具面不变；宿主同名 `#[tauri::command]` 处于双声明期，待前端半迁完再删。
 ///
-/// 六条写命令同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
+/// 六条写命令同批进 `axagent-plugins/scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
 /// `opc_kanban_board` 是读命令 ⇒ 不进。
 const COMMAND_CREATE_WORK_ITEM: &str = "opc_create_work_item";
 const COMMAND_KANBAN_BOARD: &str = "opc_kanban_board";
@@ -535,7 +535,7 @@ const OPC_STORE_MARKET_LIST: &str = "market_list";
 /// #264 批 4b：域包与内容资产五命令（三写两读）。命令名续用宿主原名 ⇒ 前端调用名与
 /// 智能体工具面不变；宿主同名 `#[tauri::command]` 处于双声明期，待前端半迁完再删。
 ///
-/// 三条写命令同批进 `scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
+/// 三条写命令同批进 `axagent-plugins/scripts/build-plugin-bundle.mjs` 的 `OPC_WRITE_COMMANDS`；
 /// `opc_get_content_asset` / `opc_market_list` 是读命令 ⇒ 不进。
 const COMMAND_EXPORT_CAPABILITY_PACK: &str = "opc_export_capability_pack";
 const COMMAND_IMPORT_CAPABILITY_PACK: &str = "opc_import_capability_pack";

@@ -11,8 +11,8 @@
 //! 门控：`AXAGENT_STOCK_WORKER_BIN=<worker 可执行文件绝对路径>`。为什么用环境变量：
 //! `plugin-stock` 是另一个 package，`CARGO_BIN_EXE_*` 只对本 package 的 bin 生效；本机
 //! `CARGO_TARGET_DIR` 又指向 `~/.cargo/target-axagent`，写死 `target/` 会找不到。
-//! 取路径的推荐方式：`node scripts/build-plugin-bundle.mjs` 后指向
-//! `dist/plugins/stock/bin/axagent-plugin-stock(.exe)`。
+//! 取路径的推荐方式：`node axagent-plugins/scripts/build-plugin-bundle.mjs` 后指向
+//! `axagent-plugins/dist/plugins/stock/bin/axagent-plugin-stock(.exe)`。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ fn worker_bin() -> Option<PathBuf> {
             eprintln!(
                 "SKIP: 未设置 AXAGENT_STOCK_WORKER_BIN，跳过真实宿主 × 真实 worker 的端到端测试。\
                  \n      本测试**未通过，也未被验证** —— 跳过仅表示没有可用产物。\
-                 \n      跑法：node scripts/build-plugin-bundle.mjs，再指向 dist/plugins/stock/bin/。"
+                 \n      跑法：node axagent-plugins/scripts/build-plugin-bundle.mjs，再指向 axagent-plugins/dist/plugins/stock/bin/。"
             );
             None
         },

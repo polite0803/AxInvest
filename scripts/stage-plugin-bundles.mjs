@@ -82,7 +82,8 @@ console.error(
 );
 for (const plugin of PLUGINS) {
   const outDir = path.join(bundledRoot, plugin);
-  const args = ["scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
+  // 打包脚本权威位置在 axagent-plugins/scripts/（随 SDK 仓走，#281 判据③缺口③）。
+  const args = ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
   if (release) {
     args.push("--release");
   }

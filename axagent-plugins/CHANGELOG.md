@@ -25,8 +25,10 @@
   依赖，独立仓判据① 未闭合，stock 分析逻辑权威实现仍在其中）。
 - `stock-core`：foundation —— 股票域纯函数（意图解析等），零 `axagent-*` 依赖。
 - `schema-gen`：构建期 IPC 类型生成器，无运行时消费方。
-- 协议 crate `axagent-plugin-proto` 在 `axagent-core` workspace（其版本权威为
-  `axagent-core/Cargo.toml` 的 `[workspace.package].version`），宿主与插件 worker 两侧
-  同源消费，不得各写一套帧形状。
+- 协议 crate `axagent-plugin-proto` 在 `axagent-core` workspace；2026-11-13 内联化改造后
+  （version/edition/thiserror/lints 不再继承 workspace 根），其版本权威为自身 `Cargo.toml`
+  的 `version = "3.0.0"` —— 内联原因：SDK 独立仓验证形态把它随行拷出，目录里没有
+  `axagent-core` workspace 根，继承字段会让 manifest 解析直接失败。宿主与插件 worker
+  两侧同源消费，不得各写一套帧形状。
 
 [3.0.0]: 与主仓应用同值起步，无更早条目。

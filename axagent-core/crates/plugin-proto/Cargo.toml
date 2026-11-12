@@ -1,13 +1,20 @@
 [package]
 name = "axagent-plugin-proto"
-version.workspace = true
-edition.workspace = true
+# 内联字段（不继承 workspace）：本 crate 是插件 SDK 的协议层，独立仓验证形态
+# （axagent-plugins 目录拷出、随行本 crate）下没有 axagent-core workspace 根，
+# 任何 `workspace = true` 继承都会让 manifest 解析失败（SDKTEST_EXIT=101 实证）。
+# 版本演进：改这里后同步 CHANGELOG（axagent-plugins/CHANGELOG.md §3.0.0 有指针）。
+version = "3.0.0"
+edition = "2024"
 publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = { workspace = true }
+thiserror = "2"
 
-[lints]
-workspace = true
+[lints.clippy]
+# 禁用 std::sync 锁类型（铁律 #8），由 clippy.toml 的 disallowed-types 列表配合。
+disallowed_types = "deny"
+# axagent- 前缀导致模块名天然重复，允许 module_name_repetitions。
+module_name_repetitions = "allow"

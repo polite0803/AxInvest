@@ -3686,4 +3686,53 @@ mod tests {
         );
         assert_eq!(json["conversationId"], conversation_id);
     }
+
+    /// §176 未做③ 销账（#320 端到端实测的宿主半边）：四条纯智能体工具的
+    /// `#[agent_command]` 已删、插件侧同语义命令已声明。「净变化 0」的宿主半边必须对
+    /// **真实 inventory 注册表**实测，不能拿手工集合推演 —— 手工集合测不出「宿主注册表里
+    /// 已经没有这四条名」。catalog 名字取**真清单投影名**（实测 dist/plugins/stock/
+    /// plugin.json：`name` 键是 `stock_*` 短名，`worker://` 前缀是 `command` 路由键，
+    /// 智能体命令面投影的是短名）⇒ 名字与已退役宿主名不同名，不触发宿主优先过滤。
+    #[test]
+    fn retired_stock_agent_tools_absent_from_host_registry_and_worker_aliases_survive_merge() {
+        let macro_names: HashSet<&str> =
+            axagent_agent_command_types::registry::get_all().iter().map(|meta| meta.name).collect();
+        assert!(
+            macro_names.len() > 500,
+            "宿主宏名注册表应是本测试二进制 link 进来的真值而非空集：实际 {} 条",
+            macro_names.len()
+        );
+        for retired in [
+            "get_portfolio_risk",
+            "compare_trade_with_analysis",
+            "scan_sector_coherence",
+            "set_quote_watch_priority",
+        ] {
+            assert!(
+                !macro_names.contains(retired),
+                "宿主注册表不得再含已退役的 `{retired}`（重复暴露会让 LLM 看到同名两条）"
+            );
+        }
+
+        let catalog = vec![
+            plugin_agent_command("stock", "stock_get_portfolio_risk", None, None),
+            plugin_agent_command("stock", "stock_compare_trade_with_analysis", None, None),
+            plugin_agent_command("stock", "stock_scan_sector_coherence", None, None),
+            plugin_agent_command("stock", "stock_set_quote_watch_priority", None, None),
+        ];
+        let specs = merge_plugin_command_specs(catalog, &macro_names);
+        assert_eq!(specs.len(), 4, "四条插件命令不得被合并口剔除：{specs:?}");
+        let mut actual: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
+        actual.sort_unstable();
+        assert_eq!(
+            actual,
+            [
+                "stock_compare_trade_with_analysis",
+                "stock_get_portfolio_risk",
+                "stock_scan_sector_coherence",
+                "stock_set_quote_watch_priority",
+            ],
+            "智能体命令面四条插件命令应全部存活（以 stock_* 短名暴露）"
+        );
+    }
 }

@@ -8958,3 +8958,20 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 **验收（2026-11-14，先有日志后落字）**：本批门禁与定点链齐绿 —— ① 第五道门判定档 `EXIT_REGISTER=0`（hard 判据全一致：登记 37 = A11/B8/C4/H1/K10/D3、能力面 Σ=23、锚点 23 项；PLAN 19 处行号订正后复跑，planPinned 零漂移）；② `check-doc-refs` `EXIT_DOCS=0`：第一层无新增 BROKEN/STALE，第二层 SYMDRIFT 基线外新增 **0**（活文档面基线 788 条；本轮订正使基线内 **29** 条已消失，**并行期不收紧，留待安静窗口**）；③ axagent-plugins 根 `cargo check -p axagent-plugin-stock --all-targets` **44.55s** 绿 + `cargo test -p axagent-plugin-stock` **16 passed / 0 failed**（首轮 `-p plugin-stock` 包名写错 ⇒「did not match any packages」被管道吃掉退出码成假绿，改真名并用 PIPESTATUS 复跑才拿到真绿）；④ src-tauri 根 `cargo check -p axagent --lib` `EXIT_MAIN=0`（29.41s 暖态；二轮复跑 7.55s 且无 Checking 行 ⇒ fingerprint 新鲜，归因前轮已检本源码态）。
 
 **本轮 doc-refs 订正账（19 处行号 + 4 条路径转正）**：路由函数与 K 线纯函数翻译两条、行情常量四条、清单区间两条（三条 / 六条 worker:// 声明段，区间改现盘 2127-2153 与 2157-2227）、能力发现五命令起点、batch 分派臂、portfolio_backtest_run 一族五处；映射表三行裸 basename 补成唯一全路径后暴露 4 条符号错位（命令名字面量在常量定义行 77/79/81/83，不在分派臂行）⇒ 行号改指常量行并同步措辞。基线内 29 条键随订正消失，**`--update-baseline` 并行期禁跑，留待安静窗口**。
+
+## §177　#320 运行时工具面端到端实测：§176 未做③ 销账（2026-11-14）
+
+§176 未做③ 登记「净变化 0 是按通道推的、未端到端实测」就此闭合：本批用**真 bundled 产物**（`build-plugin-bundle.mjs --plugin stock`，`EXIT_BUNDLE=0`，worker sha256 `5830164e…b5b05c0`）把推演变成两条运行级实测。
+
+**实测口径与名字面订正**：清单 `commands[]` 每条声明有两个名字 —— `name` 键（`stock_get_portfolio_risk` 等短名）与 `command` 键（`worker://` 前缀路由键）。实测钉清：智能体命令面投影的是 **`name` 短名**（`PluginCommandManifest` 的 serde 字段直映射，`agent_command_specs` 原样带出；`worker://` 前缀不进命令面）。⇒ §176 「少 4 个宿主名、多 4 个 `worker://stock_*` 名」的**名字形态按实测订正**：少 4 个宿主名（get_portfolio_risk / compare_trade_with_analysis / scan_sector_coherence / set_quote_watch_priority），多 4 个 `stock_*` 短名 —— 数量净变化仍为 **0**，但这是**改名迁移**（宿主名 → 带 `stock_` 前缀的插件名），不是同名字换通道。合并口「宿主优先」过滤按名字面匹配 ⇒ 短名与宿主名不同名 ⇒ 不触发剔除。
+
+**两层实测（全绿，先有日志后落字）**：
+
+| 层 | 位置 | 锁什么 | 结果 |
+|---|---|---|---|
+| 宿主半边 | `src-tauri` 主 crate，`retired_stock_agent_tools_absent_from_host_registry_and_worker_aliases_survive_merge` | **真实 inventory 注册表**（`registry::get_all()`，本测试二进制 link 进来的真值，断言 >500 条防空集恒真）无四条宿主名 + 合并口对四条短名零剔除 | `EXIT_MAIN_RE=0`，28 passed / 0 failed（含新断言） |
+| 插件半边 | `axagent-plugins` 根，`e2e_stock_agent_commands_test.rs`（`four_agent_commands_project_into_catalog_and_execute_over_real_worker_frames`） | ① 真清单 → `agent_command_specs` 投影四条短名 + 档位（三条 read-only + 一条 workspace-write）+ inputSchema（compare 的 `tradeId` required、写命令 priority **不加 enum**）；② 四条命令各自经**真 worker 进程 + 命令帧**真执行，出参按接缝替身固定值钉住（风险指标 `totalPositions=1`、对比透传 `analysisAction=hold`、板块扫描非空数组、写命令回 `null`）；③ `bg` 别名在插件侧归一成 `background`（替身断言收到归一后档位） | `EXIT_E2E_RE=0`，1 passed / 0 failed |
+
+两根 `cargo fmt -p <pkg> --check` `EXIT=0`；复跑在末次 fmt 修正之后（绿日志晚于编辑）。
+
+**诚实边界**：本实测覆盖到「真 worker 进程 + 命令帧 + 插件分派臂 + 接缝替身」为止；「Tauri 桌面实例里 LLM 经智能体引擎真调」仍属运行实例级（与 §139.3 / §143.2 同类），不在本批覆盖面 —— 但智能体引擎消费这条命令面的通道（`collect_plugin_command_specs` → `merge_plugin_command_specs`）两端已被上述两层测试各自钉死，中间无未测跳。

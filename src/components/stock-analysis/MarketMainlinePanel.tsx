@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 
 /** `market_mainlines` 的一行（后端实体 `#[serde(rename_all = "camelCase")]`）。 */
 interface MarketMainlineRow {
@@ -38,9 +38,13 @@ function symbolCount(raw: string): string {
  * 市场主线读侧面板（D7，`PLAN-chain-closure-remediation.md` §3/§9）。
  *
  * 存在理由：`daily-market-events` 每天 18:00 都在跑，但落库全靠模型自愿调工具、实测近 8 次
- * 一次没调 ⇒ `market_mainlines` 恒 0 行；而读侧更早就断了 —— 十个 `market_mainline_*` 命令
- * 全都注册在案，**前端零调用者**，界面连「这张表是空的」都看不见。
+ * 一次没调 ⇒ `market_mainlines` 恒 0 行；而读侧更早就断了 —— 宿主 `market_mainline_*` 命令
+ * 注册在案却**前端零调用者**，界面连「这张表是空的」都看不见。
  * A3 已经把写入变成图上的确定性节点，本面板补的是读侧那一半。
+ *
+ * 取数通道（#304 C3）：宿主 `market_mainline_list_recent` 已退役，本面板改走插件命名命令
+ * `stock_market_mainline_list_recent`（stock.analysis 接缝 `list_recent_mainlines` op）；
+ * 其余九条宿主命令无消费方，同批整模块删除。
  *
  * ⚠ 本面板的「有数据」态要等**应用重启**（v2 模板随重启才重播种）并跑过一趟 18:00 才会出现；
  * 现在看到空态是预期的，不是取数坏了 —— 所以空态文案必须把这层说清楚（缺席要能归因）。
@@ -54,7 +58,7 @@ export function MarketMainlinePanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke<MarketMainlineRow[]>("market_mainline_list_recent", {
+      const data = await invokePluginCommand<MarketMainlineRow[]>("stock_market_mainline_list_recent", {
         days: RECENT_DAYS,
       });
       setRows(Array.isArray(data) ? data : []);

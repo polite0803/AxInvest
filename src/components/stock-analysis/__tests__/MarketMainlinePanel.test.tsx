@@ -12,11 +12,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketMainlinePanel } from "../MarketMainlinePanel";
 
 const invokeMock = vi.fn();
+// 组件经 `invokePluginCommand`（@/lib/pluginCommand）取数；浏览器模式它 fallback 到
+// @/lib/invoke 的 `invoke`（isTauri()=false），故 mock 这一层即可截获全链。
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
   isTauri: () => false,
 }));
+
+// 正控配对（#304 C3）：宿主 `market_mainline_list_recent` 已退役，组件必须发插件命名命令；
+// 若链路回退到旧宿主命令名（退役后即报错），在这里当场暴露而不是等到运行时白屏。
+const PLUGIN_COMMAND = "stock_market_mainline_list_recent";
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: "m1",
@@ -76,5 +82,15 @@ describe("MarketMainlinePanel 的缺席分列", () => {
     invokeMock.mockResolvedValue([row({ representativeSymbols: "{not json" })]);
     renderPanel();
     await waitFor(() => expect(screen.getByTestId("mainline-symbols").textContent).toBe("—"));
+  });
+
+  it("⑤ 链路正控（#304 C3）：发出的是插件命名命令与 {days: 7}，不是已退役的宿主命令", async () => {
+    invokeMock.mockResolvedValue([]);
+    renderPanel();
+    await waitFor(() => expect(invokeMock).toHaveBeenCalled());
+    expect(invokeMock).toHaveBeenCalledWith(PLUGIN_COMMAND, { days: 7 });
+    for (const call of invokeMock.mock.calls) {
+      expect(call[0]).not.toBe("market_mainline_list_recent");
+    }
   });
 });

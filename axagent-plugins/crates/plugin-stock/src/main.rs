@@ -68,6 +68,9 @@ const STOCK_ANALYSIS_SEAM: &str = "stock.analysis";
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
 const COMMAND_MAINLINE_BATCH_UPSERT: &str = "stock_market_mainline_batch_upsert";
+/// 最近 N 天市场主线列表（宿主 `market_mainline_list_recent` 退役后的取数面，#304 C3，
+/// 前端 `MarketMainlinePanel` 消费）—— 读命令。
+const COMMAND_MAINLINE_LIST_RECENT: &str = "stock_market_mainline_list_recent";
 /// 逐票 1 月涨跌幅命令（工具 `get_stock_factor` 的执行面）。
 const COMMAND_STOCK_FACTOR: &str = "stock_get_stock_factor";
 // ── T2 试点批（#248）：四条宿主命令改走本接缝（宿主同名 Tauri 命令待删）──
@@ -316,6 +319,18 @@ fn handle_command(
             peer,
             &request.call_chain,
             "batch_upsert_mainlines",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // 读命令（#304 C3）：入参 `{days?}` 整块透传，缺省窗口与上界在宿主 provider 拍。
+        COMMAND_MAINLINE_LIST_RECENT => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_recent_mainlines",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),

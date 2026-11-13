@@ -51,7 +51,9 @@ use async_trait::async_trait;
 use axagent_analysis_engine::industry_constituents::{
     IndustryConstituentsInput, fetch_industry_constituents,
 };
-use axagent_analysis_engine::market_mainline::{BatchUpsertInput, batch_upsert_mainlines};
+use axagent_analysis_engine::market_mainline::{
+    BatchUpsertInput, batch_upsert_mainlines, list_recent_mainlines,
+};
 use axagent_analysis_engine::stock_factor::{fetch_stock_chg_1m, parse_stock_refs};
 // T2 试点批（#248）：pipeline 两行的形状权威在主壳 commands 层 —— 无 State 核心是
 // IPC 命令与本接缝的**同一份**列清单（第二份 `json!` 就是第二套形状，禁区 12）。
@@ -76,6 +78,11 @@ use axagent_runtime_core::CronJobStore;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
+
+/// `list_recent_mainlines` op 的缺省窗口（宿主命令 `market_mainline_list_recent` 原值，#304 C3）。
+const DEFAULT_RECENT_DAYS: usize = 7;
+/// `list_recent_mainlines` op 的入参上界（防单次查询拖全表；同源：被退役的宿主命令）。
+const MAX_RECENT_DAYS: usize = 90;
 
 /// `stock_factor` op 的入参：**宽容形态原样**（与工具入参逐字相同）。
 ///
@@ -188,6 +195,31 @@ impl StockAnalysisProvider for HostStockAnalysis {
             AxAgentError::Provider(format!(
                 "stock.analysis::batch_upsert_mainlines 序列化失败: {e}"
             ))
+        })
+    }
+
+    /// 读 op：列出最近 N 天市场主线（宿主 `market_mainline_list_recent` 的接缝面，
+    /// #304 C3 —— 前端 `MarketMainlinePanel` 经插件命名命令取数）。
+    ///
+    /// 缺省窗口与上界从被退役的宿主命令**原样搬来**（7 / clamp 1..=90）：上界在这里拍，
+    /// 插件侧不重复设置；其余天数原样放行给 SQL limit（引擎函数内部每日再限 20 条）。
+    async fn list_recent_mainlines(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct RecentRequest {
+            days: Option<usize>,
+        }
+        let request = serde_json::from_value::<RecentRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::list_recent_mainlines 参数解析失败: {e}。期望 {{days?: number}}"
+            ))
+        })?;
+        let days = request.days.unwrap_or(DEFAULT_RECENT_DAYS).clamp(1, MAX_RECENT_DAYS);
+        let rows = list_recent_mainlines(&self.db, days).await.map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::list_recent_mainlines 查询失败: {e}"))
+        })?;
+        serde_json::to_value(&rows).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::list_recent_mainlines 序列化失败: {e}"))
         })
     }
 

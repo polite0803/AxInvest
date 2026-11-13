@@ -97,6 +97,15 @@ describe("browserMock 覆盖股票插件命名命令（T2 试点批）", () => {
     ).resolves.toEqual([]);
   });
 
+  // C3（#304 前端半）：宿主 market_mainline_list_recent 已退役，MarketMainlinePanel
+  // 改走本命令。消费端 `Array.isArray(data)` 后渲染表格 ⇒ [] 即诚实空态（浏览器模式
+  // 无 market_mainlines 表）；显式 case 是唯一来源（stock_ 前缀不命中兜底规则）。
+  it("stock_market_mainline_list_recent 返回数组（MarketMainlinePanel Array.isArray 消费；宿主命令已退役）", async () => {
+    await expect(handleCommand("stock_market_mainline_list_recent", { days: 7 })).resolves.toEqual(
+      [],
+    );
+  });
+
   // 负控：这批命令名均不以 get_/list_ 开头，default 兜底对它们给 undefined
   // （或对 endsWith("s") 给 []）。用未登记探针锁住兜底规则本身仍在，
   // 避免上面四条因兜底被改而失去「显式 case 生效」的证明力。

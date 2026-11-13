@@ -2,9 +2,10 @@
 
 //! 股票分析数据面接缝（`stock.analysis`）— Trait（DTO 留在域包）。
 //!
-//! 宿主把十九条**确定性取数/落库/计算/任务管理**能力经本接缝暴露给插件：
+//! 宿主把二十条**确定性取数/落库/计算/任务管理**能力经本接缝暴露给插件：
 //! `industry_constituents`（按行业取全 A 股成分股）、`batch_upsert_mainlines`（按日批量
-//! upsert 市场主线）、`stock_factor`（逐票 1 月涨跌幅，反转因子原料）——E 批三条；
+//! upsert 市场主线）、`list_recent_mainlines`（列出最近 N 天主线，#304 C3）、
+//! `stock_factor`（逐票 1 月涨跌幅，反转因子原料）——E 批三条 + C3 补一条读；
 //! `pipeline_history`（管道执行历史）、`pipeline_run_detail`（单次执行详情）、
 //! `pending_evolution_plans`（待审批进化计划）、`des_integration`（Walk-Forward + DES
 //! 对比仿真）——T2 试点批（#248）四条，插件命名命令 `stock_get_pipeline_history` /
@@ -38,8 +39,8 @@
 //! **十条写 op**：`batch_upsert_mainlines`（改 `market_mainlines` 表：插入 / 更新 /
 //! 可选归档当日未提及的主线）+ 批 1a 的九个 cron 管理写 op（3 create + 3 toggle +
 //! 3 delete，增删改宿主 `CronJobStore`）。权限登记在 `worker.rs` 的
-//! `required_permission_for`，本 trait 不重复校验。其余九个 op（三条 E 批读 / 三条
-//! 试点读 / 三个 cron list）是纯读/纯计算面 ⇒ **一条都不许加闸**（给读缝加闸
+//! `required_permission_for`，本 trait 不重复校验。其余十个 op（三条 E 批读 / 三条
+//! 试点读 / 三个 cron list / `list_recent_mainlines`）是纯读/纯计算面 ⇒ **一条都不许加闸**（给读缝加闸
 //! 会让只读插件被无端拒掉，判据同 `opc.store` 模块头）。`des_integration` 虽是重 CPU
 //! 仿真，但它不落库、不外发，读/写权限面同样不适用。
 
@@ -84,6 +85,17 @@ pub trait StockAnalysisProvider: Send + Sync {
     async fn batch_upsert_mainlines(&self, _input: Value) -> Result<Value> {
         Err(AxAgentError::Provider(
             "StockAnalysisProvider::batch_upsert_mainlines 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出最近 N 天市场主线（`list_recent_mainlines` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{days?: number}`（camelCase 平铺，缺省 7；宿主 provider 拍上界），
+    /// 出参 = `market_mainlines` 实体行数组（形状权威在 analysis-engine，与被退役的
+    /// 宿主命令 `market_mainline_list_recent` 原样返回同一 JSON，#304 C3）。
+    async fn list_recent_mainlines(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::list_recent_mainlines 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 
@@ -277,6 +289,10 @@ mod tests {
             (
                 "batch_upsert_mainlines",
                 futures::executor::block_on(stub.batch_upsert_mainlines(Value::Null)),
+            ),
+            (
+                "list_recent_mainlines",
+                futures::executor::block_on(stub.list_recent_mainlines(Value::Null)),
             ),
             ("stock_factor", futures::executor::block_on(stub.stock_factor(Value::Null))),
             ("pipeline_history", futures::executor::block_on(stub.pipeline_history(Value::Null))),

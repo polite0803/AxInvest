@@ -705,6 +705,20 @@ function stockManifest({ version, binaryName, sha256 }) {
           required: ["stock_codes"],
         },
       },
+      {
+        // 只读（#304 C3）：宿主 `market_mainline_list_recent` 退役后的取数面，前端
+        // `MarketMainlinePanel` 消费；宿主 provider 缺省 7 天、上界 90 天。
+        name: "stock_market_mainline_list_recent",
+        description: "列出最近 N 天市场主线（经宿主 stock.analysis 接缝，只读；缺省 7 天）",
+        command: "worker://stock_market_mainline_list_recent",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            days: { type: "integer", description: "回看天数（缺省 7，宿主上界 90）" },
+          },
+        },
+      },
       // ── T2 试点批（#248）：四条宿主命令的取数面（只读 / 纯计算），经 `stock.analysis` 接缝 ──
       // 与 E 批三条同一透传纪律：字段形状的权威在主壳 commands 层（pipeline 手拼行 /
       // dao 进化模型 / `commands/wf_des.rs` 的 WfDes DTO），插件侧改写即第二套形状。

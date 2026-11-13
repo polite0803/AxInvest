@@ -7628,6 +7628,15 @@ async function executeCommand<T>(
     case "stock_get_forex_kline":
       return [] as unknown as T;
 
+    // ── 股票插件命名命令（插件命令桥 C3，#304 前端半）────────────────────
+    // 宿主 `market_mainline_list_recent` 已退役（market_mainline 十条同批删），前端
+    // MarketMainlinePanel 改走本命令（stock.analysis 接缝 list_recent_mainlines op）。
+    // 消费端按数组使用（`Array.isArray(data)` 后渲染表格）⇒ 回 `[]`；浏览器模式
+    // 没有接缝也没有 market_mainlines 表 ⇒ 空数组被面板自身判成「空表」空态，诚实。
+    // ⚠ 显式声明：stock_* 不命中 get_/list_ 前缀兜底规则（同上 2c 段）。
+    case "stock_market_mainline_list_recent":
+      return [] as unknown as T;
+
     // 暂停 / 恢复仅需成功 resolve（无返回体）。
     case "workflow_pause":
     case "workflow_resume":

@@ -2789,14 +2789,30 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
-            // 唯一的写 op：`write` 权限闸由 `dispatch_seam` 开头统一把关（见
+            // 写 op：`write` 权限闸由 `dispatch_seam` 开头统一把关（见
             // `required_permission_for(("stock.analysis", "batch_upsert_mainlines"))`）。
+            // ⚠「唯一」自批 1a 起不成立：另九个 cron 管理写 op 同批登记 `Write`。
             "stock.analysis" if op == "batch_upsert_mainlines" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.batch_upsert_mainlines(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 读 op（#304 C3）：最近 N 天市场主线 —— 宿主 `market_mainline_list_recent`
+            // 退役后的取数面；`required_permission_for` 不登记（读缝不加闸）。
+            "stock.analysis" if op == "list_recent_mainlines" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_recent_mainlines(request)) else {
                     return no_runtime(seam);
                 };
                 match result {

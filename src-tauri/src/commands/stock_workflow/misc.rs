@@ -152,56 +152,8 @@ pub async fn query_decision_backtest(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// P3-4: 跨股票信号聚合 + 板块联动分析 Tauri 命令
+// P3-4: 板块联动分析 Tauri 命令
 // ───────────────────────────────────────────────────────────────────────────
-
-/// P3-4: 查询跨股票信号聚合器的当前配置
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description =  "获取跨股票信号聚合器配置")]
-#[tauri::command]
-pub async fn get_cross_stock_aggregator_config(
-    state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    let Some(agg) = state.stock().cross_stock_aggregator.get() else {
-        return Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail("跨股票信号聚合器未初始化")
-            .to_string());
-    };
-    let cfg = agg.config().await;
-    serde_json::to_value(cfg).map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化配置失败: {e}")).to_string()
-    })
-}
-
-/// P3-4: 热更新跨股票信号聚合器配置
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "热更新跨股票聚合器配置")]
-#[tauri::command]
-pub async fn set_cross_stock_aggregator_config(
-    state: State<'_, AppState>,
-    config: axagent_analysis_engine::cross_stock_aggregator::AggregatorConfig,
-) -> Result<(), String> {
-    let Some(agg) = state.stock().cross_stock_aggregator.get() else {
-        return Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail("跨股票信号聚合器未初始化")
-            .to_string());
-    };
-    agg.set_config(config).await;
-    Ok(())
-}
-
-/// P3-4: 查询聚合器缓冲区快照（调试用）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description =  "查询聚合器缓冲区快照")]
-#[tauri::command]
-pub async fn get_cross_stock_aggregator_buffer(
-    state: State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
-    let Some(agg) = state.stock().cross_stock_aggregator.get() else {
-        return Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail("跨股票信号聚合器未初始化")
-            .to_string());
-    };
-    let buf = agg.buffer_snapshot().await;
-    Ok(buf.into_iter().filter_map(|s| serde_json::to_value(s).ok()).collect())
-}
 
 /// P3-4: 计算指定板块的联动报告
 ///

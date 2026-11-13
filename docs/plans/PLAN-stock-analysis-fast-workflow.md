@@ -34,7 +34,7 @@
 
 | 项 | 设计 | 依据 |
 |---|---|---|
-| 按钮位置 | `src/components/stock-analysis/StockSearchBar.tsx:174` 现有「执行分析」旁新增「快速分析」（同款 `isRunning` 联动；Tooltip 说明「Jev 秒级决策，不含长篇论述」） | 现有主按钮即此处的 `stockAnalysis.startAnalysis` |
+| 按钮位置 | `src/components/stock-analysis/StockSearchBar.tsx:179` 现有「执行分析」旁新增「快速分析」（同款 `isRunning` 联动；Tooltip 说明「Jev 秒级决策，不含长篇论述」） | 现有主按钮即此处的 `stockAnalysis.startAnalysis` |
 | 前端动作 | `src/stores/feature/stockAnalysisStore.ts` 新增 `startFastAnalysis(stockCode)`，复用 `startAnalysis` 的参数构造，多传 `templateId: "stock-analysis-fast"` | 现有调用为 `invoke("run_stock_workflow", runArgs)`（同文件 :1073-1076） |
 | 后端最小改动 | `run_single_stock_analysis` / `run_stock_workflow` 增加可选参数 `template_id`（默认 `"stock-analysis"`），把 `src-tauri/src/commands/stock_workflow/core.rs:1832` 的硬编码 `"stock-analysis"` 改为取值 | 该处 `load_and_inject_template(db, code, name, "stock-analysis")` 现为硬编码，**不参数化则两条工作流进不去** |
 | 落库 | 完全复用：走业务封装路径 ⇒ 自动落 `stock_analyses`（+ `stock_reflections` 反思占位、`price_alerts` 告警、dashboard） | 见 §3 |

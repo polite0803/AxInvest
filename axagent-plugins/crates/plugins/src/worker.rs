@@ -1328,6 +1328,71 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── P6.1 迁移：逐只并发批量面（原宿主 batch_get_* 命令的接缝形态）──
+            // 与 market_snapshot_batch 的区别是契约的一部分：本面有单只超时/失败归因/
+            // 提前终止，返回 BatchResult 双 map；`total_timeout_ms` 保持「接受但不强制」。
+            "market.quote" if op == "batch_get_quotes" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let codes: Vec<String> = match deserialize_arg(&args, "codes", seam) {
+                    Ok(codes) => codes,
+                    Err(response) => return response,
+                };
+                let per_stock_timeout_ms: Option<u64> =
+                    match deserialize_optional_arg(&args, "per_stock_timeout_ms", seam) {
+                        Ok(value) => value,
+                        Err(response) => return response,
+                    };
+                let total_timeout_ms: Option<u64> =
+                    match deserialize_optional_arg(&args, "total_timeout_ms", seam) {
+                        Ok(value) => value,
+                        Err(response) => return response,
+                    };
+                let max_failures: Option<usize> =
+                    match deserialize_optional_arg(&args, "max_failures", seam) {
+                        Ok(value) => value,
+                        Err(response) => return response,
+                    };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let request = axagent_harness::market_data::MarketBatchQuotesRequest {
+                    codes,
+                    per_stock_timeout_ms,
+                    total_timeout_ms,
+                    max_failures,
+                };
+                let Some(result) = self.block_on(provider.batch_get_quotes(&request, as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(batch) => to_value("BatchResult", &batch),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "batch_get_financials" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let codes: Vec<String> = match deserialize_arg(&args, "codes", seam) {
+                    Ok(codes) => codes,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.batch_get_financials(&codes, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(batch) => to_value("BatchResult", &batch),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
             // ── 剩余数据面（P6.1 D 批）：C 批补齐的 25 个 `MarketDataProvider` 方法 ──
             // 与 B 批同口径：参数键 snake_case、DTO 走 camelCase 序列化；
             // 无参 op 不读任何键，但**仍须**解析并透传 `as_of`（跨进程读不到宿主 task_local）。
@@ -10600,6 +10665,34 @@ mod tests {
             Ok(codes.iter().map(|code| fixed_quote(code)).collect())
         }
 
+        async fn batch_get_quotes(
+            &self,
+            request: &axagent_harness::market_data::MarketBatchQuotesRequest,
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<
+            axagent_harness::BatchResult<axagent_harness::StockQuote>,
+        > {
+            let mut batch = axagent_harness::BatchResult::new();
+            for code in &request.codes {
+                batch.success.insert(code.clone(), fixed_quote(code));
+            }
+            Ok(batch)
+        }
+
+        async fn batch_get_financials(
+            &self,
+            codes: &[String],
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<
+            axagent_harness::BatchResult<Vec<axagent_harness::FinancialReport>>,
+        > {
+            let mut batch = axagent_harness::BatchResult::new();
+            for code in codes {
+                batch.success.insert(code.clone(), Vec::new());
+            }
+            Ok(batch)
+        }
+
         async fn get_hot_stocks(
             &self,
             as_of: Option<axagent_harness::AsOfContext>,
@@ -10963,6 +11056,60 @@ mod tests {
         assert_eq!(quotes.len(), 2, "每个入参 code 一条：{value}");
         assert_eq!(quotes[0]["code"], json!("600519"));
         assert_eq!(quotes[1]["code"], json!("000001"));
+    }
+
+    /// `batch_get_quotes`：扁平 snake_case 参数 ⇒ 强类型 DTO；返回 BatchResult 双 map
+    /// camelCase 线上形态（success/failures/elapsedMs/earlyTerminated）。
+    #[test]
+    fn market_quote_batch_get_quotes_returns_batch_result_wire_shape() {
+        let (peer, _runtime) = market_peer_with_runtime(Arc::new(FixedMarketDataProvider::new()));
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote batch_get_quotes", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "batch_get_quotes",
+                        "args": {
+                            "codes": ["600519", "000001"],
+                            "per_stock_timeout_ms": 5000u64,
+                            "total_timeout_ms": 30000u64,
+                            "max_failures": 2usize,
+                        },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        let success = value["success"].as_object().expect("success 应是逐 code map");
+        assert_eq!(success.len(), 2, "每个入参 code 一条：{value}");
+        assert_eq!(success["600519"]["code"], json!("600519"));
+        assert!(value["failures"].is_object(), "failures 必须存在（可空）：{value}");
+        assert!(value["elapsedMs"].is_number(), "elapsedMs 应是数字：{value}");
+        assert_eq!(value["earlyTerminated"], json!(false));
+    }
+
+    /// `batch_get_financials`：codes 原样下传，逐 code 归因进 success map。
+    #[test]
+    fn market_quote_batch_get_financials_returns_batch_result_per_code() {
+        let (peer, _runtime) = market_peer_with_runtime(Arc::new(FixedMarketDataProvider::new()));
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote batch_get_financials", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "batch_get_financials",
+                        "args": { "codes": ["600519", "000001"] },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        let success = value["success"].as_object().expect("success 应是逐 code map");
+        assert_eq!(success.len(), 2, "每个入参 code 一条：{value}");
+        assert!(success["600519"].is_array() && success["600519"].as_array().unwrap().is_empty());
+        assert!(success.contains_key("000001"));
     }
 
     /// `as_of` 非法字符串 ⇒ invalid args，且不得 panic / 不得触达 provider。

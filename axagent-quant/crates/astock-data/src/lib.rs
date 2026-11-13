@@ -6874,6 +6874,40 @@ impl axagent_harness::market_data::MarketDataProvider for AStockClient {
         .await
     }
 
+    // ── P6.1 批量数据面迁移：委托 batch.rs 的进程内入口（run_batch_core）──
+    // 逐只取数在**当前任务内**轮询，as-of task_local 因此能穿透到每一只；
+    // 失败逐 code 归因进 BatchResult，整体永不 Err（与迁移前宿主命令同口径）。
+
+    async fn batch_get_quotes(
+        &self,
+        request: &axagent_harness::market_data::MarketBatchQuotesRequest,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        axagent_harness::market_data::BatchResult<axagent_harness::market_data::StockQuote>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            Ok(AStockClient::batch_get_quotes(self, request).await)
+        })
+        .await
+    }
+
+    async fn batch_get_financials(
+        &self,
+        codes: &[String],
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        axagent_harness::market_data::BatchResult<
+            Vec<axagent_harness::market_data::FinancialReport>,
+        >,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            Ok(AStockClient::batch_get_financials(self, codes).await)
+        })
+        .await
+    }
+
     // ── 剩余数据面（P6.1 C 批）：显式透传 as_of 并委托固有方法 ──────────
 
     async fn search_news(

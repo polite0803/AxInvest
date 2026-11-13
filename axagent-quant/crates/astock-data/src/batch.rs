@@ -79,42 +79,10 @@ impl BatchRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchResult<T> {
-    pub success: HashMap<String, T>,
-    pub failures: HashMap<String, String>,
-    pub elapsed_ms: u64,
-    /// H1.8 修复:是否因失败数超过 max_failures 阈值而提前终止
-    /// (true 表示还有未完成的任务被丢弃;false 表示所有任务都跑完)
-    #[serde(default)]
-    pub early_terminated: bool,
-}
-
-impl<T> BatchResult<T> {
-    pub fn new() -> Self {
-        Self {
-            success: HashMap::new(),
-            failures: HashMap::new(),
-            elapsed_ms: 0,
-            early_terminated: false,
-        }
-    }
-
-    pub fn total(&self) -> usize {
-        self.success.len() + self.failures.len()
-    }
-
-    pub fn is_all_success(&self) -> bool {
-        self.failures.is_empty()
-    }
-}
-
-impl<T> Default for BatchResult<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ── BatchResult / MarketBatchQuotesRequest：P6.1 迁移时上收至 harness（consumer
+// 只能依赖 harness）。本模块再导出原类型，保持 `batch::BatchResult` 旧导入路径
+// 与 JSON 线上形态逐字节兼容（camelCase + earlyTerminated 缺省容忍）。
+pub use axagent_harness::market_data::{BatchResult, MarketBatchQuotesRequest};
 
 #[async_trait]
 pub trait BatchVendor: Send + Sync {
@@ -291,87 +259,178 @@ impl BatchRunner {
         T: Send + 'static,
     {
         let start = std::time::Instant::now();
-        let method = method.to_string();
-        let codes = req.codes.clone();
-        let per_timeout = req.per_stock_timeout;
-        let max_failures = req.max_failures;
-
         // P3-D12: 解析并发上限。
         // - `max_concurrent == 0`：根据 vendor 健康度自动决定
         // - `max_concurrent > 0`：显式指定
         // 无限制（unbounded）只在健康度查询失败且无显式值时作为兜底，避免阻塞业务。
+        // `req.total_timeout` 与迁移前一致：接受但从不强制。
         let concurrency = self.resolve_concurrency(req.max_concurrent).await;
-        let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
-
-        tracing::info!(
-            "[batch:{}] P3-D12 并发上限 = {}（codes={}）",
-            method,
+        run_batch_core(
+            start,
+            req.codes,
+            req.per_stock_timeout,
+            req.max_failures,
             concurrency,
-            codes.len(),
-        );
+            method,
+            fetcher,
+        )
+        .await
+    }
+}
 
-        let fetcher = Arc::new(fetcher);
-        let mut tasks = FuturesUnordered::new();
+/// ── 批量执行策略内核（BatchRunner 与 MarketDataProvider trait 实现共用）──────────
+///
+/// P6.1 迁移：原实现直接 `tokio::spawn` + `Arc<AStockClient>`；trait 实现只能拿到
+/// `&self`、凑不齐 spawn 的 `'static` 要求，故把策略循环抽成**当前任务内**轮询的
+/// `FuturesUnordered<BoxFuture>` 执行器，future 生命周期泛型化（不要求 `'static`）。
+/// 可观测行为与迁移前逐条对齐：
+/// - 单只取数 panic：迁移前经 JoinError 让该 code **两个 map 都不出现**；此处
+///   `catch_unwind` 捕获后同样静默跳过（`None`），不改变归属；
+/// - 提前终止：`max_failures > 0` 且失败数超过阈值 ⇒ break 后 drain 剩余任务；
+///   0 ⇒ 收集全部失败（`>` 判定，非 `>=`，与迁移前一致）；
+/// - `total_timeout` 从未被强制（迁移前后一致，本函数干脆不接收该参数）；
+/// - `elapsed_ms`：由调用方在**解析并发度之前**传入 `start`，健康度查询耗时同样计入。
+pub(crate) async fn run_batch_core<'a, T, F, Fut>(
+    start: std::time::Instant,
+    codes: Vec<String>,
+    per_stock_timeout: Duration,
+    max_failures: usize,
+    concurrency: usize,
+    method: &str,
+    fetcher: F,
+) -> BatchResult<T>
+where
+    F: Fn(String) -> Fut + Send + Sync + 'a,
+    Fut: std::future::Future<Output = Result<T, crate::error::DataError>> + Send + 'a,
+    T: Send + 'a,
+{
+    use futures::FutureExt;
+    use std::panic::AssertUnwindSafe;
 
-        for code in codes {
-            let fetcher = fetcher.clone();
-            let method = method.clone();
-            let sem = sem.clone();
-            tasks.push(tokio::spawn(async move {
-                // P3-D12: 通过 Semaphore 限制并发，避免一次性 spawn 200+ task 打爆 socket / vendor
-                let _permit = match sem.acquire_owned().await {
-                    Ok(p) => p,
-                    Err(_) => return (code, Err(format!("{}: Semaphore 已关闭", method))),
-                };
-                let result = tokio::time::timeout(per_timeout, fetcher(code.clone())).await;
-                let result = match result {
-                    Ok(Ok(v)) => Ok(v),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err(format!("{}: 单只超时 {:?}", method, per_timeout)),
-                };
-                (code, result)
-            }));
-        }
+    let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
 
-        let mut success = HashMap::new();
-        let mut failures = HashMap::new();
-        let mut failure_count = 0usize;
-        // H1.8 修复:超过 max_failures 阈值时真正 break 终止后续任务
-        let mut early_terminated = false;
-        while let Some(joined) = tasks.next().await {
-            let Ok((code, res)) = joined else { continue };
-            match res {
-                Ok(v) => {
-                    success.insert(code, v);
+    tracing::info!("[batch:{method}] P3-D12 并发上限 = {concurrency}（codes={}）", codes.len(),);
+
+    // 每只股票一个 boxed future：`None` ⇒ panic 被捕获，按迁移前 JoinError 口径跳过。
+    let mut tasks = FuturesUnordered::new();
+    let fetcher = &fetcher;
+    for code in codes {
+        let sem = sem.clone();
+        tasks.push(Box::pin(async move {
+            // P3-D12: 通过 Semaphore 限制并发，避免一次性发起 200+ 请求打爆 socket / vendor
+            let _permit = match sem.acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => return (code, Some(Err(format!("{method}: Semaphore 已关闭")))),
+            };
+            // 内层再 Box 一次保证 Unpin，让 timeout 与 catch_unwind 都能安全轮询它
+            let mut inner = Box::pin(fetcher(code.clone()));
+            let mut timed = Box::pin(tokio::time::timeout(per_stock_timeout, &mut inner));
+            match AssertUnwindSafe(&mut timed).catch_unwind().await {
+                // 外层 Ok ⇒ 未超时；内层再拆 fetcher 的 Result，失败原因按迁移前
+                // `e.to_string()` 口径归因进 failures
+                Ok(Ok(Ok(v))) => (code, Some(Ok(v))),
+                Ok(Ok(Err(e))) => (code, Some(Err(e.to_string()))),
+                Ok(Err(_elapsed)) => {
+                    (code, Some(Err(format!("{method}: 单只超时 {per_stock_timeout:?}"))))
                 },
-                Err(e) => {
-                    failure_count += 1;
-                    failures.insert(code, e);
-                    if max_failures > 0 && failure_count > max_failures {
-                        tracing::warn!(
-                            "[batch:{}] 失败数 {} 超过阈值 {}，提前终止后续任务",
-                            method,
-                            failure_count,
-                            max_failures
-                        );
-                        early_terminated = true;
-                        break;
-                    }
-                },
+                // panic ⇒ 与迁移前 spawn+JoinError 完全同口径：该 code 不进任何 map
+                Err(_panic) => (code, None),
             }
-        }
+        }));
+    }
 
-        // H1.8:如提前终止,丢弃仍在运行的剩余任务(避免泄漏)
-        if early_terminated {
-            while tasks.next().await.is_some() {}
+    let mut success = HashMap::new();
+    let mut failures = HashMap::new();
+    let mut failure_count = 0usize;
+    // H1.8 修复:超过 max_failures 阈值时真正 break 终止后续任务
+    let mut early_terminated = false;
+    while let Some((code, outcome)) = tasks.next().await {
+        match outcome {
+            Some(Ok(v)) => {
+                success.insert(code, v);
+            },
+            Some(Err(e)) => {
+                failure_count += 1;
+                failures.insert(code, e);
+                if max_failures > 0 && failure_count > max_failures {
+                    tracing::warn!(
+                        "[batch:{method}] 失败数 {failure_count} 超过阈值 {max_failures}，提前终止后续任务"
+                    );
+                    early_terminated = true;
+                    break;
+                }
+            },
+            // panic 静默跳过（等同迁移前 `let Ok(..) = joined else { continue }`）
+            None => continue,
         }
+    }
 
-        BatchResult {
-            success,
-            failures,
-            elapsed_ms: start.elapsed().as_millis() as u64,
-            early_terminated,
-        }
+    // H1.8:如提前终止,丢弃仍在运行的剩余任务(避免泄漏)
+    if early_terminated {
+        while tasks.next().await.is_some() {}
+    }
+
+    BatchResult {
+        success,
+        failures,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+        early_terminated,
+    }
+}
+
+// ── P6.1 迁移：MarketDataProvider 批量数据面的进程内入口 ────────────────────
+//
+// trait 实现只拿得到 `&self`（宿主 state 里 provider 已擦除为 `Arc<dyn _>`），
+// 用不了需要 `Arc<AStockClient>` 的 `BatchRunner`；批量循环因此走
+// `run_batch_core`（当前任务内轮询）。这还顺带保证外层 `with_optional_asof`
+// 压入的 as-of task_local 能被逐只取数读到——spawn 出去的独立任务读不到它。
+impl crate::AStockClient {
+    /// 逐只并发批量拉实时行情。口径与迁移前宿主 `batch_get_quotes` 命令一致：
+    /// 单只默认 8s、`total_timeout_ms` 接受但不生效、`max_failures` 默认 0（不提前终止）、
+    /// 并发按 vendor 健康度自适应（16 / 8 / 2 三档）。
+    pub async fn batch_get_quotes(
+        &self,
+        request: &MarketBatchQuotesRequest,
+    ) -> BatchResult<StockQuote> {
+        let start = std::time::Instant::now();
+        let per_stock = request
+            .per_stock_timeout_ms
+            .map(Duration::from_millis)
+            .unwrap_or(Duration::from_secs(8));
+        // request 无 max_concurrent 字段（迁移前命令也未暴露）⇒ 恒走健康度自适应
+        let concurrency =
+            BatchRunner::concurrency_from_health(&self.health_tracker.get_all_health().await);
+        run_batch_core(
+            start,
+            request.codes.clone(),
+            per_stock,
+            request.max_failures.unwrap_or(0),
+            concurrency,
+            "get_quote",
+            move |code| async move { self.get_quote(&code).await },
+        )
+        .await
+    }
+
+    /// 逐只并发批量拉财务报告序列。口径与迁移前 `BatchRunner::get_financials_batch`
+    /// 一致：单只 15s、不提前终止、并发按健康度自适应。
+    pub async fn batch_get_financials(
+        &self,
+        codes: &[String],
+    ) -> BatchResult<Vec<FinancialReport>> {
+        let start = std::time::Instant::now();
+        let concurrency =
+            BatchRunner::concurrency_from_health(&self.health_tracker.get_all_health().await);
+        run_batch_core(
+            start,
+            codes.to_vec(),
+            Duration::from_secs(15),
+            0,
+            concurrency,
+            "get_financials",
+            move |code| async move { self.get_financials(&code).await },
+        )
+        .await
     }
 }
 

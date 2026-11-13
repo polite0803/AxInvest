@@ -64,6 +64,9 @@ const ANALYSIS_RECORD_SEAM: &str = "analysis.record";
 /// （后四件：pipeline 行 / 进化计划 / DES 仿真 DTO）⇒ 跨包口判据见
 /// `harness/src/stock_analysis.rs` 模块头。全接缝只有 `batch_upsert_mainlines` 一个写 op。
 const STOCK_ANALYSIS_SEAM: &str = "stock.analysis";
+/// 自选行情监视列表接缝（本批宿主 `list_watched_quotes` 的取数面）：
+/// 自选列表的权威存储在宿主 `quote_watcher_service`，`list_watched` 只读不设闸。
+const QUOTE_WATCHER_SEAM: &str = "quote.watcher";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -179,6 +182,12 @@ const COMMAND_GET_STOCK_CONSENSUS_EPS: &str = "stock_get_consensus_eps";
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
 /// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
 const COMMAND_ANALYSIS_RECORDS: &str = "list_stock_analysis_records";
+/// 自选行情列表命令（宿主 `list_watched_quotes` 迁移退役）—— 出参为 code 数组。
+const COMMAND_LIST_WATCHED_QUOTES: &str = "stock_list_watched_quotes";
+/// 逐只并发批量实时行情命令（宿主 `batch_get_quotes` 迁移退役）—— 出参 BatchResult 双 map。
+const COMMAND_BATCH_GET_QUOTES: &str = "stock_batch_get_quotes";
+/// 逐只并发批量财务报告命令（宿主 `batch_get_financials` 迁移退役）—— 出参 BatchResult 双 map。
+const COMMAND_BATCH_GET_FINANCIALS: &str = "stock_batch_get_financials";
 /// 一次任务源取数的默认上限：与宿主 `list_recent` 的缺省值一致，
 /// 前端泛型适配器不传 limit 时也走这一档（不是插件自己拍的第二个数）。
 const DEFAULT_TASK_SOURCE_LIMIT: u32 = 50;
@@ -285,6 +294,41 @@ fn handle_command(
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // ── 宿主命令迁移批：三条只读命令（list_watched / 批量行情 / 批量财务）──
+        // `stock_list_watched_quotes` 走 `quote.watcher` 的 `list_watched`（具名对象解包）；
+        // 两条批量命令走 `market.quote` 新增的批量 op（多键入参，仿 `COMMAND_SEARCH_NEWS` 单独成臂）。
+        COMMAND_LIST_WATCHED_QUOTES => match fetch_watched_quotes(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_BATCH_GET_QUOTES => match batch_quotes_seam_args(&frame.input) {
+            Ok(args) => {
+                match fetch_market_batch("batch_get_quotes", args, &request.call_chain, peer) {
+                    Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                    Err((code, message)) => {
+                        CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                    },
+                }
+            },
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_BATCH_GET_FINANCIALS => match batch_financials_seam_args(&frame.input) {
+            Ok(args) => {
+                match fetch_market_batch("batch_get_financials", args, &request.call_chain, peer) {
+                    Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                    Err((code, message)) => {
+                        CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                    },
+                }
+            },
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // ── E 批（#240）：股票域三条数据面命令，取数一律经宿主 `stock.analysis` 接缝 ──
         // 三个工具（`get_industry_constituents` / `market_mainline_batch_upsert` /
@@ -448,6 +492,7 @@ fn declaration() -> FrameResponse {
                 WORKFLOW_RUN_SEAM.to_string(),
                 ANALYSIS_RECORD_SEAM.to_string(),
                 STOCK_ANALYSIS_SEAM.to_string(),
+                QUOTE_WATCHER_SEAM.to_string(),
             ],
             capabilities: vec![CapabilityDecl {
                 seam: "tool.set".to_string(),
@@ -924,12 +969,11 @@ fn fetch_market_read(
     }
     // 可选键档：存在且非空白才插键 —— 缺省 / null / 空白都表示「用接缝侧缺省语义」
     // （如 `get_limit_up_pool` 的「取当下」），与宿主命令不传该参同形。
-    if let Some((input_key, seam_key)) = route.optional {
-        if let Some(value) =
+    if let Some((input_key, seam_key)) = route.optional
+        && let Some(value) =
             input.get(input_key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
-        {
-            args.insert(seam_key.to_string(), json!(value));
-        }
+    {
+        args.insert(seam_key.to_string(), json!(value));
     }
 
     let reply = peer
@@ -1121,6 +1165,110 @@ fn fetch_search_news(
     }
 }
 
+/// `batch_get_quotes` 命令面入参 → 接缝 `batch_get_quotes` 载荷：codes 必填，三个数值键可选。
+///
+/// 纯函数（不碰 `Peer`）：拒绝判据需要单测钉住。`codes` 校验口径与原宿主命令的 serde
+/// 反序列化一致（键缺失 / 非字符串数组 ⇒ 拒绝）；可选数值键存在才透传，缺省落到
+/// 接缝侧（provider 默认 8s / 不提前终止）。`totalTimeoutMs` 原样透传 —— 接缝与迁移前
+/// 一样「接受但不强制」，插件侧不做第二次裁决（禁区 12）。`as_of` 不开放（与宿主
+/// 命令调用面等价）。
+fn batch_quotes_seam_args(input: &Value) -> Result<Value, (String, String)> {
+    fn invalid(message: String) -> (String, String) {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), message)
+    }
+    let mut args = serde_json::Map::new();
+    args.insert("codes".to_string(), json!(parse_batch_codes(input)?));
+    for (input_key, seam_key) in [
+        ("perStockTimeoutMs", "per_stock_timeout_ms"),
+        ("totalTimeoutMs", "total_timeout_ms"),
+        ("maxFailures", "max_failures"),
+    ] {
+        match input.get(input_key) {
+            None | Some(Value::Null) => {},
+            Some(raw) => {
+                let value =
+                    raw.as_u64().ok_or_else(|| invalid(format!("`{input_key}` 必须是非负整数")))?;
+                args.insert(seam_key.to_string(), json!(value));
+            },
+        }
+    }
+    Ok(Value::Object(args))
+}
+
+/// `batch_get_financials` 命令面入参 → 接缝 `batch_get_financials` 载荷：只有 codes 一键。
+fn batch_financials_seam_args(input: &Value) -> Result<Value, (String, String)> {
+    Ok(json!({ "codes": parse_batch_codes(input)? }))
+}
+
+/// 批量命令的 `codes` 判据：必须是字符串数组（空数组与迁移前一致地放行 ⇒ 空结果）。
+fn parse_batch_codes(input: &Value) -> Result<Vec<String>, (String, String)> {
+    let Some(raw) = input.get("codes") else {
+        return Err((error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "`codes` 缺失".to_string()));
+    };
+    let codes: Vec<String> = serde_json::from_value(raw.clone()).map_err(|e| {
+        (
+            error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
+            format!("`codes` 必须是字符串数组，反序列化失败：{e}"),
+        )
+    })?;
+    Ok(codes)
+}
+
+/// 调宿主 `market.quote` 的批量 op，整块回传 `BatchResult` 信封。
+///
+/// 出参**不在这里解构** —— success/failures 双 map 的形状权威在 harness DTO。
+fn fetch_market_batch(
+    op: &str,
+    args: Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let reply = peer.call_seam(MARKET_SEAM, op, args, call_chain.to_vec()).map_err(|e| {
+        (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("行情接缝（{op}）调用失败：{e}"))
+    })?;
+
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "行情接缝返回了错误但没有说明".to_string()),
+        )),
+    }
+}
+
+/// 调宿主 `quote.watcher` 的 `list_watched`，解包成 code 数组（原宿主命令的出参形状）。
+///
+/// 接缝回的是**具名对象** `{codes}`（provider 侧排序，裁定 J6；原宿主命令回裸数组），
+/// 解包点仅此一处；形状不符 ⇒ 协议错误，不得吞成空列表掩盖漂移。
+fn fetch_watched_quotes(
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let reply = peer
+        .call_seam(QUOTE_WATCHER_SEAM, "list_watched", json!({}), call_chain.to_vec())
+        .map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("自选监视接缝（list_watched）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => {
+            let value = reply.value.unwrap_or(Value::Null);
+            value.get("codes").cloned().filter(Value::is_array).ok_or_else(|| {
+                (
+                    error_codes::PLUGIN_CALL_FAILED.to_string(),
+                    format!("`list_watched` 接缝返回形状异常（应为 {{codes: [...]}}）：{value}"),
+                )
+            })
+        },
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "自选监视接缝返回了错误但没有说明".to_string()),
+        )),
+    }
+}
+
 /// 插件命令名 → `stock.analysis` 接缝 op 名（批 1a 的十二条 cron 配置命令）。
 ///
 /// 表驱动而非十二段复制：每个臂的转发形态完全一致（透传入参、整块回出参），
@@ -1176,9 +1324,10 @@ fn call_analysis_seam(
 #[cfg(test)]
 mod tests {
     use super::{
-        cron_seam_op, kline_route, kline_seam_args, map_analysis_state_to_run_state,
-        map_execution_state_to_run_state, market_read_route, search_news_seam_args,
-        stock_analysis_request, task_run_row_from_analysis_record, task_run_row_from_execution,
+        batch_financials_seam_args, batch_quotes_seam_args, cron_seam_op, kline_route,
+        kline_seam_args, map_analysis_state_to_run_state, map_execution_state_to_run_state,
+        market_read_route, search_news_seam_args, stock_analysis_request,
+        task_run_row_from_analysis_record, task_run_row_from_execution,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, error_codes, is_plugin_task_run_state};
     use serde_json::{Value, json};
@@ -1446,6 +1595,11 @@ mod tests {
             "`calls` 未声明 `{}`：三个 E 批命令会在宿主侧被拒。实际: {calls:?}",
             super::STOCK_ANALYSIS_SEAM
         );
+        assert!(
+            calls.contains(&super::QUOTE_WATCHER_SEAM),
+            "`calls` 未声明 `{}`：`stock_list_watched_quotes` 会在宿主侧被拒。实际: {calls:?}",
+            super::QUOTE_WATCHER_SEAM
+        );
     }
 
     /// 批 1a（#35）十二 cron 命令 → 接缝 op 的映射必须**逐条**正确且互不重复。
@@ -1712,5 +1866,60 @@ mod tests {
                 "`{input}` 的拒绝码不对：{message}"
             );
         }
+    }
+
+    /// `batch_quotes_seam_args`：codes 必填、三可选数值键 camelCase→snake_case 翻译，
+    /// 拒绝判据与原宿主 `BatchQuotesRequest` 的 serde 反序列化口径一致。
+    #[test]
+    fn batch_quotes_seam_args_translates_camel_case_keys() {
+        let args = batch_quotes_seam_args(&json!({
+            "codes": ["600519", "000001"],
+            "perStockTimeoutMs": 5000u64,
+            "totalTimeoutMs": 30000u64,
+            "maxFailures": 2u64,
+        }))
+        .expect("完整入参应当合法");
+        assert_eq!(args["codes"], json!(["600519", "000001"]));
+        assert_eq!(args["per_stock_timeout_ms"], 5000);
+        assert_eq!(args["total_timeout_ms"], 30000);
+        assert_eq!(args["max_failures"], 2);
+
+        // 只给 codes 时三个可选键**不插**（缺省语义归接缝侧）
+        let args =
+            batch_quotes_seam_args(&json!({ "codes": ["600519"] })).expect("仅 codes 应当合法");
+        assert!(args.get("per_stock_timeout_ms").is_none());
+        assert!(args.get("total_timeout_ms").is_none());
+        assert!(args.get("max_failures").is_none());
+
+        // 空 codes 数组与迁移前一致地放行（空 ⇒ BatchResult 空，不报 INVALID）
+        let args = batch_quotes_seam_args(&json!({ "codes": [] })).expect("空数组应当放行");
+        assert_eq!(args["codes"], json!([]));
+
+        // 拒绝面：codes 缺失 / 非数组 / 元素非字符串 / 数值键负数或浮点
+        let bad = [
+            json!({}),
+            json!({ "codes": "600519" }),
+            json!({ "codes": [1, 2] }),
+            json!({ "codes": ["600519"], "perStockTimeoutMs": -1 }),
+            json!({ "codes": ["600519"], "maxFailures": 1.5 }),
+        ];
+        for input in bad {
+            let outcome = batch_quotes_seam_args(&input);
+            let Err((code, _)) = outcome else {
+                panic!("`{input}` 必须被拒，实际放行：{outcome:?}");
+            };
+            assert_eq!(code, error_codes::SEAM_CALL_INVALID_ARGS, "`{input}` 拒绝码错误");
+        }
+    }
+
+    /// `batch_financials_seam_args`：只有 codes 一键，拒绝判据同上。
+    #[test]
+    fn batch_financials_seam_args_only_takes_codes() {
+        let args = batch_financials_seam_args(&json!({ "codes": ["600519"] })).expect("合法入参");
+        assert_eq!(args, json!({ "codes": ["600519"] }));
+        let Err((code, _)) = batch_financials_seam_args(&json!({})) else {
+            panic!("codes 缺失必须被拒");
+        };
+        assert_eq!(code, error_codes::SEAM_CALL_INVALID_ARGS);
     }
 }

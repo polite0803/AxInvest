@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 24 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 55 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -1228,6 +1228,67 @@ function stockManifest({ version, binaryName, sha256 }) {
           properties: { stockCode: { type: "string", description: "6 位股票代码，如 600519" } },
           required: ["stockCode"],
         },
+      },
+      // ── F1 首批（#307）：三条「只有智能体在用」的宿主只读命令迁 T2 命令面 ──
+      // 三条都**显式声明** `requiredPermission: "read-only"`：投影档位与候选 A 的「未声明 ⇒ Safe」
+      // 等价（`plugin_command_safety`：None 与 "read-only" 同映射 Safe），但显式写死让
+      // 「只读走 read-only」的批次纪律可审计，不靠缺省值兜底。三条都没有前端调用点
+      // （消费方是 LLM 工具面），故清单之外的前端半（src/** 的 invokePluginCommand / dev mock / i18n）本批零改动。
+      {
+        // 宿主 `batch_get_quotes` 退役后的取数面。入参窗口与宿主逐字对齐：`codes` **无条数上限**
+        // （宿主侧只有 `batch_get_klines` 带 50 条闸，本条历史上没有），三个可选档缺省时全部
+        // 落 provider 侧默认（单只 8s / 不提前终止）；`totalTimeoutMs` 与宿主同口径 —— 接受但不生效。
+        name: "stock_batch_get_quotes",
+        description:
+          "逐只并发批量获取实时行情（经宿主 market.quote 接缝，只读；出参 success/failures 双 map 按 code 归因）",
+        command: "worker://stock_batch_get_quotes",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            codes: {
+              type: "array",
+              items: { type: "string" },
+              description: "股票代码数组，如 600519 / 000001",
+            },
+            perStockTimeoutMs: { type: "integer", minimum: 1, description: "单只取数超时（毫秒），缺省 8000" },
+            totalTimeoutMs: { type: "integer", minimum: 1, description: "整体超时（毫秒）；与宿主同口径：接受但不生效" },
+            maxFailures: { type: "integer", minimum: 0, description: "失败数超过该阈值即提前终止；缺省 0 = 不提前终止" },
+          },
+          required: ["codes"],
+        },
+      },
+      {
+        // 宿主 `batch_get_financials` 退役后的取数面。入参只有一个 `codes`，与宿主命令逐字同形
+        // （原命令也没有超时档 —— 单只 15s 固定在 provider 侧）。
+        name: "stock_batch_get_financials",
+        description:
+          "逐只并发批量获取财务报告序列（经宿主 market.quote 接缝，只读；出参 success/failures 双 map 按 code 归因）",
+        command: "worker://stock_batch_get_financials",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            codes: {
+              type: "array",
+              items: { type: "string" },
+              description: "股票代码数组，如 600519 / 000001",
+            },
+          },
+          required: ["codes"],
+        },
+      },
+      {
+        // 宿主 `list_watched_quotes` 退役后的取数面：走既有 `quote.watcher` 的 `list_watched` op
+        // （零入参，解包 `{codes:[…]}` 成裸数组由插件侧完成，出参形状与原宿主命令一致）。
+        // 与原命令的唯一差别是**顺序**：接缝侧按升序 sort（裁定 J6），原命令是 HashMap 键序（本就不可复现）。
+        name: "stock_list_watched_quotes",
+        description: "列出当前实时行情监听集合（经宿主 quote.watcher 接缝，只读；无入参，出参为代码数组）",
+        command: "worker://stock_list_watched_quotes",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
       },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，

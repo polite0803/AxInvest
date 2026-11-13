@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use ts_rs::TS;
 
 use crate::as_of::AsOfContext;
@@ -194,6 +195,66 @@ impl FinancialReport {
     }
 }
 
+// ── 批量查询 DTO（P6.1 迁移：自 astock-data::batch 上收，consumer 只能依赖 harness）──
+
+/// 批量查询结果信封 — `MarketDataProvider::{batch_get_quotes, batch_get_financials}` 的返回契约。
+///
+/// 逐 code 归因：`success`/`failures` 双 map；**不保证**两者之和等于入参数量
+/// （提前终止、或单只取数 task panic 时该 code 两边都不出现——与迁移前宿主命令逐字节兼容）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchResult<T> {
+    pub success: HashMap<String, T>,
+    pub failures: HashMap<String, String>,
+    pub elapsed_ms: u64,
+    /// 是否因失败数超过 `max_failures` 阈值而提前终止
+    /// （true 表示还有未完成的任务被丢弃；false 表示所有任务都跑完）。
+    #[serde(default)]
+    pub early_terminated: bool,
+}
+
+impl<T> BatchResult<T> {
+    pub fn new() -> Self {
+        Self {
+            success: HashMap::new(),
+            failures: HashMap::new(),
+            elapsed_ms: 0,
+            early_terminated: false,
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        self.success.len() + self.failures.len()
+    }
+
+    pub fn is_all_success(&self) -> bool {
+        self.failures.is_empty()
+    }
+}
+
+impl<T> Default for BatchResult<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `batch_get_quotes` 的请求参数（原宿主命令 `BatchQuotesRequest` 的强类型上收形态）。
+///
+/// 字段全 camelCase 序列化，与原宿主命令入参逐字节兼容；`None` 一律落到 provider 端默认策略。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MarketBatchQuotesRequest {
+    pub codes: Vec<String>,
+    /// 单只取数超时（毫秒）；`None` ⇒ provider 默认（quotes 8s）。
+    pub per_stock_timeout_ms: Option<u64>,
+    /// 整体超时（毫秒）。**行为口径与迁移前一致：接受但不生效**——原
+    /// `BatchRunner::run_batch` 从未强制 `total_timeout`，此处保持同样的惰性字段，
+    /// 不做「顺手修复」，以免改变既有调用方的可观测行为。
+    pub total_timeout_ms: Option<u64>,
+    /// 失败数超过该阈值即提前终止；`None`/`0` ⇒ 不提前终止、收集全部失败。
+    pub max_failures: Option<usize>,
+}
+
 // ── MarketDataProvider Trait ─────────────────────────────────────────────
 
 /// 市场数据提供者接口
@@ -379,6 +440,34 @@ pub trait MarketDataProvider: Send + Sync {
     ) -> Result<Vec<StockQuote>> {
         Err(AxAgentError::Provider(
             "MarketDataProvider::market_snapshot_batch 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 逐只并发批量拉实时行情：带单只超时、失败归因与 vendor 健康度自适应并发。
+    ///
+    /// 与 `market_snapshot_batch`（单请求整体快照、无逐 code 失败归因）**不等价**，本面
+    /// 返回 `BatchResult` 双 map。`as_of = None` 为实盘，`Some` 按该日截止回放。
+    async fn batch_get_quotes(
+        &self,
+        _request: &MarketBatchQuotesRequest,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<BatchResult<StockQuote>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::batch_get_quotes 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 逐只并发批量拉财务报告序列。
+    ///
+    /// 失败归因与并发策略同 `batch_get_quotes`；`as_of = None` 为实盘，`Some` 按披露
+    /// 日截止过滤回放。
+    async fn batch_get_financials(
+        &self,
+        _codes: &[String],
+        _as_of: Option<AsOfContext>,
+    ) -> Result<BatchResult<Vec<FinancialReport>>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::batch_get_financials 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 
@@ -836,5 +925,52 @@ mod financial_disclosure_tests {
         // 多数 vendor 回 "YYYY-MM-DD 00:00:00"
         let r = rep("2026-12-31 00:00:00", None);
         assert_eq!(r.statutory_disclosure_deadline().as_deref(), Some("2027-04-30"));
+    }
+}
+
+#[cfg(test)]
+mod batch_dto_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn market_batch_quotes_request_round_trips_camel_case_wire() {
+        let req: MarketBatchQuotesRequest = serde_json::from_value(json!({
+            "codes": ["600519", "000001"],
+            "perStockTimeoutMs": 5000u64,
+            "totalTimeoutMs": 10000u64,
+            "maxFailures": 3usize,
+        }))
+        .expect("camelCase 线上形态必须可反序列化（与原宿主 BatchQuotesRequest 兼容）");
+        assert_eq!(req.per_stock_timeout_ms, Some(5000));
+        assert_eq!(req.total_timeout_ms, Some(10000));
+        assert_eq!(req.max_failures, Some(3));
+
+        // Option 字段全部可缺省 ⇒ None，落到 provider 端默认策略
+        let bare: MarketBatchQuotesRequest =
+            serde_json::from_value(json!({"codes": ["600519"]})).unwrap();
+        assert!(bare.per_stock_timeout_ms.is_none());
+        assert!(bare.total_timeout_ms.is_none());
+        assert!(bare.max_failures.is_none());
+    }
+
+    #[test]
+    fn batch_result_wire_shape_matches_legacy_astock_data_definition() {
+        // 上收前后 JSON 形状必须逐字节一致：camelCase + earlyTerminated 缺省容忍
+        let r: BatchResult<i32> = serde_json::from_value(json!({
+            "success": {"600519": 1i32},
+            "failures": {"000001": "单只超时"},
+            "elapsedMs": 42u64,
+        }))
+        .unwrap();
+        assert_eq!(r.elapsed_ms, 42);
+        assert!(!r.early_terminated);
+        assert_eq!(r.total(), 2);
+        assert!(!r.is_all_success());
+
+        let out = serde_json::to_value(&r).unwrap();
+        assert_eq!(out["elapsedMs"], json!(42));
+        assert_eq!(out["earlyTerminated"], json!(false));
+        assert!(out.get("elapsed_ms").is_none());
     }
 }

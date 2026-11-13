@@ -30,10 +30,10 @@ use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
 use axagent_analysis_engine::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_analysis_engine::stock_analysis_round::StockAnalysisRound;
 use axagent_analysis_engine::trading::{PositionSummary, TradePredictionComparison};
+use axagent_astock_data::StockQuote;
 use axagent_astock_data::as_of::{self, AsOfContext};
-use axagent_astock_data::batch::{BatchRequest, BatchResult, BatchRunner, MarketBatchQuery};
+use axagent_astock_data::batch::{BatchResult, BatchRunner, MarketBatchQuery};
 use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, FundamentalsReport};
-use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
     stock_analyses, trades, watchlist_items,
@@ -1033,47 +1033,9 @@ pub async fn get_forex_kline(
 }
 
 // ── Phase 2: TradingAgents-CN 优势借鉴 — 批量 + 基本面报告 + 缓存统计 ──
-
-/// 批量请求参数
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchQuotesRequest {
-    pub codes: Vec<String>,
-    /// 单只超时（毫秒），默认 8000
-    pub per_stock_timeout_ms: Option<u64>,
-    /// 总超时（毫秒），默认 30000
-    pub total_timeout_ms: Option<u64>,
-    /// 允许失败数（0 = 全部必须成功），默认 0
-    pub max_failures: Option<usize>,
-}
-
-/// 批量获取实时行情（DataFrame 风格）
-///
-/// 内部并发调 `get_quote`,受 `DomainGate` 限流。
-/// 失败股票不阻塞,集中在 `failures` 字段返回。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "批量获取实时行情")]
-#[tauri::command]
-pub async fn batch_get_quotes(
-    state: State<'_, AppState>,
-    request: BatchQuotesRequest,
-) -> Result<BatchResult<StockQuote>, String> {
-    use std::time::Duration;
-
-    let mut req = BatchRequest::new(request.codes);
-    if let Some(ms) = request.per_stock_timeout_ms {
-        req = req.with_per_stock_timeout(Duration::from_millis(ms));
-    }
-    if let Some(ms) = request.total_timeout_ms {
-        req = req.with_total_timeout(Duration::from_millis(ms));
-    }
-    if let Some(n) = request.max_failures {
-        req = req.with_max_failures(n);
-    }
-
-    let client = state.stock().astock_client.clone();
-    let runner = BatchRunner::new(client);
-    Ok(runner.get_quotes_batch(req).await)
-}
+// batch_get_quotes / batch_get_financials 已迁 plugin-stock（T2 命令
+// stock_batch_get_quotes / stock_batch_get_financials，取数面走宿主 market.quote 接缝）；
+// batch_get_klines 仍留本壳（带 50 条闸的写敏感面，未在退役批次内）。
 
 /// 批量获取 K 线
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "批量获取K线")]
@@ -1099,18 +1061,6 @@ pub async fn batch_get_klines(
     let client = state.stock().astock_client.clone();
     let runner = BatchRunner::new(client);
     Ok(runner.get_klines_batch(codes, &period, limit).await)
-}
-
-/// 批量获取财务数据
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "批量获取财务数据")]
-#[tauri::command]
-pub async fn batch_get_financials(
-    state: State<'_, AppState>,
-    codes: Vec<String>,
-) -> Result<BatchResult<Vec<FinancialReport>>, String> {
-    let client = state.stock().astock_client.clone();
-    let runner = BatchRunner::new(client);
-    Ok(runner.get_financials_batch(codes).await)
 }
 
 /// 基本面报告请求
@@ -2429,16 +2379,6 @@ pub async fn unwatch_stock_quotes(
 
     tracing::info!("[unwatch_stock_quotes] 已移除 {} 只股票监控", stock_codes.len());
     Ok(())
-}
-
-/// P1-2: 查询当前监控的股票列表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询当前监控股票")]
-#[tauri::command]
-pub async fn list_watched_quotes(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let watcher =
-        state.stock().quote_watcher.get().ok_or_else(|| "实时行情监视器未初始化".to_string())?;
-
-    Ok(watcher.watched_stocks().await)
 }
 
 /// P1-2: 设置单只股票的监控优先级

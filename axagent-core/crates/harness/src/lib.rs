@@ -119,8 +119,8 @@ pub mod stock_market_types;
 // ── 取数结果信封（自 astock-data 上收；同样只按模块路径提供）──
 pub mod data_outcome;
 pub use market_data::{
-    AdjType, FinancialReport, KLine, MarketDataProvider, StockQuote, StockSearchResult,
-    detect_market_type, get_price_limit_pct, get_st_price_limit_pct,
+    AdjType, BatchResult, FinancialReport, KLine, MarketBatchQuotesRequest, MarketDataProvider,
+    StockQuote, StockSearchResult, detect_market_type, get_price_limit_pct, get_st_price_limit_pct,
 };
 
 // ── 股票分析/自选股存储契约（消除 gateway → entities 违规）──

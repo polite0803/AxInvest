@@ -479,6 +479,11 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
         // `None`**（给读缝加闸会把只读插件无端拒掉，正反向锁在 `stock_analysis_*` 用例）。
         ("stock.analysis", "batch_upsert_mainlines") => Some(PluginPermission::Write),
+        // F1 余三条（#35）：`sweep_daily_snapshots` 是写 op —— 触发每日快照采集
+        // （网络 + `astock_daily_snapshot` 落表）。另两条 `list_financial_snapshots` /
+        // `refresh_trading_calendar` 是读面 ⇒ **必须仍是 `None`**（给读缝加闸会把只读
+        // 插件无端拒掉）。
+        ("stock.analysis", "sweep_daily_snapshots") => Some(PluginPermission::Write),
         // 批 1a（#35）：九个 cron 管理写 op 增删改宿主 `CronJobStore` ⇒ `Write`；
         // 三个 list 仍是 `None`（同上：读缝不加闸）。
         (
@@ -1084,6 +1089,21 @@ impl HostPeer {
                 };
                 match result {
                     Ok(reports) => to_value("FinancialReport", &reports),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // F1 余三条（#35）：交易日历刷新（宿主命令 `refresh_trading_calendar` 迁 T2）。
+            // 无入参；读性质（拉取并返回节假日序列），不加权限闸。缺省实现报「不支持」
+            // 与宿主命令保持等价失败行为（东财报表已下线的既存状态，见 harness 注释）。
+            "market.quote" if op == "refresh_trading_calendar" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.refresh_trading_calendar()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(holidays) => to_value("TradingCalendarHolidays", &holidays),
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
@@ -2878,6 +2898,39 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.list_recent_mainlines(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── stock.analysis 接缝 · F1 余三条（#35）：快照读面 + 采集触发面 ──
+            // `list_financial_snapshots` 读宿主本地 `financial_snapshots` 表原始行（与
+            // `market.quote::get_financials` 的 vendor 财报**不等价**），读 op 无闸；
+            // `sweep_daily_snapshots` 是写 op（见 `required_permission_for`），触发口
+            // 语义 —— 执行体留宿主（后台定时服务同源复用），长任务不搬进 worker 帧。
+            // 入参 snake_case 接缝风格（同 `opc.store`）：`{stock_code, start?, end?}` /
+            // `{}`；出参 = 实体行数组 / 采集总结串。
+            "stock.analysis" if op == "list_financial_snapshots" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_financial_snapshots(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "sweep_daily_snapshots" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.sweep_daily_snapshots(request)) else {
                     return no_runtime(seam);
                 };
                 match result {

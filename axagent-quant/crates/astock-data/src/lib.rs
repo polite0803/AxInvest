@@ -7320,6 +7320,16 @@ impl axagent_harness::market_data::MarketDataProvider for AStockClient {
         })
         .await
     }
+
+    /// F1 余三条（#35）：交易日历刷新。透传 `harness::trading_calendar::fetch_holiday_calendar`
+    /// （与被退役宿主命令 `refresh_trading_calendar` 同一实现体，禁区 12）。
+    async fn refresh_trading_calendar(
+        &self,
+    ) -> std::result::Result<Vec<String>, axagent_harness::core_error::AxAgentError> {
+        axagent_harness::trading_calendar::fetch_holiday_calendar()
+            .await
+            .map_err(axagent_harness::core_error::AxAgentError::Provider)
+    }
 }
 
 /// 提取新闻 publish_time 的 YYYY-MM-DD 前缀；无法解析时返回空串（截断时会被过滤掉）

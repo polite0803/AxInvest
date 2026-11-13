@@ -81,6 +81,16 @@ const COMMAND_COMPARE_TRADE: &str = "stock_compare_trade_with_analysis";
 const COMMAND_SCAN_SECTOR_COHERENCE: &str = "stock_scan_sector_coherence";
 /// 设置单只股票监控优先级（宿主 `set_quote_watch_priority`）—— **写命令**。
 const COMMAND_SET_QUOTE_WATCH_PRIORITY: &str = "stock_set_quote_watch_priority";
+// ── F1 余三条（#35 / #321）：宿主同名 Tauri 命令同批退役，走新 op ──
+/// 列估值快照原始行（宿主 `list_financial_snapshots`）：读 `financial_snapshots` 表，
+/// 与 `stock_get_financials`（vendor 财报）**不等价**，必须独立 op —— 读命令。
+const COMMAND_LIST_FINANCIAL_SNAPSHOTS: &str = "stock_list_financial_snapshots";
+/// 从东方财富 API 刷新交易日历（宿主 `refresh_trading_calendar`）：读命令；该报表
+/// 2026-09-27 起已下线，op 保持与被退役宿主命令等价的失败行为，不修功能。
+const COMMAND_REFRESH_TRADING_CALENDAR: &str = "stock_refresh_trading_calendar";
+/// 触发每日快照采集（宿主 `sweep_daily_snapshots`）—— **写命令**（网络 + 快照落表）。
+/// 插件只是触发口：执行体 `run_daily_snapshot_sweep` 留在宿主，长任务不进 worker 帧。
+const COMMAND_SWEEP_DAILY_SNAPSHOTS: &str = "stock_sweep_daily_snapshots";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -470,6 +480,27 @@ fn handle_command(
         },
         COMMAND_SET_QUOTE_WATCH_PRIORITY => {
             match set_quote_watch_priority(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── F1 余三条（#35 / #321）：显式臂两条 + 路由表一条 ──
+        // `stock_list_financial_snapshots` / `stock_sweep_daily_snapshots` 走
+        // `stock.analysis` 新 op（快照读面 / 采集触发口）；`stock_refresh_trading_calendar`
+        // 零入参，与批 2c 同形态进 `market_read_route` 表（`market.quote` 新 op）。
+        COMMAND_LIST_FINANCIAL_SNAPSHOTS => {
+            match fetch_financial_snapshots(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_SWEEP_DAILY_SNAPSHOTS => {
+            match call_analysis_seam(peer, &request.call_chain, "sweep_daily_snapshots", json!({}))
+            {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -987,6 +1018,9 @@ fn market_read_route(command: &str) -> Option<MarketReadRoute> {
             keys: None,
             optional: Some(("date", "requested_date")),
         },
+        // F1 余三条（#35 / #321）：刷新交易日历，零入参 ⇒ `keys: None`（与批 2c 同形）。
+        // `fetch_holiday_calendar` 的东财报表已下线，op 保持与被退役宿主命令等价的失败行为。
+        COMMAND_REFRESH_TRADING_CALENDAR => MarketReadRoute::read("refresh_trading_calendar", None),
         _ => return None,
     })
 }
@@ -1564,6 +1598,33 @@ fn set_quote_watch_priority(
             reply.message.unwrap_or_else(|| "自选监视接缝（watch）返回错误但未说明".to_string()),
         )),
     }
+}
+
+/// 列估值快照原始行（宿主 `list_financial_snapshots`，F1 余三条之一）。
+///
+/// 命令面 `stockCode` 必填 + `start` / `end` 可选（camelCase，禁区 13）；接缝面
+/// `stock_code` / `start` / `end`（snake_case）—— 两名不同源，靠这一层显式翻译
+/// （与 `MarketReadRoute` 的 keys 档同款纪律）。可选键存在且非空白才透传，缺省不插键。
+/// 快照行是实体原始行整块透传，出参形状权威在宿主 `financial_snapshots::Model`。
+fn fetch_financial_snapshots(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let stock_code = command_str_arg(input, "stockCode")?;
+    let mut request = serde_json::Map::new();
+    request.insert("stock_code".to_string(), json!(stock_code));
+    if let Some(start) =
+        input.get("start").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+    {
+        request.insert("start".to_string(), json!(start));
+    }
+    if let Some(end) =
+        input.get("end").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+    {
+        request.insert("end".to_string(), json!(end));
+    }
+    call_analysis_seam(peer, call_chain, "list_financial_snapshots", Value::Object(request))
 }
 
 /// 分析时间戳（UNIX 秒）：与宿主原命令的 `chrono::Utc::now().timestamp()` 同量纲。
@@ -2247,7 +2308,7 @@ mod tests {
         }
     }
 
-    /// #311：四条新命令是**显式分派臂**，不得被三张 fallback 路由表吞掉。
+    /// #311 + F1 余三条：显式分派臂命令**不得被三张 fallback 路由表吞掉**。
     ///
     /// 负控意义：若有人日后把它们塞进 `market_read_route` / `cron_seam_op`，命令会打到
     /// 相邻数据面上（`stock_set_quote_watch_priority` 尤其危险 —— 它是写命令）。
@@ -2258,6 +2319,9 @@ mod tests {
             super::COMMAND_COMPARE_TRADE,
             super::COMMAND_SCAN_SECTOR_COHERENCE,
             super::COMMAND_SET_QUOTE_WATCH_PRIORITY,
+            // F1 余三条的两条显式臂（快照读面 / 快照采集触发口，均走 stock.analysis）。
+            super::COMMAND_LIST_FINANCIAL_SNAPSHOTS,
+            super::COMMAND_SWEEP_DAILY_SNAPSHOTS,
         ] {
             assert!(market_read_route(command).is_none(), "`{command}` 不得进行情只读表");
             assert!(kline_route(command).is_none(), "`{command}` 不得进 K 线表");
@@ -2267,6 +2331,19 @@ mod tests {
         assert!(market_read_route(super::COMMAND_GET_QUOTE).is_some());
         assert!(kline_route(super::COMMAND_GET_KLINE).is_some());
         assert!(cron_seam_op(super::COMMAND_LIST_RECOMMENDATION_CRONS).is_some());
+    }
+
+    /// F1 余三条：`stock_refresh_trading_calendar` 与显式臂两条**必须落在正确的取数路径**
+    /// —— refresh 走 `market_read_route` 表（`market.quote` 零入参 op），另两条显式臂走
+    /// `stock.analysis`。refresh 若被挪进显式臂而没在表里登记，命令会打
+    /// `PLUGIN_COMMAND_UNKNOWN`；反之 list/sweep 若被塞进表，会打到相邻数据面。
+    #[test]
+    fn f1_three_commands_route_to_their_own_seams() {
+        let refresh = market_read_route(super::COMMAND_REFRESH_TRADING_CALENDAR)
+            .expect("刷新交易日历必须在 market_read_route 表里");
+        assert_eq!(refresh.op, "refresh_trading_calendar");
+        assert!(refresh.keys.is_none(), "刷新交易日历是零入参 op，不得有标的键");
+        assert!(refresh.optional.is_none(), "刷新交易日历不得有可选键");
     }
 
     /// #311：时间戳量纲必须是**秒**（宿主原命令用 `chrono::Utc::now().timestamp()`）。

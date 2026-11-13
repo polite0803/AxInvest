@@ -2804,13 +2804,6 @@ pub async fn get_market_status() -> Result<serde_json::Value, String> {
     }))
 }
 
-/// 从东方财富 API 刷新交易日历
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "刷新交易日历")]
-#[tauri::command]
-pub async fn refresh_trading_calendar() -> Result<Vec<String>, String> {
-    axagent_astock_data::calendar::fetch_holiday_calendar().await
-}
-
 // ── Review Commands ──
 
 /// 生成每日收盘复盘报告
@@ -3788,34 +3781,6 @@ pub(crate) async fn backfill_financial_snapshots(
     Ok(written)
 }
 
-/// 列估值快照原始行(R3-C 辅助):返回 financial_snapshots 表中某只股票在区间内的全部快照。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列估值快照原始行")]
-#[tauri::command]
-pub async fn list_financial_snapshots(
-    state: State<'_, AppState>,
-    stock_code: String,
-    start: Option<String>,
-    end: Option<String>,
-) -> Result<Vec<financial_snapshots::Model>, String> {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-    let mut q = financial_snapshots::Entity::find()
-        .filter(financial_snapshots::Column::StockCode.eq(stock_code.clone()));
-    if let Some(s) = start {
-        q = q.filter(financial_snapshots::Column::SnapshotDate.gte(s));
-    }
-    if let Some(e) = end {
-        q = q.filter(financial_snapshots::Column::SnapshotDate.lte(e));
-    }
-    let rows = q
-        .order_by_asc(financial_snapshots::Column::SnapshotDate)
-        .all(state.harness.db())
-        .await
-        .map_err(|err| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询财务快照失败: {err}"))
-        })?;
-    Ok(rows)
-}
-
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取热门股票")]
 #[tauri::command]
 pub async fn get_hot_stocks(
@@ -4336,32 +4301,29 @@ pub async fn save_eastmoney_proxy(
     Ok(())
 }
 
-/// 执行每日快照采集：遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 SQL 归档表
+/// 快照采集归属日的共用计算（被退役的 Tauri 命令与 `stock.analysis` 接缝 provider 共用）。
 ///
-/// #20②（2026-10-08）：落点从 DiskCache 单文件换成 `astock_daily_snapshot` 表
-/// （端口 `DailySnapshotStore` 在 astock-data，适配器在 `src-tauri/src/init/daily_snapshot_store.rs`）。
-///
-/// 调用一次即可采集当日快照；as-of 模式下的 NoHistoricalSemantic 方法会优先查快照缓存。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "采集每日快照")]
-#[tauri::command]
-pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String, String> {
-    // G2'：归属日 = 最近一个**已完成**交易日。交易日盘中手动触发时 snapshot_target_date 给
-    // None（今天只有半日数据，绝不能按收盘值落盘）⇒ 从**昨天**起回溯上一交易日。
-    // ⚠ 不能回落成 `previous_trading_day(今天)` —— 该函数在 date 本身是交易日时返回 date，
-    //   盘中触发会把半日数据当收盘值写进快照。
+/// G2'：归属日 = 最近一个**已完成**交易日。交易日盘中手动触发时 snapshot_target_date 给
+/// None（今天只有半日数据，绝不能按收盘值落盘）⇒ 从**昨天**起回溯上一交易日。
+/// ⚠ 不能回落成 `previous_trading_day(今天)` —— 该函数在 date 本身是交易日时返回 date，
+///   盘中触发会把半日数据当收盘值写进快照。
+pub fn snapshot_sweep_date() -> String {
     let now = chrono::Local::now();
-    let date = axagent_astock_data::daily_snapshot::snapshot_target_date(&now)
+    axagent_astock_data::daily_snapshot::snapshot_target_date(&now)
         .unwrap_or_else(|| {
             axagent_astock_data::calendar::previous_trading_day(
                 now.date_naive() - chrono::Duration::days(1),
             )
         })
         .format("%Y-%m-%d")
-        .to_string();
-    run_daily_snapshot_sweep(&state.stock().astock_client, state.harness.db(), &date).await
+        .to_string()
 }
 
-/// 每日快照采集的公共实现（Tauri 命令与后台定时服务共用）。
+/// 每日快照采集的公共实现（后台定时服务与 `stock.analysis` 接缝触发口共用）。
+///
+/// 遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 `astock_daily_snapshot` 表
+/// （端口 `DailySnapshotStore` 在 astock-data，适配器在 `src-tauri/src/init/daily_snapshot_store.rs`）。
+/// 调用一次即可采集当日快照；as-of 模式下的 NoHistoricalSemantic 方法会优先查快照缓存。
 ///
 /// **为什么抽成自由函数**：命令形态只拿得到 `State<AppState>`，而后台服务
 /// （`init/services.rs`）没有 State ⇒ 此前采集**只能由前端手动触发**，

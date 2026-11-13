@@ -9,6 +9,7 @@
   "excludes": [
     ".trae/**/*",
     ".qoder/**/*",
+    ".qoder-tmp/**/*",
     ".worktrees/**/*",
     "node_modules/**/*",
     "dist/**/*",

@@ -68,9 +68,12 @@ use crate::commands::recommendation_cron::{
     list_recommendation_crons_core, list_trend_screening_crons_core,
     toggle_recommendation_cron_core, toggle_trend_screening_cron_core,
 };
+use crate::commands::stock_analysis::{run_daily_snapshot_sweep, snapshot_sweep_date};
 use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
+use axagent_astock_data::AStockClient;
 use axagent_dao::repo::stock_evolution_history as evo_hist;
+use axagent_entities::financial_snapshots;
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::stock_analysis::StockAnalysisProvider;
@@ -111,11 +114,18 @@ pub struct HostStockAnalysis {
     /// 与 `AppState.cron_job_store` **同一个**实例（`Arc` 共享，不是第二份任务表）——
     /// 定时任务的读改必须与调度器、宿主命令看到同一份状态，否则插件建的任务永不触发。
     cron_job_store: Arc<CronJobStore>,
+    /// F1 余三条（#35）：`sweep_daily_snapshots` 是触发口，真正的采集走 vendor 网络
+    /// ⇒ 执行体 `run_daily_snapshot_sweep` 仍留宿主（后台定时服务同源复用），本层只传客户端。
+    astock_client: Arc<AStockClient>,
 }
 
 impl HostStockAnalysis {
-    pub fn new(db: DatabaseConnection, cron_job_store: Arc<CronJobStore>) -> Self {
-        Self { db, cron_job_store }
+    pub fn new(
+        db: DatabaseConnection,
+        cron_job_store: Arc<CronJobStore>,
+        astock_client: Arc<AStockClient>,
+    ) -> Self {
+        Self { db, cron_job_store, astock_client }
     }
 
     /// 无参 op 的入参闸：只收 `null` / `{}`。
@@ -466,5 +476,66 @@ impl StockAnalysisProvider for HostStockAnalysis {
             .await
             .map_err(|e| Self::cron_err("delete_pool_scan_cron", e))?;
         Ok(Value::Null)
+    }
+
+    /// 读 op：列估值快照原始行（F1 余三条 #35）。
+    ///
+    /// 与被退役的宿主命令 `list_financial_snapshots` 同一查询形状（同一份 filter / 排序）；
+    /// `start` / `end` 是 `snapshot_date` 闭区间（YYYY-MM-DD，缺省不筛）。实体行整块透传，
+    /// 不上收 DTO（形状权威在 entities，照 `list_recent_mainlines` 先例）。
+    async fn list_financial_snapshots(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            stock_code: String,
+            #[serde(default)]
+            start: Option<String>,
+            #[serde(default)]
+            end: Option<String>,
+        }
+        let req: Input = serde_json::from_value(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::list_financial_snapshots 参数解析失败: {e}。\
+                 期望 {{stock_code, start?, end?}}"
+            ))
+        })?;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+        let mut q = financial_snapshots::Entity::find()
+            .filter(financial_snapshots::Column::StockCode.eq(req.stock_code));
+        if let Some(s) = req.start {
+            q = q.filter(financial_snapshots::Column::SnapshotDate.gte(s));
+        }
+        if let Some(e) = req.end {
+            q = q.filter(financial_snapshots::Column::SnapshotDate.lte(e));
+        }
+        let rows =
+            q.order_by_asc(financial_snapshots::Column::SnapshotDate).all(&self.db).await.map_err(
+                |err| {
+                    AxAgentError::Provider(format!(
+                        "stock.analysis::list_financial_snapshots 查询失败: {err}"
+                    ))
+                },
+            )?;
+        serde_json::to_value(rows).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::list_financial_snapshots 序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 写 op：触发每日快照采集（F1 余三条 #35）。
+    ///
+    /// **触发口，不是执行体**：`run_daily_snapshot_sweep` 留宿主（后台定时服务
+    /// `start_daily_snapshot_sweep` 复用同一实现体），归属日计算与宿主命令共用
+    /// `snapshot_sweep_date`（盘中触发绝不把半日数据当收盘值落盘）。入参 `{}`。
+    async fn sweep_daily_snapshots(&self, input: Value) -> Result<Value> {
+        Self::require_no_params("sweep_daily_snapshots", &input)?;
+        let date = snapshot_sweep_date();
+        let summary =
+            run_daily_snapshot_sweep(&self.astock_client, &self.db, &date).await.map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::sweep_daily_snapshots 失败: {e}"))
+            })?;
+        serde_json::to_value(summary).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::sweep_daily_snapshots 序列化失败: {e}"))
+        })
     }
 }

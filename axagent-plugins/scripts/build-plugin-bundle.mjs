@@ -1174,8 +1174,7 @@ function stockManifest({ version, binaryName, sha256 }) {
       },
       {
         name: "stock_get_international_stock_kline",
-        description:
-          "获取国际个股 K 线序列（固定未复权，与宿主命令同档；经宿主 market.quote 接缝，只读）",
+        description: "获取国际个股 K 线序列（固定未复权，与宿主命令同档；经宿主 market.quote 接缝，只读）",
         command: "worker://stock_get_international_stock_kline",
         inputSchema: {
           type: "object",
@@ -1253,8 +1252,16 @@ function stockManifest({ version, binaryName, sha256 }) {
               description: "股票代码数组，如 600519 / 000001",
             },
             perStockTimeoutMs: { type: "integer", minimum: 1, description: "单只取数超时（毫秒），缺省 8000" },
-            totalTimeoutMs: { type: "integer", minimum: 1, description: "整体超时（毫秒）；与宿主同口径：接受但不生效" },
-            maxFailures: { type: "integer", minimum: 0, description: "失败数超过该阈值即提前终止；缺省 0 = 不提前终止" },
+            totalTimeoutMs: {
+              type: "integer",
+              minimum: 1,
+              description: "整体超时（毫秒）；与宿主同口径：接受但不生效",
+            },
+            maxFailures: {
+              type: "integer",
+              minimum: 0,
+              description: "失败数超过该阈值即提前终止；缺省 0 = 不提前终止",
+            },
           },
           required: ["codes"],
         },
@@ -1305,7 +1312,8 @@ function stockManifest({ version, binaryName, sha256 }) {
       },
       {
         name: "stock_compare_trade_with_analysis",
-        description: "对比实际交易出场价与交易前分析的预测价位（经宿主 trading.engine 接缝；交易不存在或无前置分析时报错）",
+        description:
+          "对比实际交易出场价与交易前分析的预测价位（经宿主 trading.engine 接缝；交易不存在或无前置分析时报错）",
         command: "worker://stock_compare_trade_with_analysis",
         requiredPermission: "read-only",
         inputSchema: {
@@ -1355,6 +1363,43 @@ function stockManifest({ version, binaryName, sha256 }) {
           },
           required: ["stockCode", "priority"],
         },
+      },
+      // ── F1 余三条（#35 / #321）：宿主同名命令同批退役，走新 op ──
+      // `stock_list_financial_snapshots` 读本地快照表原始行，与 `stock_get_financials`
+      // （vendor 财报）不等价 ⇒ 独立 op；`stock_refresh_trading_calendar` 的东财报表
+      // 2026-09-27 起已下线，与被退役宿主命令等价失败；`stock_sweep_daily_snapshots`
+      // 是触发口（执行体 `run_daily_snapshot_sweep` 留宿主，长任务不进 worker 帧）。
+      // 档位按接缝 op 的读写性质（#311 同口径）：两条读 op 显式 read-only，写 op
+      // 走宿主 `required_permission_for` 判 Write ⇒ 必须 workspace-write。
+      {
+        name: "stock_list_financial_snapshots",
+        description: "列估值快照原始行（本地 financial_snapshots 表某股在区间内的全部快照；与财报接口不等价）",
+        command: "worker://stock_list_financial_snapshots",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "6 位股票代码，如 600519" },
+            start: { type: "string", description: "起始日期（含，YYYY-MM-DD），缺省不设下界" },
+            end: { type: "string", description: "结束日期（含，YYYY-MM-DD），缺省不设上界" },
+          },
+          required: ["stockCode"],
+        },
+      },
+      {
+        name: "stock_refresh_trading_calendar",
+        description: "从东方财富 API 刷新交易日历（该报表已下线，调用返回与退役宿主命令相同的错误）",
+        command: "worker://stock_refresh_trading_calendar",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_sweep_daily_snapshots",
+        description: "触发每日收盘快照采集（网络抓取 + 落 financial_snapshots 表；盘中调用取上一交易日口径）",
+        command: "worker://stock_sweep_daily_snapshots",
+        requiredPermission: "workspace-write",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
       },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，

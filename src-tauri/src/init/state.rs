@@ -1834,6 +1834,7 @@ pub async fn create_app_state_with_resource_dir(
             Arc::new(crate::init::stock_analysis_service::HostStockAnalysis::new(
                 sea_db.clone(),
                 cron_job_store.clone(),
+                astock_client.clone(),
             ));
         match axagent_harness::get_capability_registry().register_stock_analysis(provider) {
             Ok(_) => tracing::info!("stock.analysis 接缝已注册 (BuiltIn)"),

@@ -263,6 +263,36 @@ pub trait StockAnalysisProvider: Send + Sync {
             "StockAnalysisProvider::delete_pool_scan_cron 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── F1 余三条（#35）：estimation 快照读面 + 快照采集触发面 ────────────────
+    // `list_financial_snapshots` 读宿主本地 `financial_snapshots` 表原始行——
+    // 与 `market.quote::get_financials`（vendor 财报）**不等价**，形状权威是
+    // entities 的 `financial_snapshots::Model` ⇒ 照 `list_recent_mainlines` 先例
+    // 「实体行数组整块透传」，harness 不上收 DTO。`sweep_daily_snapshots` 是
+    // **触发口**：执行体 `run_daily_snapshot_sweep` 留宿主（还被后台定时服务复用），
+    // 长任务不搬进 worker 帧。入参 snake_case 接缝风格（同 `opc.store`）。
+
+    /// 列估值快照原始行（`list_financial_snapshots` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"stock_code": str, "start": str?, "end": str?}`（`start`/`end` 为
+    /// `YYYY-MM-DD` 快照日期闭区间，缺省不筛）；出参 = `financial_snapshots`
+    /// 实体行数组（按 `snapshot_date` 升序，与被退役的宿主命令原样同形状）。
+    async fn list_financial_snapshots(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::list_financial_snapshots 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 触发每日快照采集（`sweep_daily_snapshots` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参 `{}`；出参 = 采集总结串（与被退役的宿主命令同形状）。归属日 =
+    /// 最近一个**已完成**交易日的计算留宿主（盘中触发绝不把半日数据当收盘值落盘）。
+    async fn sweep_daily_snapshots(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::sweep_daily_snapshots 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -295,6 +325,13 @@ mod tests {
                 futures::executor::block_on(stub.list_recent_mainlines(Value::Null)),
             ),
             ("stock_factor", futures::executor::block_on(stub.stock_factor(Value::Null))),
+            ("list_financial_snapshots", {
+                futures::executor::block_on(stub.list_financial_snapshots(Value::Null))
+            }),
+            (
+                "sweep_daily_snapshots",
+                futures::executor::block_on(stub.sweep_daily_snapshots(Value::Null)),
+            ),
             ("pipeline_history", futures::executor::block_on(stub.pipeline_history(Value::Null))),
             (
                 "pipeline_run_detail",

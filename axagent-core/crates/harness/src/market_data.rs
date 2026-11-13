@@ -741,6 +741,17 @@ pub trait MarketDataProvider: Send + Sync {
             "MarketDataProvider::market_list_page 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 拉取交易日历节假日序列（`refresh_trading_calendar` op）—— 读性质的网络请求，
+    /// 无权限闸。缺省实现报「不支持」；内置实现透传 `harness::trading_calendar::fetch_holiday_calendar`。
+    ///
+    /// ⚠ 既存状态（2026-09-27 起）：数据源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线，
+    /// 被指数日 K 自证取代 —— 本 op 保持与被退役宿主命令**等价的失败行为**，不修功能。
+    async fn refresh_trading_calendar(&self) -> Result<Vec<String>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::refresh_trading_calendar 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── MarketDataStreamer Trait (P3: WebSocket 升级架构占位) ────────────────

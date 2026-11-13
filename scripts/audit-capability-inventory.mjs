@@ -35,7 +35,7 @@
 //   （其文件末尾的 main guard 保证，该守卫在它自己的注释里叫「阻断 2」）。
 //   ⚠ 反之，扫描面三常量（`K1_ROOTS` / `K1_IGNORE` / `HARNESS_PREFIX`）在主脚本里是
 //     `const` 而非 `export const` ⇒ 无法 import，本脚本只能逐字抄一份并在此互指
-//     （对面是 `check-capability-register.mjs:195-199`）。改任一侧必须同改另一侧，否则
+//     （对面是 `check-capability-register.mjs:230-231`）。改任一侧必须同改另一侧，否则
 //     「同口径」这句声明就是假的。#61 之所以不顺手把它们改成 export：本次任务禁改主脚本
 //     （另有会话正在其中加功能）——拔第二套解析器不能以制造第三处并发编辑为代价。
 //
@@ -53,7 +53,7 @@ import { isTestDoublePath, implTraitOf, computeK2Readings } from './check-capabi
 const argv = process.argv.slice(2);
 const argVal = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; };
 
-// ── K1 扫描面常量（与 check-capability-register.mjs:195-199 逐字同源；理由见文件头）──
+// ── K1 扫描面常量（与 check-capability-register.mjs:230-231 逐字同源；理由见文件头）──
 export const K1_ROOTS = ['axagent-ai', 'axagent-core', 'axagent-infra', 'axagent-kit', 'axagent-plugins', 'axagent-quant', 'axagent-runtime', 'src-tauri'];
 export const K1_IGNORE = new Set(['target', 'node_modules', 'gen', 'tests']);
 export const HARNESS_PREFIX = 'axagent-core/crates/harness/';
@@ -421,7 +421,7 @@ function runAudit() {
 - **+1 的判据分支 = impl 正则会否跨行**：定案沿用门禁 \`implTraitOf\`（逐行、不跨行），因此漏一条多行 impl 头——
   \`axagent-runtime/crates/runtime-core/src/conversation.rs:2024\`：\`impl<C: ApiClient + Send, T: ToolExecutor + Send + 'static>\` 换行后才写全路径 \`axagent_harness::runtime_types::conversation::ConversationRuntimeHost\`。
   census 系的 \`[^;{=]*?\` 版本能跨行 ⇒ 会多数这一条（今天该配方 = 235，定案 = ${K1.declaredExternalCount}）。
-  **本脚本不为此引进第二套 impl 正则**（禁区 12）；要收这一条只能改 \`IMPL_LINE_RE\` 本体（\`check-capability-register.mjs:343\`，另有会话持有该文件）⇒ 记为待决策项交 leader。
+  **本脚本不为此引进第二套 impl 正则**（禁区 12）；要收这一条只能改 \`IMPL_LINE_RE\` 本体（\`check-capability-register.mjs:390\`，另有会话持有该文件）⇒ 记为待决策项交 leader。
 - **定案读数（可机器复跑）**：\`k1DeclaredExternalImplTraitCount = ${K1.declaredExternalCount}\`。复跑：
   \`node scripts/audit-capability-inventory.mjs --out <仓外路径>\` 看同名那一行；恒等式
   \`${K1.externalAllCount}（第五道门 k1.externalImplTraits） − ${K1.undeclaredExt.length}（§1.1 无声明面名单） = ${K1.declaredExternalCount}\`，

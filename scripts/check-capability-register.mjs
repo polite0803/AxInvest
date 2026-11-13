@@ -28,7 +28,7 @@
 //   anchors[].check ∈ registryCommandCount registryModuleCount registryUnassigned registryFileLineCount
 //     registryBoundaryCount registryDomainCount frontendVolume frontendDirVolume l1ForeignBlockers
 //     k1RsFileCount k1PubTraitCount k1DeclaredExternalImplTraitCount remoteSeamRegistryCount registerGroupSum manual
-//     k2KeyedHits commandNameSetCount      ← #57 / #58（2026-11-02 同批新增，声明清单见 ANCHOR_CHECK_KINDS_DECLARED）
+//     k2KeyedHits commandNameSetCount agentCommandFaceCount      ← #57 / #58 / #306（声明清单见 ANCHOR_CHECK_KINDS_DECLARED）
 //   entries[].check ∈ implementorCount seamExists evidenceOnly manual。
 //   ⚠ 为什么登记项的**身份键是 seamId / trait 名而不含行号**，行号只出现在 evidence 锚点里：
 //   `.i18n-allowlist.json` 拿行号当键、随编辑整体腐烂是前车之鉴（见 check-i18n-exemption-budget.mjs 头注）。
@@ -214,7 +214,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { spawnSync } from "node:child_process";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { REG_PATH, parseRegistry, domainOf, unassigned } from "./lib/command-domains.mjs";
+import { REG_PATH, parseRegistry, domainOf, unassigned, scanAgentCommandFace, AC_NO_DOMAIN_BUCKET } from "./lib/command-domains.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -248,6 +248,7 @@ const ANCHOR_CHECK_KINDS_DECLARED = [
   "k2KeyedHits", // #57：K2 键控面读数（value=强档 trait 数 / value2=弱档）——登记必须 hard:false
   "commandNameSetCount", // #58：契约 A 名集合数 == 产物条目数 == 登记值（三方对齐）
   "k1DeclaredExternalImplTraitCount", // #61：K1 + **有声明面**的外部实现者 trait 数（两趟法，与 audit 脚本 scanK1Traits 同源）
+  "agentCommandFaceCount", // #306：智能体工具面 = `#[agent_command]` 标注计数（value=全扫描面标注条数 / value2=非宿主根条数）
 ];
 
 // DOMAINS 逐字抄自 scripts/audit-l1-blockers.mjs:64-79（152/28 与 293/84 873 的基线出处）
@@ -833,6 +834,19 @@ export function reconcile(register, readings, planText) {
         // 它不改 `k2TraitFaces`（51 / manual / hard:false）的现值与口径，升 hard 属 #54。
         const k = readings.k2;
         mismatch = !k ? "K2 读数缺失（扫描面未产出）" : (cmpNum(k.strongHits, a.value, " 强") ?? cmpNum(k.weakHits, a.value2, " 弱"));
+        break;
+      }
+      case "agentCommandFaceCount": {
+        // #306：智能体工具面 = `#[agent_command]` 属性标注的条数。存在理由——本门原读数全部钉在
+        //   **命令注册面**（parseRegistry 逐行）上；而 LLM 实际可调用的工具面由宏的 `inventory::submit!`
+        //   在编译期收集，源码里没有命令名字符串 ⇒ 「grep 不到消费方」恒真、不证明无人使用。删一批标注
+        //   时 commandTotal 会红，但「这些命令原本是不是工具」门此前一个数都不出。
+        //   value=扫描面标注总数 · value2=**非宿主根**条数（当前恒 0：插件命名命令经
+        //   `build_plugin_command_index` 并入索引、不走 inventory ⇒ 这个 0 是要钉住的锚，插件侧真接入
+        //   标注时必须显式判红并登记，不许静默变化）。
+        const ac = readings.agentCommand;
+        mismatch = !ac ? "智能体工具面读数缺失（本门未出数 ⇒ 不是登记错，是判据没落地）"
+          : (cmpNum(ac.total, a.value, " 条标注") ?? cmpNum(ac.nonHost, a.value2, ` ${a.value2Label ?? "条非宿主根标注"}`));
         break;
       }
       case "remoteSeamRegistryCount":
@@ -1738,6 +1752,8 @@ function fixture() {
       // #57 / #58 新增的两类 check（fixture 侧必须与真实表同档：k2KeyedHits=hard:false、commandNameSetCount=hard:true）
       { id: "k2Keyed", label: "K2 键控面（强/弱）", value: 3, value2: 1, check: "k2KeyedHits", hard: false },
       { id: "commandNameSet", label: "契约 A 名集合=产物条目数", value: 10, check: "commandNameSetCount", hard: true },
+      // #306 智能体工具面：fixture 取「宿主 7 条 / 非宿主根 0 条」，与真实表同档 hard:true
+      { id: "agentCommandFace", label: "智能体工具面（标注总数 / 非宿主根）", value: 7, value2: 0, value2Label: "条非宿主根", check: "agentCommandFaceCount", hard: true },
       // ⚠ #207 的前端反向软锚点 feForeignReverse **刻意不进通用 fixture**：它 check:"manual"，进 fixture
       //   会被「覆盖度反向校验」认账、逼着新增一类 check ⇒ 与本设计相反（它不占机器复检名额，对照走
       //   feForeignRecomputeReport 的「只报告」档）。它的用例在 ㉙ 系列自配表与读数。
@@ -1759,6 +1775,7 @@ function fixture() {
     k1: { rsFiles: 12, pubTraits: 4, externalImplTraits: 7, declaredExternalTraits: 3 },
     k2: { strongHits: 3, weakHits: 1, strongTraits: ["TraitOne", "TraitTwo", "TraitThree"], weakTraits: ["TraitFour"], formCounts: { "container-map": 2, "container-seq": 1, "self-key-filter": 1 }, scannedTraits: 4, implTypesKnown: 2 },
     commandNames: { definedCount: 10, registeredNameCount: 10, entriesCount: 10, unregistered: [], orphanRegistered: [], scannedFiles: 3 },
+    agentCommand: { total: 7, host: 7, nonHost: 0, domainCount: 2, byDomain: { finance: 5, general: 2 }, byRoot: { "src-tauri": 7 }, roots: { "src-tauri": { total: 7, byDomain: { finance: 5, general: 2 } } } },
     implementors: { TraitOne: 2 },
     remoteSeams: ["a.one"],
     seamRegistryText: 'const X = "a.one";',
@@ -1811,6 +1828,11 @@ const ANCHOR_CHECK_NEGATIVE_CASES = [
   { check: "commandNameSetCount", id: "commandNameSet", tier: "hard", mutate: (f) => { f.readings.commandNames.definedCount = 9; } },
   { check: "commandNameSetCount", id: "commandNameSet", tier: "hard", mutate: (f) => { f.readings.commandNames.entriesCount = 11; } },
   { check: "commandNameSetCount", id: "commandNameSet", tier: "hard", mutate: (f) => { f.readings.commandNames = null; } },
+  // #306 智能体工具面：标注数掉一条（= 少一条 LLM 可调用工具）必红 · 非宿主根从 0 变 1 必红
+  //   （插件侧接入 inventory 标注是要显式登记的架构变化，不许静默）· 整份读数缺失必红。
+  { check: "agentCommandFaceCount", id: "agentCommandFace", tier: "hard", mutate: (f) => { f.readings.agentCommand.total = 6; } },
+  { check: "agentCommandFaceCount", id: "agentCommandFace", tier: "hard", mutate: (f) => { f.readings.agentCommand.nonHost = 1; } },
+  { check: "agentCommandFaceCount", id: "agentCommandFace", tier: "hard", mutate: (f) => { delete f.readings.agentCommand; } },
 ];
 
 function runSelftest() {
@@ -1980,6 +2002,46 @@ function runSelftest() {
     check(st2.ok && st2.anchored.includes(1), "正控⑯b：出现行与 token 同行 ⇒ 健康且只放行该行");
     const empty = alsoAtRegionStatus(["只有 token 没有数", "填充"], { startLine: 1, endLine: 2, mustContain: ["只有 token 没有数"] }, "1541");
     check(!empty.ok && /段内已找不到旧读数/.test(empty.reason), "负控⑯c：段内没有旧读数 ⇒ 即使 token 齐也不得判健康");
+  }
+
+  // 正控⑰ / 负控⑰（#306）：智能体工具面**判据本体**的用例（合成源码、零盘 IO）。断言的是
+  //   「什么算一条标注」；锚点数值档由 ANCHOR_CHECK_NEGATIVE_CASES 的 agentCommandFaceCount 负责，两档分工不同。
+  //   ⚠ 标注名一律用字符串拼接构造（理由见 lib/command-domains.mjs 同段注释）：判据扫的是源码文本，
+  //     完整字面量留在 `.mjs` 里，将来扫描面扩到脚本自身就会自命中。
+  {
+    const AC = "#" + "[agent" + "_command";
+    const L = (...ls) => ls.join("\n");
+    const src = L(
+      "use axagent_agent_macro::agent_command;",
+      `/// 文档示例 ${AC}(domain = "docfake") —— 注释不算`,
+      `//${AC}(domain = "linefake") —— 紧贴的行注释不算`,
+      `${AC}(domain = "finance", safety = Safe)`,
+      `    ${AC}(domain = market_sim)`,
+      `${AC}`,
+      `#[tauri::command]`,
+      `pub async fn demo() {}`,
+      `${AC}(`,
+      `  safety = Safe,`,
+      `)`,
+      `${AC}(domain = "general",`,
+      `  safety = Safe)`,
+    );
+    const ac = scanAgentCommandFace([["src-tauri/src/commands/demo.rs", src]]);
+    check(ac.total === 4, `正控⑰a：真实标注必须计满 4（引号 domain / 裸值 domain / 无 domain 跨行 / 有 domain 跨行各一条），实得 ${ac.total}`);
+    check(ac.byDomain.finance === 1 && ac.byDomain.market_sim === 1 && ac.byDomain.general === 1, `正控⑰b：三种 domain 写法都要归位，实得 ${JSON.stringify(ac.byDomain)}`);
+    check(ac.byDomain[AC_NO_DOMAIN_BUCKET] === 1, "正控⑰c：未声明 domain 必须单列一桶，不许静默并进别的域");
+    check(ac.domainCount === 4, `正控⑰d：domainCount 数的是桶数 4，实得 ${ac.domainCount}`);
+    check(ac.host === 4 && ac.nonHost === 0, "正控⑰e：宿主根分段（src-tauri 归 host）");
+    // 负控⑰a：裸标注（行内无开括号）不得吞掉**下一行**的左括号。旧写法只判 indexOf >= 0，
+    //   这组两行会被配平成属性体 `foo` 并计入未声明桶 ⇒ 读数虚高 1；行内限定后必须 0。
+    check(scanAgentCommandFace([["src-tauri/a.rs", L(AC, "fn foo() {}")]]).total === 0, "负控⑰a：裸标注 + 后续无关左括号 ⇒ 必须 0 条（跨行吞括号即静默虚高）");
+    // 负控⑰b：三种注释形态一律不计（`//!` 模块文档、缩进的 `//`、块注释）。
+    const commentOnly = L(`//! ${AC}(domain = "mod_doc")`, `  // ${AC}(domain = "block")`, `  /* ${AC}(domain = "x") */`);
+    check(scanAgentCommandFace([["src-tauri/b.rs", commentOnly]]).total === 0, "负控⑰b：`//!` / `//` / `/*` 注释形态的标注名一律不计");
+    // 负控⑰c：非宿主根必须单列。真实树当前为 0（插件命名命令走 `build_plugin_command_index`，
+    //   不经 inventory），而锚点 value2 钉的就是这个 0 ⇒ 插件侧真接入标注时必须显式判红，不许静默变化。
+    const plug = scanAgentCommandFace([["axagent-plugins/crates/plugin-stock/src/main.rs", L(`${AC}(domain = "finance")`)]]);
+    check(plug.total === 1 && plug.host === 0 && plug.nonHost === 1, "负控⑰c：插件根标注计入 nonHost，不得并进 host");
   }
 
   // 负控⑭（第 2 条修复）：逐类 anchor check 的「登记≠实测 必被抓出」+ 正控「登记=实测 不假阳性」。
@@ -2641,7 +2703,7 @@ function runSelftest() {
   }
 
   if (fail > 0) { return false; }
-  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· --repin-code 代码锚点重锚（整行定位键唯一才回写 / 零命中与歧义与缺键一律拒写 / 同 token 双条目靠整行键各自解歧 / 默认 dry-run 零写盘 / 内存版与文本版不一致拒写 / 从盘上复检不过回滚 / 判定档照样红）· K2 八形态正负对照（映射型容器强 / 顺序型容器无自述键不升强 / ⑦ 只判弱键控 / ⑧ 无 impl→trait 反查不命中 / k2KeyedHits 永不升硬）· 契约 A 分流（产物滞后专码仍判红且点名 cargo check / 名集合一致才按真漂移 / 名集合低估点名 / 判据不引用产物行数）· planOld.alsoAt（段内放行 / 段外仍红 / 腐烂双报且专码可区分 / 不填该字段逐字等价旧行为 / 越界与无键判腐烂 / --repin-plan 按最小包络重锚且歧义零命中缺键拒写 / 文本版成对定点替换不唯一即整次拒写 / alsoAt 数字 token 同受锚点自洽管辖、挪数字不能拆判据）· k1DeclaredExternalImplTraitCount 两趟语义（站点面 ∩ 声明面、与遍历次序无关、未声明名不计、单趟就地判定必丢条目、读数缺字段不许按 undefined 静默比绿）· K2 ⑥ 接收者收窄（集合接收者进强 / 单槽 setter 与 Option·字段写入不计且不留形态 / 集合标记在窗口内计、出窗不计 / vec![ 与 .insert( 也算集合接收者 / 动词表与 3 行参数窗口未动）· test 块内实现单列（区间 = mod 头行到闭合行两端都含 / 块内外两本账不串 / 同文件多 test mod 边界各自闭合 / 属性后跟 fn 不开区间 / 花括号配平闭合 / 无属性零区间）· 前端反向复算对照 #207（复算相符正控 ㉙a/㉙g · 逐域差额/只改文件数/子进程失败/删锚/判据死亡 五负控 ㉙b–㉙f，全部只报告不判红）· 干净读数零假阳性 全部通过");
+  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· --repin-code 代码锚点重锚（整行定位键唯一才回写 / 零命中与歧义与缺键一律拒写 / 同 token 双条目靠整行键各自解歧 / 默认 dry-run 零写盘 / 内存版与文本版不一致拒写 / 从盘上复检不过回滚 / 判定档照样红）· K2 八形态正负对照（映射型容器强 / 顺序型容器无自述键不升强 / ⑦ 只判弱键控 / ⑧ 无 impl→trait 反查不命中 / k2KeyedHits 永不升硬）· 契约 A 分流（产物滞后专码仍判红且点名 cargo check / 名集合一致才按真漂移 / 名集合低估点名 / 判据不引用产物行数）· planOld.alsoAt（段内放行 / 段外仍红 / 腐烂双报且专码可区分 / 不填该字段逐字等价旧行为 / 越界与无键判腐烂 / --repin-plan 按最小包络重锚且歧义零命中缺键拒写 / 文本版成对定点替换不唯一即整次拒写 / alsoAt 数字 token 同受锚点自洽管辖、挪数字不能拆判据）· k1DeclaredExternalImplTraitCount 两趟语义（站点面 ∩ 声明面、与遍历次序无关、未声明名不计、单趟就地判定必丢条目、读数缺字段不许按 undefined 静默比绿）· K2 ⑥ 接收者收窄（集合接收者进强 / 单槽 setter 与 Option·字段写入不计且不留形态 / 集合标记在窗口内计、出窗不计 / vec![ 与 .insert( 也算集合接收者 / 动词表与 3 行参数窗口未动）· test 块内实现单列（区间 = mod 头行到闭合行两端都含 / 块内外两本账不串 / 同文件多 test mod 边界各自闭合 / 属性后跟 fn 不开区间 / 花括号配平闭合 / 无属性零区间）· 前端反向复算对照 #207（复算相符正控 ㉙a/㉙g · 逐域差额/只改文件数/子进程失败/删锚/判据死亡 五负控 ㉙b–㉙f，全部只报告不判红）· 智能体工具面判据本体 ⑰（引号 / 裸值 / 无 domain 跨行 / 有 domain 跨行四条都计 · `//!`·`//`·`/*` 三档注释不计 · 裸标注不许吞下一行的左括号 · 插件根计入 nonHost 不并进 host）· 干净读数零假阳性 全部通过");
   return true;
 }
 
@@ -2811,6 +2873,9 @@ function collectReadings(register) {
   // 声明面 ∩ 站点面（遍历收齐之后）⇒ 与 `scanK1Traits().declaredExternalCount` 同一集合（#61 定案档）。
   const declaredExternal = declaredExternalTraitNames(externalTraits, pubTraits);
   rd.k1 = { rsFiles: k1Files.length, pubTraits: pubTraits.size, externalImplTraits: externalTraits.size, declaredExternalTraits: declaredExternal.length };
+  // 智能体工具面（#306）：**与 K1/K2 同一份扫描面、同一份内容缓存**（`k2Sources` 由上面同一个循环填），
+  //   不另起遍历、不自写第二套标注正则（判据本体在 lib，`--selftest` 与本门共用同一实现）。
+  rd.agentCommand = scanAgentCommandFace(Object.entries(k2Sources));
   rd.implementors = implementors;
   rd.implementorsTestMod = implementorsTestMod; // #54 §24.5：进 `--dump-readings`，**不进**任何判据分支
 

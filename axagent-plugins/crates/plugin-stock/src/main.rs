@@ -67,6 +67,20 @@ const STOCK_ANALYSIS_SEAM: &str = "stock.analysis";
 /// 自选行情监视列表接缝（本批宿主 `list_watched_quotes` 的取数面）：
 /// 自选列表的权威存储在宿主 `quote_watcher_service`，`list_watched` 只读不设闸。
 const QUOTE_WATCHER_SEAM: &str = "quote.watcher";
+/// 交易引擎接缝（#311）：持仓与交易对比的权威只有宿主持有的 `TradingEngine` 知道。
+/// 本批只用两个读 op（`get_positions` / `compare_trade`），`execute_trade` 那个写 op 不碰。
+const TRADING_ENGINE_SEAM: &str = "trading.engine";
+// ── #311：四条零新 op 的纯智能体工具迁 T2（宿主同名命令同批退役）──
+// 四条前端 `invoke` 全零命中，只活在智能体工具面 ⇒ 按 #273 迁不删能力：
+// 命令名加 `stock_` 前缀（与既有批一致），入参 camelCase、接缝面 snake_case。
+/// 组合风险指标（宿主 `get_portfolio_risk`）：持仓来自接缝，算法跑 `analysis-engine` 权威实现。
+const COMMAND_GET_PORTFOLIO_RISK: &str = "stock_get_portfolio_risk";
+/// 交易出场价与分析预测对比（宿主 `compare_trade_with_analysis`）。
+const COMMAND_COMPARE_TRADE: &str = "stock_compare_trade_with_analysis";
+/// 批量板块联动扫描（宿主 `scan_sector_coherence`）：本体索引 + 逐票行情 + 纯函数扫描。
+const COMMAND_SCAN_SECTOR_COHERENCE: &str = "stock_scan_sector_coherence";
+/// 设置单只股票监控优先级（宿主 `set_quote_watch_priority`）—— **写命令**。
+const COMMAND_SET_QUOTE_WATCH_PRIORITY: &str = "stock_set_quote_watch_priority";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -429,6 +443,39 @@ fn handle_command(
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
         },
+        // ── #311：四条零新 op 的纯智能体工具（宿主同名命令同批退役）──
+        // 两条走 `trading.engine` 读 op、一条走 `market.quote` + 本地纯函数、
+        // 一条走 `quote.watcher` 的写 op。三处可观察行为差见各 helper 的注释。
+        COMMAND_GET_PORTFOLIO_RISK => match portfolio_risk(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_COMPARE_TRADE => {
+            match compare_trade_with_analysis(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_SCAN_SECTOR_COHERENCE => {
+            match scan_sector_coherence(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_SET_QUOTE_WATCH_PRIORITY => {
+            match set_quote_watch_priority(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
         // ── 批 1a（#35）：十二股票 cron 配置命令，一律经 `stock.analysis` 接缝 ──
         // 三条 create 回建好的任务、九条管理面回 `null`（与宿主命令的 `()` 一致）；
         // 插件只透传入参，配置归一/响应形状的权威在宿主无 State 核心里。
@@ -493,6 +540,7 @@ fn declaration() -> FrameResponse {
                 ANALYSIS_RECORD_SEAM.to_string(),
                 STOCK_ANALYSIS_SEAM.to_string(),
                 QUOTE_WATCHER_SEAM.to_string(),
+                TRADING_ENGINE_SEAM.to_string(),
             ],
             capabilities: vec![CapabilityDecl {
                 seam: "tool.set".to_string(),
@@ -1177,7 +1225,7 @@ fn batch_quotes_seam_args(input: &Value) -> Result<Value, (String, String)> {
         (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), message)
     }
     let mut args = serde_json::Map::new();
-    args.insert("codes".to_string(), json!(parse_batch_codes(input)?));
+    args.insert("codes".to_string(), json!(parse_string_array(input, "codes")?));
     for (input_key, seam_key) in [
         ("perStockTimeoutMs", "per_stock_timeout_ms"),
         ("totalTimeoutMs", "total_timeout_ms"),
@@ -1197,21 +1245,22 @@ fn batch_quotes_seam_args(input: &Value) -> Result<Value, (String, String)> {
 
 /// `batch_get_financials` 命令面入参 → 接缝 `batch_get_financials` 载荷：只有 codes 一键。
 fn batch_financials_seam_args(input: &Value) -> Result<Value, (String, String)> {
-    Ok(json!({ "codes": parse_batch_codes(input)? }))
+    Ok(json!({ "codes": parse_string_array(input, "codes")? }))
 }
 
-/// 批量命令的 `codes` 判据：必须是字符串数组（空数组与迁移前一致地放行 ⇒ 空结果）。
-fn parse_batch_codes(input: &Value) -> Result<Vec<String>, (String, String)> {
-    let Some(raw) = input.get("codes") else {
-        return Err((error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "`codes` 缺失".to_string()));
+/// 批量命令的字符串数组判据：必须是字符串数组（空数组与迁移前一致地放行 ⇒ 空结果）。
+/// `key` 由调用方给（`codes` / `conceptIds`），判据与拒绝码只此一份。
+fn parse_string_array(input: &Value, key: &str) -> Result<Vec<String>, (String, String)> {
+    let Some(raw) = input.get(key) else {
+        return Err((error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("`{key}` 缺失")));
     };
-    let codes: Vec<String> = serde_json::from_value(raw.clone()).map_err(|e| {
+    let values: Vec<String> = serde_json::from_value(raw.clone()).map_err(|e| {
         (
             error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
-            format!("`codes` 必须是字符串数组，反序列化失败：{e}"),
+            format!("`{key}` 必须是字符串数组，反序列化失败：{e}"),
         )
     })?;
-    Ok(codes)
+    Ok(values)
 }
 
 /// 调宿主 `market.quote` 的批量 op，整块回传 `BatchResult` 信封。
@@ -1321,13 +1370,219 @@ fn call_analysis_seam(
     }
 }
 
+/// 命令面必填字符串入参：缺失 / 非字符串 / 空白一律 `SEAM_CALL_INVALID_ARGS`。
+///
+/// 判据与 `fetch_market_read` 的必填键档逐字一致（trim 后非空），不在同一插件里立第二套
+/// 「什么算缺失」。
+fn command_str_arg(input: &Value, key: &str) -> Result<String, (String, String)> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("`{key}` 缺失或为空白"))
+        })
+}
+
+/// 调宿主 `trading.engine` 接缝（#311 两条读命令的唯一取数路径）。
+///
+/// 与 `call_analysis_seam` 同形态但**不嵌 `request` 层**：该接缝的分派臂按平铺 snake_case
+/// 键取参（`worker.rs` 的 `deserialize_arg` / `deserialize_as_of_arg`）。
+fn call_trading_seam(
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+    call_chain: &[String],
+    op: &str,
+    args: Value,
+) -> Result<Value, (String, String)> {
+    let reply =
+        peer.call_seam(TRADING_ENGINE_SEAM, op, args, call_chain.to_vec()).map_err(|e| {
+            (
+                error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+                format!("交易引擎接缝（{op}）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| format!("交易引擎接缝（{op}）返回错误但未说明")),
+        )),
+    }
+}
+
+/// 组合风险指标（宿主 `get_portfolio_risk`）：持仓经接缝取，算法跑 `analysis-engine` 权威实现。
+///
+/// 不开放 `asOf`：宿主原命令调的是 `engine.get_positions()`（无时间旅行入参），
+/// 多开一个键就是承诺一条原命令没有的通道（同 `fetch_market_read` 的纪律）。
+fn portfolio_risk(
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    use axagent_analysis_engine::portfolio_risk::PortfolioRiskManager;
+    use axagent_analysis_engine::trading::PositionSummary;
+
+    let raw = call_trading_seam(peer, call_chain, "get_positions", json!({}))?;
+    let positions: Vec<PositionSummary> = serde_json::from_value(raw).map_err(|e| {
+        (
+            error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+            format!("持仓接缝返回形状异常（应为 PositionSummary 数组）：{e}"),
+        )
+    })?;
+    serde_json::to_value(PortfolioRiskManager::compute_from_positions(&positions)).map_err(|e| {
+        (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("组合风险指标序列化失败：{e}"))
+    })
+}
+
+/// 交易出场价 vs 分析预测（宿主 `compare_trade_with_analysis`）。
+///
+/// ⚠ 与宿主原命令的**可观察差异**：接缝 `compare_trade` 走
+/// `compare_trade_vs_prediction_opt`，把「交易记录不存在」与「交易前无已完成分析」
+/// 合并成 `Ok(None)`；宿主原命令是两条不同文案的 `Err`。插件侧拿不到区分依据 ⇒
+/// 统一回一条覆盖两因的错误，**不假装成功**（null 直透会让 LLM 以为对比结果是空）。
+fn compare_trade_with_analysis(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let trade_id = command_str_arg(input, "tradeId")?;
+    let value =
+        call_trading_seam(peer, call_chain, "compare_trade", json!({ "trade_id": trade_id }))?;
+    if value.is_null() {
+        return Err((
+            error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+            "交易记录不存在，或该交易之前没有已完成的分析记录".to_string(),
+        ));
+    }
+    Ok(value)
+}
+
+/// 批量板块联动扫描（宿主 `scan_sector_coherence`）。
+///
+/// 三段与宿主原命令逐字同源：① 本体索引用 `build_sample_index` + `seed_ashare_ontology`
+/// （**不是** `get_sector_coherence_report` 那套 DB 完整版索引 —— 两条命令的成员覆盖不同，
+/// 换索引就是改结果）；② 逐票行情经 `market.quote::get_quote`，单票失败**跳过不报错**；
+/// ③ 扫描与排序跑 `scan_sectors` 权威纯函数（禁区 12：不在插件里复制算法）。
+fn scan_sector_coherence(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    use axagent_analysis_engine::concept_index::{build_sample_index, seed_ashare_ontology};
+    use axagent_analysis_engine::sector_coherence::{StockQuote, scan_sectors};
+    use std::collections::HashMap;
+
+    let concept_ids = parse_string_array(input, "conceptIds")?;
+
+    let mut idx = build_sample_index();
+    seed_ashare_ontology(&mut idx);
+    let mut quotes_by_concept: HashMap<String, Vec<StockQuote>> = HashMap::new();
+    for cid in &concept_ids {
+        let members = idx.members(cid);
+        if members.is_empty() {
+            continue;
+        }
+        let mut quotes = Vec::with_capacity(members.len());
+        for code in &members {
+            // 复用工具面同一取数原语（它收 snake_case `stock_code`）；失败与形状不符都跳过，
+            // 与宿主原命令的 `if let Ok(q)` 同口径。
+            if let Ok((_, value)) = fetch_quote(&json!({ "stock_code": code }), call_chain, peer)
+                && let Ok(quote) = serde_json::from_value::<StockQuote>(value)
+            {
+                quotes.push(quote);
+            }
+        }
+        quotes_by_concept.insert(cid.clone(), quotes);
+    }
+
+    let reports = scan_sectors(&idx, &concept_ids, &quotes_by_concept, unix_now_secs());
+    Ok(Value::Array(reports.into_iter().filter_map(|r| serde_json::to_value(r).ok()).collect()))
+}
+
+/// 监控优先级归一（宿主 `set_quote_watch_priority` 的别名宽容）。
+///
+/// 宿主原命令认 `background` / `bg`，且**任何未知串静默回落 Active**；接缝侧是严格 serde
+/// （只认 `active` / `background`，`bg` 直接 `SEAM_CALL_INVALID_ARGS`）⇒ 宽容必须在插件侧
+/// 补回，否则 LLM 传 `bg` 从「成功」变「报错」，属行为回退。
+fn watch_priority_arg(priority: &str) -> &'static str {
+    match priority {
+        "background" | "bg" => "background",
+        _ => "active",
+    }
+}
+
+/// 设置单只股票监控优先级（宿主 `set_quote_watch_priority`）—— 本批唯一写命令。
+///
+/// 引擎的 `watch` 是 insert ⇒ 对已在监控的码重复调用即覆盖优先级，与宿主原命令的
+/// `set_priority` 同一语义（裁定 K-6 把 `set_priority` 并入 `watch`）。
+///
+/// ⚠ 与宿主原命令的**可观察差异**：`watch` 走 `plan_watch_batch`（单次 / 总量双闸，
+/// 超限**截断不报错**），而 `set_priority` 是无条件 insert ⇒ 集合已满且该码未在监控时，
+/// 原命令会加进去、接缝会静默不加。这里 fail-closed：`applied == 0` 即报错，不假装成功。
+/// 出参保持宿主原命令的 `()`（JSON `null`），不透出 `WatchOutcome`。
+fn set_quote_watch_priority(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let stock_code = command_str_arg(input, "stockCode")?;
+    let priority = command_str_arg(input, "priority")?;
+    let reply = peer
+        .call_seam(
+            QUOTE_WATCHER_SEAM,
+            "watch",
+            json!({
+                "codes": [stock_code],
+                "priority": watch_priority_arg(&priority),
+                "replace": false,
+            }),
+            call_chain.to_vec(),
+        )
+        .map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("自选监视接缝（watch）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => {
+            let value = reply.value.unwrap_or(Value::Null);
+            let applied = value.get("applied").and_then(Value::as_u64).unwrap_or(0);
+            if applied == 0 {
+                return Err((
+                    error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+                    format!(
+                        "监控优先级未生效：`{stock_code}` 未被加入监视集合（集合已满或达单次上限）"
+                    ),
+                ));
+            }
+            Ok(Value::Null)
+        },
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "自选监视接缝（watch）返回错误但未说明".to_string()),
+        )),
+    }
+}
+
+/// 分析时间戳（UNIX 秒）：与宿主原命令的 `chrono::Utc::now().timestamp()` 同量纲。
+/// 本 crate 不依赖 chrono ⇒ 用标准库取同一个秒数，不为一个时间戳引第二个时间库。
+fn unix_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        batch_financials_seam_args, batch_quotes_seam_args, cron_seam_op, kline_route,
-        kline_seam_args, map_analysis_state_to_run_state, map_execution_state_to_run_state,
-        market_read_route, search_news_seam_args, stock_analysis_request,
-        task_run_row_from_analysis_record, task_run_row_from_execution,
+        batch_financials_seam_args, batch_quotes_seam_args, command_str_arg, cron_seam_op,
+        kline_route, kline_seam_args, map_analysis_state_to_run_state,
+        map_execution_state_to_run_state, market_read_route, parse_string_array,
+        search_news_seam_args, stock_analysis_request, task_run_row_from_analysis_record,
+        task_run_row_from_execution, unix_now_secs, watch_priority_arg,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, error_codes, is_plugin_task_run_state};
     use serde_json::{Value, json};
@@ -1599,6 +1854,11 @@ mod tests {
             calls.contains(&super::QUOTE_WATCHER_SEAM),
             "`calls` 未声明 `{}`：`stock_list_watched_quotes` 会在宿主侧被拒。实际: {calls:?}",
             super::QUOTE_WATCHER_SEAM
+        );
+        assert!(
+            calls.contains(&super::TRADING_ENGINE_SEAM),
+            "`calls` 未声明 `{}`：#311 两条交易面命令会在宿主侧被拒。实际: {calls:?}",
+            super::TRADING_ENGINE_SEAM
         );
     }
 
@@ -1921,5 +2181,104 @@ mod tests {
             panic!("codes 缺失必须被拒");
         };
         assert_eq!(code, error_codes::SEAM_CALL_INVALID_ARGS);
+    }
+
+    /// #311：监控优先级的**别名宽容必须留在插件侧**。
+    ///
+    /// 宿主原命令认 `bg` 且把任何未知串静默回落 Active；接缝是严格 serde（`bg` 直接
+    /// INVALID_ARGS）。这条钉住「归一后只剩接缝认得的两个词」，且未知串不许变成错误 ——
+    /// 否则 LLM 传 `bg` / 拼错词会从「成功」变「报错」，属行为回退。
+    #[test]
+    fn watch_priority_arg_keeps_host_alias_tolerance() {
+        for alias in ["background", "bg"] {
+            assert_eq!(watch_priority_arg(alias), "background", "`{alias}` 必须归一成 background");
+        }
+        // 正控：接缝认得的另一个词原样保留。
+        assert_eq!(watch_priority_arg("active"), "active");
+        // 未知串（含大小写变体、空串、中文）一律回落 active，与宿主原命令的 `_ =>` 臂同口径。
+        for unknown in ["Active", "BACKGROUND", "", "high", "低", "bg "] {
+            assert_eq!(watch_priority_arg(unknown), "active", "`{unknown}` 必须静默回落 active");
+        }
+    }
+
+    /// #311：必填字符串入参的判据与 `fetch_market_read` 必填键档一致（trim 后非空）。
+    #[test]
+    fn command_str_arg_trims_and_rejects_blanks() {
+        assert_eq!(
+            command_str_arg(&json!({ "tradeId": " t-1 " }), "tradeId").expect("合法"),
+            "t-1"
+        );
+        for bad in [
+            json!({}),
+            json!({ "tradeId": "" }),
+            json!({ "tradeId": "   " }),
+            json!({ "tradeId": null }),
+            json!({ "tradeId": 7 }),
+        ] {
+            let Err((code, _)) = command_str_arg(&bad, "tradeId") else {
+                panic!("`{bad}` 必须被拒");
+            };
+            assert_eq!(code, error_codes::SEAM_CALL_INVALID_ARGS, "`{bad}` 拒绝码错误");
+        }
+    }
+
+    /// #311：`conceptIds` 与批量 `codes` 共用同一判据（空数组放行 ⇒ 空结果，与宿主命令一致）。
+    #[test]
+    fn parse_string_array_serves_codes_and_concept_ids() {
+        assert_eq!(
+            parse_string_array(&json!({ "conceptIds": [] }), "conceptIds").expect("空数组放行"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            parse_string_array(&json!({ "conceptIds": ["concept_ai"] }), "conceptIds")
+                .expect("合法"),
+            vec!["concept_ai".to_string()]
+        );
+        for bad in [
+            json!({}),
+            json!({ "conceptIds": "concept_ai" }),
+            json!({ "conceptIds": [1] }),
+            json!({ "conceptIds": null }),
+        ] {
+            let Err((code, _)) = parse_string_array(&bad, "conceptIds") else {
+                panic!("`{bad}` 必须被拒");
+            };
+            assert_eq!(code, error_codes::SEAM_CALL_INVALID_ARGS, "`{bad}` 拒绝码错误");
+        }
+    }
+
+    /// #311：四条新命令是**显式分派臂**，不得被三张 fallback 路由表吞掉。
+    ///
+    /// 负控意义：若有人日后把它们塞进 `market_read_route` / `cron_seam_op`，命令会打到
+    /// 相邻数据面上（`stock_set_quote_watch_priority` 尤其危险 —— 它是写命令）。
+    #[test]
+    fn new_t2_commands_are_not_swallowed_by_fallback_tables() {
+        for command in [
+            super::COMMAND_GET_PORTFOLIO_RISK,
+            super::COMMAND_COMPARE_TRADE,
+            super::COMMAND_SCAN_SECTOR_COHERENCE,
+            super::COMMAND_SET_QUOTE_WATCH_PRIORITY,
+        ] {
+            assert!(market_read_route(command).is_none(), "`{command}` 不得进行情只读表");
+            assert!(kline_route(command).is_none(), "`{command}` 不得进 K 线表");
+            assert!(cron_seam_op(command).is_none(), "`{command}` 不得进 cron 表");
+        }
+        // 正控：三张表本身仍然活着（否则上面的 is_none 全是空洞通过）。
+        assert!(market_read_route(super::COMMAND_GET_QUOTE).is_some());
+        assert!(kline_route(super::COMMAND_GET_KLINE).is_some());
+        assert!(cron_seam_op(super::COMMAND_LIST_RECOMMENDATION_CRONS).is_some());
+    }
+
+    /// #311：时间戳量纲必须是**秒**（宿主原命令用 `chrono::Utc::now().timestamp()`）。
+    /// 写成毫秒会让板块报告的 `timestamp` 字段与历史产物差三个数量级。
+    #[test]
+    fn unix_now_secs_is_seconds_not_millis() {
+        let got = unix_now_secs();
+        let direct = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("系统时钟晚于 UNIX 纪元")
+            .as_secs() as i64;
+        assert!((got - direct).abs() <= 2, "与标准库直取偏差过大：{got} vs {direct}");
+        assert!(got < 100_000_000_000, "量纲疑似毫秒：{got}");
     }
 }

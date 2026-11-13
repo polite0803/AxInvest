@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 55 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 59 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -1289,6 +1289,72 @@ function stockManifest({ version, binaryName, sha256 }) {
         command: "worker://stock_list_watched_quotes",
         requiredPermission: "read-only",
         inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      // ── #311：四条零新 op 的纯智能体工具（宿主同名命令同批退役）──
+      // 档位按**接缝 op 的读写性质**定（与 #307 三条同口径）：三条读 op 显式 read-only，
+      // 唯一写命令走 `quote.watcher::watch`（宿主 `required_permission_for` 判 Write）
+      // ⇒ 必须 workspace-write，否则智能体面按 Safe 暴露、确认弹窗形同虚设。
+      // ⚠ 两处与宿主原命令的档位差已登记 PLAN §176：两条读命令宿主标 Caution（纯读，
+      // 降为 read-only）；写命令宿主标 Safe（升为 workspace-write，收紧）。
+      {
+        name: "stock_get_portfolio_risk",
+        description: "获取组合风险指标（持仓经宿主 trading.engine 接缝取，算法跑 analysis-engine 权威实现；无入参）",
+        command: "worker://stock_get_portfolio_risk",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_compare_trade_with_analysis",
+        description: "对比实际交易出场价与交易前分析的预测价位（经宿主 trading.engine 接缝；交易不存在或无前置分析时报错）",
+        command: "worker://stock_compare_trade_with_analysis",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            tradeId: { type: "string", description: "交易记录 id（trades 表主键）" },
+          },
+          required: ["tradeId"],
+        },
+      },
+      {
+        name: "stock_scan_sector_coherence",
+        description: "批量扫描板块联动情况（本体索引 + 逐票实时行情，按联动强度绝对值降序返回报告数组）",
+        command: "worker://stock_scan_sector_coherence",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            conceptIds: {
+              type: "array",
+              items: { type: "string" },
+              description: "概念板块 id 数组，如 concept_ai；空数组返回空结果",
+            },
+          },
+          required: ["conceptIds"],
+        },
+      },
+      {
+        // `priority` **不加 enum**：宿主原命令认 background/bg 且把任何未知串静默回落
+        // Active，加 enum 等于把这条宽容变成 IPC 层拒收（行为回退）。归一在插件侧
+        // `watch_priority_arg`，接缝只收 active/background。
+        name: "stock_set_quote_watch_priority",
+        description: "设置单只股票的实时行情监控优先级（经宿主 quote.watcher 接缝写入监视集合）",
+        command: "worker://stock_set_quote_watch_priority",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "6 位股票代码，如 600519" },
+            priority: {
+              type: "string",
+              description: "监控优先级：background/bg = 后台低频，其余值（含 active）= 活跃高频",
+            },
+          },
+          required: ["stockCode", "priority"],
+        },
       },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，

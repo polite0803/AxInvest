@@ -89,6 +89,8 @@ fn describe_declares_the_tool_seam_and_its_outbound_call() {
     let caps: Vec<(&str, &str)> =
         declaration.capabilities.iter().map(|c| (c.seam.as_str(), c.op.as_str())).collect();
     assert!(caps.contains(&("tool.set", "exec")), "必须声明 tool.set 的执行面：{caps:?}");
+    // 逐字全等而不是「包含」：少声明一条 ⇒ 宿主拒调，多声明一条 ⇒ 出站准入面被悄悄放宽，
+    // 两个方向都必须红。顺序即 `declaration().calls` 的书写顺序。
     assert_eq!(
         declaration.calls,
         vec![
@@ -96,9 +98,11 @@ fn describe_declares_the_tool_seam_and_its_outbound_call() {
             "workflow.run".to_string(),
             "analysis.record".to_string(),
             "stock.analysis".to_string(),
+            "quote.watcher".to_string(),
+            "trading.engine".to_string(),
         ],
         "出站接缝必须逐条声明，否则宿主 handle_call_seam 直接拒调\
-         （行情 + 工作流任务源 + 单股分析记录 + 股票域数据面）"
+         （行情 + 工作流任务源 + 单股分析记录 + 股票域数据面 + 自选监视 + 交易引擎）"
     );
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
@@ -668,6 +672,170 @@ fn command_frame_lists_stock_analysis_records_via_host_seam() {
     let failed = worker.recv_response();
     assert_eq!(failed.kind, ResponseKind::Error);
     assert_eq!(failed.code.as_deref(), Some("TEST_ANALYSIS_RECORD_UNAVAILABLE"));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+/// #311 迁 T2 的组合风险命令：钉「平铺入参 + 出参 camelCase」这两段只有真管道能证的口径。
+///
+/// 空持仓是刻意选的载荷：它让 `compute_from_positions` 走 n=0 分支，
+/// 从而不需要构造 `PositionSummary` 的十个字段就能钉住键名档位。
+#[test]
+fn command_frame_portfolio_risk_calls_trading_seam_flat_and_returns_camel_case() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "stock_get_portfolio_risk", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id("req-risk"),
+    );
+
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "trading.engine");
+    assert_eq!(call.args["op"], "get_positions");
+    // 交易引擎分派臂按平铺 snake_case 键取参，**不嵌 `request` 层**（与 stock.analysis 相反）。
+    assert_eq!(call.args["args"], serde_json::json!({}), "本命令不开放 asOf，入参必须是空对象");
+
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!([]))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["command"], "stock_get_portfolio_risk");
+    assert_eq!(reply["value"]["totalPositions"], 0, "空持仓 ⇒ 0 个头寸：{reply:?}");
+    assert!(reply["value"].get("totalMarketValue").is_some(), "出参必须是 camelCase：{reply:?}");
+    assert!(
+        reply["value"].get("total_positions").is_none(),
+        "snake_case 键不得泄漏到命令出参（禁区 13）：{reply:?}"
+    );
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+/// #311 交易对比：接缝的 `Ok(None)` 在线上是 JSON null，**不是错误帧** ⇒
+/// 插件必须自己把它还原成显式 Err，否则智能体会把「查无此交易」读成「对比成功但没内容」。
+#[test]
+fn command_frame_compare_trade_restores_null_into_an_explicit_error() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "stock_compare_trade_with_analysis",
+            serde_json::json!({ "tradeId": "t-1" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-compare"),
+    );
+
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "trading.engine");
+    assert_eq!(call.args["op"], "compare_trade");
+    assert_eq!(call.args["args"]["trade_id"], "t-1", "命令面 camelCase 必须已译成接缝 snake_case");
+    assert!(call.args["args"].get("tradeId").is_none(), "命令面键不得泄漏进接缝载荷");
+    worker.send_response(
+        &FrameResponse::success(serde_json::Value::Null)
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let missing = worker.recv_response();
+    assert_eq!(missing.kind, ResponseKind::Error, "null 不得被当成功透出");
+    assert_eq!(missing.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_FAILED));
+
+    // 正控：同一个 worker 上再跑一次，有对比结果时必须原样透出（证明上面的红不是帧通道坏了）。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "stock_compare_trade_with_analysis",
+            serde_json::json!({ "tradeId": "t-2" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求"),
+    );
+    let second = worker.recv_request();
+    assert_eq!(second.args["args"]["trade_id"], "t-2");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "tradeId": "t-2", "directionMatched": true }))
+            .with_id(second.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let hit = worker.recv_response();
+    assert_eq!(hit.kind, ResponseKind::Success);
+    let reply = hit.value.expect("命令回执必须带 value");
+    assert_eq!(reply["value"]["directionMatched"], true, "对比结果必须原样透出：{reply:?}");
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+/// #311 监控优先级：钉两处与宿主原命令的可观察差 ——
+/// ① `bg` 这类别名在插件侧补回宽容（接缝严格解析，不补就是行为回退）；
+/// ② 接缝的数量闸会静默截断（`applied=0`），插件必须 fail-closed 报错而不是回成功。
+#[test]
+fn command_frame_watch_priority_keeps_alias_and_fails_closed_when_not_applied() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "stock_set_quote_watch_priority",
+            serde_json::json!({ "stockCode": "600519", "priority": "bg" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-priority"),
+    );
+
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "quote.watcher");
+    assert_eq!(call.args["op"], "watch", "set_priority 已并入 watch（裁定 K-6），不得另立 op");
+    assert_eq!(call.args["args"]["codes"], serde_json::json!(["600519"]));
+    assert_eq!(call.args["args"]["priority"], "background", "`bg` 必须在插件侧译成接缝认的词");
+    assert_eq!(call.args["args"]["replace"], false, "改优先级不得清空既有监视集合");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "requested": 1, "applied": 0 }))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let truncated = worker.recv_response();
+    assert_eq!(truncated.kind, ResponseKind::Error, "applied=0 是被数量闸截断，不是成功");
+    assert_eq!(truncated.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_FAILED));
+
+    // 正控：真的加进去了 ⇒ 回 null（宿主原命令回 `()`，不透出 WatchOutcome）。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "stock_set_quote_watch_priority",
+            serde_json::json!({ "stockCode": "300750", "priority": "active" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求"),
+    );
+    let second = worker.recv_request();
+    assert_eq!(second.args["args"]["codes"], serde_json::json!(["300750"]));
+    assert_eq!(second.args["args"]["priority"], "active");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "requested": 1, "applied": 1 }))
+            .with_id(second.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let applied = worker.recv_response();
+    assert_eq!(applied.kind, ResponseKind::Success);
+    let reply = applied.value.expect("命令回执必须带 value");
+    assert!(reply["value"].is_null(), "出参须与宿主原命令的 `()` 同形：{reply:?}");
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);

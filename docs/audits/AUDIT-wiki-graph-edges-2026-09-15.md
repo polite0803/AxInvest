@@ -288,7 +288,7 @@ F4 的价值在初稿里写的是「一举解决 R1/R2/R3」。**R1/R2/R3 既然
 - 失效**完全依赖调用方主动** `invalidate_cache`，而全仓只有 **2 个调用点**
   （`src/commands/knowledge_source.rs:221` 与 `:245`，都是知识源同步路径）；
 - 前端 `WikiGraphPage.tsx:131` **只调 `get_wiki_graph_cached`**，
-  `invalidate_wiki_graph_cache` 命令**已注册但前端零调用**（`register_commands.rs:1435`）——
+  `invalidate_wiki_graph_cache` 命令**已注册但前端零调用**（`register_commands.rs`）——
   属「有命令、无调用方」的断链。
 
 ⇒ `935fabab`（OPC wiki）的 15 篇笔记是在**未经 knowledge_source 同步**的路径下写入的，

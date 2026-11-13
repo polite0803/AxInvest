@@ -42,7 +42,9 @@
 //! 视为"龙头领涨→从属跟涨"传导模式启动。
 
 use crate::concept_index::ConceptIndex;
-use axagent_harness::market_data::StockQuote;
+// `pub use` 而非 `use`：插件 worker 要自己构造 `scan_sectors` 的行情入参，
+// 而它只依赖本 crate（不直连 harness）⇒ 在此开出引用路径，形态同 `trading.rs` 的 DTO re-export。
+pub use axagent_harness::market_data::StockQuote;
 use std::collections::HashMap;
 
 /// 板块联动报告

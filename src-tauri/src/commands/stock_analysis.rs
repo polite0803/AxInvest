@@ -23,13 +23,12 @@ use axagent_analysis_engine::backtest_feedback;
 use axagent_analysis_engine::portfolio_monitor::{
     self, CorrelationCell, PortfolioDashboard, StressTestBundle,
 };
-use axagent_analysis_engine::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
 use axagent_analysis_engine::position_limits::PositionLimits;
 use axagent_analysis_engine::recommender::{self, RecoPick, RecoResponse};
 use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
 use axagent_analysis_engine::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_analysis_engine::stock_analysis_round::StockAnalysisRound;
-use axagent_analysis_engine::trading::{PositionSummary, TradePredictionComparison};
+use axagent_analysis_engine::trading::PositionSummary;
 use axagent_astock_data::StockQuote;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchResult, BatchRunner, MarketBatchQuery};
@@ -2381,28 +2380,6 @@ pub async fn unwatch_stock_quotes(
     Ok(())
 }
 
-/// P1-2: 设置单只股票的监控优先级
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "设置监控优先级")]
-#[tauri::command]
-pub async fn set_quote_watch_priority(
-    state: State<'_, AppState>,
-    stock_code: String,
-    priority: String,
-) -> Result<(), String> {
-    use axagent_astock_data::realtime_quote::WatchPriority;
-
-    let watcher =
-        state.stock().quote_watcher.get().ok_or_else(|| "实时行情监视器未初始化".to_string())?;
-
-    let pri = match priority.as_str() {
-        "background" | "bg" => WatchPriority::Background,
-        _ => WatchPriority::Active,
-    };
-
-    watcher.set_priority(&stock_code, pri).await;
-    Ok(())
-}
-
 // ── 自定义分析师插件 ──
 
 // dashboard/专家合流（`PLAN-plugin-gap-closure.md` §3）：`list_custom_analysts` 已删除。
@@ -2776,25 +2753,6 @@ pub async fn validate_trade(
         "errors": result.errors,
         "warnings": result.warnings,
     }))
-}
-
-/// 对比实际交易出场价与最近分析预测价位
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "对比交易与分析预测")]
-#[tauri::command]
-pub async fn compare_trade_with_analysis(
-    state: State<'_, AppState>,
-    trade_id: String,
-) -> Result<TradePredictionComparison, String> {
-    let trade = trades::Entity::find_by_id(&trade_id)
-        .one(state.harness.db())
-        .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询交易记录失败: {e}"))
-        })?
-        .ok_or_else(|| ErrorResponse::new(wf_err::INTERNAL).with_detail("交易记录不存在"))?;
-
-    let engine = state.stock().trading_engine.read().await;
-    engine.compare_trade_vs_prediction(&trade).await
 }
 
 // ── Screen Commands ──
@@ -3361,19 +3319,6 @@ pub async fn get_reco_signal_history(
         Some(&stock_list),
     )
     .await
-}
-
-// ── Portfolio Risk ──
-
-/// 获取组合风险指标
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "获取组合风险指标")]
-#[tauri::command]
-pub async fn get_portfolio_risk(
-    state: State<'_, AppState>,
-) -> Result<PortfolioRiskMetrics, String> {
-    let engine = state.stock().trading_engine.read().await;
-    let positions = engine.get_positions().await?;
-    Ok(PortfolioRiskManager::compute_from_positions(&positions))
 }
 
 // ── R2 组合监控 ──

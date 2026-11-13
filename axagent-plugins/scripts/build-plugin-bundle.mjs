@@ -63,9 +63,12 @@ const PLUGIN_SPECS = {
   },
   opc: {
     packageName: "axagent-plugin-opc",
-    // #36 第 1 批只有 worker 骨架：没有前端页面，也没有 `ui.json` 详情槽 ⇒ 两者皆 null。
-    // 第一批真实页面/详情槽接进来时再改这两处（不要为「以后可能用」预留空目录）。
-    webDir: null,
+    // 前端贡献源目录（#301 判据④闭合）：`web/` 下的文件按**相对路径原样**进产物，
+    // 目前只有一页通道探针（pages/index.html，照 stock B8-0 先例）。OPC 的 16 个真实页面
+    // 仍住主壳 src/pages/opc/**（路由声明已交域模块 routes.tsx），迁入本产物属后续批。
+    webDir: path.join("crates", "plugin-opc", "web"),
+    // OPC 无 ui.json 详情槽声明（没有任务源引用 OPC 的 detailSchema）⇒ 保持 null，
+    // 不为「以后可能用」预留空文件。
     uiSchema: null,
     manifest: opcManifest,
   },
@@ -277,7 +280,7 @@ if (check) {
 
 /** 起一次成品 worker：describe 必须回合法声明，shutdown 必须回执并以 0 退出。 */
 async function checkStagedBundle(declared, root) {
-  // 页面自检只在**声明了前端源**的插件上跑：无前端贡献的插件（opc 骨架）连 pages[] 都不许有，
+  // 页面自检只在**声明了前端源**的插件上跑：无前端贡献的插件连 pages[] 都不许有，
   // 否则宿主会去解析一条不存在的资产 —— 那种清单装得上但页面永远打不开。
   if (webRoot) {
     checkDeclaredPages(declared, root);
@@ -1254,7 +1257,9 @@ function stockManifest({ version, binaryName, sha256 }) {
  * `defaultEnabled: true` 的理由与 stock 同一条（第 402 行那段注释）：前端 OPC 站点页 /
  * 仪表盘的博客列表已改走本插件的命名命令，宿主同名命令已删 ⇒ 内置包不默认启用就等于
  * 该功能静默失效（`resolvePluginForCommand` 解析不到插件）。
- * 仍**不写** `pages` / `taskSources` / `uiSchema`：OPC 的页面贡献属后续批。
+ * `pages` 已写（#301 判据④闭合）：一页通道探针证明 pages[] 装载链通；OPC 16 个真实页面
+ * 仍住主壳 src/pages/opc/**，迁入本产物属后续批。
+ * 仍**不写** `taskSources` / `uiSchema`：OPC 没有任务源贡献，也没有 ui.json 详情槽。
  */
 
 function withRequiredPermission(commands) {
@@ -1268,7 +1273,7 @@ function opcManifest({ version, binaryName, sha256 }) {
   return {
     name: "opc",
     version,
-    description: "OPC 域功能包（#36）：worker 通道 + 125 条命名命令（读 74 条 · 写 51 条）",
+    description: "OPC 域功能包（#36）：worker 通道 + 130 条命名命令（读 76 条 · 写 54 条）",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     // ⚠ `write` 是第二批加的：宿主分派层 `worker.rs` 的 `required_permission_for`
     // 给 `("opc.store","publish_blog_post" | "delete_blog_post" | "create_blog_post")`
@@ -1282,6 +1287,10 @@ function opcManifest({ version, binaryName, sha256 }) {
     agents: [],
     defaultEnabled: true,
     worker: { program: path.posix.join("bin", binaryName) },
+    // 前端页面声明（#301）：语义与 stock 段上方四行注释逐字相同（entry 相对安装目录、
+    // 宿主 resolve_page_asset 解析、前端只传 (pluginId, pageId)）。键序同 stock：pages
+    // 插在 worker 与 commands 之间。
+    pages: [{ id: "opc-home", title: "OPC", entry: PAGE_ENTRY, loading: "bundle" }],
     // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
     // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` / `COMMAND_PUBLISH_BLOG_POST` 逐字一致。
     commands: withRequiredPermission([

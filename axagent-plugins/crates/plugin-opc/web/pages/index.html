@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  OPC 插件的 bundle 页面 —— 前端贡献的**通道探针**（#301，照 stock B8-0 同款）。
+
+  这一页的职责只有一条：证明「插件自带的前端资产能被打进产物、按 `pages[]` 声明、
+  由宿主的 `resolve_page_asset` 解析成安装根内的绝对路径、并在页面容器里渲染」这条链是通的。
+  OPC 的 16 个真实页面仍住主壳 `src/pages/opc/**`（页面声明已交域模块 routes.tsx，#260），
+  迁入本插件的构建产物属后续批次 —— 这里刻意**不含脚本**：桥客户端是 TS 源码模块
+  （`src/sdk/pluginClientBridge.ts`，由插件作者 vendored 进自己的构建图），
+  静态页没有构建步骤，写内联脚本只会变成协议的第二份副本。
+
+  装载契约见 `axagent-plugins/crates/plugins/src/types.rs` 的 `PluginPage`：
+  `entry` 是相对安装目录的资产路径，扩展名必须在 html/htm/js/css 白名单内；
+  宿主只认 `(pluginId, pageId)`，前端不得自行拼路径。
+-->
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>OPC 插件</title>
+  </head>
+  <body style="margin:0;padding:16px;font:13px/1.6 system-ui,sans-serif;color:inherit">
+    <h1 style="margin:0 0 8px;font-size:16px">OPC 插件前端通道已打通</h1>
+    <p style="margin:0 0 8px">
+      本页来自插件安装目录内的 <code>pages/index.html</code>，经 <code>pages[]</code>
+      声明、由宿主解析资产路径后装入页面容器。
+    </p>
+    <p style="margin:0;color:#888">
+      OPC 的真实界面（住主壳 <code>src/pages/opc/**</code> 的 16 页）将在后续批次迁入本插件的
+      构建产物；此探针页只验证装载通道，判据④「挪出主仓页面全丢」从此闭合。
+    </p>
+  </body>
+</html>

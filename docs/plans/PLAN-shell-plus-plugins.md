@@ -8859,4 +8859,42 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 | `refresh_trading_calendar`（`stock_analysis.rs:2852`） | 纯网络：`:2853 fetch_holiday_calendar`，零 `State`、零 DB | 该函数是**自由函数非 trait 方法**，且 `axagent_astock_data::calendar` 只是兼容垫片（垫片头注释 `axagent-quant/crates/astock-data/src/calendar.rs:3` 自述「`calendar::` 原路径继续可用」，re-export 体在同文件末行），实体在 `harness/src/trading_calendar.rs:375`（`:377 reqwest::get`）；`worker.rs:1744` 的 `get_earnings_calendar` 是个股财报日历，不同物 ⇒ 三者最易迁的一条 |
 | `sweep_daily_snapshots`（`stock_analysis.rs:4402`） | 网络 + DB 双 IO：`:4416` 同时拿 `astock_client` 与 `harness.db()`、`:4446 watchlist_items::Entity::find()`、`:4494/:4521/:4539/:4553 set_stock_daily_snapshot` 与 `:4568 set_daily_snapshot` | 无臂无 trait 方法 ⇒ 需新 op；⚠ 共用体 `run_daily_snapshot_sweep`（`:4424`）**还被后台定时服务复用**（调用点 `src-tauri/src/init/services.rs:5636`，任务名见同文件 `:108` 的 `start_daily_snapshot_sweep`）⇒ 执行体应留宿主、接缝只做触发口，别把长任务搬进 worker 帧。⚠ 同处既存注释假话：`services.rs:5592` 写「采集此前只能由前端手动调 `sweep_daily_snapshots`」，而 `src/` 下该命令名 **0 命中**（全仓仅 `stock_analysis.rs:4402` 定义 + `register_commands.rs:1178` 自动产物）⇒ 该后台任务今日是**唯一调用方** |
 
-**未做**：① `set_quote_watch_priority` 的出参处置（丢 `WatchOutcome` 还是透传）受 **J3 出参 key 政策未裁**（#125 在途）阻塞；② F6 六条的插件命名命令形状未设计（须保留别名入参），且迁前要先确认 `command_bridge.rs` 的短名解析是否按 `snake_case` 全名匹配；③ `save_analyst_feedback` 载荷里 null 键对**其它**数值读口的影响未盘（本节只证伪了一致性指标那一处）；④ `sweep_daily_snapshots` 的接缝权限档未裁（长任务 + DB 写，倾向 `write`/`execute`，但触发口与执行体分离尚未设计）；⑤ 本节只登记底册，未动任何代码。
+**未做**：① `set_quote_watch_priority` 的出参处置（丢 `WatchOutcome` 还是透传）受 **J3 出参 key 政策未裁**（#125 在途）阻塞；② F6 六条的插件命名命令形状未设计（须保留别名入参），且迁前要先确认 `command_bridge.rs` 的短名解析是否按 `snake_case` 全名匹配；③ `save_analyst_feedback` 载荷里 null 键对**其它**数值读口的影响未盘（本节只证伪了一致性指标那一处）—— **已由 §175 收口（2026-11-13）**；④ `sweep_daily_snapshots` 的接缝权限档未裁（长任务 + DB 写，倾向 `write`/`execute`，但触发口与执行体分离尚未设计）；⑤ 本节只登记底册，未动任何代码。
+
+## §175　#317 quality_metrics 的 null 键读口普查（2026-11-13，只读核查收口，销 §174 未做③）
+
+**结论先行**：写侧确实**主动**产 null 键（不止别名那条），但**全部生产读口与 Rhai 侧都把 null 当作「缺键」** ⇒ 属**载荷卫生**问题，不是数值口径问题；**不加读侧特判**（加了反而会掩盖真缺键，与「不知道就不写那个键」的判据方向相反）。
+
+### 一、写侧（三条路径全部产 null）
+
+- 别名命令 `save_analyst_feedback`（`src-tauri/src/commands/analyst_feedback.rs:132`）的请求体定义在 `src-tauri/src/commands/analyst_feedback.rs:168`（`SaveAnalystFeedbackRequest`）。该结构体里 `bull_score` / `bear_score` / `confidence` 三个字段类型是 `Option<f64>`（`src-tauri/src/commands/analyst_feedback.rs:179` 起），经 `json!` 落成 null。
+- 泛化写侧 `make_feedback_row`（`src-tauri/src/commands/analyst_feedback.rs:517`）主动写 null，共 5 键：`dqi_score`（`src-tauri/src/commands/analyst_feedback.rs:536`）、`node_report_quality`（`src-tauri/src/commands/analyst_feedback.rs:544`）、`tier`（`src-tauri/src/commands/analyst_feedback.rs:549`）、`period`（`src-tauri/src/commands/analyst_feedback.rs:550`）、`analysis_as_of_date`（`src-tauri/src/commands/analyst_feedback.rs:564`）。
+
+⚠ **顺带抓到的既存缺陷（新，未被任何门覆盖）**：`src-tauri/src/commands/analyst_feedback.rs:550` 写 `"period"` 时用的是 **`tier` 变量** —— `make_feedback_row` 的形参只有 `tier: Option<&str>`（`src-tauri/src/commands/analyst_feedback.rs:520`），**没有 period**；调用点 `src-tauri/src/commands/analyst_feedback.rs:450` 传的是 `diagnostics_by_tier[abbr]` 的键名。⇒ `period` 的**值实际是档名**。⚠ 口径限定：本节说「零读者」指的是**`quality_metrics` 载荷内**这两个键，不是全仓 `"tier"` / `"period"` 字符串零命中（那两串在 opc_store / rar_router / plugin-opc / search 等**别的域**大量出现，与此处无关）。按这个限定，`quality_metrics_json` 的全部解析点只有三处 —— `axagent-quant/crates/analysis-engine/src/analyst_evolution.rs:98`、`axagent-quant/crates/analysis-engine/src/node_evolution.rs:249`、`axagent-quant/crates/analysis-engine/src/node_quality.rs:742`（`aggregate_consistency_rates`，循环体逐行 `serde_json::from_str`）—— 三处均只取 `score_consistent` / `direction_consistent` ⇒ `tier` / `period` 确无读者。`tier` 是**待接线的计划字段**而非死键：`axagent-core/crates/harness/src/holding_period.rs:845` 自述「档位信息走 `quality_metrics_json.tier`；要按 (分析师, 档) 分桶得先改读侧聚合」，即写侧已就位、读侧聚合未做。今日无行为影响，处置见本节四。
+
+### 二、读侧（生产四处，无一按「键存在」计数）
+
+1. `axagent-quant/crates/analysis-engine/src/node_quality.rs:672` 的 `push_rate`：`m.get(key).and_then(|x| x.as_bool())` ⇒ null 与缺键同样跳过；口径修正注释与两条负控断言都在同函数下方，锁的就是「缺键不产指标」。
+2. `axagent-quant/crates/analysis-engine/src/node_quality.rs:742` 的 `aggregate_consistency_rates`：只对 `calc_consistency_metrics` **实际产出**的项累加 ⇒ null 不进分母。
+3. `axagent-quant/crates/analysis-engine/src/analyst_evolution.rs:95` 的 `generate_prompt_corrections`：取 `score_consistent` 走 `as_bool()` 再与布尔值合取 ⇒ null 既不触发纠正、也不落入「一致」分支。
+4. `axagent-quant/crates/analysis-engine/src/node_evolution.rs:257`：`m.get("score_consistent").and_then(|v| v.as_bool())` 后判 `== Some(false)` ⇒ null 不命中。
+5. 传递点 `src-tauri/src/commands/analyst_feedback.rs:327`：把各行 `quality_metrics_json` 原文整批喂给第 2 条，无本地解析。
+
+`git grep -n contains_key` 在 quality / metric 生产路径**零命中**（命中的全在测试断言与无关模块）⇒ 当前不存在「按键存在 / 键数」型判据。
+
+### 三、Rhai 读口（§174 未做③ 的最后一环，已闭）
+
+- 转换器：`axagent-core/crates/harness/src/rhai_engine.rs:191` 的 `json_value_to_dynamic`，其 match 首臂逐字把 `serde_json::Value::Null` 映射成 `rhai::Dynamic::UNIT`。
+- 脚本侧：`fn present(x) { type_of(x) != "()" }` 在 18 个 `.rhai` 里各自重复定义（17 个逐字同文，以 `src-tauri/src/commands/portfolio-mgr.rhai:22` 为代表；`src-tauri/src/commands/sim-verify.rhai:48` 版额外把空串也判缺席）。
+- ⇒ `present(null) == false`，与 `present(缺键)` 不可区分且同为「缺席」。代表消费点 `src-tauri/src/commands/portfolio-mgr.rhai:1256` 的 F6 中性化分支因此不会被 null 误触发。
+
+### 四、残余（登记，不立项）
+
+1. null 键的**载荷瘦身**（`skip_serializing_if`）属卫生问题，与口径无关，未做。
+2. `period` / `tier` 两个载荷内无读者的键的处置未做：`period` 是**错值死键**（值是档名，且 `make_feedback_row` 根本没有 period 形参），倾向删除；`tier` 是**待接线的计划字段**（`axagent-core/crates/harness/src/holding_period.rs:845` 已声明它是分桶载体），倾向保留并在「按档分桶」立项时接上读侧聚合。在接线前**不要**把 `period` 当可用字段、也不要按 `tier` 做统计。
+3. 若未来新增按「键存在 / 键数」统计的读口，必须先读本节 —— 那种读口会把 null 计入分母。
+
+### 五、两路只读 lane 中断记账（§174 的取证过程）
+
+- F6 底册 lane（38 次工具调用）与 null 键普查 lane（28 次）**均以「Model response interrupted」结束、未交回报告**。按既有判据「中断 ≠ 结果可用」，两份底册由 leader 接手自做：F6 部分落 §174（含两处判定纠正与一条 lane 归因被证伪），null 键部分即本节。
+- 落笔复核：两次中断后 `git status --porcelain` 除既存 `.codegraph/` `.trae/` 删除与既往未跟踪产物外，**零 M 条目** ⇒ 两路 lane 未写入任何 tracked 文件。

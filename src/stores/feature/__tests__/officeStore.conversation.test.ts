@@ -27,6 +27,7 @@ vi.mock("@/lib/invoke", () => ({
 
 vi.mock("@/lib/errorI18n", () => ({
   translateBackendError: (e: unknown) => String(e),
+  backendErrorText: (e: unknown) => String(e),
 }));
 
 import { useOfficeStore } from "@/stores/feature/officeStore";

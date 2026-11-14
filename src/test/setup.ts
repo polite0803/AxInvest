@@ -2,6 +2,32 @@
 
 import "@testing-library/jest-dom";
 
+// Node 24 自带惰性 webstorage getter（未提供 --localstorage-file ⇒ 恒返回 undefined），
+// 而 vitest 4 的 populateGlobal 对「globalThis 上已存在的键」只转发其白名单 KEYS，
+// localStorage / sessionStorage 不在名单 ⇒ jsdom 的真 Storage 到不了测试全局
+// （347 个测试因此挂：localStorage.clear() 直接抛 TypeError，zustand persist 同源崩）。
+// vitest 的 jsdom 环境在本文件执行前已把真实窗口挂在 globalThis.jsdom ⇒ 在这里重绑。
+{
+  const realWindow = (
+    globalThis as unknown as {
+      jsdom?: { window?: { localStorage?: Storage; sessionStorage?: Storage } };
+    }
+  ).jsdom?.window;
+  if (realWindow?.localStorage && realWindow?.sessionStorage) {
+    const g = globalThis as unknown as Record<string, unknown>;
+    Object.defineProperty(g, "localStorage", {
+      value: realWindow.localStorage,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(g, "sessionStorage", {
+      value: realWindow.sessionStorage,
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
 // jsdom 销毁后 react-dom scheduler 异步回调仍可能访问 window/document，
 // 用 getter 防御 ReferenceError（不可删除的兜底值）
 {

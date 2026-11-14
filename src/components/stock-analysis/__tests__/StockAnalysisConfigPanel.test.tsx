@@ -11,28 +11,28 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const PANEL_PATH = resolve(__dirname, "./StockAnalysisConfigPanel.tsx");
+const PANEL_PATH = resolve(__dirname, "../StockAnalysisConfigPanel.tsx");
 // 组件中立性 A 档：getDefaultVariables 的 b() 默认值声明已下沉到中性 lib，
 // 面板只保留 resolve() 分组结构。抓默认值清单的断言须读此源，抓分组的仍读面板。
-const DEFAULTS_PATH = resolve(__dirname, "../../../src/lib/stock-analysis-defaults.ts");
+const DEFAULTS_PATH = resolve(__dirname, "../../../../src/lib/stock-analysis-defaults.ts");
 const RUST_SETUP_PATH = resolve(
   __dirname,
-  "../../../src-tauri/src/commands/stock_analysis_setup/mod.rs",
+  "../../../../src-tauri/src/commands/stock_analysis_setup/mod.rs",
 );
 /** 变量表权威源：所有模板变量的默认值/描述都定义在这里 */
 const SEED_VARS_PATH = resolve(
   __dirname,
-  "../../../src-tauri/src/commands/stock_analysis_setup/seed_variables.rs",
+  "../../../../src-tauri/src/commands/stock_analysis_setup/seed_variables.rs",
 );
 /** 工作流节点定义（portfolio-mgr 的 input_mapping 在这里） */
 const SEED_WF_PATH = resolve(
   __dirname,
-  "../../../src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs",
+  "../../../../src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs",
 );
 /** portfolio-mgr 的消费点（rhai 顶部的 present() 守卫 = 参数真正被读取的地方） */
 const PORTFOLIO_MGR_RHAI_PATH = resolve(
   __dirname,
-  "../../../src-tauri/src/commands/portfolio-mgr.rhai",
+  "../../../../src-tauri/src/commands/portfolio-mgr.rhai",
 );
 
 /**

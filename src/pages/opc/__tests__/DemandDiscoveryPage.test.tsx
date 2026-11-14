@@ -167,8 +167,9 @@ function renderPage() {
 describe(
   "DemandDiscoveryPage",
   // 重交互用例（多轮 waitFor + antd 浮层）在全套并行的高负载下会超 5s 默认值；
-  // 单文件跑全绿，故只对该 describe 放宽，不动全局 testTimeout。
-  { timeout: 15_000 },
+  // 2026-11-15 已把全局 testTimeout 提到 30s（vite.config.ts），此处钉同值兜底
+  // （describe 级会覆盖全局，将来全局再调小时本文件不会被拉回 5s 墙）。
+  { timeout: 30_000 },
   () => {
     beforeEach(() => {
       vi.clearAllMocks();

@@ -83,6 +83,7 @@ vi.mock("@/lib/invoke", () => ({
 
 vi.mock("@/lib/errorI18n", () => ({
   showBackendError: vi.fn(),
+  backendErrorText: (e: unknown) => String(e),
 }));
 
 vi.mock("../DirectoryImportWizard", () => ({

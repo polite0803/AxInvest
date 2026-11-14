@@ -41,7 +41,10 @@ const { invokeMock, logIpcErrorMock, translateMock, parseMock } = vi.hoisted(() 
   invokeMock: vi.fn(),
   logIpcErrorMock: vi.fn(() => () => {}),
   translateMock: vi.fn(),
-  parseMock: vi.fn(),
+  // 形状真默认值：真 parseBackendError 恒返回对象（ParsedBackendError 字段全可选），
+  // 裸 vi.fn() 返回 undefined 会让 MasterKeyCard 的 `parseBackendError(e).code` 抛
+  // TypeError 并计成 unhandled rejection（EXIT=1）。需要特定 code 的用例自行 override。
+  parseMock: vi.fn(() => ({})),
 }));
 
 vi.mock("@/lib/invoke", () => ({
@@ -52,6 +55,9 @@ vi.mock("@/lib/invoke", () => ({
 vi.mock("@/lib/errorI18n", () => ({
   translateBackendError: translateMock,
   parseBackendError: parseMock,
+  // MasterKeyCard 等组件在 catch 分支调用 backendErrorText；mock 缺导出会让该分支抛
+  // 「No export defined on the mock」并在测试完成后计 unhandled error（EXIT=1）。
+  backendErrorText: (e: unknown) => String(e),
 }));
 
 // `testFailed: "连接失败：{{error}}"` 的替身：把插值参数显式拼进来，便于断言两段原因都在。

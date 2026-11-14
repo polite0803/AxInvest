@@ -128,7 +128,7 @@ afterEach(() => {
 });
 
 describe("分支判据只取 loading（§20.4 E2）", () => {
-  it("schema 页：一次都不调解析命令，entry 作为 schema id 交给动态 UI 那条既有通道", async () => {
+  it("schema 页：一次都不调解析命令，entry 经命名空间化交给动态 UI 通道", async () => {
     const view = render(
       <AntdApp>
         <PluginPageHost pluginId={PLUGIN_ID} page={schemaPage} />
@@ -138,7 +138,9 @@ describe("分支判据只取 loading（§20.4 E2）", () => {
 
     expect(invoke, "schema 页调了 plugin_resolve_page_asset —— 后端那条解析路对 schema 必报错").not.toHaveBeenCalled();
     const channel = view.getByTestId("schema-channel");
-    expect(channel.getAttribute("data-schema-id")).toBe("schema-42");
+    // f0a8a7afa 起 schema 注册通道要求全局唯一 row id（plugin.<pluginId>.<entry>），
+    // 裸 entry 会在多插件间撞名 ⇒ 断言命名空间化形态而非裸 entry。
+    expect(channel.getAttribute("data-schema-id")).toBe("plugin.own-pack.schema-42");
   });
 
   it("bundle 页：只调解析命令，参数只有 (pluginId, pageId)", async () => {

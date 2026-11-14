@@ -15,7 +15,7 @@ vi.mock("@/lib/invoke", () => ({
     console.warn("[ipc]", e);
   },
 }));
-vi.mock("@/lib/errorI18n", () => ({ showBackendError: vi.fn() }));
+vi.mock("@/lib/errorI18n", () => ({ showBackendError: vi.fn(), backendErrorText: (e: unknown) => String(e) }));
 vi.mock("react-i18next", () => ({
   // t 回键名；模板卡片用到的 defaultValue 原样返回
   useTranslation: () => ({

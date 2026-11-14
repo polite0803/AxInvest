@@ -286,6 +286,12 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     globals: true,
+    // 默认 5s 在全套并行（298 文件 + graphAggregate.settle 单文件 135s 抢 CPU）下不够：
+    // 2026-11-15 实测满载 flaky 集在多次全量间漂移（McpServerSettings / SourceManager /
+    // RunsTab.openAction / legacyIndustryPathRedirect / kgFusedScale 轮流撞 5s 墙，
+    // 隔离跑全绿）⇒ 全局放宽到 30s。超时只是失败阈值，不影响通过测试的耗时；
+    // 代价仅是「真挂死」的用例从 5s 变 30s 才报红。
+    testTimeout: 30_000,
     // 使用 forks 池替代默认 threads 池：vitest 4.1.4 的 threads 池在 Windows 下
     // 加载 @/stores 等大依赖树时偶发进程级崩溃（无输出、退出码 1，吞掉 shell 输出），
     // forks 池稳定通过。2026-08-02 实测确认（WorkspaceHub.test.tsx 等）。

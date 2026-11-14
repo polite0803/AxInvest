@@ -19,6 +19,7 @@ vi.mock("@/lib/invoke", async (importOriginal) => {
 });
 vi.mock("@/lib/errorI18n", () => ({
   showBackendError: showBackendErrorMock,
+  backendErrorText: (e: unknown) => String(e),
   // 历史详情列对非 null 的 output 会走翻译；这个导出缺失会让「有 output 的历史行」整棵树崩
   // （D-5 加轮次跳转时才第一次把这条路径跑到）。
   translateBackendError: (s: string) => s,

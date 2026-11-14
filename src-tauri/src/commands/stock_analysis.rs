@@ -1724,28 +1724,10 @@ pub async fn analyze_sentiment_depth(
     ))
 }
 
-/// 运行组合回测（简化版 — 调用 quant crate）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "运行组合回测")]
-#[tauri::command]
-pub async fn portfolio_backtest_run(
-    _state: State<'_, AppState>,
-    config_json: String,
-) -> Result<serde_json::Value, String> {
-    let config: axagent_quant::PortfolioConfig =
-        serde_json::from_str(&config_json).map_err(|e| format!("解析组合配置失败: {e}"))?;
-    let _engine = axagent_quant::PortfolioEngine::new(config.clone()).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    // 返回配置校验结果（实际执行需要前端传入K线）
-    Ok(serde_json::json!({
-        "status": "config_valid",
-        "strategies": config.strategies.len(),
-        "message": "配置校验通过。回测执行需要前端传入K线数据。",
-    }))
-}
+/// 运行组合回测（简化版 — 调用 quant crate）已迁 `trading.engine` 接缝新读 op
+/// `validate_portfolio_config`（#323 子批④，op 名与命令名不同形照 #322
+/// `run_stress_test` 先例）；插件命名命令 `stock_portfolio_backtest_run` 接管
+/// （前端零 invoke 已核）。配置校验 no-op 的三字段响应形状原样下沉宿主 provider。
 
 /// 获取因子分析结果
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取因子分析结果")]
@@ -1894,50 +1876,6 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
         })
         .collect();
     Ok(enriched)
-}
-
-// ── MCP Stock Data Tools ──
-
-/// 返回 stock data MCP 工具定义列表（供前端 MCP 管理页面注册）
-///
-/// P2-8: 合并 `axagent_astock_data::mcp_tools::stock_mcp_tools()` 与
-/// `axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools()`。
-/// G3 产业链工具已从 astock-data 迁回 stock-analysis，需在此合并返回。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取股票MCP工具列表")]
-#[tauri::command]
-pub async fn get_stock_mcp_tools() -> Result<Vec<serde_json::Value>, String> {
-    let mut tools = axagent_astock_data::mcp_tools::stock_mcp_tools();
-    tools.extend(axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools());
-    Ok(tools)
-}
-
-/// 执行 stock data MCP 工具调用
-///
-/// P2-8: 先尝试 G3 产业链工具（位于 stock-analysis crate），未匹配则回退到 astock-data。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "执行股票MCP工具调用")]
-#[tauri::command]
-pub async fn execute_stock_mcp_tool(
-    state: State<'_, AppState>,
-    tool_name: String,
-    arguments: serde_json::Value,
-) -> Result<String, String> {
-    // P2-8: G3 产业链工具优先（纯计算，不依赖 astock_client）
-    if axagent_analysis_engine::mcp_tools::is_industry_chain_tool(&tool_name) {
-        return axagent_analysis_engine::mcp_tools::execute_industry_chain_tool(
-            &tool_name, &arguments,
-        );
-    }
-
-    // 为 compute_valuation 工具注入估值参数配置（复用可导出的注入函数）
-    let arguments =
-        inject_valuation_config_for_tool(&tool_name, state.harness.db(), arguments).await;
-
-    axagent_astock_data::mcp_tools::execute_mcp_tool(
-        &state.stock().astock_client,
-        &tool_name,
-        &arguments,
-    )
-    .await
 }
 
 // ── Backtesting ──
@@ -4135,74 +4073,10 @@ pub async fn set_vendor_status(
     Ok(())
 }
 
-/// 将 NeoData token 保存到 Python 脚本缓存文件
-///
-/// 调用 WorkBuddy 的 connect_cloud_service 获取新 token 后，
-/// 由前端或自动化流程触发此命令将 token 写入脚本缓存。
-/// 后续所有 NeoData 查询自动使用该 token（无需在设置页手动粘贴）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存NeoData token")]
-#[tauri::command]
-pub async fn save_neodata_token(state: State<'_, AppState>, token: String) -> Result<(), String> {
-    if token.is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail("NeoData token 不能为空")
-            .into());
-    }
-    // 1) 写入 Python 脚本缓存
-    axagent_astock_data::vendors::neodata::save_token_to_cache(&token).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("保存 NeoData token 到脚本缓存失败: {e}"))
-    })?;
-
-    // 2) 同时写入共享内存（立即生效，无需重启）
-    if let Some(ref nd) = state.stock().astock_client.neodata_token {
-        *nd.write().await = token.clone();
-    }
-
-    // 3) 持久化到数据库（设置页下次加载时自动读取）
-    use axagent_entities::workflow_template;
-    use sea_orm::EntityTrait;
-    if let Some(t) = workflow_template::Entity::find_by_id("stock-analysis")
-        .one(state.harness.db())
-        .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
-        })?
-    {
-        let mut vars = t
-            .variables
-            .as_ref()
-            .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
-            .unwrap_or_default();
-        let token_val = serde_json::json!({
-            "name": "vendor_neodata_token",
-            "is_secret": true,
-            "defaultValue": null,
-            "value": token,
-            "type": "string",
-        });
-        // 替换或新增
-        if let Some(pos) = vars
-            .iter()
-            .position(|v| v.get("name").and_then(|n| n.as_str()) == Some("vendor_neodata_token"))
-        {
-            vars[pos] = token_val;
-        } else {
-            vars.push(token_val);
-        }
-        let json_str = serde_json::to_string(&vars).unwrap_or_default();
-        use axagent_entities::workflow_template::ActiveModel;
-        use sea_orm::ActiveModelTrait;
-        let mut am: ActiveModel = t.into();
-        am.variables = sea_orm::ActiveValue::Set(Some(json_str));
-        am.update(state.harness.db()).await.map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("持久化 NeoData token 失败: {e}"))
-        })?;
-    }
-
-    Ok(())
-}
+/// 将 NeoData token 保存到 Python 脚本缓存已迁 `stock.analysis` 接缝新写 op
+/// `save_neodata_token`（#323 子批②）：三段效应（脚本缓存 / 共享内存 /
+/// workflow_template 持久化）逐字下沉宿主 provider（`init/stock_analysis_service.rs`），
+/// 插件命名命令 `stock_save_neodata_token` 接管（前端零 invoke 已核）。
 
 /// 保存东财代理地址（设置页配置，运行时热更新，无需重启）
 ///
@@ -7945,10 +7819,11 @@ impl Default for ValuationParams {
     /// 2026-09-22 修复（`AUDIT-300642-run-variance-2026-09-22.md` §9.6 方案 A）：
     /// 此前这里手抄的是**校准前**的旧值（`0.03 / 0.10 / 0.08 / 0.02`），
     /// 与本仓另外三处给出的新值（`0.04 / 0.085 / 0.12 / −0.30`）**分叉**。
-    /// 而本结构体是 `inject_valuation_config_for_tool` 注入 `valuation_config`
-    /// 的**唯一取值来源**，注入对象在 `compute_valuation` 中优先级最高
-    /// （见 `mcp_tools.rs` 的 `ValuationConfig` 解析处）
-    /// ⇒ 前端直调链（WhatIf / 试算）与工作流链会取到**两套不同的估值参数**。
+    /// 本结构体是估值参数的宿主侧权威视图：序列化后持久化到 settings 的
+    /// `valuation_params` 键，经 `get_valuation_params` / `save_valuation_params`
+    /// 与前端互通；`compute_valuation` 侧的 `valuation_config` 注入通道已随
+    /// `execute_stock_mcp_tool` 退役（#323），工作流链扁平参数缺省仍走
+    /// `astock-data` 真相源常量。
     ///
     /// 等式由 `valuation_defaults_are_single_sourced` 测试锁住。
     fn default() -> Self {
@@ -7968,7 +7843,7 @@ impl Default for ValuationParams {
 const VALUATION_PARAMS_KEY: &str = "valuation_params";
 
 /// 从数据库加载估值参数，失败时返回默认值
-/// 供 inject_valuation_config_for_tool 复用
+/// 供 get_valuation_params_inner 复用
 pub async fn load_valuation_params(db: &sea_orm::DatabaseConnection) -> ValuationParams {
     match axagent_dao::repo::settings::get_setting(db, VALUATION_PARAMS_KEY).await {
         Ok(Some(json_str)) => {
@@ -7976,34 +7851,6 @@ pub async fn load_valuation_params(db: &sea_orm::DatabaseConnection) -> Valuatio
         },
         Ok(None) => ValuationParams::default(),
         Err(_) => ValuationParams::default(),
-    }
-}
-
-/// 为 compute_valuation 工具注入估值配置
-/// 如果是 compute_valuation 工具，从数据库加载估值参数并注入到 arguments 中
-pub async fn inject_valuation_config_for_tool(
-    tool_name: &str,
-    db: &sea_orm::DatabaseConnection,
-    arguments: serde_json::Value,
-) -> serde_json::Value {
-    if tool_name == "compute_valuation" {
-        let params = load_valuation_params(db).await;
-        let config = serde_json::json!({
-            "perpetualGrowth": params.perpetual_growth,
-            "discountRate": params.discount_rate,
-            "defaultGrowth": params.default_growth,
-            "minGrowth": params.min_growth,
-            "maxGrowth": params.max_growth,
-            "forecastYears": params.forecast_years,
-            "bondYield": params.bond_yield,
-        });
-        let mut args = arguments;
-        if let Some(obj) = args.as_object_mut() {
-            obj.insert("valuation_config".to_string(), config);
-        }
-        args
-    } else {
-        arguments
     }
 }
 
@@ -8128,11 +7975,11 @@ mod valuation_defaults_tests {
     ///
     /// ## 为什么需要它
     ///
-    /// 本结构体是 `inject_valuation_config_for_tool` 注入 `valuation_config` 的
-    /// **唯一取值来源**，而注入对象在 `compute_valuation` 的参数解析里**优先级最高**
-    /// （`valuation_config`(object) > 扁平参数 > 模块常量）⇒ 它一旦与真相源分叉，
-    /// **前端直调链**（WhatIf / 试算，走注入）与**工作流链**（`input_mapping` 扁平参数）
-    /// 就会对同一标的取到两套估值参数。
+    /// 本结构体是估值参数的宿主侧权威视图（settings `valuation_params` 持久化 +
+    /// `get_valuation_params` 回显），而工作流链扁平参数在 `compute_valuation` 的
+    /// 解析里**缺省回落到同一批模块常量**（`valuation_config`(object) > 扁平参数 >
+    /// 模块常量）⇒ 它一旦与真相源分叉，宿主展示链与**工作流链**（`input_mapping`
+    /// 扁平参数）就会对同一标的取到两套估值参数。
     ///
     /// 历史：此处曾手抄**校准前**的旧值（`0.03 / 0.10 / 0.08 / 0.02`），
     /// 与真相源（`0.04 / 0.085 / 0.12 / −0.30`）分叉达 10 天

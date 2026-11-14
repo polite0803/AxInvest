@@ -339,6 +339,45 @@ impl TradingEngineProvider for HostTradingEngine {
             AxAgentError::Provider(format!("trading.engine::run_stress_test 序列化失败: {e}"))
         })
     }
+
+    // ── #323 T2 五命令批迁（子批④）：组合配置校验读面 ─────────────────────────
+
+    /// 读 op：校验组合回测配置（宿主 `portfolio_backtest_run` 退役后的接缝面）。
+    ///
+    /// ⚠ op 名 ≠ 被退役的宿主命令名（命令叫 `portfolio_backtest_run`，op 跟 trait
+    /// 方法 —— `run_stress_test` 先例）。命令体是**配置校验 no-op**：`PortfolioConfig`
+    /// 反序列化 + `PortfolioEngine::new` 构造即弃（`quant` 是 consumer，宿主 wiring 层
+    /// 依赖它合法；引擎实例不外发、不执行回测）。出参 `{status, strategies, message}`
+    /// 三字段与被退役的宿主命令逐字同形状。
+    async fn validate_portfolio_config(&self, input: Value) -> Result<Value, AxAgentError> {
+        #[derive(serde::Deserialize)]
+        struct Input {
+            config_json: String,
+        }
+        let req: Input = serde_json::from_value(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "trading.engine::validate_portfolio_config 参数解析失败: {e}。\
+                 期望 {{config_json: string}}"
+            ))
+        })?;
+        let config: axagent_quant::PortfolioConfig = serde_json::from_str(&req.config_json)
+            .map_err(|e| {
+                AxAgentError::Validation(format!(
+                    "trading.engine::validate_portfolio_config 解析组合配置失败: {e}"
+                ))
+            })?;
+        let strategies = config.strategies.len();
+        axagent_quant::PortfolioEngine::new(config).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "trading.engine::validate_portfolio_config 配置校验失败: {e}"
+            ))
+        })?;
+        Ok(serde_json::json!({
+            "status": "config_valid",
+            "strategies": strategies,
+            "message": "配置校验通过。回测执行需要前端传入K线数据。",
+        }))
+    }
 }
 
 /// 历史条数钳位：下限 1（0 行没有语义）、上限 [`MAX_TRADES_LIMIT`]。

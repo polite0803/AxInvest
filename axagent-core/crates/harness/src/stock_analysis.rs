@@ -372,6 +372,41 @@ pub trait StockAnalysisProvider: Send + Sync {
                 .into(),
         ))
     }
+
+    // ── #323 T2 五命令批迁（子批②③）：token 写入面 + 决策回测读面 ──────────────
+    // 宿主命令 `save_neodata_token` / `query_decision_backtest` 退役后的接缝面。
+    // 两者的实现都只存在于宿主进程（token 三段效应动宿主文件/内存/DB；决策回测读
+    // `stock_analyses` 表）⇒ 插件够不着，必须走 op。`save_neodata_token` 是写 op
+    // （写脚本缓存 + 改共享内存 + 改 `workflow_template` 变量），权限闸登记在
+    // `worker.rs` 的 `required_permission_for`；`query_decision_backtest` 纯读 ⇒ 无闸。
+
+    /// 保存 NeoData token（`save_neodata_token` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参 `{"token": str}`（非空，op 帧收 snake_case 接缝风格）；出参 `null`
+    /// （与被退役的宿主命令回 `()` 同形状）。三段效应**逐字下沉**宿主 provider：
+    /// ① `save_token_to_cache` 写 Python 脚本缓存；② `astock_client.neodata_token`
+    /// 共享内存立即生效（无需重启）；③ `workflow_template` 的 `stock-analysis`
+    /// 模板变量 `vendor_neodata_token` 替换或新增（`is_secret = true`）。
+    async fn save_neodata_token(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::save_neodata_token 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 查询决策回测分析（`query_decision_backtest` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"limit": u32?}`（缺省 100，宿主 provider 钳 500）；出参 = 手拼投影数组
+    /// **整块透传**（`stockCode` / `stockName` / `analysisDate` / `formulaAction` /
+    /// `llmAction` / `outcome` / `decisionConfidence` / `userTrustDecision`）——形状
+    /// 权威在被退役的宿主命令（`stock_workflow/misc.rs`），照 `list_financial_snapshots`
+    /// 先例 harness 不上收 DTO。查询面：`Outcome` / `DecisionAction` 双 `IS NOT NULL`
+    /// 过滤 + `AnalysisDate` 降序（与被退役的宿主命令逐字等价）。
+    async fn query_decision_backtest(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::query_decision_backtest 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -493,6 +528,16 @@ mod tests {
             (
                 "delete_pool_scan_cron",
                 futures::executor::block_on(stub.delete_pool_scan_cron(Value::Null)),
+            ),
+            // #323 T2 五命令批迁（子批②③）：默认实现同样必须显式报错
+            // （空值会被读成「token 已保存 / 回测记录为空」，那是另一种谎）。
+            (
+                "save_neodata_token",
+                futures::executor::block_on(stub.save_neodata_token(Value::Null)),
+            ),
+            (
+                "query_decision_backtest",
+                futures::executor::block_on(stub.query_decision_backtest(Value::Null)),
             ),
         ];
         for (name, result) in cases {

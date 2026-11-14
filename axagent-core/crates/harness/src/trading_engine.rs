@@ -303,6 +303,27 @@ pub trait TradingEngineProvider: Send + Sync {
             "TradingEngineProvider::run_stress_test 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    /// 校验组合回测配置（`validate_portfolio_config` op）—— 读 op（纯计算，不落库、
+    /// 不取行情、无 DB 副作用），无权限闸（与 `run_stress_test` 同口径）。
+    ///
+    /// ⚠ op 名与被退役的宿主命令名**不同形**：命令叫 `portfolio_backtest_run`，
+    /// op 跟 trait 方法（照 `run_stress_test` 先例）。`PortfolioConfig` /
+    /// `PortfolioEngine` 的权威在 `quant`（consumer crate），harness 是 foundation
+    /// 不得依赖 ⇒ 照 `stock_analysis` 接缝的归属判据走 **Value 透传**，不上收 DTO。
+    ///
+    /// 入参 `{"config_json": str}`（宿主命令的 `configJson` 字符串**原样**——它才是
+    /// 反序列化的形状权威）；出参 = `{status, strategies, message}` 三字段（与被退役的
+    /// 宿主命令逐字同形状：`status = "config_valid"`、`strategies` = 配置内策略数、
+    /// `message` = 「配置校验通过。回测执行需要前端传入K线数据。」）。宿主 provider 的
+    /// 语义 = `PortfolioConfig` 反序列化 + `PortfolioEngine::new` 构造即弃（配置校验
+    /// no-op，实际执行不在本 op 职责内）。
+    async fn validate_portfolio_config(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "TradingEngineProvider::validate_portfolio_config 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -485,5 +506,13 @@ mod tests {
         let err =
             p.run_stress_test(Value::Null).await.expect_err("run_stress_test 默认实现必须是错误");
         assert!(matches!(err, AxAgentError::Provider(_)), "run_stress_test: {err:?}");
+
+        // #323 T2 五命令批迁（子批④）：缺省实现同样必须显式报错，不得返回空值
+        // （空对象会被插件读成「0 条策略校验通过」，那是另一种谎）。
+        let err = p
+            .validate_portfolio_config(Value::Null)
+            .await
+            .expect_err("validate_portfolio_config 默认实现必须是错误");
+        assert!(matches!(err, AxAgentError::Provider(_)), "validate_portfolio_config: {err:?}");
     }
 }

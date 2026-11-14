@@ -99,57 +99,9 @@ pub async fn record_decision_trust(
     Ok(serde_json::json!({ "success": true, "trust_model": trust_model }))
 }
 
-/// 查询决策回测分析：返回所有有 outcome 的分析记录的比较数据。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description =  "查询决策回测分析")]
-#[tauri::command]
-pub async fn query_decision_backtest(
-    state: State<'_, AppState>,
-    limit: Option<u32>,
-) -> Result<Vec<serde_json::Value>, String> {
-    use crate::commands::error::ErrorResponse;
-    use sea_orm::QueryFilter;
-    use sea_orm::QueryOrder;
-
-    let db = state.harness.db();
-    let records = stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::Outcome.is_not_null())
-        .filter(stock_analyses::Column::DecisionAction.is_not_null())
-        .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
-        .all(db)
-        .await
-        .map_err(|e| ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询失败: {e}")))?;
-
-    let limit = limit.unwrap_or(100).min(500) as usize;
-    let mut results: Vec<serde_json::Value> = Vec::new();
-    for r in records.iter().take(limit) {
-        let formula_action = r.decision_action.as_deref().unwrap_or("");
-        let outcome_str = r.outcome.as_deref().unwrap_or("");
-        let llm_action: Option<String> = r
-            .llm_decision_json
-            .as_ref()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .and_then(|v| {
-                v.get("action")
-                    .or_else(|| v.get("stance"))
-                    .and_then(|a| a.as_str().map(String::from))
-            });
-        results.push(serde_json::json!({
-            "stockCode": r.stock_code,
-            "stockName": r.stock_name,
-            "analysisDate": r.analysis_date,
-            "formulaAction": formula_action,
-            "llmAction": llm_action,
-            "outcome": outcome_str,
-            "decisionConfidence": r.decision_json.as_ref()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                .and_then(|v| v.get("confidence").and_then(|c| c.as_f64())),
-            "userTrustDecision": r.decision_json.as_ref()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                .and_then(|v| v.get("userTrustDecision").and_then(|t| t.as_str().map(String::from))),
-        }));
-    }
-    Ok(results)
-}
+// ⚠ `query_decision_backtest` 已迁 `stock.analysis` 接缝新读 op（#323 子批③）：
+// 查询 + 投影变换逐字下沉宿主 provider（`init/stock_analysis_service.rs`），
+// 插件命名命令 `stock_query_decision_backtest` 接管（前端零 invoke 已核）。
 
 // ───────────────────────────────────────────────────────────────────────────
 // P3-4: 板块联动分析 Tauri 命令

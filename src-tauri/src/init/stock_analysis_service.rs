@@ -82,7 +82,7 @@ use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
 use axagent_astock_data::AStockClient;
 use axagent_dao::repo::stock_evolution_history as evo_hist;
-use axagent_entities::financial_snapshots;
+use axagent_entities::{financial_snapshots, stock_analyses};
 use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::stock_analysis::StockAnalysisProvider;
@@ -721,5 +721,142 @@ impl StockAnalysisProvider for HostStockAnalysis {
                 "stock.analysis::get_analyst_feedback_stats 序列化失败: {e}"
             ))
         })
+    }
+
+    // ── #323 T2 五命令批迁（子批②③）：token 写入面 + 决策回测读面 ──────────────
+
+    /// 写 op：保存 NeoData token（宿主 `save_neodata_token` 退役后的接缝面）。
+    ///
+    /// 三段效应**逐字下沉**（与被退役的宿主命令同序同语义）：① 写 Python 脚本缓存；
+    /// ② `astock_client.neodata_token` 共享内存立即生效（无需重启）；③ 持久化到
+    /// `stock-analysis` 模板变量 `vendor_neodata_token`（替换或新增，`is_secret`）。
+    /// 权限闸在分派层（`required_permission_for` 登记为 `Write`），本层不重复校验。
+    async fn save_neodata_token(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            token: String,
+        }
+        let req: Input = Self::parse("save_neodata_token", "{token}", input)?;
+        if req.token.is_empty() {
+            return Err(AxAgentError::Validation(
+                "stock.analysis::save_neodata_token token 不能为空".into(),
+            ));
+        }
+        // 1) 写入 Python 脚本缓存
+        axagent_astock_data::vendors::neodata::save_token_to_cache(&req.token).await.map_err(
+            |e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::save_neodata_token 保存 NeoData token 到脚本缓存失败: {e}"
+                ))
+            },
+        )?;
+        // 2) 同时写入共享内存（立即生效，无需重启）
+        if let Some(ref nd) = self.astock_client.neodata_token {
+            *nd.write().await = req.token.clone();
+        }
+        // 3) 持久化到数据库（设置页下次加载时自动读取）
+        use axagent_entities::workflow_template;
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        if let Some(t) = workflow_template::Entity::find_by_id("stock-analysis")
+            .one(&self.db)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::save_neodata_token 查询模板失败: {e}"
+                ))
+            })?
+        {
+            let mut vars = t
+                .variables
+                .as_ref()
+                .and_then(|s| serde_json::from_str::<Vec<Value>>(s).ok())
+                .unwrap_or_default();
+            let token_val = serde_json::json!({
+                "name": "vendor_neodata_token",
+                "is_secret": true,
+                "defaultValue": null,
+                "value": req.token,
+                "type": "string",
+            });
+            // 替换或新增
+            if let Some(pos) = vars.iter().position(|v| {
+                v.get("name").and_then(|n| n.as_str()) == Some("vendor_neodata_token")
+            }) {
+                vars[pos] = token_val;
+            } else {
+                vars.push(token_val);
+            }
+            let json_str = serde_json::to_string(&vars).unwrap_or_default();
+            let mut am: workflow_template::ActiveModel = t.into();
+            am.variables = sea_orm::ActiveValue::Set(Some(json_str));
+            am.update(&self.db).await.map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::save_neodata_token 持久化 NeoData token 失败: {e}"
+                ))
+            })?;
+        }
+        Ok(Value::Null)
+    }
+
+    /// 读 op：查询决策回测分析（宿主 `query_decision_backtest` 退役后的接缝面）。
+    ///
+    /// 投影与过滤**逐字下沉**（与被退役的宿主命令同一段变换，不造第二份）：
+    /// `Outcome` / `DecisionAction` 双 `IS NOT NULL` + `AnalysisDate` 降序；
+    /// `limit` 缺省 100 钳 500；`llmAction` 取 `llm_decision_json` 的 `action`/`stance`，
+    /// `decisionConfidence` / `userTrustDecision` 取 `decision_json` 对应键。出参 =
+    /// 手拼投影数组整块透传（形状权威在被退役的宿主命令，harness 不上收 DTO）。
+    async fn query_decision_backtest(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            limit: Option<u32>,
+        }
+        let req = serde_json::from_value::<Input>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::query_decision_backtest 参数解析失败: {e}。期望 {{limit?: number}}"
+            ))
+        })?;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+        let records = stock_analyses::Entity::find()
+            .filter(stock_analyses::Column::Outcome.is_not_null())
+            .filter(stock_analyses::Column::DecisionAction.is_not_null())
+            .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
+            .all(&self.db)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::query_decision_backtest 查询失败: {e}"
+                ))
+            })?;
+        let limit = req.limit.unwrap_or(100).min(500) as usize;
+        let mut results: Vec<Value> = Vec::new();
+        for r in records.iter().take(limit) {
+            let formula_action = r.decision_action.as_deref().unwrap_or("");
+            let outcome_str = r.outcome.as_deref().unwrap_or("");
+            let llm_action: Option<String> = r
+                .llm_decision_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| {
+                    v.get("action")
+                        .or_else(|| v.get("stance"))
+                        .and_then(|a| a.as_str().map(String::from))
+                });
+            results.push(serde_json::json!({
+                "stockCode": r.stock_code,
+                "stockName": r.stock_name,
+                "analysisDate": r.analysis_date,
+                "formulaAction": formula_action,
+                "llmAction": llm_action,
+                "outcome": outcome_str,
+                "decisionConfidence": r.decision_json.as_ref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| v.get("confidence").and_then(|c| c.as_f64())),
+                "userTrustDecision": r.decision_json.as_ref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| v.get("userTrustDecision").and_then(|t| t.as_str().map(String::from))),
+            }));
+        }
+        Ok(Value::Array(results))
     }
 }

@@ -120,6 +120,16 @@ const COMMAND_SAVE_ANALYST_FEEDBACK: &str = "stock_save_analyst_feedback";
 const COMMAND_GET_ANALYST_FEEDBACKS: &str = "stock_get_analyst_feedbacks";
 /// 分析师反馈统计（别名：含 needs_evolution 判定）—— 读命令。
 const COMMAND_GET_ANALYST_FEEDBACK_STATS: &str = "stock_get_analyst_feedback_stats";
+// ── #323 T2 五命令批迁（子批②③④）：宿主同名 Tauri 命令同批退役 ──
+/// 保存 NeoData token（宿主 `save_neodata_token`）：写脚本缓存 + 共享内存 + 模板变量
+/// —— **写命令**（三段持久效应，权限闸在宿主分派层）。
+const COMMAND_SAVE_NEODATA_TOKEN: &str = "stock_save_neodata_token";
+/// 查询决策回测分析（宿主 `query_decision_backtest`，stock_workflow/misc.rs）—— 读命令。
+const COMMAND_QUERY_DECISION_BACKTEST: &str = "stock_query_decision_backtest";
+/// 运行组合回测——配置校验面（宿主 `portfolio_backtest_run`，走 `trading.engine`
+/// `validate_portfolio_config` op；命令名逐字续宿主名，op 名与命令名不同形照 #322
+/// `run_stress_test` 先例）—— 读命令（纯计算，无 DB/行情副作用）。
+const COMMAND_PORTFOLIO_BACKTEST_RUN: &str = "stock_portfolio_backtest_run";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -614,6 +624,35 @@ fn handle_command(
         },
         COMMAND_GET_ANALYST_FEEDBACK_STATS => {
             match fetch_analyst_feedback_stats(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── #323 T2 五命令批迁（子批②③④）：显式臂三条 ──
+        // 写命令一条（save_neodata_token，权限闸由宿主分派层 required_permission_for
+        // 把关）；读命令两条（query_decision_backtest / portfolio_backtest_run 的
+        // 配置校验面）。三条实现体都在宿主进程内（token 缓存 / stock_analyses 表 /
+        // quant 配置解析），插件只透传。
+        COMMAND_SAVE_NEODATA_TOKEN => {
+            match save_neodata_token(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_QUERY_DECISION_BACKTEST => {
+            match query_decision_backtest(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_PORTFOLIO_BACKTEST_RUN => {
+            match portfolio_backtest_run(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -1942,6 +1981,60 @@ fn fetch_analyst_feedback_stats(
         call_chain,
         "get_analyst_feedback_stats",
         json!({ "analyst_id": analyst_id }),
+    )
+}
+
+// ── #323 T2 五命令批迁（子批②③④）：新 op 三条 ──
+// 三条实现体都在宿主进程内（token 缓存 / `stock_analyses` 表 / quant 配置解析），
+// 插件只做命令面 camelCase → 接缝面 snake_case 的平铺透传。
+
+/// 保存 NeoData token（宿主 `save_neodata_token`）—— **写命令**。
+///
+/// 命令面 `token` 必填非空（宿主 provider 拒空串）；出参恒 `null`
+/// （宿主命令回 `()` 同形）。三段效应（脚本缓存 / 共享内存 / 模板变量）在宿主。
+fn save_neodata_token(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let token = command_str_arg(input, "token")?;
+    call_analysis_seam(peer, call_chain, "save_neodata_token", json!({ "token": token }))
+}
+
+/// 查询决策回测分析（宿主 `query_decision_backtest`）—— 读命令。
+///
+/// 命令面 `limit` 可选（存在才透传，缺省 100 / 宿主钳 500）；出参 = 手拼投影数组
+/// 整块透传（`stockCode` / `llmAction` / `decisionConfidence` 等，形状权威在宿主）。
+fn query_decision_backtest(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let mut request = serde_json::Map::new();
+    if let Some(v) = input.get("limit").and_then(Value::as_u64) {
+        request.insert("limit".to_string(), json!(v));
+    }
+    call_analysis_seam(peer, call_chain, "query_decision_backtest", Value::Object(request))
+}
+
+/// 运行组合回测——配置校验面（宿主 `portfolio_backtest_run`）—— 读命令。
+///
+/// ⚠ op 名 `validate_portfolio_config` ≠ 命令名（命令逐字续宿主名，op 跟
+/// trading.engine trait 方法，#322 `run_stress_test` 同款）。命令面 `configJson`
+/// 必填（camelCase，禁区 13，与前端 `invoke` 传参一致）；层内键 snake_case，
+/// 字符串**原样**透传 —— 它是 `quant::PortfolioConfig` 反序列化形状的唯一权威，
+/// 插件侧不拆不验。
+fn portfolio_backtest_run(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let config_json = command_str_arg(input, "configJson")?;
+    call_trading_seam(
+        peer,
+        call_chain,
+        "validate_portfolio_config",
+        json!({ "request": { "config_json": config_json } }),
     )
 }
 

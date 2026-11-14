@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 59 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 75 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -1567,6 +1567,52 @@ function stockManifest({ version, binaryName, sha256 }) {
             analystId: { type: "string", description: "分析师节点 ID" },
           },
           required: ["analystId"],
+        },
+      },
+      // ── #323 T2 五命令批迁（子批②③④）：宿主同名命令同批退役，走新 op ──
+      // 档位按接缝 op 的读写性质（#321/#322 同口径）：写 op 显式 workspace-write
+      // （三段持久效应：脚本缓存 / 共享内存 / 模板变量），两条读 op 显式 read-only。
+      {
+        name: "stock_save_neodata_token",
+        description: "保存 NeoData token（写脚本缓存并立即生效，持久化到工作流模板变量）",
+        command: "worker://stock_save_neodata_token",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            token: { type: "string", description: "NeoData token，不能为空" },
+          },
+          required: ["token"],
+        },
+      },
+      {
+        name: "stock_query_decision_backtest",
+        description: "查询决策回测分析（有 outcome 且有决策动作的分析记录对比数据，按日期降序）",
+        command: "worker://stock_query_decision_backtest",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "取数上限，宿主缺省 100、上界 500" },
+          },
+        },
+      },
+      {
+        // 配置校验面：宿主原命令 `portfolio_backtest_run` 的实际语义是校验 no-op
+        // （PortfolioEngine 构造即弃，回测执行需要前端传 K 线，原命令本就不执行）。
+        name: "stock_portfolio_backtest_run",
+        description: "运行组合回测——配置校验（解析组合配置并校验合法性，返回 status/strategies/message）",
+        command: "worker://stock_portfolio_backtest_run",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            configJson: { type: "string", description: "组合配置 JSON 字符串（含 strategies 数组）" },
+          },
+          required: ["configJson"],
         },
       },
     ],

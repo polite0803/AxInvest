@@ -484,6 +484,11 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // `refresh_trading_calendar` 是读面 ⇒ **必须仍是 `None`**（给读缝加闸会把只读
         // 插件无端拒掉）。
         ("stock.analysis", "sweep_daily_snapshots") => Some(PluginPermission::Write),
+        // #323 T2 五命令批迁（子批②）：`save_neodata_token` 是写 op —— 写 Python 脚本
+        // 缓存 + 改 `neodata_token` 共享内存 + 改 `workflow_template` 的 `stock-analysis`
+        // 模板变量（三段都可观察的持久效应）。同批的 `query_decision_backtest`（子批③）
+        // 纯读 ⇒ **必须仍是 `None`**（给读缝加闸会把只读插件无端拒掉）。
+        ("stock.analysis", "save_neodata_token") => Some(PluginPermission::Write),
         // F6 别名族（#35，#322）：`evolve_analyst` 触发进化（Prompt/配置优化建议落库）
         // 、`save_analyst_feedback` 写反馈表 ⇒ `Write`。四条 get_*（两条进化状态 +
         // 两条反馈读面）是读 ⇒ **必须仍是 `None`**（同上：读缝不加闸）。
@@ -2477,6 +2482,27 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // ── trading.engine 接缝 · #323 T2 五命令批迁（子批④）─────────────────
+            // 组合回测配置校验（宿主 `portfolio_backtest_run` 退役后的取数面）。读 op
+            // （纯计算，不落库、不取行情）⇒ `required_permission_for` 不登记（与
+            // `get_position_limits` / `run_stress_test` 同口径）。op 名与命令名不同形：
+            // op 叫 `validate_portfolio_config`（trait 方法名）。入参嵌
+            // `{"request": {"config_json": str}}` 透传 —— `config_json` 字符串是反序列化
+            // 形状的唯一权威（`quant::PortfolioConfig`），本层不做任何键名映射。
+            "trading.engine" if op == "validate_portfolio_config" => {
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.validate_portfolio_config(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // ── stock.monitor 接缝：宿主把独持的 RealtimeMonitor + CrossStockSignalAggregator
             // 暴露给插件（方向与 market.quote 同类：宿主 → 插件，见上方先例注释） ──
             // op 参数一律 **snake_case**；嵌套 DTO（`AlertUpsertRequest` / `TZeroConfig` /
@@ -3318,6 +3344,38 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.delete_pool_scan_cron(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── stock.analysis 接缝 · #323 T2 五命令批迁（子批②③）───────────────
+            // 宿主 `save_neodata_token` / `query_decision_backtest` 退役后的接缝面。
+            // 前者是写 op（脚本缓存 + 共享内存 + 模板变量三段持久效应），已在
+            // `required_permission_for` 登记 `Write`；后者纯读 ⇒ 不登记。两条实现体
+            // 都只在宿主进程内（token 缓存文件 / `neodata_token` 共享内存 /
+            // `stock_analyses` 表查询），入参嵌 `{"request": {...}}` 透传。
+            "stock.analysis" if op == "save_neodata_token" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.save_neodata_token(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "query_decision_backtest" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.query_decision_backtest(request)) else {
                     return no_runtime(seam);
                 };
                 match result {

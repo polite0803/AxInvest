@@ -781,78 +781,6 @@ pub fn clear_asof_degradation_log() {
     as_of::reset_global_degradation_log();
 }
 
-/// 搜索股票
-///
-/// `market` 可选参数用于过滤市场：
-/// - `"A"` → 仅 A 股（上交所/深交所/北交所/创业板/科创板）
-/// - `"HK"` → 仅港股
-/// - `"US"` → 仅美股
-/// - `None` → 全市场
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "搜索股票")]
-#[tauri::command]
-pub async fn search_stock(
-    state: State<'_, AppState>,
-    keyword: String,
-    market: Option<String>,
-) -> Result<Vec<axagent_astock_data::StockSearchResult>, String> {
-    if keyword.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("keyword 不能为空").into());
-    }
-    let results = state.stock().astock_client.search_stock(&keyword).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("搜索股票失败: {e}"))
-    })?;
-    // 按市场过滤（基于 market 描述字段或代码后缀）
-    let filtered = match market.as_deref() {
-        Some("A") => results
-            .into_iter()
-            .filter(|r| !r.code.ends_with(".HK") && !r.code.ends_with(".US"))
-            .collect(),
-        Some("HK") => results.into_iter().filter(|r| r.code.ends_with(".HK")).collect(),
-        Some("US") => results.into_iter().filter(|r| r.code.ends_with(".US")).collect(),
-        _ => results,
-    };
-    Ok(filtered)
-}
-
-/// 搜索财经新闻
-///
-/// 复用 AStockClient::search_news 已有链路：多 vendor 路由（eastmoney/akshare/neodata）
-/// + 自动去重入库（news_archive 表）+ as-of 模式查本地语料库。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "搜索财经新闻")]
-#[tauri::command]
-pub async fn search_news(
-    state: State<'_, AppState>,
-    keyword: String,
-    limit: Option<u32>,
-) -> Result<Vec<axagent_astock_data::NewsItem>, String> {
-    if keyword.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("keyword 不能为空").into());
-    }
-    let limit = limit.unwrap_or(20).min(100);
-    state.stock().astock_client.search_news(&keyword, limit).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("搜索新闻失败: {e}")).to_string()
-    })
-}
-
-/// 获取社交舆情数据（股吧/雪球热度）
-///
-/// 返回指定股票在社交平台上的讨论热度、情感倾向等数据。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取社交舆情数据")]
-#[tauri::command]
-pub async fn get_social_sentiment(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::SocialSentiment>, String> {
-    if stock_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("stock_code 不能为空").into());
-    }
-    state.stock().astock_client.get_social_sentiment(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取社交舆情失败: {e}"))
-            .to_string()
-    })
-}
-
 /// 获取实时行情
 ///
 /// spec §4.1: `as_of_date` 非空时,所有 vendor 调用以"截至该日"语义截断,
@@ -940,25 +868,6 @@ pub async fn get_stock_kline(
     .await
 }
 
-// ── G1 跨市场数据接入：美股/港股/外汇/基准指数 Tauri 命令 ──
-
-/// 获取国际股票（美股/港股）实时行情
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取国际股票行情")]
-#[tauri::command]
-pub async fn get_international_stock_quote(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<StockQuote, String> {
-    if stock_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("stock_code 不能为空").into());
-    }
-    state.stock().astock_client.get_international_quote(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取国际股票行情失败: {e}"))
-            .to_string()
-    })
-}
-
 /// 获取国际股票（美股/港股）K 线
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取国际股票K线")]
 #[tauri::command]
@@ -981,50 +890,6 @@ pub async fn get_international_stock_kline(
                 .with_detail(format!("获取国际股票 K 线失败: {e}"))
                 .to_string()
         })
-}
-
-/// 获取基准指数 K 线（标普 500 / 纳指 / 恒生 / 上证等）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取基准指数K线")]
-#[tauri::command]
-pub async fn get_benchmark_kline(
-    state: State<'_, AppState>,
-    benchmark_code: String,
-    period: String,
-    limit: u32,
-) -> Result<Vec<KLine>, String> {
-    if benchmark_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail("benchmark_code 不能为空")
-            .into());
-    }
-    state.stock().astock_client.get_benchmark_klines(&benchmark_code, &period, limit).await.map_err(
-        |e| {
-            ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("获取基准指数 K 线失败: {e}"))
-                .to_string()
-        },
-    )
-}
-
-/// 获取外汇 K 线（USD/CNY、HKD/CNY 等）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取外汇K线")]
-#[tauri::command]
-pub async fn get_forex_kline(
-    state: State<'_, AppState>,
-    pair: String,
-    period: String,
-    limit: u32,
-) -> Result<Vec<KLine>, String> {
-    if pair.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail("pair 不能为空（如 USD/CNY）")
-            .into());
-    }
-    state.stock().astock_client.get_forex_klines(&pair, &period, limit).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取外汇 K 线失败: {e}"))
-            .to_string()
-    })
 }
 
 // ── Phase 2: TradingAgents-CN 优势借鉴 — 批量 + 基本面报告 + 缓存统计 ──
@@ -3300,63 +3165,6 @@ pub async fn check_position_limits(
     }
 }
 
-// ── Position Limits ──
-// `get_position_limits` IPC 命令已退役为插件命令 `stock_get_position_limits`
-// （`trading.engine` 同名 op，#322）；`PositionLimits::panel_effective()` 仍被
-// `check_position_limits`（风控门）消费，面板数与风控门同权威不变。
-
-// ── 新增数据源命令 ──
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取研究报告")]
-#[tauri::command]
-pub async fn get_stock_research_reports(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::ResearchReport>, String> {
-    state.stock().astock_client.get_research_reports(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取研究报告失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取一致预期EPS")]
-#[tauri::command]
-pub async fn get_stock_consensus_eps(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Option<axagent_astock_data::ConsensusEPS>, String> {
-    state.stock().astock_client.get_consensus_eps(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取一致预期 EPS 失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取概念板块")]
-#[tauri::command]
-pub async fn get_stock_concept_blocks(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Option<axagent_astock_data::ConceptBlocks>, String> {
-    state.stock().astock_client.get_concept_blocks(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取概念板块失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取公司公告")]
-#[tauri::command]
-pub async fn get_stock_announcements(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::Announcement>, String> {
-    state.stock().astock_client.get_announcements(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取公告失败: {e}")).to_string()
-    })
-}
-
 /// 财报披露日历(R3-B):
 ///
 /// 复用 `get_announcements` vendor 链路(优先 cninfo),按标题归类成
@@ -3584,115 +3392,6 @@ pub(crate) async fn backfill_financial_snapshots(
     Ok(written)
 }
 
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取热门股票")]
-#[tauri::command]
-pub async fn get_hot_stocks(
-    state: State<'_, AppState>,
-) -> Result<Vec<axagent_astock_data::HotStock>, String> {
-    state.stock().astock_client.get_hot_stocks().await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取热门股票失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取涨停池")]
-#[tauri::command]
-pub async fn get_limit_up_pool(
-    state: State<'_, AppState>,
-    date: Option<String>,
-) -> Result<Option<axagent_astock_data::LimitUpPool>, String> {
-    state.stock().astock_client.get_limit_up_pool(date.as_deref()).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取涨停池失败: {e}")).to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取行业排名")]
-#[tauri::command]
-pub async fn get_industry_ranking(
-    state: State<'_, AppState>,
-) -> Result<Vec<axagent_astock_data::IndustryRank>, String> {
-    state.stock().astock_client.get_industry_ranking().await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取行业排名失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "搜索概念板块")]
-#[tauri::command]
-pub async fn search_concept_boards(
-    state: State<'_, AppState>,
-    keyword: String,
-) -> Result<Vec<axagent_astock_data::ConceptBoard>, String> {
-    if keyword.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("keyword 不能为空").into());
-    }
-    state.stock().astock_client.search_concept_boards(&keyword).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("搜索概念板块失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取板块成分股")]
-#[tauri::command]
-pub async fn get_concept_board_members(
-    state: State<'_, AppState>,
-    board_code: String,
-) -> Result<Vec<axagent_astock_data::BoardMember>, String> {
-    if board_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("board_code 不能为空").into());
-    }
-    state.stock().astock_client.get_concept_board_members(&board_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取板块成分股失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取财联社快讯")]
-#[tauri::command]
-pub async fn get_cls_flash(
-    state: State<'_, AppState>,
-) -> Result<Vec<axagent_astock_data::ClsFlashItem>, String> {
-    state.stock().astock_client.get_cls_flash().await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取财联社快讯失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取龙虎榜")]
-#[tauri::command]
-pub async fn get_market_dragon_tiger(
-    state: State<'_, AppState>,
-) -> Result<Vec<axagent_astock_data::MarketDragonTiger>, String> {
-    state.stock().astock_client.get_market_dragon_tiger().await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取龙虎榜失败: {e}")).to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取北向资金")]
-#[tauri::command]
-pub async fn get_north_bound_flow(
-    state: State<'_, AppState>,
-) -> Result<Option<axagent_astock_data::NorthBoundFlow>, String> {
-    Ok(state.stock().astock_client.get_north_bound_flow().await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取北向资金失败: {e}"))
-    })?)
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取指数行情")]
-#[tauri::command]
-pub async fn get_index_quotes(
-    state: State<'_, AppState>,
-) -> Result<axagent_astock_data::DataOutcome<Vec<axagent_astock_data::IndexQuote>>, String> {
-    // 返回信封而非裸数组：空数据必须能区分「该时点无行情」与「通道故障/接口改版」。
-    // 面板据此显示不同空态，不再把取数故障统一说成「暂无数据」。
-    Ok(state.stock().astock_client.get_index_quotes_outcome().await)
-}
-
 /// 最近 N 个交易日的核心接口健康检查记录（倒序，缺失日不出现）。
 ///
 /// `storeEnabled=false` 是「归档没启用、结果没留存」，与「检查过且全好」必须分开显示。
@@ -3704,32 +3403,6 @@ pub async fn get_interface_health_history(
 ) -> Result<axagent_astock_data::health_check::InterfaceHealthHistory, String> {
     let days = days.unwrap_or(7).clamp(1, 30) as usize;
     Ok(state.stock().astock_client.interface_health_history(days).await)
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取同行业对比")]
-#[tauri::command]
-pub async fn get_stock_peers(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::PeerComparison>, String> {
-    state.stock().astock_client.get_peers(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取同行业对比失败: {e}"))
-            .to_string()
-    })
-}
-
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取期权PCR")]
-#[tauri::command]
-pub async fn get_stock_option_pcr(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Option<axagent_astock_data::OptionPCR>, String> {
-    state.stock().astock_client.get_option_pcr(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取期权 PCR 失败: {e}"))
-            .to_string()
-    })
 }
 
 // ── CronJob 定时任务（基于上游 CronJobStore + 持久化）──
@@ -7552,48 +7225,6 @@ pub async fn list_stock_tools() -> Result<Vec<String>, String> {
         .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
         .collect();
     Ok(names)
-}
-
-/// 获取限售解禁时间表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取限售解禁时间表")]
-#[tauri::command]
-pub async fn get_lockup_schedule(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::types::LockupSchedule>, String> {
-    state.stock().astock_client.get_lockup_schedule(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取解禁数据失败: {e}"))
-            .to_string()
-    })
-}
-
-/// 获取分红记录
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取分红记录")]
-#[tauri::command]
-pub async fn get_dividend_records(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::types::DividendRecord>, String> {
-    state.stock().astock_client.get_dividend_records(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取分红数据失败: {e}"))
-            .to_string()
-    })
-}
-
-/// 获取股票财务数据（对比面板使用）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取股票财务数据")]
-#[tauri::command]
-pub async fn get_stock_financials(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_harness::market_data::FinancialReport>, String> {
-    state.stock().astock_client.get_financials(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取财务数据失败: {e}"))
-            .to_string()
-    })
 }
 
 /// 演化漂移重算（EvolutionDriftPanel 重算按钮）

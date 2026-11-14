@@ -1165,7 +1165,7 @@ fn task_run_row_from_analysis_record(record: &Value) -> Value {
         name: format!("{stock_code} {stock_name}").trim().to_string(),
         state: state.to_string(),
         // 记录表没有触发来源列（`config_id` 现网 0 行有值）⇒ 定时发起的分析无法与手动区分。
-        // 一律标 manual，与宿主适配器同口径（`stockAnalysis.adapter.ts:55` 的注释）。
+        // 一律标 manual，与本文件工作流任务源同口径（`:1044` 的注释实证「触发来源不可区分」；原宿主 adapter 已于 #149 第 3 步删除）。
         trigger: Some("manual".to_string()),
         started_at: created_at,
         finished_at,

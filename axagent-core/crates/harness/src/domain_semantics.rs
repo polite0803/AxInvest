@@ -241,7 +241,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股条目的推荐置信度",
-        evidence: "axagent-quant/crates/analysis-engine/src/recommender/mod.rs:1043",
+        evidence: "axagent-quant/crates/analysis-engine/src/recommender/types.rs:133",
     },
     // 0–1 组（各自独立的若干概念）
     ConceptDecl {

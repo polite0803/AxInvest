@@ -124,7 +124,7 @@ pub async fn restore_incomplete_tasks(
 ///
 /// `run_stock_workflow_inner` 与 `run_single_stock_analysis` 都是 **fire-and-forget**：
 /// 建行即写 `status="running"`，再把 DAG `tokio::spawn` 到后台并立即返回
-/// （`commands/stock_workflow/core.rs:621` / `:2028`）。而四个终态分支
+/// （`commands/stock_workflow/core.rs:621` / `:974`）。而四个终态分支
 /// （`:1081` timeout、`:1112` cancelled、`:2254` completed、`:2369` failed）
 /// **全在那个后台任务里** ⇒ 进程一旦非优雅退出（硬杀 / 崩溃 / 关机 / runtime 先于
 /// select 分支被 poll 到），**没有任何分支有机会写终态**，该行就永久停在 `running`。

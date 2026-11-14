@@ -35,7 +35,7 @@
 //! - `blackboard_snapshot` / `decision_reasoning` / `llm_decision_json`：宿主列表投影本来就
 //!   不 SELECT（见 `stock_analysis.rs` 的「排除大字段」注释），本接缝同样不取。
 //! - 表里其余写面列（`config_id` / `source` / `synthetic` 等）：任务中心不用，且 `config_id`
-//!   现网 0 行有值（`stockAnalysis.adapter.ts:55` 的注释实证「触发来源不可区分」）⇒ 不进视图。
+//!   现网 0 行有值（`axagent-plugins/crates/plugin-stock/src/main.rs:1044` 的注释实证「触发来源不可区分」；原宿主 adapter 已于 #149 第 3 步删除）⇒ 不进视图。
 //!
 //! ## `total` 的口径
 //!

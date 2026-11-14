@@ -5220,7 +5220,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   （`axagent-core/crates/axagent-agent-macro/src/lib.rs:45-64`）只生成 `CommandMetadata` 并注册元数据，
     //   其唯一消费者是命令文档生成测试 —— **全仓不存在「命令 → 工具」的桥**。
     //   而 ToolNode 走 `ToolRegistry`（`rt-workflow/.../tool_executor.rs:122-140`），
-    //   表内条目由 `crates/tools/src/tools/astock_data.rs:118` 从 `stock_mcp_tools()`
+    //   表内条目由 `src-tauri/src/init/stock_domain_tools.rs:24` 从 `stock_mcp_tools()`
     //   逐个包装 ⇒ `ToolResolver` 返 `None` ⇒ `core.rs` 的 Failed 分支 `emit degraded: true`
     //   **静默吞掉**（节点 completed、输出为空、无报错）⇒ `valuation_pe_percentile` 恒空
     //   ⇒ 这条腿成了**永久空壳**、逐位退化回 0.7/0.3。

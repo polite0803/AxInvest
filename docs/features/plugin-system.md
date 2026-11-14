@@ -29,7 +29,7 @@ worker 是一个**独立可执行文件**，由 manifest 的 `worker.program` �
 
 所有跨插件通信都经宿主中转，插件之间没有直连通道：
 
-- **L1 事件桥**：插件发 `emit`，宿主代为派发领域事件；`emit` **不等待派发结果**（`axagent-plugins/crates/plugins/src/worker.rs:588-637`）。订阅侧要求声明里含 `event.dispatch`，否则不挂订阅句柄（`:5167-5183`）。注释明确「跨插件优先用 L1 事件」（`:55`）。
+- **L1 事件桥**：插件发 `emit`，宿主代为派发领域事件；`emit` **不等待派发结果**（`axagent-plugins/crates/plugins/src/worker.rs:658-707`）。订阅侧要求声明里含 `event.dispatch`，否则不挂订阅句柄（`:5167-5183`）。注释明确「跨插件优先用 L1 事件」（`:55`）。
 - **L2 接缝调用**：`call_seam` 走宿主已注册的能力接缝实现，可与内置实现或另一个插件的远程接缝同表（`:5238-5245` 说明「平权」）；请求/响应按 `request_id` 配对（`axagent-core/crates/plugin-proto/src/lib.rs:139-164`）。
 
 防环与限深两条硬约束都在**目标端自检**：

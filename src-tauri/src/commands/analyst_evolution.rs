@@ -16,7 +16,7 @@
 use crate::AppState;
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::node_quality::NodeType;
-use axagent_analysis_engine::{NodeEvolutionStatus, evolve_node, get_node_evolution_status};
+use axagent_analysis_engine::{NodeEvolutionStatus, evolve_node};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -30,20 +30,14 @@ pub struct NodeEvolveRequest {
     pub node_id: String,
 }
 
-/// 分析师节点进化请求 DTO（向后兼容）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalystEvolveRequest {
-    /// 分析师节点 ID
-    pub analyst_id: String,
-}
-
 /// 字符串 → NodeType。
 ///
 /// 权威映射复用 `NodeType` 的 serde 表示（`#[serde(rename_all = "snake_case")]`），
 /// 与前端 `detectNodeType` 的 7 个输出逐字对齐；未知值兜底 `Other`。
 /// 不要手搓 match 重定义枚举映射（违反禁区 12「禁止重复定义」）。
-fn parse_node_type(type_str: &str) -> NodeType {
+/// `pub(crate)`：`stock.analysis` 接缝 `get_node_evolution_status` op 的宿主
+/// provider（#322）用同一份映射，不许在 init/ 再抄第二份。
+pub(crate) fn parse_node_type(type_str: &str) -> NodeType {
     serde_json::from_value(serde_json::Value::String(type_str.to_string()))
         .unwrap_or(NodeType::Other)
 }
@@ -61,38 +55,13 @@ pub async fn evolve_node_command(
     evolve_node(state.harness.db(), &node_type, &request.node_id).await
 }
 
-/// 获取节点进化状态（通用版，不触发进化）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取节点当前进化状态")]
-pub async fn get_node_evolution_status_command(
-    state: State<'_, AppState>,
-    request: NodeEvolveRequest,
-) -> Result<NodeEvolutionStatus, String> {
-    let node_type = parse_node_type(&request.node_type);
-    get_node_evolution_status(state.harness.db(), &node_type, &request.node_id).await
-}
-
-// ── 分析师节点专用进化命令（向后兼容包装）──
-
-/// 触发分析师节点自我进化
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "触发分析师节点自我进化")]
-pub async fn evolve_analyst_command(
-    state: State<'_, AppState>,
-    request: AnalystEvolveRequest,
-) -> Result<NodeEvolutionStatus, String> {
-    evolve_node(state.harness.db(), &NodeType::Analyst, &request.analyst_id).await
-}
-
-/// 获取分析师节点进化状态
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取分析师节点进化状态")]
-pub async fn get_analyst_evolution_status_command(
-    state: State<'_, AppState>,
-    request: AnalystEvolveRequest,
-) -> Result<NodeEvolutionStatus, String> {
-    get_node_evolution_status(state.harness.db(), &NodeType::Analyst, &request.analyst_id).await
-}
+// ── 分析师别名族三条（#35 / #322）：已迁出为插件命令 ──
+// `evolve_analyst_command` / `get_analyst_evolution_status_command`（别名，硬编码
+// Analyst）/ `get_node_evolution_status_command`（泛化查询形）退役为
+// `stock_evolve_analyst_command` / `stock_get_analyst_evolution_status_command` /
+// `stock_get_node_evolution_status_command`，走 `stock.analysis` 接缝六 op
+// （provider 在 `init/stock_analysis_service.rs`，别名形状逐字保留）。
+// 通用写命令 `evolve_node_command` 保留 —— 前端 `AnalystDataQualityModal` 直调。
 
 // ── 单元测试 ── 追加在文件末尾（防 clippy::items_after_test_module）
 #[cfg(test)]

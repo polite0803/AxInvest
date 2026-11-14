@@ -32,6 +32,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::AsOfContext;
 use crate::core_error::{AxAgentError, Result};
@@ -245,6 +246,63 @@ pub trait TradingEngineProvider: Send + Sync {
             "TradingEngineProvider::trading_enabled 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── F2 组合与风控四条（#35，#322）：持仓写口 / 限额读口 / VLM 导入 / 压测 ────
+    // 四条 DTO（`PositionLimits` / `StressTestBundle`）权威都在 `analysis-engine`
+    // （implementor），harness 是 foundation 不得依赖 ⇒ 照 `stock_analysis` 接缝的
+    // 归属判据走 **Value 透传**，不上收（上收即禁区 12 第二份定义）。
+    // 权限闸登记在 `worker.rs` 的 `required_permission_for`：`update_portfolio_holding`
+    // 与 `import_portfolio_from_vlm` 是写 op（要 `write`），`get_position_limits` 与
+    // `run_stress_test` 纯读/纯计算面 ⇒ 无闸。`run_stress_test` 内部是 N+1 网络取数
+    // （`estimate_betas` 逐持仓拉 K 线），**执行体整体留宿主**——不把长任务搬进
+    // worker 帧，插件侧等一条汇总结果即可。
+
+    /// 读取全局仓位限制（`get_position_limits` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{}`；出参 = `analysis-engine` 的 `PositionLimits` 原样 JSON（camelCase）。
+    /// ⚠ `PositionLimits::panel_effective()` 读 harness 全局面板变量，**只在宿主
+    /// 进程内有效**（插件是独立进程，静态变量不同步）⇒ 必须走本 op 而非插件直调。
+    async fn get_position_limits(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "TradingEngineProvider::get_position_limits 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新单条持仓的数量与成本（`update_portfolio_holding` op）—— 写 op，要 `write`。
+    ///
+    /// 入参 snake_case 接缝风格 `{"id": str, "shares": f64, "avg_cost": f64}`；
+    /// 出参 `null`（与被退役的宿主命令 `update_portfolio_holding` 回 `()` 同形状）。
+    async fn update_portfolio_holding(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "TradingEngineProvider::update_portfolio_holding 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 批量导入 VLM 识别的持仓（`import_portfolio_from_vlm` op）—— 写 op，要 `write`。
+    ///
+    /// 入参 snake_case 接缝风格 `{"raw_vlm_output": str, "replace_existing": bool?}`；
+    /// 出参 = 手拼 JSON `{success, imported, failed, stockCodes, errors}`（解析失败时
+    /// `{success: false, error, holdings: []}`），与被退役的宿主命令逐字同形状。
+    async fn import_portfolio_from_vlm(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "TradingEngineProvider::import_portfolio_from_vlm 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 运行组合压力测试（`run_stress_test` op）—— 纯计算 op（无 DB 副作用），无权限闸。
+    ///
+    /// 入参 `{}`；出参 = `analysis-engine` 的 `StressTestBundle` 原样 JSON（camelCase）。
+    /// N+1 网络取数慢 op：宿主 provider 不得持锁跨 await（照原命令「先释放读锁再取数」
+    /// 的结构）。⚠ 超时**不进** `SEAM_OP_TIMEOUT_OVERRIDES`——收录判据要求盘上实测
+    /// 或宿主预算出处，两者皆无（Tauri 命令通道无预算概念）⇒ 留默认预算、标
+    /// 「预算待实证」，与 `chat` / `reflect` 同款处理。
+    async fn run_stress_test(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "TradingEngineProvider::run_stress_test 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -403,5 +461,29 @@ mod tests {
 
         let err = p.trading_enabled().await.expect_err("trading_enabled 默认实现必须是错误");
         assert!(matches!(err, AxAgentError::Provider(_)), "trading_enabled: {err:?}");
+
+        // F2 四 op（#322）：缺省实现同样必须显式报错，不得返回空值
+        // （空对象会被插件读成「限额全是 0」，那是另一种谎）。
+        let err = p
+            .get_position_limits(Value::Null)
+            .await
+            .expect_err("get_position_limits 默认实现必须是错误");
+        assert!(matches!(err, AxAgentError::Provider(_)), "get_position_limits: {err:?}");
+
+        let err = p
+            .update_portfolio_holding(Value::Null)
+            .await
+            .expect_err("update_portfolio_holding 默认实现必须是错误");
+        assert!(matches!(err, AxAgentError::Provider(_)), "update_portfolio_holding: {err:?}");
+
+        let err = p
+            .import_portfolio_from_vlm(Value::Null)
+            .await
+            .expect_err("import_portfolio_from_vlm 默认实现必须是错误");
+        assert!(matches!(err, AxAgentError::Provider(_)), "import_portfolio_from_vlm: {err:?}");
+
+        let err =
+            p.run_stress_test(Value::Null).await.expect_err("run_stress_test 默认实现必须是错误");
+        assert!(matches!(err, AxAgentError::Provider(_)), "run_stress_test: {err:?}");
     }
 }

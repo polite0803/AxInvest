@@ -96,8 +96,20 @@ pub async fn save_node_feedback(
     state: State<'_, AppState>,
     request: SaveNodeFeedbackRequest,
 ) -> Result<String, String> {
-    let db = state.harness.db();
+    save_node_feedback_core(state.harness.db(), request).await.map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
+}
 
+/// `save_node_feedback` 的无 State 核心（IPC 命令与 `stock.analysis` 接缝
+/// `save_analyst_feedback` op 共用，#322）。命令退役后本函数是唯一权威。
+pub(crate) async fn save_node_feedback_core(
+    db: &DatabaseConnection,
+    request: SaveNodeFeedbackRequest,
+) -> Result<String, sea_orm::DbErr> {
     let new_feedback = analyst_feedback::ActiveModel {
         id: Set(uuid::Uuid::new_v4().to_string()),
         node_type: Set(request.node_type),
@@ -117,71 +129,17 @@ pub async fn save_node_feedback(
         created_at: Set(chrono::Utc::now().to_rfc3339()),
     };
 
-    let result = new_feedback.insert(db).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
+    let result = new_feedback.insert(db).await?;
     Ok(result.id)
 }
 
-/// 保存分析师反馈（向后兼容包装）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存分析师质量反馈数据（向后兼容）")]
-pub async fn save_analyst_feedback(
-    state: State<'_, AppState>,
-    request: SaveAnalystFeedbackRequest,
-) -> Result<String, String> {
-    // 将旧格式转换为新格式
-    let quality_metrics = serde_json::json!({
-        "bull_score": request.bull_score,
-        "bear_score": request.bear_score,
-        "confidence": request.confidence,
-        "score_consistent": request.score_consistent,
-        "direction_consistent": request.direction_consistent,
-    });
-
-    save_node_feedback(
-        state,
-        SaveNodeFeedbackRequest {
-            node_type: "analyst".to_string(),
-            node_id: request.analyst_id,
-            report_id: request.report_id,
-            stock_code: request.stock_code,
-            execution_id: request.execution_id,
-            quality_score: request.quality_score,
-            grade: request.grade,
-            issue_count: request.issue_count,
-            warning_count: request.warning_count,
-            good_count: request.good_count,
-            checks_json: request.checks_json,
-            quality_metrics_json: quality_metrics.to_string(),
-        },
-    )
-    .await
-}
-
-/// 分析师反馈请求 DTO（向后兼容）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveAnalystFeedbackRequest {
-    pub analyst_id: String,
-    pub report_id: String,
-    pub stock_code: String,
-    pub execution_id: String,
-    pub quality_score: i32,
-    pub grade: String,
-    pub issue_count: i32,
-    pub warning_count: i32,
-    pub good_count: i32,
-    pub checks_json: String,
-    pub bull_score: Option<f64>,
-    pub bear_score: Option<f64>,
-    pub confidence: Option<f64>,
-    pub score_consistent: bool,
-    pub direction_consistent: bool,
-}
+// ── 分析师别名族三条（#35 / #322）：已迁出为插件命令 ──
+// `save_analyst_feedback` / `get_analyst_feedbacks` / `get_analyst_feedback_stats`
+// 退役为 `stock_save_analyst_feedback` / `stock_get_analyst_feedbacks` /
+// `stock_get_analyst_feedback_stats`，走 `stock.analysis` 接缝（provider 在
+// `init/stock_analysis_service.rs`，别名形状逐字保留：13 字段无 node_type、
+// bull/bear/confidence 拼 quality_metrics_json）。泛化形三条命令保留 —— 与插件
+// provider 共用同一份无 State 核心（`save_node_feedback_core` 等）。
 
 /// 获取节点反馈历史（通用版）
 #[tauri::command]
@@ -190,8 +148,20 @@ pub async fn get_node_feedbacks(
     state: State<'_, AppState>,
     request: GetNodeFeedbacksRequest,
 ) -> Result<Vec<NodeFeedbackSummary>, String> {
-    let db = state.harness.db();
+    get_node_feedbacks_core(state.harness.db(), request).await.map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
+}
 
+/// `get_node_feedbacks` 的无 State 核心（IPC 命令与 `stock.analysis` 接缝
+/// `get_analyst_feedbacks` op 共用，#322）：同一份 filter / 排序 / limit 语义。
+pub(crate) async fn get_node_feedbacks_core(
+    db: &DatabaseConnection,
+    request: GetNodeFeedbacksRequest,
+) -> Result<Vec<NodeFeedbackSummary>, sea_orm::DbErr> {
     let limit = request.limit.unwrap_or(50);
     let only_issues = request.only_issues.unwrap_or(false);
 
@@ -210,14 +180,9 @@ pub async fn get_node_feedbacks(
         query = query.filter(analyst_feedback::Column::IssueCount.gt(0));
     }
 
-    let results = query.all(db).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
+    let results = query.all(db).await?;
 
-    let summaries: Vec<NodeFeedbackSummary> = results
+    Ok(results
         .into_iter()
         .map(|m| NodeFeedbackSummary {
             id: m.id,
@@ -229,36 +194,7 @@ pub async fn get_node_feedbacks(
             warning_count: m.warning_count,
             created_at: m.created_at,
         })
-        .collect();
-
-    Ok(summaries)
-}
-
-/// 获取分析师反馈历史（向后兼容）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetAnalystFeedbacksRequest {
-    pub analyst_id: String,
-    pub limit: Option<u64>,
-    pub only_issues: Option<bool>,
-}
-
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取指定分析师的质量反馈历史（向后兼容）")]
-pub async fn get_analyst_feedbacks(
-    state: State<'_, AppState>,
-    request: GetAnalystFeedbacksRequest,
-) -> Result<Vec<NodeFeedbackSummary>, String> {
-    get_node_feedbacks(
-        state,
-        GetNodeFeedbacksRequest {
-            node_type: Some("analyst".to_string()),
-            node_id: Some(request.analyst_id),
-            limit: request.limit,
-            only_issues: request.only_issues,
-        },
-    )
-    .await
+        .collect())
 }
 
 /// 节点反馈统计（用于判断是否需要触发进化）
@@ -283,19 +219,26 @@ pub async fn get_node_feedback_stats(
     node_type: String,
     node_id: String,
 ) -> Result<NodeFeedbackStats, String> {
-    let db = state.harness.db();
+    get_node_feedback_stats_core(state.harness.db(), node_type, node_id).await.map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
+}
 
+/// `get_node_feedback_stats` 的无 State 核心（IPC 命令与 `stock.analysis` 接缝
+/// `get_analyst_feedback_stats` op 共用，#322）：同一份聚合 / 早退 / 进化判定语义。
+pub(crate) async fn get_node_feedback_stats_core(
+    db: &DatabaseConnection,
+    node_type: String,
+    node_id: String,
+) -> Result<NodeFeedbackStats, sea_orm::DbErr> {
     let all_feedbacks = AnalystFeedback::find()
         .filter(analyst_feedback::Column::NodeType.eq(&node_type))
         .filter(analyst_feedback::Column::NodeId.eq(&node_id))
         .all(db)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
+        .await?;
 
     let total_count = all_feedbacks.len() as u64;
 
@@ -318,8 +261,6 @@ pub async fn get_node_feedback_stats(
     let low_score_count = all_feedbacks.iter().filter(|f| f.quality_score < 60).count() as u64;
 
     // 一致性指标：与进化判定共用同一份聚合实现（`node_quality::aggregate_consistency_rates`）。
-    // 此前这里自己写了一遍「累加后除以总行数」，与 `node_evolution` 那份是同逻辑两份实现，
-    // 两边一旦漂移，同一张表会在两个面板显示不同的一致率（2026-10-25 收口）。
     // 分母是「带上该指标的行数」：缺键的行既不当一致、也不当不一致。
     let node_type_enum = parse_node_type(&node_type);
     let consistency_metrics = axagent_analysis_engine::node_quality::aggregate_consistency_rates(
@@ -327,9 +268,7 @@ pub async fn get_node_feedback_stats(
         all_feedbacks.iter().map(|f| f.quality_metrics_json.as_str()),
     );
 
-    // 触发进化的条件：
-    // 1. 至少有 3 次反馈
-    // 2. 平均分 < 70 或 任一致性率 < 0.7 或 低分之多
+    // 触发进化的条件：≥3 次反馈，且平均分 <70 / 低分 ≥2 / 任一致性率 <0.7。
     let needs_evolution = total_count >= 3
         && (avg_quality_score < 70.0
             || low_score_count >= 2
@@ -356,16 +295,6 @@ fn parse_node_type(type_str: &str) -> axagent_analysis_engine::NodeType {
         "tool" | "valuation" | "risk" => axagent_analysis_engine::NodeType::Tool,
         _ => axagent_analysis_engine::NodeType::Other,
     }
-}
-
-/// 获取分析师反馈统计（向后兼容）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取分析师的反馈统计数据（向后兼容）")]
-pub async fn get_analyst_feedback_stats(
-    state: State<'_, AppState>,
-    analyst_id: String,
-) -> Result<NodeFeedbackStats, String> {
-    get_node_feedback_stats(state, "analyst".to_string(), analyst_id).await
 }
 
 // ── 分析完成后的反馈落库（2026-10-25：`analyst_feedbacks` 的**唯一**写入路径）────────
@@ -838,28 +767,6 @@ mod analyst_feedback_ipc_tests {
         .expect("GetNodeFeedbacksRequest 必须按 camelCase 收");
         assert_eq!(q.node_type.as_deref(), Some("analyst"));
         assert_eq!(q.only_issues, Some(true));
-
-        let mut legacy = frontend_payload().as_object().unwrap().clone();
-        legacy.insert("analystId".into(), serde_json::json!("a-technical"));
-        legacy.insert("bullScore".into(), serde_json::json!(71.0));
-        legacy.insert("scoreConsistent".into(), serde_json::json!(true));
-        // 该 DTO 的 `directionConsistent` 是**必填 bool**（无 default）⇒ 夹具必须给全，
-        // 否则这条测试会因为夹具自身缺字段而失败，锁不住它想锁的东西。
-        legacy.insert("directionConsistent".into(), serde_json::json!(true));
-        let parsed: SaveAnalystFeedbackRequest =
-            serde_json::from_value(serde_json::Value::Object(legacy))
-                .expect("SaveAnalystFeedbackRequest 必须按 camelCase 收");
-        assert_eq!(parsed.analyst_id, "a-technical");
-        assert_eq!(parsed.bull_score, Some(71.0));
-        assert!(parsed.score_consistent);
-
-        let g: GetAnalystFeedbacksRequest = serde_json::from_value(serde_json::json!({
-            "analystId": "a-technical",
-            "onlyIssues": false
-        }))
-        .expect("GetAnalystFeedbacksRequest 必须按 camelCase 收");
-        assert_eq!(g.analyst_id, "a-technical");
-        assert_eq!(g.only_issues, Some(false));
     }
 }
 

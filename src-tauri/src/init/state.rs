@@ -1891,6 +1891,7 @@ pub async fn create_app_state_with_resource_dir(
             crate::commands::stock_workflow::trading_engine_service::HostTradingEngine::new(
                 trading_engine,
                 Arc::new(sea_db.clone()),
+                astock_client.clone(),
             ),
         );
         match axagent_harness::get_capability_registry().register_trading_engine(provider) {

@@ -91,6 +91,35 @@ const COMMAND_REFRESH_TRADING_CALENDAR: &str = "stock_refresh_trading_calendar";
 /// 触发每日快照采集（宿主 `sweep_daily_snapshots`）—— **写命令**（网络 + 快照落表）。
 /// 插件只是触发口：执行体 `run_daily_snapshot_sweep` 留在宿主，长任务不进 worker 帧。
 const COMMAND_SWEEP_DAILY_SNAPSHOTS: &str = "stock_sweep_daily_snapshots";
+// ── F2 余四条（#35 / #322）：宿主同名 Tauri 命令同批退役，走 `trading.engine` 新 op ──
+// 四 op 的分派臂按嵌 `{"request": {...}}` 层取参（与既有六 op 的平铺取参不同形）；
+// 插件侧在 args 里自己嵌层，层内键 snake_case（形状权威在宿主 Input struct）。
+/// 组合持仓限额（宿主 `get_position_limits`）：读全局面板变量，零入参 —— 读命令。
+const COMMAND_GET_POSITION_LIMITS: &str = "stock_get_position_limits";
+/// 更新单条持仓的数量与成本（宿主 `update_portfolio_holding`）—— **写命令**。
+const COMMAND_UPDATE_PORTFOLIO_HOLDING: &str = "stock_update_portfolio_holding";
+/// 批量导入 VLM 识别的持仓（宿主 `import_portfolio_from_vlm`）—— **写命令**
+/// （`replaceExisting` 可选清空旧持仓，不可逆；权限闸在宿主分派层）。
+const COMMAND_IMPORT_PORTFOLIO_FROM_VLM: &str = "stock_import_portfolio_from_vlm";
+/// 组合压力测试（宿主 `run_portfolio_stress_test`）：N+1 网络取数在宿主跑，零入参 —— 读命令。
+/// ⚠ op 名与命令名不同形：op 叫 `run_stress_test`（trading.engine trait 方法名）。
+const COMMAND_RUN_PORTFOLIO_STRESS_TEST: &str = "stock_run_portfolio_stress_test";
+// ── F6 别名族（#35 / #322）：宿主 Tauri 命令同批退役；别名形状逐字保留（PLAN §174
+// 五处不等价）。泛化形邻居（`evolve_node_command` / `save_node_feedback` /
+// `get_node_feedbacks` / `get_node_feedback_stats`）**不退役** —— 前端直调。
+/// 触发分析师节点自我进化（别名：硬编码 NodeType::Analyst）—— **写命令**（改 prompt/配置）。
+/// ⚠ 宿主命令名带 `_command` 后缀，插件命名 = 全名拼接（#273 裁定）。
+const COMMAND_EVOLVE_ANALYST: &str = "stock_evolve_analyst_command";
+/// 分析师节点进化状态查询（别名，不触发进化）—— 读命令。
+const COMMAND_GET_ANALYST_EVOLUTION_STATUS: &str = "stock_get_analyst_evolution_status_command";
+/// 通用节点进化状态查询（泛化形：nodeType + nodeId）—— 读命令。
+const COMMAND_GET_NODE_EVOLUTION_STATUS: &str = "stock_get_node_evolution_status_command";
+/// 保存分析师反馈（别名：13 字段无 node_type，宿主按 Analyst 补）—— **写命令**。
+const COMMAND_SAVE_ANALYST_FEEDBACK: &str = "stock_save_analyst_feedback";
+/// 分析师反馈历史（别名：单键 analystId 必填）—— 读命令。
+const COMMAND_GET_ANALYST_FEEDBACKS: &str = "stock_get_analyst_feedbacks";
+/// 分析师反馈统计（别名：含 needs_evolution 判定）—— 读命令。
+const COMMAND_GET_ANALYST_FEEDBACK_STATS: &str = "stock_get_analyst_feedback_stats";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -501,6 +530,90 @@ fn handle_command(
         COMMAND_SWEEP_DAILY_SNAPSHOTS => {
             match call_analysis_seam(peer, &request.call_chain, "sweep_daily_snapshots", json!({}))
             {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── F2 余四条（#35 / #322）：宿主同名 Tauri 命令同批退役，走 trading.engine 新 op ──
+        // 两条零入参读命令（限额 / 压测）不收 input；两条写命令平铺 camelCase → 层内
+        // snake_case（形状权威在宿主 Input struct，见函数体注释）。
+        COMMAND_GET_POSITION_LIMITS => match fetch_position_limits(&request.call_chain, peer) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_UPDATE_PORTFOLIO_HOLDING => {
+            match update_portfolio_holding(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_IMPORT_PORTFOLIO_FROM_VLM => {
+            match import_portfolio_from_vlm(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_RUN_PORTFOLIO_STRESS_TEST => {
+            match run_portfolio_stress_test(&request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── F6 别名族（#35 / #322）：六条显式臂，别名形状逐字保留（PLAN §174）──
+        // 写 op 两条（evolve_analyst / save_analyst_feedback）的权限闸由宿主分派层
+        // required_permission_for 把关；四条读 op 显式 read-only。
+        COMMAND_EVOLVE_ANALYST => {
+            match evolve_analyst_via_seam(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_ANALYST_EVOLUTION_STATUS => {
+            match fetch_analyst_evolution_status(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_NODE_EVOLUTION_STATUS => {
+            match fetch_node_evolution_status(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_SAVE_ANALYST_FEEDBACK => {
+            match save_analyst_feedback(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_ANALYST_FEEDBACKS => {
+            match fetch_analyst_feedbacks(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_ANALYST_FEEDBACK_STATS => {
+            match fetch_analyst_feedback_stats(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -1420,6 +1533,26 @@ fn command_str_arg(input: &Value, key: &str) -> Result<String, (String, String)>
         })
 }
 
+/// 必填数字取参（`command_str_arg` 的数值同形态）。i64 版给整数字段（反馈计数等）。
+fn command_f64_arg(input: &Value, key: &str) -> Result<f64, (String, String)> {
+    input.get(key).and_then(Value::as_f64).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("`{key}` 缺失或不是数字"))
+    })
+}
+
+fn command_i64_arg(input: &Value, key: &str) -> Result<i64, (String, String)> {
+    input.get(key).and_then(Value::as_i64).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("`{key}` 缺失或不是整数"))
+    })
+}
+
+/// 必填布尔取参（`save_analyst_feedback` 的两个一致性字段用）。
+fn command_bool_arg(input: &Value, key: &str) -> Result<bool, (String, String)> {
+    input.get(key).and_then(Value::as_bool).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("`{key}` 缺失或不是布尔"))
+    })
+}
+
 /// 调宿主 `trading.engine` 接缝（#311 两条读命令的唯一取数路径）。
 ///
 /// 与 `call_analysis_seam` 同形态但**不嵌 `request` 层**：该接缝的分派臂按平铺 snake_case
@@ -1625,6 +1758,191 @@ fn fetch_financial_snapshots(
         request.insert("end".to_string(), json!(end));
     }
     call_analysis_seam(peer, call_chain, "list_financial_snapshots", Value::Object(request))
+}
+
+// ── F2 余四条（#35 / #322）：走 `trading.engine` 新 op ──
+// 分派臂按嵌 `{"request": {...}}` 层取参 ⇒ 插件侧在 args 里自己嵌层；层内键
+// snake_case（形状权威在宿主 Input struct）。两个零入参 op 传 `json!({})`：
+// 分派臂解出 `Null`，宿主 `require_empty_request` 放行（多余载荷会被拒，不是静默忽略）。
+
+/// 组合持仓限额（宿主 `get_position_limits`）：读全局面板变量
+/// （`PositionLimits::panel_effective`，面板 `pos_max_*` 回落 20/10/40）。
+fn fetch_position_limits(
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    call_trading_seam(peer, call_chain, "get_position_limits", json!({}))
+}
+
+/// 更新单条持仓的数量与成本（宿主 `update_portfolio_holding`）—— **写命令**。
+///
+/// 命令面 `id` / `shares` / `avgCost`（camelCase，禁区 13）；层内键 snake_case。
+/// 出参恒 `null`（宿主命令回 `()` 同形）。
+fn update_portfolio_holding(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let id = command_str_arg(input, "id")?;
+    let shares = command_f64_arg(input, "shares")?;
+    let avg_cost = command_f64_arg(input, "avgCost")?;
+    call_trading_seam(
+        peer,
+        call_chain,
+        "update_portfolio_holding",
+        json!({ "request": { "id": id, "shares": shares, "avg_cost": avg_cost } }),
+    )
+}
+
+/// 批量导入 VLM 识别的持仓（宿主 `import_portfolio_from_vlm`）—— **写命令**。
+///
+/// 命令面 `rawVlmOutput` 必填 + `replaceExisting` 可选（true 会**先清空旧持仓**，
+/// 不可逆 —— 权限闸 workspace-write 在宿主分派层）。出参是宿主核心的结果对象
+/// （`{"success", "imported", "failed", "stockCodes", "errors"}`）整块透传。
+fn import_portfolio_from_vlm(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let raw_vlm_output = command_str_arg(input, "rawVlmOutput")?;
+    let mut request = serde_json::Map::new();
+    request.insert("raw_vlm_output".to_string(), json!(raw_vlm_output));
+    if let Some(replace) = input.get("replaceExisting").and_then(Value::as_bool) {
+        request.insert("replace_existing".to_string(), json!(replace));
+    }
+    call_trading_seam(
+        peer,
+        call_chain,
+        "import_portfolio_from_vlm",
+        json!({ "request": Value::Object(request) }),
+    )
+}
+
+/// 组合压力测试（宿主 `run_portfolio_stress_test`）：纯计算 op，N+1 网络取数在宿主跑。
+/// ⚠ op 名 `run_stress_test` ≠ 命令名（宿主命令带 `portfolio`，trait 方法不带）。
+fn run_portfolio_stress_test(
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    call_trading_seam(peer, call_chain, "run_stress_test", json!({}))
+}
+
+// ── F6 别名族（#35 / #322）：走 `stock.analysis` 新 op，别名形状逐字保留 ──
+// 六 op 的宿主 provider 在 `stock_analysis_service.rs`（权威实现复用无 State 核心）；
+// 接缝键 snake_case（provider 头注释同口径）。别名命令与宿主 IPC 面的键名差异只做
+// camelCase 平铺（本文件惯例，与宿主 request 嵌层形状无关 —— inputSchema 是权威）。
+
+/// 触发分析师节点自我进化（别名：硬编码 NodeType::Analyst）—— **写命令**。
+fn evolve_analyst_via_seam(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let analyst_id = command_str_arg(input, "analystId")?;
+    call_analysis_seam(peer, call_chain, "evolve_analyst", json!({ "analyst_id": analyst_id }))
+}
+
+/// 分析师节点进化状态查询（别名，不触发进化）—— 读命令。
+fn fetch_analyst_evolution_status(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let analyst_id = command_str_arg(input, "analystId")?;
+    call_analysis_seam(
+        peer,
+        call_chain,
+        "get_analyst_evolution_status",
+        json!({ "analyst_id": analyst_id }),
+    )
+}
+
+/// 通用节点进化状态查询（泛化形：nodeType + nodeId，未知值宿主兜 Other）—— 读命令。
+fn fetch_node_evolution_status(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let node_type = command_str_arg(input, "nodeType")?;
+    let node_id = command_str_arg(input, "nodeId")?;
+    call_analysis_seam(
+        peer,
+        call_chain,
+        "get_node_evolution_status",
+        json!({ "node_type": node_type, "node_id": node_id }),
+    )
+}
+
+/// 保存分析师反馈（别名：13 字段无 node_type，宿主按 Analyst 补）—— **写命令**。
+///
+/// 命令面 13 字段 camelCase（可选三键 `bullScore` / `bearScore` / `confidence` 存在才
+/// 透传，缺省不插键 —— 宿主侧 serde `default` 收 `None`）；其余 12 键必填。
+fn save_analyst_feedback(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let mut request = serde_json::Map::new();
+    request.insert("analyst_id".to_string(), json!(command_str_arg(input, "analystId")?));
+    request.insert("report_id".to_string(), json!(command_str_arg(input, "reportId")?));
+    request.insert("stock_code".to_string(), json!(command_str_arg(input, "stockCode")?));
+    request.insert("execution_id".to_string(), json!(command_str_arg(input, "executionId")?));
+    request
+        .insert("quality_score".to_string(), json!(command_i64_arg(input, "qualityScore")? as i32));
+    request.insert("grade".to_string(), json!(command_str_arg(input, "grade")?));
+    request.insert("issue_count".to_string(), json!(command_i64_arg(input, "issueCount")? as i32));
+    request
+        .insert("warning_count".to_string(), json!(command_i64_arg(input, "warningCount")? as i32));
+    request.insert("good_count".to_string(), json!(command_i64_arg(input, "goodCount")? as i32));
+    request.insert("checks_json".to_string(), json!(command_str_arg(input, "checksJson")?));
+    if let Some(v) = input.get("bullScore").and_then(Value::as_f64) {
+        request.insert("bull_score".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("bearScore").and_then(Value::as_f64) {
+        request.insert("bear_score".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("confidence").and_then(Value::as_f64) {
+        request.insert("confidence".to_string(), json!(v));
+    }
+    request
+        .insert("score_consistent".to_string(), json!(command_bool_arg(input, "scoreConsistent")?));
+    request.insert(
+        "direction_consistent".to_string(),
+        json!(command_bool_arg(input, "directionConsistent")?),
+    );
+    call_analysis_seam(peer, call_chain, "save_analyst_feedback", Value::Object(request))
+}
+
+/// 分析师反馈历史（别名：单键 analystId 必填 + limit / onlyIssues 可选）—— 读命令。
+fn fetch_analyst_feedbacks(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let mut request = serde_json::Map::new();
+    request.insert("analyst_id".to_string(), json!(command_str_arg(input, "analystId")?));
+    if let Some(v) = input.get("limit").and_then(Value::as_u64) {
+        request.insert("limit".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("onlyIssues").and_then(Value::as_bool) {
+        request.insert("only_issues".to_string(), json!(v));
+    }
+    call_analysis_seam(peer, call_chain, "get_analyst_feedbacks", Value::Object(request))
+}
+
+/// 分析师反馈统计（别名：含 needs_evolution 判定，阈值在宿主核心）—— 读命令。
+fn fetch_analyst_feedback_stats(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let analyst_id = command_str_arg(input, "analystId")?;
+    call_analysis_seam(
+        peer,
+        call_chain,
+        "get_analyst_feedback_stats",
+        json!({ "analyst_id": analyst_id }),
+    )
 }
 
 /// 分析时间戳（UNIX 秒）：与宿主原命令的 `chrono::Utc::now().timestamp()` 同量纲。
@@ -2308,7 +2626,7 @@ mod tests {
         }
     }
 
-    /// #311 + F1 余三条：显式分派臂命令**不得被三张 fallback 路由表吞掉**。
+    /// #311 + F1 余三条 + F2/F6（#322）：显式分派臂命令**不得被三张 fallback 路由表吞掉**。
     ///
     /// 负控意义：若有人日后把它们塞进 `market_read_route` / `cron_seam_op`，命令会打到
     /// 相邻数据面上（`stock_set_quote_watch_priority` 尤其危险 —— 它是写命令）。
@@ -2322,6 +2640,18 @@ mod tests {
             // F1 余三条的两条显式臂（快照读面 / 快照采集触发口，均走 stock.analysis）。
             super::COMMAND_LIST_FINANCIAL_SNAPSHOTS,
             super::COMMAND_SWEEP_DAILY_SNAPSHOTS,
+            // F2 余四条（#322，均走 trading.engine 新 op）。
+            super::COMMAND_GET_POSITION_LIMITS,
+            super::COMMAND_UPDATE_PORTFOLIO_HOLDING,
+            super::COMMAND_IMPORT_PORTFOLIO_FROM_VLM,
+            super::COMMAND_RUN_PORTFOLIO_STRESS_TEST,
+            // F6 别名族六条（#322，均走 stock.analysis 新 op）。
+            super::COMMAND_EVOLVE_ANALYST,
+            super::COMMAND_GET_ANALYST_EVOLUTION_STATUS,
+            super::COMMAND_GET_NODE_EVOLUTION_STATUS,
+            super::COMMAND_SAVE_ANALYST_FEEDBACK,
+            super::COMMAND_GET_ANALYST_FEEDBACKS,
+            super::COMMAND_GET_ANALYST_FEEDBACK_STATS,
         ] {
             assert!(market_read_route(command).is_none(), "`{command}` 不得进行情只读表");
             assert!(kline_route(command).is_none(), "`{command}` 不得进 K 线表");

@@ -48,12 +48,21 @@
 //!   「字段在不在」就会与该 DTO 的演进脱钩。
 
 use async_trait::async_trait;
+// F6 别名族（#322）：analyst 进化/反馈的形状权威 —— evolve 两函数在 analysis-engine
+// （implementor），反馈三族走泛化形命令抽出的无 State 核心（前端仍直调，同一份实现）。
+use crate::commands::analyst_evolution::parse_node_type;
+use crate::commands::analyst_feedback::{
+    GetNodeFeedbacksRequest, SaveNodeFeedbackRequest, get_node_feedback_stats_core,
+    get_node_feedbacks_core, save_node_feedback_core,
+};
 use axagent_analysis_engine::industry_constituents::{
     IndustryConstituentsInput, fetch_industry_constituents,
 };
 use axagent_analysis_engine::market_mainline::{
     BatchUpsertInput, batch_upsert_mainlines, list_recent_mainlines,
 };
+use axagent_analysis_engine::node_evolution::{evolve_node, get_node_evolution_status};
+use axagent_analysis_engine::node_quality::NodeType;
 use axagent_analysis_engine::stock_factor::{fetch_stock_chg_1m, parse_stock_refs};
 // T2 试点批（#248）：pipeline 两行的形状权威在主壳 commands 层 —— 无 State 核心是
 // IPC 命令与本接缝的**同一份**列清单（第二份 `json!` 就是第二套形状，禁区 12）。
@@ -536,6 +545,181 @@ impl StockAnalysisProvider for HostStockAnalysis {
             })?;
         serde_json::to_value(summary).map_err(|e| {
             AxAgentError::Provider(format!("stock.analysis::sweep_daily_snapshots 序列化失败: {e}"))
+        })
+    }
+
+    // ── F6 别名族（#322）：analyst 进化 / 反馈六条宿主命令的取数面 ──────────────
+    // 实现权威：analysis-engine 的 `evolve_node` / `get_node_evolution_status` 与泛化形
+    // 命令抽出的无 State 核心（`save_node_feedback_core` 等 —— 前端仍直调的泛化形命令
+    // 与本层共用同一份实现，不造第二份查询）。别名形状逐字保留（PLAN §174 五处不等价）；
+    // 接缝键名 snake_case（同本文件其它 op），IPC 命令面的 camelCase 不受影响。
+
+    /// 写 op：触发分析师节点自我进化（别名：硬编码 `NodeType::Analyst`，不开放成泛化形）。
+    async fn evolve_analyst(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            analyst_id: String,
+        }
+        let req: Input = Self::parse("evolve_analyst", "{analyst_id}", input)?;
+        let status =
+            evolve_node(&self.db, &NodeType::Analyst, &req.analyst_id).await.map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::evolve_analyst 失败: {e}"))
+            })?;
+        serde_json::to_value(status).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::evolve_analyst 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：获取分析师节点进化状态（别名，不触发进化）。
+    async fn get_analyst_evolution_status(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            analyst_id: String,
+        }
+        let req: Input = Self::parse("get_analyst_evolution_status", "{analyst_id}", input)?;
+        let status = get_node_evolution_status(&self.db, &NodeType::Analyst, &req.analyst_id)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::get_analyst_evolution_status 失败: {e}"
+                ))
+            })?;
+        serde_json::to_value(status).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::get_analyst_evolution_status 序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 读 op：获取节点进化状态（**泛化形本体**：收 `node_type` + `node_id` 双键；
+    /// 未知 node_type 照宿主 `parse_node_type` 兜 `Other`，不拒参）。
+    async fn get_node_evolution_status(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            node_type: String,
+            node_id: String,
+        }
+        let req: Input = Self::parse("get_node_evolution_status", "{node_type, node_id}", input)?;
+        let node_type = parse_node_type(&req.node_type);
+        let status =
+            get_node_evolution_status(&self.db, &node_type, &req.node_id).await.map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::get_node_evolution_status 失败: {e}"
+                ))
+            })?;
+        serde_json::to_value(status).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::get_node_evolution_status 序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 写 op：保存分析师质量反馈（别名：13 字段无 node_type，宿主按 `Analyst` 补；
+    /// bull/bear/confidence 三可空字段拼进 `quality_metrics_json`——与被退役的宿主命令
+    /// 同一段转换）。null 键照原样透传（读口全按缺键处理，PLAN §175）。
+    async fn save_analyst_feedback(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            analyst_id: String,
+            report_id: String,
+            stock_code: String,
+            execution_id: String,
+            quality_score: i32,
+            grade: String,
+            issue_count: i32,
+            warning_count: i32,
+            good_count: i32,
+            checks_json: String,
+            #[serde(default)]
+            bull_score: Option<f64>,
+            #[serde(default)]
+            bear_score: Option<f64>,
+            #[serde(default)]
+            confidence: Option<f64>,
+            score_consistent: bool,
+            direction_consistent: bool,
+        }
+        let req: Input =
+            Self::parse("save_analyst_feedback", "{analyst_id, report_id, … 13 字段}", input)?;
+        let quality_metrics = serde_json::json!({
+            "bull_score": req.bull_score,
+            "bear_score": req.bear_score,
+            "confidence": req.confidence,
+            "score_consistent": req.score_consistent,
+            "direction_consistent": req.direction_consistent,
+        });
+        let id = save_node_feedback_core(
+            &self.db,
+            SaveNodeFeedbackRequest {
+                node_type: "analyst".to_string(),
+                node_id: req.analyst_id,
+                report_id: req.report_id,
+                stock_code: req.stock_code,
+                execution_id: req.execution_id,
+                quality_score: req.quality_score,
+                grade: req.grade,
+                issue_count: req.issue_count,
+                warning_count: req.warning_count,
+                good_count: req.good_count,
+                checks_json: req.checks_json,
+                quality_metrics_json: quality_metrics.to_string(),
+            },
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::save_analyst_feedback 落库失败: {e}"))
+        })?;
+        Ok(Value::String(id))
+    }
+
+    /// 读 op：获取分析师反馈历史（别名：单键 `analyst_id` 必填，limit/only_issues 可选）。
+    async fn get_analyst_feedbacks(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            analyst_id: String,
+            #[serde(default)]
+            limit: Option<u64>,
+            #[serde(default)]
+            only_issues: Option<bool>,
+        }
+        let req: Input =
+            Self::parse("get_analyst_feedbacks", "{analyst_id, limit?, only_issues?}", input)?;
+        let rows = get_node_feedbacks_core(
+            &self.db,
+            GetNodeFeedbacksRequest {
+                node_type: Some("analyst".to_string()),
+                node_id: Some(req.analyst_id),
+                limit: req.limit,
+                only_issues: req.only_issues,
+            },
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::get_analyst_feedbacks 查询失败: {e}"))
+        })?;
+        serde_json::to_value(rows).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::get_analyst_feedbacks 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：获取分析师反馈统计（别名：平铺单参 `analyst_id`，node_type 固定 analyst）。
+    async fn get_analyst_feedback_stats(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        struct Input {
+            analyst_id: String,
+        }
+        let req: Input = Self::parse("get_analyst_feedback_stats", "{analyst_id}", input)?;
+        let stats = get_node_feedback_stats_core(&self.db, "analyst".to_string(), req.analyst_id)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::get_analyst_feedback_stats 查询失败: {e}"
+                ))
+            })?;
+        serde_json::to_value(stats).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::get_analyst_feedback_stats 序列化失败: {e}"
+            ))
         })
     }
 }

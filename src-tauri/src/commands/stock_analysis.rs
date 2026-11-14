@@ -20,9 +20,7 @@ use axagent_analysis_engine::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
 use axagent_analysis_engine::backtest_feedback;
-use axagent_analysis_engine::portfolio_monitor::{
-    self, CorrelationCell, PortfolioDashboard, StressTestBundle,
-};
+use axagent_analysis_engine::portfolio_monitor::{self, CorrelationCell, PortfolioDashboard};
 use axagent_analysis_engine::position_limits::PositionLimits;
 use axagent_analysis_engine::recommender::{self, RecoPick, RecoResponse};
 use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
@@ -753,7 +751,6 @@ pub async fn replay_tool_chain(
         data_degraded,
     })
 }
-use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -1807,27 +1804,25 @@ pub async fn add_portfolio_holding(
     })
 }
 
-/// 更新持仓
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "更新持仓")]
-#[tauri::command]
-pub async fn update_portfolio_holding(
-    state: State<'_, AppState>,
-    id: String,
+/// `update_portfolio_holding` 的无 State 核心（IPC 命令与 `trading.engine` 接缝同名 op
+/// 共用，#322）：UPDATE 单条持仓的数量/成本/更新时间。IPC 命令已退役为插件命令
+/// `stock_update_portfolio_holding`（`trading.engine` 同名 op，#322），本函数是唯一权威。
+pub(crate) async fn update_portfolio_holding_core(
+    db: &axagent_harness::DatabaseConnection,
+    id: &str,
     shares: f64,
     avg_cost: f64,
-) -> Result<(), String> {
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::sea_query::Expr;
     let now = chrono::Utc::now().timestamp_millis();
     portfolio_holdings::Entity::update_many()
         .col_expr(portfolio_holdings::Column::Shares, Expr::value(shares))
         .col_expr(portfolio_holdings::Column::AvgCost, Expr::value(avg_cost))
         .col_expr(portfolio_holdings::Column::UpdatedAt, Expr::value(now))
         .filter(portfolio_holdings::Column::Id.eq(id))
-        .exec(state.harness.db())
+        .exec(db)
         .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("更新持仓失败: {e}"))
-        })?;
-    Ok(())
+        .map(|_| ())
 }
 
 /// 移除持仓
@@ -3422,27 +3417,12 @@ pub async fn get_portfolio_correlations(
     portfolio_monitor::get_correlation_snapshot(state.harness.db(), as_of_date.as_deref()).await
 }
 
-/// 压测（无 DB 副作用，纯计算）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "运行组合压力测试")]
-#[tauri::command]
-pub async fn run_portfolio_stress_test(
-    state: State<'_, AppState>,
-) -> Result<StressTestBundle, String> {
-    // 先取持仓并**释放读锁**，再做 N+1 次网络取数（不持锁跨 await）
-    let positions = {
-        let engine = state.stock().trading_engine.read().await;
-        engine.get_positions().await?
-    };
-    let (top, sector, _max) = portfolio_monitor::compute_concentration(&positions);
-    let _ = top;
-    let betas = portfolio_monitor::estimate_betas(
-        &*state.stock().astock_client,
-        &positions,
-        portfolio_monitor::BETA_LOOKBACK_DAYS,
-    )
-    .await;
-    Ok(portfolio_monitor::run_all_scenarios(&positions, &sector, &betas))
-}
+// `run_portfolio_stress_test` / `get_position_limits` / `import_portfolio_from_vlm`
+// 三条 IPC 命令已退役为插件命令（`stock_run_portfolio_stress_test` /
+// `stock_get_position_limits` / `stock_import_portfolio_from_vlm`），走
+// `trading.engine` 接缝四 op（#322；provider 在 `stock_workflow/trading_engine_service.rs`）。
+// 压测的算法调用链（compute_concentration → estimate_betas → run_all_scenarios）
+// 整体在 provider 里重放，与本文件的 `get_portfolio_dashboard` 共用权威实现。
 
 /// 校验能否新开仓（position_limits）
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "校验新开仓限制")]
@@ -3491,16 +3471,9 @@ pub async fn check_position_limits(
 }
 
 // ── Position Limits ──
-
-/// 获取全局仓位限制配置
-///
-/// 走 `PositionLimits::panel_effective()`（面板 `pos_max_*`，回落 20/10/40）：
-/// 前端展示与风控门必须是同一组数，否则「面板改了、展示条不动」又是一套两处权威。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取全局仓位限制配置")]
-#[tauri::command]
-pub async fn get_position_limits() -> Result<PositionLimits, String> {
-    Ok(PositionLimits::panel_effective())
-}
+// `get_position_limits` IPC 命令已退役为插件命令 `stock_get_position_limits`
+// （`trading.engine` 同名 op，#322）；`PositionLimits::panel_effective()` 仍被
+// `check_position_limits`（风控门）消费，面板数与风控门同权威不变。
 
 // ── 新增数据源命令 ──
 
@@ -7504,30 +7477,23 @@ pub async fn import_trades(
     })
 }
 
-/// 批量导入 VLM 识别的持仓
-///
-/// 一步完成：解析 VLM 输出 → 批量写入 portfolio_holdings
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "批量导入VLM持仓")]
-#[tauri::command]
-pub async fn import_portfolio_from_vlm(
-    state: State<'_, AppState>,
-    raw_vlm_output: String,
+/// `import_portfolio_from_vlm` 的无 State 核心（IPC 命令已退役为插件命令
+pub(crate) async fn import_portfolio_from_vlm_core(
+    db: &axagent_harness::DatabaseConnection,
+    raw_vlm_output: &str,
     replace_existing: Option<bool>,
-) -> Result<serde_json::Value, String> {
+) -> serde_json::Value {
     use axagent_analysis_engine::vlm_import::{holdings_to_import_params, parse_vlm_output};
-    use axagent_entities::portfolio_holdings;
     use sea_orm::{EntityTrait, Set};
 
-    let parsed = parse_vlm_output(&raw_vlm_output);
+    let parsed = parse_vlm_output(raw_vlm_output);
     if !parsed.success {
-        return Ok(serde_json::json!({
+        return serde_json::json!({
             "success": false,
             "error": parsed.error,
             "holdings": [],
-        }));
+        });
     }
-
-    let db = state.harness.db();
 
     // 可选：清除旧持仓
     if replace_existing.unwrap_or(false) {
@@ -7558,13 +7524,13 @@ pub async fn import_portfolio_from_vlm(
         }
     }
 
-    Ok(serde_json::json!({
+    serde_json::json!({
         "success": errors.is_empty() || !imported.is_empty(),
         "imported": imported.len(),
         "failed": errors.len(),
         "stockCodes": imported,
         "errors": if errors.is_empty() { None } else { Some(errors) },
-    }))
+    })
 }
 
 // ── P3: 快速回测模式（采样+持有期模拟）──

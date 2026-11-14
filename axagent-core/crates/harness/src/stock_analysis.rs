@@ -293,6 +293,85 @@ pub trait StockAnalysisProvider: Send + Sync {
             "StockAnalysisProvider::sweep_daily_snapshots 未实现（该提供者不支持此数据面）".into(),
         ))
     }
+
+    // ── F6 分析师别名族六条（#35，#322）：进化与反馈面 ─────────────────────────
+    // 实现权威 `evolve_node` / `get_node_evolution_status` / `NodeEvolutionStatus` /
+    // `NodeType` 都在 `analysis-engine`（implementor）⇒ 照本接缝「Value 透传」铁律，
+    // harness 不上收 DTO。六条全部要宿主 DB（进化统计读写 `node_quality_feedbacks`
+    // 表）⇒ 插件进程够不着，必须走 op。**别名入参形状逐字保留**（§174 五处不等价）：
+    // 两条 analyst 别名收单键、`get_node_evolution_status` 是泛化形本体收双键、
+    // `save_analyst_feedback` 13 字段无 nodeType、`get_analyst_feedbacks` 把 Option
+    // 强制成必填、`get_analyst_feedback_stats` 平铺单参——入参 schema 给 LLM 的形状
+    // 由插件命名命令照宿主别名命令逐字保留，op 帧入参走 snake_case 接缝风格。
+    // 权限闸登记在 `worker.rs` 的 `required_permission_for`：`evolve_analyst` 与
+    // `save_analyst_feedback` 是写 op（要 `write`），四条 get_* 是读 ⇒ 无闸。
+
+    /// 触发分析师节点自我进化（`evolve_analyst` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参 `{"analyst_id": str}`（op 帧）；出参 = `NodeEvolutionStatus` 原样 JSON。
+    /// 宿主 provider 委托 `evolve_node(db, &NodeType::Analyst, &analyst_id)`——
+    /// 分析师别名硬编码 `NodeType::Analyst`，不得顺手开放成泛化形。
+    async fn evolve_analyst(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::evolve_analyst 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取分析师节点进化状态（`get_analyst_evolution_status` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"analyst_id": str}`；出参 = `NodeEvolutionStatus` 原样 JSON（不触发进化）。
+    async fn get_analyst_evolution_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::get_analyst_evolution_status 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 获取任意节点进化状态（`get_node_evolution_status` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"node_type": str, "node_id": str}`；出参 = `NodeEvolutionStatus` 原样
+    /// JSON。**这是泛化形本体**（F6 六条里唯一的泛化形，宿主命令带 `_command` 后缀
+    /// 但不是别名）；未知 `node_type` 由宿主 provider 照 `parse_node_type` 兜底
+    /// `NodeType::Other`（宽容语义，与宿主命令逐字一致）。
+    async fn get_node_evolution_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::get_node_evolution_status 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 保存分析师质量反馈（`save_analyst_feedback` op）—— 写 op，要 `write` 权限。
+    ///
+    /// 入参 = 13 字段请求体的 snake_case 帧形态（无 `node_type`——宿主 provider 按
+    /// 分析师别名语义补 `Analyst`）；出参 = 与被退役的宿主命令逐字同形状。
+    /// ⚠ 载荷 null 键是既有写侧行为（§175 已裁定属载荷卫生、读口全按缺键处理），
+    /// 本 op 照原样透传，不加读侧特判。
+    async fn save_analyst_feedback(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::save_analyst_feedback 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取指定分析师的质量反馈历史（`get_analyst_feedbacks` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 = 别名请求体（**把泛化形的 `Option` 字段强制成必填**，§174 入参不等价
+    /// 第 2 处——别名形状逐字保留，不得回落成可选）；出参 = 反馈历史数组原样 JSON。
+    async fn get_analyst_feedbacks(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::get_analyst_feedbacks 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取分析师反馈统计（`get_analyst_feedback_stats` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"analyst_id": str}` 平铺单参（别名形状，与泛化形的平铺双参不同）；
+    /// 出参 = 统计对象原样 JSON（判据「是否需要触发进化」的读数）。
+    async fn get_analyst_feedback_stats(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::get_analyst_feedback_stats 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -331,6 +410,29 @@ mod tests {
             (
                 "sweep_daily_snapshots",
                 futures::executor::block_on(stub.sweep_daily_snapshots(Value::Null)),
+            ),
+            // F6 别名族六 op（#322）：缺省实现同样必须显式报错，不得返回空值
+            // （空数组会被读成「该分析师没有任何反馈」，那是另一种谎）。
+            ("evolve_analyst", futures::executor::block_on(stub.evolve_analyst(Value::Null))),
+            (
+                "get_analyst_evolution_status",
+                futures::executor::block_on(stub.get_analyst_evolution_status(Value::Null)),
+            ),
+            (
+                "get_node_evolution_status",
+                futures::executor::block_on(stub.get_node_evolution_status(Value::Null)),
+            ),
+            (
+                "save_analyst_feedback",
+                futures::executor::block_on(stub.save_analyst_feedback(Value::Null)),
+            ),
+            (
+                "get_analyst_feedbacks",
+                futures::executor::block_on(stub.get_analyst_feedbacks(Value::Null)),
+            ),
+            (
+                "get_analyst_feedback_stats",
+                futures::executor::block_on(stub.get_analyst_feedback_stats(Value::Null)),
             ),
             ("pipeline_history", futures::executor::block_on(stub.pipeline_history(Value::Null))),
             (

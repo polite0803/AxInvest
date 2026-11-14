@@ -36,7 +36,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+// F2 余四条（#322）：持仓域读写走 `commands/stock_analysis.rs` 抽出的无 State 核心
+// （本文件基线 0，不出现 ORM 字面量）；压测的集中度/β 估计在 portfolio_monitor。
+use crate::commands::stock_analysis::{
+    import_portfolio_from_vlm_core, update_portfolio_holding_core,
+};
+use axagent_analysis_engine::portfolio_monitor;
+use axagent_analysis_engine::position_limits::PositionLimits;
 use axagent_analysis_engine::trading::{TradingEngine, is_trading_enabled, trade_view};
+use axagent_astock_data::AStockClient;
 use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::trade as trade_dao;
 use axagent_harness::{
@@ -44,6 +52,7 @@ use axagent_harness::{
     TradePredictionComparison, TradeValidation, TradeValidationRequest, TradeView,
     TradingEngineProvider,
 };
+use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
 /// 交易历史单次返回上限（分派层缺省 50；这里再夹一层，防插件一次拉爆内存）。
@@ -61,6 +70,8 @@ pub struct HostTradingEngine {
     engine: Arc<RwLock<TradingEngine>>,
     /// 查重 / 开关读取用；与 AppState 的 DB 是同一连接池。
     db: Arc<DatabaseConnection>,
+    /// 压测 β 估计的行情源（`run_stress_test` 的 N+1 网络取数在宿主跑，#322）。
+    astock_client: Arc<AStockClient>,
     /// 按 `stock_code` 的串行锁表。
     ///
     /// 为什么需要：引擎的 `upsert_position` 是 SELECT→UPDATE 的读-改-写
@@ -72,8 +83,28 @@ pub struct HostTradingEngine {
 }
 
 impl HostTradingEngine {
-    pub fn new(engine: Arc<RwLock<TradingEngine>>, db: Arc<DatabaseConnection>) -> Self {
-        Self { engine, db, execute_locks: Mutex::new(HashMap::new()) }
+    pub fn new(
+        engine: Arc<RwLock<TradingEngine>>,
+        db: Arc<DatabaseConnection>,
+        astock_client: Arc<AStockClient>,
+    ) -> Self {
+        Self { engine, db, astock_client, execute_locks: Mutex::new(HashMap::new()) }
+    }
+
+    /// 无参 op 的入参校验（request 必须是 null / 空对象）：多余的载荷会被静默忽略，
+    /// 那会让「参数拼错但调用照常成功」看起来像正常——不收就不许给。
+    fn require_empty_request(op: &str, input: &Value) -> Result<(), AxAgentError> {
+        let non_empty = match input {
+            Value::Null => false,
+            Value::Object(map) => !map.is_empty(),
+            _ => true,
+        };
+        if non_empty {
+            return Err(AxAgentError::Validation(format!(
+                "trading.engine::{op} 不收任何参数，收到: {input}"
+            )));
+        }
+        Ok(())
     }
 
     /// 取某只股票的串行锁（首次使用时建）。
@@ -226,6 +257,87 @@ impl TradingEngineProvider for HostTradingEngine {
     async fn trading_enabled(&self) -> Result<bool, AxAgentError> {
         // 唯一口径：settings 的 `trading_enabled`（引擎的 `enabled` 是死字段，禁读禁写）
         Ok(is_trading_enabled(self.db.as_ref()).await)
+    }
+
+    // ── F2 余四条（#322）：持仓域读写与压测 ──────────────────────────────────
+    // `get_position_limits` 读全局面板变量（`PositionLimits::panel_effective`，回落
+    // 20/10/40），只在宿主进程内有效；`run_stress_test` 的 N+1 网络取数执行体整体留宿主。
+    // 两条写口的 ORM 全部在 `commands/stock_analysis.rs` 的无 State 核心里（本文件
+    // 基线 0，不得出现 ORM 字面量——分层门禁规则）。
+
+    /// 读 op：获取全局仓位限制配置（面板 `pos_max_*` 生效值；前端展示与风控门同一组数）。
+    async fn get_position_limits(&self, input: Value) -> Result<Value, AxAgentError> {
+        Self::require_empty_request("get_position_limits", &input)?;
+        serde_json::to_value(PositionLimits::panel_effective()).map_err(|e| {
+            AxAgentError::Provider(format!("trading.engine::get_position_limits 序列化失败: {e}"))
+        })
+    }
+
+    /// 写 op：更新单条持仓的数量与成本（SQL 在 `update_portfolio_holding_core`）。
+    async fn update_portfolio_holding(&self, input: Value) -> Result<Value, AxAgentError> {
+        #[derive(serde::Deserialize)]
+        struct Input {
+            id: String,
+            shares: f64,
+            avg_cost: f64,
+        }
+        let req: Input = serde_json::from_value(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "trading.engine::update_portfolio_holding 参数解析失败: {e}。\
+                 期望 {{id, shares, avg_cost}}"
+            ))
+        })?;
+        update_portfolio_holding_core(&self.db, &req.id, req.shares, req.avg_cost).await.map_err(
+            |e| {
+                AxAgentError::Provider(format!(
+                    "trading.engine::update_portfolio_holding 落库失败: {e}"
+                ))
+            },
+        )?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：批量导入 VLM 识别的持仓（`replace_existing` 可选清空旧持仓——不可逆，
+    /// 权限闸在分派层；解析/落库细节全在 `import_portfolio_from_vlm_core`）。
+    async fn import_portfolio_from_vlm(&self, input: Value) -> Result<Value, AxAgentError> {
+        #[derive(serde::Deserialize)]
+        struct Input {
+            raw_vlm_output: String,
+            #[serde(default)]
+            replace_existing: Option<bool>,
+        }
+        let req: Input = serde_json::from_value(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "trading.engine::import_portfolio_from_vlm 参数解析失败: {e}。\
+                 期望 {{raw_vlm_output, replace_existing?}}"
+            ))
+        })?;
+        Ok(import_portfolio_from_vlm_core(&self.db, &req.raw_vlm_output, req.replace_existing)
+            .await)
+    }
+
+    /// 纯计算 op：组合压力测试（无 DB 副作用）。先取持仓并**释放读锁**，再做 N+1 次
+    /// 网络取数（不持锁跨 await）—— 与被退役的宿主命令同结构。
+    async fn run_stress_test(&self, input: Value) -> Result<Value, AxAgentError> {
+        Self::require_empty_request("run_stress_test", &input)?;
+        let positions = {
+            let engine = self.engine.read().await;
+            engine.get_positions().await.map_err(|e| {
+                AxAgentError::Provider(format!("trading.engine::run_stress_test 取持仓失败: {e}"))
+            })?
+        };
+        let (top, sector, _max) = portfolio_monitor::compute_concentration(&positions);
+        let _ = top;
+        let betas = portfolio_monitor::estimate_betas(
+            self.astock_client.as_ref(),
+            &positions,
+            portfolio_monitor::BETA_LOOKBACK_DAYS,
+        )
+        .await;
+        let bundle = portfolio_monitor::run_all_scenarios(&positions, &sector, &betas);
+        serde_json::to_value(bundle).map_err(|e| {
+            AxAgentError::Provider(format!("trading.engine::run_stress_test 序列化失败: {e}"))
+        })
     }
 }
 

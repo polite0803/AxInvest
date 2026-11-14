@@ -1401,6 +1401,174 @@ function stockManifest({ version, binaryName, sha256 }) {
         requiredPermission: "workspace-write",
         inputSchema: { type: "object", additionalProperties: false, properties: {} },
       },
+      // ── F2 余四条（#35 / #322）：宿主同名 Tauri 命令同批退役，走 trading.engine 新 op ──
+      // 档位按接缝 op 的读写性质：两条写 op（更新持仓 / 导入 VLM 持仓）显式
+      // workspace-write，两条零入参读 op 显式 read-only（#311 同口径）。
+      {
+        name: "stock_get_position_limits",
+        description: "获取全局仓位限制配置（面板 pos_max_* 生效值，回落 20/10/40）",
+        command: "worker://stock_get_position_limits",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      {
+        name: "stock_update_portfolio_holding",
+        description: "更新单条持仓的数量与成本（按 id 定位；写 portfolio_holdings 表）",
+        command: "worker://stock_update_portfolio_holding",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "持仓记录 id" },
+            shares: { type: "number", description: "新持仓数量（股）" },
+            avgCost: { type: "number", description: "新平均成本" },
+          },
+          required: ["id", "shares", "avgCost"],
+        },
+      },
+      {
+        name: "stock_import_portfolio_from_vlm",
+        description: "批量导入 VLM 识别的持仓（replaceExisting=true 会先清空旧持仓，不可逆）",
+        command: "worker://stock_import_portfolio_from_vlm",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            rawVlmOutput: { type: "string", description: "VLM 识别的原始输出文本" },
+            replaceExisting: { type: "boolean", description: "导入前清空旧持仓（缺省不清）" },
+          },
+          required: ["rawVlmOutput"],
+        },
+      },
+      {
+        name: "stock_run_portfolio_stress_test",
+        description: "运行组合压力测试（集中度 + β 估计 + 多情景模拟；纯计算，无 DB 副作用）",
+        command: "worker://stock_run_portfolio_stress_test",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      // ── F6 别名族（#35 / #322）：宿主 Tauri 命令同批退役；别名形状逐字保留 ──
+      // 泛化形邻居（evolve_node_command / save_node_feedback / get_node_feedbacks /
+      // get_node_feedback_stats）不退役，宿主继续提供。写 op 两条显式 workspace-write。
+      {
+        name: "stock_evolve_analyst_command",
+        description: "触发分析师节点自我进化（基于历史反馈统计优化 Prompt/配置；别名，硬编码 Analyst 节点）",
+        command: "worker://stock_evolve_analyst_command",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analystId: { type: "string", description: "分析师节点 ID，如 a-technical" },
+          },
+          required: ["analystId"],
+        },
+      },
+      {
+        name: "stock_get_analyst_evolution_status_command",
+        description: "获取分析师节点当前进化状态（不触发进化；别名）",
+        command: "worker://stock_get_analyst_evolution_status_command",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analystId: { type: "string", description: "分析师节点 ID，如 a-technical" },
+          },
+          required: ["analystId"],
+        },
+      },
+      {
+        name: "stock_get_node_evolution_status_command",
+        description: "获取任意节点当前进化状态（泛化形：nodeType + nodeId，未知类型兜 other）",
+        command: "worker://stock_get_node_evolution_status_command",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            nodeType: {
+              type: "string",
+              description: "节点类型：analyst/debate/decision/tool/valuation/risk/other",
+            },
+            nodeId: { type: "string", description: "节点 ID" },
+          },
+          required: ["nodeType", "nodeId"],
+        },
+      },
+      {
+        name: "stock_save_analyst_feedback",
+        description: "保存分析师反馈（别名：13 字段，无 node_type —— 宿主按 Analyst 节点补齐）",
+        command: "worker://stock_save_analyst_feedback",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analystId: { type: "string", description: "分析师节点 ID" },
+            reportId: { type: "string", description: "关联报告 ID" },
+            stockCode: { type: "string", description: "6 位股票代码" },
+            executionId: { type: "string", description: "关联执行 ID" },
+            qualityScore: { type: "integer", description: "质量分（0-100）" },
+            grade: { type: "string", description: "评级，如 A/B/C" },
+            issueCount: { type: "integer", description: "问题数" },
+            warningCount: { type: "integer", description: "警告数" },
+            goodCount: { type: "integer", description: "亮点数" },
+            checksJson: { type: "string", description: "检查项明细（JSON 字符串）" },
+            bullScore: { type: "number", description: "多头评分（可选）" },
+            bearScore: { type: "number", description: "空头评分（可选）" },
+            confidence: { type: "number", description: "置信度（可选）" },
+            scoreConsistent: { type: "boolean", description: "评分自洽" },
+            directionConsistent: { type: "boolean", description: "方向自洽" },
+          },
+          required: [
+            "analystId",
+            "reportId",
+            "stockCode",
+            "executionId",
+            "qualityScore",
+            "grade",
+            "issueCount",
+            "warningCount",
+            "goodCount",
+            "checksJson",
+            "scoreConsistent",
+            "directionConsistent",
+          ],
+        },
+      },
+      {
+        name: "stock_get_analyst_feedbacks",
+        description: "获取分析师反馈历史（别名：单键 analystId 必填，limit/onlyIssues 可选）",
+        command: "worker://stock_get_analyst_feedbacks",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analystId: { type: "string", description: "分析师节点 ID" },
+            limit: { type: "integer", description: "返回条数上限（缺省 50）" },
+            onlyIssues: { type: "boolean", description: "只看有问题的记录（缺省 false）" },
+          },
+          required: ["analystId"],
+        },
+      },
+      {
+        name: "stock_get_analyst_feedback_stats",
+        description: "获取分析师反馈统计（含 needs_evolution 进化触发判定；别名）",
+        command: "worker://stock_get_analyst_feedback_stats",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analystId: { type: "string", description: "分析师节点 ID" },
+          },
+          required: ["analystId"],
+        },
+      },
     ],
     // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
     // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，

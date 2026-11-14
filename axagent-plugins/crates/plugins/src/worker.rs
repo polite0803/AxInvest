@@ -484,6 +484,20 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // `refresh_trading_calendar` 是读面 ⇒ **必须仍是 `None`**（给读缝加闸会把只读
         // 插件无端拒掉）。
         ("stock.analysis", "sweep_daily_snapshots") => Some(PluginPermission::Write),
+        // F6 别名族（#35，#322）：`evolve_analyst` 触发进化（Prompt/配置优化建议落库）
+        // 、`save_analyst_feedback` 写反馈表 ⇒ `Write`。四条 get_*（两条进化状态 +
+        // 两条反馈读面）是读 ⇒ **必须仍是 `None`**（同上：读缝不加闸）。
+        (
+            "stock.analysis",
+            "evolve_analyst" | "save_analyst_feedback",
+        ) => Some(PluginPermission::Write),
+        // F2 组合与风控（#35，#322）：`update_portfolio_holding` 改持仓行 /
+        // `import_portfolio_from_vlm` 批量落库（可选清空旧持仓）⇒ `Write`。
+        // `get_position_limits` / `run_stress_test` 是读/纯计算面 ⇒ 不登记。
+        (
+            "trading.engine",
+            "update_portfolio_holding" | "import_portfolio_from_vlm",
+        ) => Some(PluginPermission::Write),
         // 批 1a（#35）：九个 cron 管理写 op 增删改宿主 `CronJobStore` ⇒ `Write`；
         // 三个 list 仍是 `None`（同上：读缝不加闸）。
         (
@@ -2403,6 +2417,66 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── trading.engine 接缝 · F2 组合与风控四条（#35，#322）──────────────
+            // 两条写 op（`update_portfolio_holding` 改持仓表 / `import_portfolio_from_vlm`
+            // 批量落库）已在 `required_permission_for` 登记 `Write`；两条读/纯计算面
+            // （`get_position_limits` / `run_stress_test`）不登记——读缝不加闸。
+            // `run_stress_test` 的执行体（N+1 网络取数）整体留宿主，长任务不搬进帧；
+            // `get_position_limits` 读全局面板变量，只在宿主进程内有效。四条签名与
+            // `stock.analysis` 同款（Value 透传），入参嵌 `{"request": {...}}` 层。
+            "trading.engine" if op == "get_position_limits" => {
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_position_limits(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "trading.engine" if op == "update_portfolio_holding" => {
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.update_portfolio_holding(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "trading.engine" if op == "import_portfolio_from_vlm" => {
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.import_portfolio_from_vlm(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "trading.engine" if op == "run_stress_test" => {
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.run_stress_test(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // ── stock.monitor 接缝：宿主把独持的 RealtimeMonitor + CrossStockSignalAggregator
             // 暴露给插件（方向与 market.quote 同类：宿主 → 插件，见上方先例注释） ──
             // op 参数一律 **snake_case**；嵌套 DTO（`AlertUpsertRequest` / `TZeroConfig` /
@@ -2931,6 +3005,93 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.sweep_daily_snapshots(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── stock.analysis 接缝 · F6 分析师别名族六条（#35，#322）─────────────
+            // `evolve_analyst` / `save_analyst_feedback` 是写 op（进化和反馈都落库），
+            // 已在 `required_permission_for` 登记 `Write`；四条 get_* 是读 ⇒ 不登记。
+            // 实现权威（evolve_node / get_node_evolution_status / 反馈读写）在宿主 +
+            // analysis-engine，入参嵌 `{"request": {...}}` 透传；别名入参形状由插件
+            // 命名命令层逐字保留（op 帧收 snake_case 归一后的形状）。
+            "stock.analysis" if op == "evolve_analyst" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.evolve_analyst(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "get_analyst_evolution_status" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_analyst_evolution_status(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "get_node_evolution_status" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_node_evolution_status(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "save_analyst_feedback" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.save_analyst_feedback(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "get_analyst_feedbacks" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_analyst_feedbacks(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "get_analyst_feedback_stats" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_analyst_feedback_stats(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {

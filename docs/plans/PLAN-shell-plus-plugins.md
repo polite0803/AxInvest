@@ -8724,7 +8724,7 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 | F6 分析师别名族 | 6 | `evolve_analyst_command` · `get_analyst_evolution_status_command` · `get_node_evolution_status_command` · `get_analyst_feedback_stats` · `get_analyst_feedbacks` · `save_analyst_feedback` | 无需接缝 | **唯一可能整族直退的一族**：前三条委托 `evolve_node` / `get_node_evolution_status`，活命令 `evolve_node_command` 同指（前端真用，`src/components/stock-analysis/AnalystDataQualityModal.tsx:221`）；后三条自述「向后兼容」，委托 `*_node_feedback*` 泛化形。⚠ 前置：逐条人核「别名与泛化形的出参/权限档等价」，机械配对（共用 `parse_node_type` 也算同指）不可直接当判据 |
 | F7 回测验证 | 3 | `run_decision_backtest` · `list_decision_validations` · `compute_validation_report` | 需新建 backtest 侧 op 或并入 `stock.analysis` | 迁 T2。⚠ 三条都被 `scripts/` 下的静态门按名字钉住（`check-generation-scope-registry.mjs:111/117/150`、`check-validation-window-authority.mjs:45`、`check-reco-generation.mjs:323`），改指与删命令必须同批 |
 | F8 股票工作流 | 5 | `get_sector_coherence_report` · `query_decision_backtest` · `scan_sector_coherence` · `run_batch_reflection` · `run_lesson_validation_command` | `workflow.run`（5 op）部分可复用 | 迁 T2。**§173 实测纠正原「5 条全无等价 op」判定**：`scan_sector_coherence` **零新 op**（算法在插件已 link 的 `analysis-engine/src/sector_coherence.rs:266 scan_sectors`，行情走 `market.quote::batch_get_quotes`，不必然经 `workflow.run`）；`query_decision_backtest` 可复用 `analysis.record::list` 的裁剪契约 ⇒ 实为 **1 条零新 op + 4 条需新 op**。结论「必须补 op，不能只切前端通道」只对余下 4 条成立 |
-| F9 自成模块留宿主 | 5 | `conditional_order` 1 + `market_close_sweep` 1 + `market_sim` 2 + `paper` 1 | —— | ⚠ **口径问题不是迁移问题**：`market_sim` / `paper` 命中 `DOMAINS.STOCK.cmdRe` 纯属模块名前缀巧合，而 #31 已裁「市场仿真维持内核」。建议按 H 桶白名单处理（登记「计入边界但不随股票插件迁出」），否则这 5 条永远挂在 T2 剩余面上 |
+| F9 自成模块留宿主 | 43 | `paper` 20（**论文阅读，非股票业务**）+ `paper_portfolio` 9 + `market_sim` 5 + `conditional_order` 5 + `market_close_sweep` 4（2026-11-14 #325 机械订正：原记 5 条为 lane 手工计数失真，真值按 parseRegistry mod 口径 × `DOMAINS.STOCK.cmdRe` 枚举，见 §183） | —— | ⚠ **口径问题不是迁移问题**：五模块命中 `DOMAINS.STOCK.cmdRe` 纯属模块名前缀巧合（paper 是论文阅读），而 #31 已裁「市场仿真维持内核」。**#325 已按 H 桶白名单登记 18 处引用点**（`l1-host-owned-allowlist.json`，`--check-allowlist` PASS 24/24），裁定与逐族依据见 §183 |
 
 **排序结论**：F6 是唯一能立刻减命令数又不动接缝的小刀（6 条，纯宿主删除）⇒ 排在机制护栏（#306 智能体工具面读数）落地之后做，退完由新读数自证「工具面只少了 6 个别名名字、泛化名全在」。F1 剩余 4 条 + F2 的 2 条次之（op 大多在位）。F3/F7/F8 是真正要扩接缝的大头，且 F3 与 plugin-stock 的 `analysis-engine` path 依赖（独立仓判据①、#281 判据缺口）是**同一个阻塞物**，应当并批裁。F9 走白名单不动代码。
 
@@ -9128,3 +9128,55 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 - 本批源码删改（backtest_validation.rs −16 / worker.rs / plugin-stock main.rs / bundle 清单扩）在活文档面引出 **SYMDRIFT 基线外新增 33 键 + 首层 BROKEN 1 条**（§138.2 decision_backtest 行的 :1512 越界），全部属「引用行号漂移」一类，逐条订正到实现体现行号；**未动基线**（棘轮纪律：`--update-baseline` 不许在有新增时执行，本轮已消失 27 条照旧暂不收紧）。复跑 PASS（基线外新增 0）。
 - **门按键去重的盲区（#323 已实证、本批复发）**：判红清单按「键」去重显示，同键兄弟行不可见 —— market_read_route 键下除 get_quote 行外还有 hot_stocks 行、compare_trade 键下除 :8813 外还有两处；#323 收口已把该教训连同当时行号（7817/8760/8911/8924）写进收口记录，本批压缩续跑丢了这条记忆 ⇒ 第一轮只订了 dump 可见行，复跑剩 2 键暴露后补 grep 全文订 3 行才 PASS。**同批改指的「旧行号模式全文档 grep」必须在第一轮就做**，不靠复跑暴露。
 - **批 1 漏改指销账**：§138.2 的 batch_reflection / watchlist_scan / decision_backtest 三行此前仍写「只有定义 :1476/:1490/:1512」—— 三条 wrapper 早在批 1（`3331a3f5c`）删除，本批改为「已退役（§141）；create 保留」并重锚现存定义（create 行号同步订正）；`docs/features/quant-backtest.md` 命令表同步改 T2 迁移说明（余 serenity / create 两行 + 迁移段），其 :107-109 历史锚一并摘除行号。
+
+## §183　#325 F9 自成模块 H 桶白名单登记 + F3 八条分类取证（2026-11-14）
+
+### 一、F9 真身枚举（订正 §170 表行）
+
+§170 F9 行原记「5 条（conditional_order 1 + market_close_sweep 1 + market_sim 2 + paper 1）」——lane 手工计数失真。机械枚举（`parseRegistry` 的 mod 口径 = `commands::` 后第一段，`DOMAINS.STOCK.cmdRe` 按**模块名**匹配，`scripts/lib/command-domains.mjs`）：五个自成模块共 **43 条命令**——
+
+| 模块 | 命令数 | 其中 agent_command | 内容 | 处置依据 |
+|---|---|---|---|---|
+| `paper` | 20 | 20 | **论文阅读**（阅读清单 / 论文问答 / overview），与股票无关 | STOCK 口径**假阳性**（`^paper` 前缀巧合；机械事实：全文件零股票域 crate 引用） |
+| `paper_portfolio` | 9 | 9 | 模拟盘交易（引擎在 `analysis-engine/src/paper_portfolio`） | 自成模块留宿主 |
+| `market_sim` | 5 | 5 | 市场仿真（#31 已裁「维持内核」） | 既有裁定 |
+| `conditional_order` | 5 | 5 | 条件单（规则引擎 + 实时行情事件） | 自成模块留宿主 |
+| `market_close_sweep` | 4 | 1 | 收盘扫库（cron 调度面） | 自成模块留宿主 |
+
+审计 19 域口径：前四模块 38 条归「股票分析与管线」、market_sim 5 条归「量化与仿真」（domainOf 按规则顺序首中：`^paper` 先于 `^paper_portfolio`）。**F9 裁定（leader，2026-11-14）**：五模块不随股票插件迁出。paper 是机械假阳性；market_sim 有 #31 在案；conditional_order / market_close_sweep / paper_portfolio 的宿主耦合是实时行情事件流（`QuoteChangeEvent`）与 cron 调度面——与 H 桶既有「宿主事件出口 / 宿主取数设施」条目同类。
+
+### 二、H 桶登记（18 条，`--check-allowlist` PASS 24/24）
+
+| 文件 | 处数 | 内容 |
+|---|---|---|
+| `src-tauri/src/commands/conditional_order.rs` | 5 | 条件规则引擎 use ×2 + 实时事件 / 北京日历 / 交易时段 ×3 |
+| `src-tauri/src/commands/market_close_sweep.rs` | 7 | `market_close_store` pub use + 六个调用点（sweep / refresh / coverage / 回补 ×2 / 快照日期） |
+| `src-tauri/src/commands/paper_portfolio.rs` | 1 | `paper_portfolio` use |
+| `src-tauri/src/commands/market_sim.rs` | 5 | `market_sim` use + `axagent_quant` 策略 use + SimAgent ×2 + 策略选择 |
+| `src-tauri/src/commands/paper.rs` | 0 | 零股票域 crate 引用 ⇒ 无条目（假阳性只存在于命令计数面，见上表） |
+
+读数面影响：owned −18 / hostOwned +18（两桶均无登记锚）；`l1ForeignStock` / `l1ForeignOpc` 3/3 不变（判定档复跑 PASS，hard:true 锚点 23 项）；边界 234/18 与审计域读数不变（模块仍在宿主注册面）。校验代码语义澄清：H 桶计入不看 `ownedRe`（`allowMatch` 命中即 hostOwned、`matched` 照加）⇒ owned 文件的行**可以**进白名单，`--check-allowlist` 腐烂判据③注释里「文件被划成域自有 ⇒ 空转」的措辞与实现不符（实现为准，本批不改注释）。
+
+### 三、F3 八条分类取证（下一批实施的任务书）
+
+| 命令 | 定义处 | 实现形态 | 处置 |
+|---|---|---|---|
+| `analyze_sentiment_depth` | `commands/stock_analysis.rs:1713` | 纯 `analysis-engine::sentiment_analysis::analyze_sentiment`，入参 `history_json` 预序列化 | **零新 op**，插件直调 |
+| `factor_analysis_list` | `commands/stock_analysis.rs:1735` | 纯 `FactorRegistry::new().all_factors()`，零参数 | **零新 op**，插件直调 |
+| `generate_fundamentals_report` | `commands/stock_analysis.rs:1077` | `market.quote::get_quote` + `get_financials`（两现成 op）+ `FundamentalsAnalyzer::generate`（`astock-data/src/fundamentals_report.rs:86` 纯函数） | **零新 op**，插件编排 |
+| `discover_stock_candidates` | `commands/stock_analysis.rs:2715` | `StockScreener::discover_candidates(&AStockClient)`（`analysis-engine/src/screener.rs:74`）——客户端逐股取行情 + 纯函数筛选 | **零新 op 但需插件侧重写编排**（照 `scan_sector_coherence` 先例：行情走 `market.quote::get_quote` 逐股） |
+| `get_latest_analysis_for_stock` | `commands/stock_analysis.rs:5633` | DB 读 `stock_analyses`（FAST_TEMPLATE_ID 排除 + `as_of` 时间旅行） | **需新读 op**（stock.analysis） |
+| `list_param_suggestions` | `commands/stock_analysis.rs:6385` | DB 读 `stock_reflections` + `decision_json` 解析 `params_suggestion` | **需新读 op** |
+| `invalidate_recommendation_cache` | `commands/stock_analysis.rs:5603` | `recommender::invalidate_cache()`（`analysis-engine/src/recommender/mod.rs:447`）——**进程内缓存** | ⚠ worker 直调失效的是插件进程副本，而宿主有活消费方（`commands/mover_recall_analysis.rs:1153` 的 `recommend_stocks_multi` 等）⇒ **需新写 op**（宿主 provider 调宿主缓存） |
+| `run_self_improving_stock_analysis` | `commands/stock_analysis.rs:7751` | `SelfImprovementExecutor` 在 `axagent_agent`（consumer crate，插件不可链接；import 见 `commands/stock_analysis.rs:17`） | **需新 op**（宿主 provider 实现体直调 agent crate）；宿主侧同款先例在 `init/opc_store_service.rs:3556` |
+
+合计：3 零新 op 直调 + 1 重写编排 + 2 新读 op + 2 新写 op。五落点形态照 #321-#324 先例（harness trait + 宿主 provider + worker 分派臂 + 插件命名命令 + bundled 清单）。
+
+### 四、plugin-stock 的 analysis-engine path 依赖裁定
+
+判据①（§0.5.2）原文是「依赖面收敛到只有 harness」。plugin-stock 现依赖 harness + entities + analysis-engine + astock-data（path 形态）；F3 的零新 op 直调会把 analysis-engine 直调面再加深 3 条命令。**裁定：path 依赖不阻塞 T2 迁移**——判据①②③约束的是「独立仓抽取」的时机（#281 底册已登记两插件均未收敛、均非独立仓），不是命令迁移动作；F3 落地后独立仓前置仍卡在判据①（两个域 SDK 未版本化发布），该挂账留在 #281 底册，待「域 SDK 发布批」收敛。本批不改判据原文——把「已发布的域 SDK」纳入 ① 的措辞修订属独立批，不随 F3 顺手做。
+
+### 五、未做
+
+- F3 实施批未开工（按 §183 表逐条五落点，为下一批；建议先做 3 条零新 op 直调，再补 4 条新 op）。
+- `paper` 模块 20 条论文命令污染 STOCK 边界/审计域计数（234 含 20 假阳性、231 含 38 自成模块）——本批只登记事实不改编开口径；若要把假阳性从口径摘除，属「口径修订批」（须同批改 `DOMAINS` 正则、登记读数与钉句，工作量另估）。

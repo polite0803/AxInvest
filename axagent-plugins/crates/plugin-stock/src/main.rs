@@ -172,6 +172,17 @@ const COMMAND_PIPELINE_RUN_DETAIL: &str = "stock_get_pipeline_run_detail";
 const COMMAND_LATEST_ANALYSIS_FOR_STOCK: &str = "stock_get_latest_analysis_for_stock";
 /// 参数调整建议列表（宿主 `list_param_suggestions`）。
 const COMMAND_LIST_PARAM_SUGGESTIONS: &str = "stock_list_param_suggestions";
+// ── #329：F3 余三条迁 T2（两条写 op 走 `stock.analysis` 新 op；discover 零新 op 编排）──
+/// 热门候选发现（宿主 `discover_stock_candidates`）：宇宙两现成 op + 逐票
+/// `market.quote::get_quote` + 引擎纯函数 `StockScreener::score_candidate` 打分
+/// （打分单一权威；编排判据见 §183 表）。
+const COMMAND_DISCOVER_STOCK_CANDIDATES: &str = "stock_discover_stock_candidates";
+/// 失效荐股缓存（宿主 `invalidate_recommendation_cache`）：写 op —— 必须落在宿主进程，
+/// worker 直调只会清掉插件进程副本（§183 表的裁定依据）。
+const COMMAND_INVALIDATE_RECOMMENDATION_CACHE: &str = "stock_invalidate_recommendation_cache";
+/// 自改进分析循环（宿主 `run_self_improving_stock_analysis`）：写 op —— 执行体在
+/// 宿主 agent crate（consumer 层，插件不可链接）。
+const COMMAND_RUN_SELF_IMPROVING: &str = "stock_run_self_improving_stock_analysis";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -565,6 +576,37 @@ fn handle_command(
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // ── #329：F3 余三条（discover 零新 op 编排；两条写 op 走 stock.analysis 新 op）──
+        COMMAND_DISCOVER_STOCK_CANDIDATES => {
+            match discover_stock_candidates(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_INVALIDATE_RECOMMENDATION_CACHE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "invalidate_recommendation_cache",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_RUN_SELF_IMPROVING => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "run_self_improving_stock_analysis",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         COMMAND_SET_QUOTE_WATCH_PRIORITY => {
             match set_quote_watch_priority(&frame.input, &request.call_chain, peer) {
@@ -1816,6 +1858,88 @@ fn scan_sector_coherence(
     Ok(Value::Array(reports.into_iter().filter_map(|r| serde_json::to_value(r).ok()).collect()))
 }
 
+/// 热门候选发现（宿主 `discover_stock_candidates`，#329）—— 零新 op 的插件侧重写编排。
+///
+/// 判据（§183 表）：宇宙 = 热门股前 30 + 行业龙头前 10 + 引擎兜底池（单一权威
+/// `recommender::FALLBACK_STOCKS`），行情逐票走 `market.quote::get_quote` 接缝，
+/// 打分走引擎纯函数 `StockScreener::score_candidate`（宿主原命令与引擎编排函数已退役，
+/// 这份纯函数是唯一权威）。与宿主原命令的可观察差异：
+/// - 宇宙源失败时跳过该源（宿主 `if let Ok` 同口径），不报错；
+/// - 单票行情失败跳过（宿主 `Err(_) => continue` 同口径）；
+/// - 取数走接缝多一跳，时延略增；打分与排序/截断口径逐字同源。
+///
+/// 出参 = `ScreenResult` 数组（score 降序、前 20），camelCase 与宿主同形。
+fn discover_stock_candidates(
+    _input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    use axagent_analysis_engine::recommender::FALLBACK_STOCKS;
+    // harness 类型一律经引擎 screener 转发取（插件不直接依赖 harness，依赖面判据①）。
+    use axagent_analysis_engine::screener::{HotStock, IndustryRank, StockQuote, StockScreener};
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::new();
+    let mut universe: Vec<(String, String)> = Vec::new();
+
+    // 1. 热门个股前 30（源失败跳过 = 宿主 `if let Ok` 同口径）
+    if let Ok(hot_value) = fetch_market_read(
+        market_read_route(COMMAND_GET_HOT_STOCKS).expect("热股路由必须在表中"),
+        &json!({}),
+        call_chain,
+        peer,
+    ) && let Ok(hot) = serde_json::from_value::<Vec<HotStock>>(hot_value)
+    {
+        for h in hot.iter().take(30) {
+            if seen.insert(h.stock_code.clone()) {
+                universe.push((h.stock_code.clone(), h.stock_name.clone()));
+            }
+        }
+    }
+
+    // 2. 行业排名靠前的龙头前 10
+    if let Ok(rank_value) = fetch_market_read(
+        market_read_route(COMMAND_GET_INDUSTRY_RANKING).expect("行业排名路由必须在表中"),
+        &json!({}),
+        call_chain,
+        peer,
+    ) && let Ok(industries) = serde_json::from_value::<Vec<IndustryRank>>(rank_value)
+    {
+        for ind in industries.iter().take(10) {
+            if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name)
+                && seen.insert(code.clone())
+            {
+                universe.push((code.clone(), name.clone()));
+            }
+        }
+    }
+
+    // 3. 回退：引擎兜底池（沪深300 核心成分股）
+    if universe.is_empty() {
+        for (code, name) in FALLBACK_STOCKS {
+            if seen.insert((*code).to_string()) {
+                universe.push(((*code).to_string(), (*name).to_string()));
+            }
+        }
+    }
+
+    // 逐票行情 + 纯函数打分；失败跳过 = 宿主 `Err(_) => continue` 同口径
+    let mut candidates = Vec::new();
+    for (code, name) in &universe {
+        if let Ok((_, value)) = fetch_quote(&json!({ "stock_code": code }), call_chain, peer)
+            && let Ok(quote) = serde_json::from_value::<StockQuote>(value)
+        {
+            candidates.push(StockScreener::score_candidate(code, name, &quote));
+        }
+    }
+
+    candidates.sort_by_key(|r| std::cmp::Reverse(r.score));
+    let top: Vec<_> = candidates.into_iter().take(20).collect();
+    serde_json::to_value(top).map_err(|e| {
+        (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("候选发现序列化失败: {e}"))
+    })
+}
+
 /// 监控优先级归一（宿主 `set_quote_watch_priority` 的别名宽容）。
 ///
 /// 宿主原命令认 `background` / `bg`，且**任何未知串静默回落 Active**；接缝侧是严格 serde
@@ -3055,6 +3179,10 @@ mod tests {
             // #328 两条：DB 直读经 `stock.analysis` 新读 op（非行情/K线/cron 三表）。
             super::COMMAND_LATEST_ANALYSIS_FOR_STOCK,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
+            // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
+            super::COMMAND_DISCOVER_STOCK_CANDIDATES,
+            super::COMMAND_INVALIDATE_RECOMMENDATION_CACHE,
+            super::COMMAND_RUN_SELF_IMPROVING,
         ] {
             assert!(market_read_route(command).is_none(), "`{command}` 不得进行情只读表");
             assert!(kline_route(command).is_none(), "`{command}` 不得进 K 线表");

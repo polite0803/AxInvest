@@ -6,6 +6,10 @@ use axagent_astock_data::AStockClient;
 
 use crate::concept_index::ConceptIndex;
 use crate::recommender::FALLBACK_STOCKS;
+// #329：score_candidate 的行情入参与编排宇宙 DTO 经本模块转发给 plugin-stock
+// （插件不直接依赖 harness —— 与 sector_coherence 转发 StockQuote 同一先例）。
+pub use axagent_harness::market_data::StockQuote;
+pub use axagent_harness::stock_market_types::{HotStock, IndustryRank};
 
 /// 筛选条件
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -238,57 +242,50 @@ impl StockScreener {
         Ok(results)
     }
 
-    /// 从全市场发现热门候选标的（优先使用实时热门股/行业排名数据，回退到沪深300成分股）
-    pub async fn discover_candidates(client: &AStockClient) -> Result<Vec<ScreenResult>, String> {
-        // 优先：从实时市场数据获取股票列表
-        let stock_list = Self::fetch_dynamic_candidates(client).await;
-
-        let mut candidates = Vec::new();
-        for (code, name) in &stock_list {
-            let quote = match client.get_quote(code).await {
-                Ok(q) => q,
-                Err(_) => continue,
-            };
-            let mut reasons = Vec::new();
-            let mut score = 5u32;
-            if quote.change_pct.abs() > 2.0 {
-                let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
-                reasons.push(format!("{}幅 {:.2}%", dir, quote.change_pct));
-                score += (quote.change_pct.abs() * 2.0) as u32;
-            }
-            if quote.turnover_rate > 3.0 {
-                reasons.push(format!("换手 {:.2}%", quote.turnover_rate));
-                score += (quote.turnover_rate / 2.0) as u32;
-            }
-
-            // PE/PB 估值信号
-            if let Some(pe) = quote.pe
-                && pe < 15.0
-                && pe > 0.0
-            {
-                reasons.push(format!("低PE {:.1}", pe));
-                score += 5;
-            }
-
-            // ST 风险提示
-            if quote.is_st {
-                reasons.push("ST警示".to_string());
-                score = score.saturating_sub(10);
-            }
-
-            candidates.push(ScreenResult {
-                stock_code: code.to_string(),
-                stock_name: name.to_string(),
-                price: quote.price,
-                change_pct: quote.change_pct,
-                reasons,
-                score,
-                matched_themes: None,
-            });
+    /// 单只候选的量化打分（发现编排的纯段）。
+    ///
+    /// 编排（宇宙来源 + 逐票取行情）留在调用侧：宿主 `discover_stock_candidates` 已退役
+    /// （#329），生产编排落在 plugin-stock 的 `stock_discover_stock_candidates`
+    /// （宇宙 = 热门股前 30 + 行业龙头前 10，行情走 `market.quote` 接缝逐票），两边共享
+    /// 这一份打分 ⇒ 单一权威。基线 5 分；涨幅 >2%、换手 >3%、低 PE 各加分；ST 扣 10。
+    /// 排序与截断（score 降序取前 20）也属编排，不在本函数。
+    pub fn score_candidate(stock_code: &str, stock_name: &str, quote: &StockQuote) -> ScreenResult {
+        let mut reasons = Vec::new();
+        let mut score = 5u32;
+        if quote.change_pct.abs() > 2.0 {
+            let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
+            reasons.push(format!("{}幅 {:.2}%", dir, quote.change_pct));
+            score += (quote.change_pct.abs() * 2.0) as u32;
+        }
+        if quote.turnover_rate > 3.0 {
+            reasons.push(format!("换手 {:.2}%", quote.turnover_rate));
+            score += (quote.turnover_rate / 2.0) as u32;
         }
 
-        candidates.sort_by(|a, b| b.score.cmp(&a.score));
-        Ok(candidates.into_iter().take(20).collect())
+        // PE/PB 估值信号
+        if let Some(pe) = quote.pe
+            && pe < 15.0
+            && pe > 0.0
+        {
+            reasons.push(format!("低PE {:.1}", pe));
+            score += 5;
+        }
+
+        // ST 风险提示
+        if quote.is_st {
+            reasons.push("ST警示".to_string());
+            score = score.saturating_sub(10);
+        }
+
+        ScreenResult {
+            stock_code: stock_code.to_string(),
+            stock_name: stock_name.to_string(),
+            price: quote.price,
+            change_pct: quote.change_pct,
+            reasons,
+            score,
+            matched_themes: None,
+        }
     }
 
     /// 纯函数筛选：**先按主题收窄候选宇宙，再叠加量化指标打分**。
@@ -479,43 +476,6 @@ impl StockScreener {
         }
 
         Ok(Self::screen_snapshots(&snapshots, criteria, index))
-    }
-
-    /// 从实时市场数据动态获取候选股票列表（热门股 + 行业排名），回退到沪深300
-    async fn fetch_dynamic_candidates(client: &AStockClient) -> Vec<(String, String)> {
-        let mut seen = std::collections::HashSet::new();
-        let mut stocks = Vec::new();
-
-        // 1. 热门个股
-        if let Ok(hot) = client.get_hot_stocks().await {
-            for h in hot.iter().take(30) {
-                if seen.insert(h.stock_code.clone()) {
-                    stocks.push((h.stock_code.clone(), h.stock_name.clone()));
-                }
-            }
-        }
-
-        // 2. 行业排名靠前的龙头
-        if let Ok(industries) = client.get_industry_ranking().await {
-            for ind in industries.iter().take(10) {
-                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name)
-                    && seen.insert(code.clone())
-                {
-                    stocks.push((code.clone(), name.clone()));
-                }
-            }
-        }
-
-        // 回退：沪深300 核心成分股
-        if stocks.is_empty() {
-            for (code, name) in FALLBACK_STOCKS {
-                if seen.insert(code.to_string()) {
-                    stocks.push((code.to_string(), name.to_string()));
-                }
-            }
-        }
-
-        stocks
     }
 }
 

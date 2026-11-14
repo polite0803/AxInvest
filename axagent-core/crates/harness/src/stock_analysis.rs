@@ -17,6 +17,12 @@
 //! （最近未处理的参数调整建议）—— #328 两条，原宿主命令直读 sea-orm 表，插件侧
 //! 无法自行取数故新增读 op，插件命名命令 `stock_get_latest_analysis_for_stock` /
 //! `stock_list_param_suggestions`。
+//! `discover_stock_candidates`（热门候选发现——编排留插件侧，打分纯函数
+//! `StockScreener::score_candidate` 单一权威）、`invalidate_recommendation_cache`
+//! （失效荐股进程内缓存）、`run_self_improving_stock_analysis`（自改进分析循环，
+//! 执行体在宿主 agent crate）—— #329 三条，插件命名命令
+//! `stock_discover_stock_candidates` / `stock_invalidate_recommendation_cache` /
+//! `stock_run_self_improving_stock_analysis`。
 //!
 //! ## 为什么需要它
 //!
@@ -155,6 +161,44 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 热门候选发现（`discover_stock_candidates` op）—— 读 op，无权限闸。
+    ///
+    /// 打分权威在 `analysis-engine::screener::StockScreener::score_candidate`（纯函数）；
+    /// 宇宙来源（热门股/行业龙头/兜底池）与逐票行情由插件编排（`market.quote` 接缝），
+    /// 故宿主 provider **不实现**本方法（worker 分派臂不存在，命令直接缺省报错）。
+    /// 出参 = `ScreenResult` 数组的 camelCase JSON。
+    async fn discover_stock_candidates(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::discover_stock_candidates 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 失效荐股缓存（`invalidate_recommendation_cache` op）—— 写 op。
+    ///
+    /// ⚠ 必须落在宿主进程：`analysis_engine::recommender::invalidate_cache()` 失效的是
+    /// **当前进程**的进程内缓存，worker 直调只会清掉插件进程副本，而宿主的
+    /// `recommend_stocks_multi` 等活消费方用的是宿主副本（§183 表的裁定依据）。
+    /// 入参为空对象；出参 = `null`。
+    async fn invalidate_recommendation_cache(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::invalidate_recommendation_cache 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 自改进分析循环（`run_self_improving_stock_analysis` op）—— 写 op。
+    ///
+    /// 执行体在宿主 agent crate（consumer 层，插件不可链接）：`SelfImprovementExecutor`
+    /// + `StockAnalysisRound`。入参 `{task: string, maxRounds?: number}`；出参 =
+    /// `{text, totalRounds, finalScore, confidence, strengths, gaps}`，中途出错时返回
+    /// `{partial: true, ...}`（与宿主原命令同口径）。
+    async fn run_self_improving_stock_analysis(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::run_self_improving_stock_analysis 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
     /// 待审批进化计划列表（`pending_evolution_plans` op）—— 读 op，无权限闸。
     async fn pending_evolution_plans(&self, _input: Value) -> Result<Value> {
         Err(AxAgentError::Provider(
@@ -635,6 +679,20 @@ mod tests {
             (
                 "list_param_suggestions",
                 futures::executor::block_on(stub.list_param_suggestions(Value::Null)),
+            ),
+            // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
+            // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。
+            (
+                "discover_stock_candidates",
+                futures::executor::block_on(stub.discover_stock_candidates(Value::Null)),
+            ),
+            (
+                "invalidate_recommendation_cache",
+                futures::executor::block_on(stub.invalidate_recommendation_cache(Value::Null)),
+            ),
+            (
+                "run_self_improving_stock_analysis",
+                futures::executor::block_on(stub.run_self_improving_stock_analysis(Value::Null)),
             ),
         ];
         for (name, result) in cases {

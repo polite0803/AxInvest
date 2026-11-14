@@ -494,6 +494,14 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // 接缝只做触发口）。同批两条读（`list_decision_validations` /
         // `compute_validation_report`）纯读 ⇒ **必须仍是 `None`**（读缝不加闸）。
         ("stock.analysis", "run_decision_backtest") => Some(PluginPermission::Write),
+        // #329 F3 余三条迁（子批）：`invalidate_recommendation_cache` 失效宿主进程内
+        // 荐股缓存、`run_self_improving_stock_analysis` 触发自改进 LLM 循环 ⇒ `Write`。
+        // `discover_stock_candidates` 是纯读编排（宿主 provider 不实现——打分纯函数在
+        // 引擎、宇宙与行情由插件经 `market.quote` 取）⇒ **必须仍是 `None`**（读缝不加闸）。
+        (
+            "stock.analysis",
+            "invalidate_recommendation_cache" | "run_self_improving_stock_analysis",
+        ) => Some(PluginPermission::Write),
         // F6 别名族（#35，#322）：`evolve_analyst` 触发进化（Prompt/配置优化建议落库）
         // 、`save_analyst_feedback` 写反馈表 ⇒ `Write`。四条 get_*（两条进化状态 +
         // 两条反馈读面）是读 ⇒ **必须仍是 `None`**（同上：读缝不加闸）。
@@ -3181,6 +3189,36 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.list_param_suggestions(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #329 两条写 op（宿主 `invalidate_recommendation_cache` / `run_self_improving_stock_analysis`）。
+            "stock.analysis" if op == "invalidate_recommendation_cache" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.invalidate_recommendation_cache(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "run_self_improving_stock_analysis" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.run_self_improving_stock_analysis(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -13468,6 +13506,24 @@ mod tests {
         assert_eq!(verdict.2, None, "读 op `stock_factor` 不得设权限闸");
         // 接缝维度参与判定：同名 op 换接缝不得再命中本条。
         assert_eq!(required_permission_for("opc.store", "batch_upsert_mainlines"), None);
+    }
+
+    /// #329 F3 余三条：`invalidate_recommendation_cache` / `run_self_improving_stock_analysis`
+    /// 是写 op ⇒ `Write`；`discover_stock_candidates` 纯读编排 ⇒ `None`（读缝不加闸；
+    /// 且宿主 provider 不实现本 op——编排全在插件侧，见 harness trait 文档）。
+    #[test]
+    fn stock_analysis_329_ops_permissions_follow_read_write_split() {
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #329 权限表", || {
+                (
+                    required_permission_for("stock.analysis", "invalidate_recommendation_cache"),
+                    required_permission_for("stock.analysis", "run_self_improving_stock_analysis"),
+                    required_permission_for("stock.analysis", "discover_stock_candidates"),
+                )
+            });
+        assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
+        assert_eq!(verdict.1, Some(PluginPermission::Write), "写 op 必须要求 write");
+        assert_eq!(verdict.2, None, "读 op `discover_stock_candidates` 不得设权限闸");
     }
 
     /// 批 1a（#35）十二 cron op 的权限档：3 create + 3 toggle + 3 delete = `Write`，

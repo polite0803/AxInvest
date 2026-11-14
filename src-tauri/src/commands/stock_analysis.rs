@@ -14,7 +14,6 @@ use crate::commands::stock_analysis_setup::seed_stock_analysis::{
 };
 // 行情快照的「样本不足 vs 取数失败」判据（定义在 reflection.rs，两条反思入口共用）。
 use crate::commands::stock_workflow::{SnapshotGap, take_primary_snapshot};
-use axagent_agent::self_improvement_executor::{SelfImprovementConfig, SelfImprovementExecutor};
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
@@ -25,7 +24,6 @@ use axagent_analysis_engine::position_limits::PositionLimits;
 use axagent_analysis_engine::recommender::{self, RecoPick, RecoResponse};
 use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
 use axagent_analysis_engine::screener::{ScreenCriteria, ScreenResult, StockScreener};
-use axagent_analysis_engine::stock_analysis_round::StockAnalysisRound;
 use axagent_analysis_engine::trading::PositionSummary;
 use axagent_astock_data::StockQuote;
 use axagent_astock_data::as_of::{self, AsOfContext};
@@ -2440,15 +2438,6 @@ pub async fn screen_stocks(
         };
 
     StockScreener::screen_watchlist(&state.stock().astock_client, &watchlist, &criteria).await
-}
-
-/// 从全市场发现热门候选标的
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "发现热门候选标的")]
-#[tauri::command]
-pub async fn discover_stock_candidates(
-    state: State<'_, AppState>,
-) -> Result<Vec<ScreenResult>, String> {
-    StockScreener::discover_candidates(&state.stock().astock_client).await
 }
 
 // ── Calendar Commands ──
@@ -5138,13 +5127,6 @@ fn parse_iso8601_to_millis(s: &str) -> Option<i64> {
     None
 }
 
-/// 失效荐股缓存（设置页保存 vendor 后由前端调用）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "失效荐股缓存")]
-#[tauri::command]
-pub fn invalidate_recommendation_cache() {
-    recommender::invalidate_cache();
-}
-
 /// 个股最近一次分析摘要 — 用于荐股面板等场景展示"上次分析结论"
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -7218,70 +7200,6 @@ pub async fn stock_evolution_recalc(
         "written": written,
         "currentWeights": flat,
     }))
-}
-
-// ── 自改进分析循环（Loop Engineering 股票域闭环）──
-//
-// 对接上游 harness::SelfImprovingRound + agent::SelfImprovementExecutor，
-// 让本地股票业务复用上游"执行 → 自评估 → 识别不足 → 注入改进提示 → 重新生成"
-// 的回合制迭代策略，实现功能性闭环。
-//   - trait + DTO 在 axagent-harness（foundation）
-//   - 通用执行器在 axagent-agent（consumer）
-//   - 领域实现 StockAnalysisRound 在 axagent-stock-analysis（implementor）
-//   - 命令注册在 src/commands（wiring）
-
-/// 运行自改进股票分析循环
-///
-/// 在 Loop Engineering 基础设施上执行多轮股票分析：
-/// 1. `task` — 分析任务，如 "分析 600519.SH"
-/// 2. `max_rounds` — 最大改进轮数（默认 3）
-/// 3. 每轮自动补全薄弱维度，评估质量，决定是否继续改进
-///
-/// 返回最终分析报告 + 评估分数 + 轮次信息。
-/// 即使中途出错也会返回已完成的回合记录（`partial: true`），便于前端展示部分结果。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "运行自改进股票分析循环")]
-#[tauri::command]
-pub async fn run_self_improving_stock_analysis(
-    state: State<'_, AppState>,
-    task: String,
-    max_rounds: Option<u32>,
-) -> Result<serde_json::Value, String> {
-    let client = state.stock().astock_client.clone();
-    let round = StockAnalysisRound::new(client);
-    let config = SelfImprovementConfig::new(
-        max_rounds.unwrap_or(3),
-        0.80, // 收敛阈值：评估分数高于此值直接 Accept
-        3,    // 连续无进展多少次后 Escalate
-    );
-    let mut executor = SelfImprovementExecutor::new(Box::new(round), config);
-
-    match executor.run(&task).await {
-        Ok(output) => Ok(serde_json::json!({
-            "text": output.text,
-            "totalRounds": output.total_rounds,
-            "finalScore": output.final_evaluation.score,
-            "confidence": output.final_evaluation.confidence,
-            "strengths": output.final_evaluation.strengths,
-            "gaps": output.final_evaluation.gaps,
-        })),
-        Err(e) => {
-            // 即使出错也尝试返回已有的 round_history
-            let partial = executor.round_history();
-            if let Some(last) = partial.last() {
-                Ok(serde_json::json!({
-                    "text": last.output.clone(),
-                    "totalRounds": partial.len(),
-                    "finalScore": last.evaluation.as_ref().map(|e| e.score),
-                    "error": e.to_string(),
-                    "partial": true,
-                }))
-            } else {
-                Err(ErrorResponse::new(wf_err::INTERNAL)
-                    .with_detail(format!("自改进分析失败: {e}"))
-                    .to_string())
-            }
-        },
-    }
 }
 
 // ── 估值参数配置命令 ──

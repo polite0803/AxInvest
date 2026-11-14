@@ -83,6 +83,8 @@ use crate::commands::stock_analysis::{
 };
 use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
+use axagent_agent::self_improvement_executor::{SelfImprovementConfig, SelfImprovementExecutor};
+use axagent_analysis_engine::stock_analysis_round::StockAnalysisRound;
 use axagent_astock_data::AStockClient;
 use axagent_dao::repo::stock_evolution_history as evo_hist;
 use axagent_entities::{financial_snapshots, stock_analyses};
@@ -368,6 +370,68 @@ impl StockAnalysisProvider for HostStockAnalysis {
                 ))
             })?;
         Ok(Value::Array(rows))
+    }
+
+    /// 写 op：失效荐股缓存（宿主 `invalidate_recommendation_cache` 的接缝面）。
+    ///
+    /// ⚠ 必须落在宿主进程：`recommender::invalidate_cache()` 失效的是**当前进程**的
+    /// 进程内缓存；worker 直调只会清掉插件进程副本，而宿主 `recommend_stocks_multi`
+    /// 等活消费方用的是宿主副本（§183 表的裁定依据）。入参恒空对象，出参 = `null`。
+    async fn invalidate_recommendation_cache(&self, _input: Value) -> Result<Value> {
+        axagent_analysis_engine::recommender::invalidate_cache();
+        Ok(Value::Null)
+    }
+
+    /// 写 op：自改进分析循环（宿主 `run_self_improving_stock_analysis` 的接缝面）。
+    ///
+    /// 执行体在宿主 agent crate（consumer 层，插件不可链接）：`SelfImprovementExecutor`
+    /// + 领域回合 `StockAnalysisRound`。入参 `{task: string, maxRounds?: number}`；
+    /// 出参与宿主原命令同形（`partial: true` = 中途出错但带回已完成轮次）。
+    async fn run_self_improving_stock_analysis(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SelfImprovingRequest {
+            task: String,
+            max_rounds: Option<u32>,
+        }
+        let request = serde_json::from_value::<SelfImprovingRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::run_self_improving_stock_analysis 参数解析失败: {e}。期望 \
+                 {{task: string, maxRounds?: number}}"
+            ))
+        })?;
+        let round = StockAnalysisRound::new(self.astock_client.clone());
+        let config = SelfImprovementConfig::new(
+            request.max_rounds.unwrap_or(3),
+            0.80, // 收敛阈值：评估分数高于此值直接 Accept
+            3,    // 连续无进展多少次后 Escalate
+        );
+        let mut executor = SelfImprovementExecutor::new(Box::new(round), config);
+        match executor.run(&request.task).await {
+            Ok(output) => Ok(serde_json::json!({
+                "text": output.text,
+                "totalRounds": output.total_rounds,
+                "finalScore": output.final_evaluation.score,
+                "confidence": output.final_evaluation.confidence,
+                "strengths": output.final_evaluation.strengths,
+                "gaps": output.final_evaluation.gaps,
+            })),
+            Err(e) => {
+                // 即使出错也尝试返回已有的 round_history（宿主原命令同口径）
+                let partial = executor.round_history();
+                if let Some(last) = partial.last() {
+                    Ok(serde_json::json!({
+                        "text": last.output.clone(),
+                        "totalRounds": partial.len(),
+                        "finalScore": last.evaluation.as_ref().map(|e| e.score),
+                        "error": e.to_string(),
+                        "partial": true,
+                    }))
+                } else {
+                    Err(AxAgentError::Provider(format!("自改进分析失败: {e}")))
+                }
+            },
+        }
     }
 
     /// 读 op：待审批进化计划列表（宿主 `list_pending_evolution_plans` 的接缝面）。

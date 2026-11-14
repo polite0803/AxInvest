@@ -72,7 +72,8 @@ pub use types::{
 /// 当 `get_hot_stocks` / `get_industry_ranking` 都拿不到数据时用作种子池兜底，
 /// 保证 `recommend_stocks` 至少能基于一组已知活跃股跑子策略。
 /// screener.rs 与 pool.rs 共用此常量，避免重复定义导致不同步。
-pub(crate) const FALLBACK_STOCKS: &[(&str, &str)] = &[
+// #329 开 pub：plugin-stock 的 `stock_discover_stock_candidates` 编排用同一份兜底池（单一权威）。
+pub const FALLBACK_STOCKS: &[(&str, &str)] = &[
     ("600519", "贵州茅台"),
     ("000858", "五粮液"),
     ("300750", "宁德时代"),

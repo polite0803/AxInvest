@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 84 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 87 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -793,6 +793,47 @@ function stockManifest({ version, binaryName, sha256 }) {
           properties: {
             stockCode: { type: "string", description: "股票代码；省略则返回所有股票的建议" },
           },
+        },
+      },
+      {
+        // #329：宿主 `discover_stock_candidates` 的接缝面 —— **零新 op 的插件侧编排**：
+        // 宇宙（热门股前 30 + 行业龙头前 10 + 引擎兜底池）走两现成 `market.quote` op +
+        // `recommender::FALLBACK_STOCKS`，行情逐票 `get_quote`，打分走引擎纯函数
+        // `StockScreener::score_candidate`（宿主原命令已退役，纯函数是唯一权威）。
+        name: "stock_discover_stock_candidates",
+        description: "从全市场发现热门候选标的并按量化信号打分（经行情接缝逐票取数 + 引擎纯函数打分，只读）",
+        command: "worker://stock_discover_stock_candidates",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #329：宿主 `invalidate_recommendation_cache` 的接缝面。⚠ 执行体必须留宿主：
+        // `recommender::invalidate_cache()` 失效的是**当前进程**的进程内缓存，worker 直调
+        // 只会清掉插件进程副本，而宿主 `recommend_stocks_multi` 等活消费方用的是宿主副本
+        // （§183 表的裁定依据）。宿主原档 Safe ⇒ 等阶 read-only；接缝 op 级要求包有 write
+        // （变更宿主进程状态），本包已声明 write ⇒ 行为等阶。
+        name: "stock_invalidate_recommendation_cache",
+        description: "失效荐股推荐缓存（宿主进程内缓存立即重算，供设置变更后调用，无参数）",
+        command: "worker://stock_invalidate_recommendation_cache",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #329：宿主 `run_self_improving_stock_analysis` 的接缝面。执行体在宿主 agent crate
+        // （consumer 层，插件不可链接）；宿主原档 Caution ⇒ 等阶 workspace-write。
+        // 出参 partial: true 表示中途出错但带回已完成轮次（宿主原命令同口径）。
+        name: "stock_run_self_improving_stock_analysis",
+        description: "运行自改进股票分析循环（多轮执行-评估-改进，经宿主接缝；返回最终报告与轮次）",
+        command: "worker://stock_run_self_improving_stock_analysis",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            task: { type: "string", description: '分析任务描述（如 "分析 600519.SH"）' },
+            maxRounds: { type: "integer", description: "最大改进轮数（缺省 3）" },
+          },
+          required: ["task"],
         },
       },
       {

@@ -757,20 +757,20 @@ pub const EDGE_TYPE_DECLS: &[EdgeTypeDecl] = &[
     },
     EdgeTypeDecl {
         id: "backlink",
-        meaning: "【悬空】仅前端 `GraphView.tsx:164` 的 `GraphEdgeType` 声明过，**后端零写入点**",
-        evidence: "前端声明 src/components/wiki/GraphView.tsx:164；全仓 grep 无生产写入点",
+        meaning: "【悬空】仅前端 `GraphView.tsx:174` 的 `GraphEdgeType` 声明过，**后端零写入点**",
+        evidence: "前端声明 src/components/shared/GraphView.tsx:174；全仓 grep 无生产写入点",
         observed: false,
     },
     EdgeTypeDecl {
         id: "derived_from",
         meaning: "【悬空】同上 —— 后端零写入点",
-        evidence: "前端声明 src/components/wiki/GraphView.tsx:164；全仓 grep 无生产写入点",
+        evidence: "前端声明 src/components/shared/GraphView.tsx:174；全仓 grep 无生产写入点",
         observed: false,
     },
     EdgeTypeDecl {
         id: "contradicts",
         meaning: "【悬空】同上 —— 后端零写入点（`trajectory/process_reward.rs:60` 的同名串是文本模式，不是边类型）",
-        evidence: "前端声明 src/components/wiki/GraphView.tsx:164；全仓 grep 无生产写入点",
+        evidence: "前端声明 src/components/shared/GraphView.tsx:174；全仓 grep 无生产写入点",
         observed: false,
     },
 ];
@@ -1472,7 +1472,7 @@ mod type_vocabulary_tests {
     /// 值域差异由 `test_dangling_contracts_are_exactly_the_documented_ones` 单独锁。
     #[test]
     fn test_edge_type_table_covers_frontend_union_keys() {
-        // 与 src/components/wiki/GraphView.tsx:164 的 `GraphEdgeType` 逐字一致。
+        // 与 src/components/shared/GraphView.tsx:174 的 `GraphEdgeType` 逐字一致。
         // ⚠ 前端改这个联合类型时必须同步本测试与 `EDGE_TYPE_DECLS`。
         let frontend_union =
             ["link", "backlink", "reference", "derived_from", "contradicts", "mapping"];

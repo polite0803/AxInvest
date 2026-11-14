@@ -41,7 +41,7 @@ const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
-const PANEL_REL = "src/components/settings/StockAnalysisConfigPanel.tsx";
+const PANEL_REL = "src/components/stock-analysis/StockAnalysisConfigPanel.tsx";
 const MOD_REL = "src-tauri/src/commands/stock_analysis_setup/mod.rs";
 
 /** 声明面下限：现网 374 —— 解析器坏 / 声明形态改名 ⇒ 立刻判红，不当「无违规」 */

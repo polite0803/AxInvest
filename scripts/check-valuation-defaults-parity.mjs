@@ -13,7 +13,7 @@
  * | 设置页 DTO 缺省 | `src-tauri/src/commands/stock_analysis.rs` | `ValuationParams::default()` **派生** |
  * | 模板变量默认值 | `.../stock_analysis_setup/seed_variables.rs` | `DEFAULT_DCF_*_PCT` **派生**×100 |
  * | 决策层估值配置 | `axagent-quant/crates/analysis-engine/src/decision.rs` | `ValueConfig::{default_dcf_*,Default}` **派生**×100（**2026-09-23 新增为第 5 处**） |
- * | 前端兜底显示 | `src/components/settings/StockAnalysisConfigPanel.tsx` | **手抄**（引用不到 Rust） |
+ * | 前端兜底显示 | `src/components/stock-analysis/StockAnalysisConfigPanel.tsx` | **手抄**（引用不到 Rust） |
  *
  * ### 第 5 处（`decision.rs`）的由来 —— 它曾是一个「无消费方」的漂移地雷
  *
@@ -72,7 +72,7 @@ const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${cra
 const SRC_OF_TRUTH = `${crateRel("astock-data", "src/mcp_tools.rs")}`;
 const MAIN_CRATE = "src-tauri/src/commands/stock_analysis.rs";
 const SEED_VARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
-const FRONTEND = "src/components/settings/StockAnalysisConfigPanel.tsx";
+const FRONTEND = "src/components/stock-analysis/StockAnalysisConfigPanel.tsx";
 const DECISION_CRATE = `${crateRel("analysis-engine", "src/decision.rs")}`;
 
 /**

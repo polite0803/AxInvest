@@ -39,7 +39,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
-const PANEL_REL = "src/components/settings/StockAnalysisConfigPanel.tsx";
+// 组件中立性 A 档：b() 默认值声明已下沉到中性 lib，面板只保留分组结构（本门读真源）。
+const PANEL_REL = "src/lib/stock-analysis-defaults.ts";
 const CFG_REL = `${crateRel("astock-data", "src/indicators.rs")}`;
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs";
 const BUILDER_REL = "src-tauri/src/commands/stock_analysis_setup/horizon_tier_template.rs";

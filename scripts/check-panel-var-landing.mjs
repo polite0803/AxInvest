@@ -71,7 +71,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
-const PANEL_REL = "src/components/settings/StockAnalysisConfigPanel.tsx";
+// 组件中立性 A 档：b() 默认值声明已下沉到中性 lib，面板只保留分组结构（本门读真源）。
+const PANEL_REL = "src/lib/stock-analysis-defaults.ts";
 const SCORING_REL = `${crateRel("astock-data", "src/scoring.rs")}`;
 const POS_REL = `${crateRel("analysis-engine", "src/position_limits.rs")}`;
 const MONITOR_REL = `${crateRel("analysis-engine", "src/monitor.rs")}`;
@@ -126,10 +127,12 @@ export const LANDED = [
     calls: [
       { rel: FORMULA_REL, needle: "PositionLimits::panel_effective()", min: 2 },
       { rel: TRADING_REL, needle: "PositionLimits::panel_effective()", min: 1 },
-      // 2026-10-15 G-5 把这里的 3 改成 2：第三处是 `refresh_portfolio_metrics` 往
-      // `refresh_metrics` 透传的 **死参数**（`compute_dashboard` 从不读 limits ⇒ 传了没人看）。
-      // 撤参数后留下的两处才是真消费者（风控门 + `get_position_limits` 命令面板读数）。
-      { rel: REPLAY_REL, needle: "PositionLimits::panel_effective()", min: 2 },
+      // 2026-10-15 G-5 把这里的 3 改成 2（撤 `refresh_portfolio_metrics` 死参数）。
+      // 2026-11-15 订正：#322 把 `get_position_limits` 命令退役到插件命名命令，
+      // 面板读数落点随迁到宿主 provider `trading_engine_service.rs`（`trading.engine`
+      // 同名 op）⇒ 主壳 `stock_analysis.rs` 只剩风控门 1 处，第二处改指新落点。
+      { rel: REPLAY_REL, needle: "PositionLimits::panel_effective()", min: 1 },
+      { rel: "src-tauri/src/commands/stock_workflow/trading_engine_service.rs", needle: "PositionLimits::panel_effective()", min: 1 },
     ],
   },
   {

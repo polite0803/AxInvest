@@ -728,6 +728,7 @@ name = "axagent-plugin-stock"
 version = "3.0.0"
 dependencies = [
  "axagent-analysis-engine",
+ "axagent-astock-data",
  "axagent-plugin-proto",
  "axagent-stock-core",
  "serde_json",

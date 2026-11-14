@@ -30,7 +30,6 @@ use axagent_analysis_engine::trading::PositionSummary;
 use axagent_astock_data::StockQuote;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchResult, BatchRunner, MarketBatchQuery};
-use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, FundamentalsReport};
 use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
     stock_analyses, trades, watchlist_items,
@@ -1059,76 +1058,6 @@ pub async fn batch_get_klines(
     Ok(runner.get_klines_batch(codes, &period, limit).await)
 }
 
-/// 基本面报告请求
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FundamentalsReportRequest {
-    pub stock_code: String,
-    /// 是否同时返回 Markdown 渲染
-    pub include_markdown: Option<bool>,
-}
-
-/// 生成基本面分析报告（PE/PB/ROE/同比/估值带/健康度评分）
-///
-/// 喂给工作流 a-fundamentals 节点使用:
-/// 报告把 `FinancialReport` + 实时行情聚合成可读结构 + 0-100 健康度评分。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "生成基本面分析报告")]
-#[tauri::command]
-pub async fn generate_fundamentals_report(
-    state: State<'_, AppState>,
-    request: FundamentalsReportRequest,
-) -> Result<FundamentalsReportEnvelope, String> {
-    let include_md = request.include_markdown.unwrap_or(true);
-
-    // 1. 拉取实时行情
-    let quote = state.stock().astock_client.get_quote(&request.stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取实时行情失败: {e}"))
-    })?;
-
-    // 2. 拉取财务数据（按时间倒序,首项为最新）
-    let financials =
-        state.stock().astock_client.get_financials(&request.stock_code).await.map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取财务数据失败: {e}"))
-        })?;
-
-    // 3. 生成报告
-    let report = FundamentalsAnalyzer::generate(&request.stock_code, &quote, &financials);
-    let markdown = if include_md {
-        Some(report.to_markdown())
-    } else {
-        None
-    };
-
-    // 4. 拼装返回（含可选 Markdown）
-    Ok(FundamentalsReportEnvelope { report, markdown })
-}
-
-/// 基本面报告包装（含可选 Markdown）
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FundamentalsReportEnvelope {
-    pub report: FundamentalsReport,
-    pub markdown: Option<String>,
-}
-
-/// 仅获取 Markdown 渲染（轻量,不返回结构）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取基本面报告Markdown")]
-#[tauri::command]
-pub async fn get_fundamentals_report_markdown(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<String, String> {
-    let quote = state.stock().astock_client.get_quote(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取实时行情失败: {e}"))
-    })?;
-    let financials =
-        state.stock().astock_client.get_financials(&stock_code).await.map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取财务数据失败: {e}"))
-        })?;
-    let report = FundamentalsAnalyzer::generate(&stock_code, &quote, &financials);
-    Ok(report.to_markdown())
-}
-
 /// 取消分析 — 设置取消令牌让后台任务停止
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "取消股票分析任务")]
 #[tauri::command]
@@ -1707,48 +1636,11 @@ pub async fn generate_monthly_report(
     .await
 }
 
-/// 获取情绪深度分析报告
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "分析情绪深度")]
-#[tauri::command]
-pub async fn analyze_sentiment_depth(
-    stock_code: String,
-    stock_name: String,
-    history_json: String,
-) -> Result<axagent_analysis_engine::sentiment_analysis::SentimentReport, String> {
-    let history: Vec<axagent_analysis_engine::sentiment_analysis::SentimentSnapshot> =
-        serde_json::from_str(&history_json).map_err(|e| format!("解析历史数据失败: {e}"))?;
-    Ok(axagent_analysis_engine::sentiment_analysis::analyze_sentiment(
-        &stock_code,
-        &stock_name,
-        &history,
-    ))
-}
-
-/// 运行组合回测（简化版 — 调用 quant crate）已迁 `trading.engine` 接缝新读 op
-/// `validate_portfolio_config`（#323 子批④，op 名与命令名不同形照 #322
-/// `run_stress_test` 先例）；插件命名命令 `stock_portfolio_backtest_run` 接管
-/// （前端零 invoke 已核）。配置校验 no-op 的三字段响应形状原样下沉宿主 provider。
-
-/// 获取因子分析结果
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取因子分析结果")]
-#[tauri::command]
-pub async fn factor_analysis_list() -> Result<Vec<serde_json::Value>, String> {
-    let registry = axagent_analysis_engine::factor_analysis::FactorRegistry::new();
-    let factors = registry.all_factors();
-    Ok(factors
-        .iter()
-        .map(|f| {
-            serde_json::json!({
-                "id": f.id,
-                "name": f.name,
-                "category": format!("{:?}", f.category),
-                "higherIsBetter": f.higher_is_better,
-                "defaultWeight": f.default_weight,
-                "enabled": f.enabled,
-            })
-        })
-        .collect())
-}
+// 运行组合回测（简化版 — 调用 quant crate）已迁 `trading.engine` 接缝新读 op
+// `validate_portfolio_config`（#323 子批④，op 名与命令名不同形照 #322
+// `run_stress_test` 先例）；插件命名命令 `stock_portfolio_backtest_run` 接管
+// （前端零 invoke 已核）。
+//配置校验 no-op 的三字段响应形状原样下沉宿主 provider。
 
 /// 获取宏观经济数据快照
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取宏观数据快照")]
@@ -4073,10 +3965,10 @@ pub async fn set_vendor_status(
     Ok(())
 }
 
-/// 将 NeoData token 保存到 Python 脚本缓存已迁 `stock.analysis` 接缝新写 op
-/// `save_neodata_token`（#323 子批②）：三段效应（脚本缓存 / 共享内存 /
-/// workflow_template 持久化）逐字下沉宿主 provider（`init/stock_analysis_service.rs`），
-/// 插件命名命令 `stock_save_neodata_token` 接管（前端零 invoke 已核）。
+// 将 NeoData token 保存到 Python 脚本缓存已迁 `stock.analysis` 接缝新写 op
+// `save_neodata_token`（#323 子批②）：三段效应（脚本缓存 / 共享内存 /
+// workflow_template 持久化）逐字下沉宿主 provider（`init/stock_analysis_service.rs`），
+// 插件命名命令 `stock_save_neodata_token` 接管（前端零 invoke 已核）。
 
 /// 保存东财代理地址（设置页配置，运行时热更新，无需重启）
 ///

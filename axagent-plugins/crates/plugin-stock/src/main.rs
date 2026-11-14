@@ -138,6 +138,20 @@ const COMMAND_RUN_DECISION_BACKTEST: &str = "stock_run_decision_backtest";
 const COMMAND_LIST_DECISION_VALIDATIONS: &str = "stock_list_decision_validations";
 /// 计算验证报告（宿主 `compute_validation_report`）—— 读命令。
 const COMMAND_COMPUTE_VALIDATION_REPORT: &str = "stock_compute_validation_report";
+// ── #326 T2 F3 首刀：分析与推荐产出四条迁，零新 op ──
+/// 分析情绪深度（宿主 `analyze_sentiment_depth`）—— **纯本地计算**
+/// （analysis-engine 直调，无接缝；历史快照经命令面 `historyJson` 预序列化传入）。
+/// 宿主档 Caution ⇒ 清单 `workspace-write`。
+const COMMAND_ANALYZE_SENTIMENT_DEPTH: &str = "stock_analyze_sentiment_depth";
+/// 获取因子分析结果（宿主 `factor_analysis_list`）—— **纯本地计算**，零参数，读命令。
+const COMMAND_FACTOR_ANALYSIS_LIST: &str = "stock_factor_analysis_list";
+/// 生成基本面分析报告（宿主 `generate_fundamentals_report`）—— 读命令：行情/财务经
+/// `market.quote::get_quote` + `get_financials`（现成 op），报告生成本地
+/// `FundamentalsAnalyzer::generate`（astock-data 纯函数）。
+const COMMAND_GENERATE_FUNDAMENTALS_REPORT: &str = "stock_generate_fundamentals_report";
+/// 仅获取基本面报告 Markdown（宿主 `get_fundamentals_report_markdown`，同型轻量变体，
+/// §183 取证补漏的 44 档漏项）—— 读命令。
+const COMMAND_GET_FUNDAMENTALS_REPORT_MARKDOWN: &str = "stock_get_fundamentals_report_markdown";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -690,6 +704,38 @@ fn handle_command(
         },
         COMMAND_COMPUTE_VALIDATION_REPORT => {
             match compute_validation_report(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── #326 F3 首刀：分析与推荐产出四条，零新 op ──
+        // 前两条纯本地（analysis-engine 直调）；后两条行情/财务走 market.quote 现成 op，
+        // 报告生成本地 astock-data 纯函数。四条权限面：sentiment 宿主档 Caution ⇒ 清单
+        // workspace-write；其余三条读命令 ⇒ read-only。
+        COMMAND_ANALYZE_SENTIMENT_DEPTH => match analyze_sentiment_depth(&frame.input) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_FACTOR_ANALYSIS_LIST => match factor_analysis_list() {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_GENERATE_FUNDAMENTALS_REPORT => {
+            match generate_fundamentals_report(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_GET_FUNDAMENTALS_REPORT_MARKDOWN => {
+            match get_fundamentals_report_markdown(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2135,6 +2181,136 @@ fn compute_validation_report(
     call_analysis_seam(peer, call_chain, "compute_validation_report", Value::Object(request))
 }
 
+// ── #326 F3 首刀：分析与推荐产出四条，零新 op ──
+
+/// 分析情绪深度（宿主 `analyze_sentiment_depth` 同义迁移）—— **纯本地**。
+///
+/// 入参三键必填（camelCase）：`stockCode` / `stockName` / `historyJson`
+/// （`Vec<SentimentSnapshot>` 的 JSON 字符串；解析失败报 `解析历史数据失败: {e}`，
+/// 与宿主命令体同文案）。出参 = `SentimentReport` 序列化整块。
+fn analyze_sentiment_depth(input: &Value) -> Result<Value, (String, String)> {
+    let stock_code = input.get("stockCode").and_then(Value::as_str).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `stockCode`".to_string())
+    })?;
+    let stock_name = input.get("stockName").and_then(Value::as_str).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `stockName`".to_string())
+    })?;
+    let history_json = input.get("historyJson").and_then(Value::as_str).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `historyJson`".to_string())
+    })?;
+    let history: Vec<axagent_analysis_engine::sentiment_analysis::SentimentSnapshot> =
+        serde_json::from_str(history_json).map_err(|e| {
+            (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("解析历史数据失败: {e}"))
+        })?;
+    let report = axagent_analysis_engine::sentiment_analysis::analyze_sentiment(
+        stock_code, stock_name, &history,
+    );
+    serde_json::to_value(report)
+        .map_err(|e| (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("报告序列化失败: {e}")))
+}
+
+/// 获取因子分析结果（宿主 `factor_analysis_list` 同义迁移）—— 纯本地，零参数。
+///
+/// 映射逐字照搬宿主命令体：`category` 走 `format!("{:?}", …)`（枚举变体名 Debug
+/// 形态；同 crate 同输出，因子清单口径不漂移）。
+fn factor_analysis_list() -> Result<Value, (String, String)> {
+    let registry = axagent_analysis_engine::factor_analysis::FactorRegistry::new();
+    let factors = registry.all_factors();
+    let items: Vec<Value> = factors
+        .iter()
+        .map(|f| {
+            json!({
+                "id": f.id,
+                "name": f.name,
+                "category": format!("{:?}", f.category),
+                "higherIsBetter": f.higher_is_better,
+                "defaultWeight": f.default_weight,
+                "enabled": f.enabled,
+            })
+        })
+        .collect();
+    Ok(Value::Array(items))
+}
+
+/// 取行情 + 财务（`market.quote::get_quote` / `get_financials`，接缝参数 snake_case）。
+///
+/// 反序列化目标 = `astock-data::types::{StockQuote, FinancialReport}`——#81 上收后
+/// 它们就是 harness 同一类型（astock-data `types.rs` re-export），seam 出参零转换。
+fn fetch_quote_and_financials(
+    stock_code: &str,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<
+    (axagent_astock_data::types::StockQuote, Vec<axagent_astock_data::types::FinancialReport>),
+    (String, String),
+> {
+    let quote_raw =
+        fetch_market_batch("get_quote", json!({ "stock_code": stock_code }), call_chain, peer)?;
+    let quote: axagent_astock_data::types::StockQuote =
+        serde_json::from_value(quote_raw).map_err(|e| {
+            (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("行情出参形状异常: {e}"))
+        })?;
+    let financials_raw = fetch_market_batch(
+        "get_financials",
+        json!({ "stock_code": stock_code }),
+        call_chain,
+        peer,
+    )?;
+    let financials: Vec<axagent_astock_data::types::FinancialReport> =
+        serde_json::from_value(financials_raw).map_err(|e| {
+            (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("财务出参形状异常: {e}"))
+        })?;
+    Ok((quote, financials))
+}
+
+/// 生成基本面分析报告（宿主 `generate_fundamentals_report` 同义迁移）—— 读命令。
+///
+/// 入参：`stockCode` 必填、`includeMarkdown` 可选（缺省 `true`，与宿主
+/// `unwrap_or(true)` 一致）；出参 = 宿主 `FundamentalsReportEnvelope` 同形
+/// `{report, markdown}`（`markdown` 缺省时为 `null`）。
+fn generate_fundamentals_report(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let stock_code = input.get("stockCode").and_then(Value::as_str).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `stockCode`".to_string())
+    })?;
+    let include_md = input.get("includeMarkdown").and_then(Value::as_bool).unwrap_or(true);
+    let (quote, financials) = fetch_quote_and_financials(stock_code, call_chain, peer)?;
+    let report = axagent_astock_data::fundamentals_report::FundamentalsAnalyzer::generate(
+        stock_code,
+        &quote,
+        &financials,
+    );
+    let markdown = if include_md {
+        Some(report.to_markdown())
+    } else {
+        None
+    };
+    serde_json::to_value(json!({ "report": report, "markdown": markdown }))
+        .map_err(|e| (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("报告序列化失败: {e}")))
+}
+
+/// 仅获取基本面报告 Markdown（宿主 `get_fundamentals_report_markdown` 同义迁移）——
+/// 读命令，轻量变体：只回 `to_markdown()` 字符串，不带结构。
+fn get_fundamentals_report_markdown(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let stock_code = input.get("stockCode").and_then(Value::as_str).ok_or_else(|| {
+        (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `stockCode`".to_string())
+    })?;
+    let (quote, financials) = fetch_quote_and_financials(stock_code, call_chain, peer)?;
+    let report = axagent_astock_data::fundamentals_report::FundamentalsAnalyzer::generate(
+        stock_code,
+        &quote,
+        &financials,
+    );
+    Ok(json!(report.to_markdown()))
+}
+
 /// 分析时间戳（UNIX 秒）：与宿主原命令的 `chrono::Utc::now().timestamp()` 同量纲。
 /// 本 crate 不依赖 chrono ⇒ 用标准库取同一个秒数，不为一个时间戳引第二个时间库。
 fn unix_now_secs() -> i64 {
@@ -2147,11 +2323,12 @@ fn unix_now_secs() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        batch_financials_seam_args, batch_quotes_seam_args, command_str_arg, cron_seam_op,
-        kline_route, kline_seam_args, map_analysis_state_to_run_state,
-        map_execution_state_to_run_state, market_read_route, parse_string_array,
-        search_news_seam_args, stock_analysis_request, task_run_row_from_analysis_record,
-        task_run_row_from_execution, unix_now_secs, watch_priority_arg,
+        analyze_sentiment_depth, batch_financials_seam_args, batch_quotes_seam_args,
+        command_str_arg, cron_seam_op, factor_analysis_list, kline_route, kline_seam_args,
+        map_analysis_state_to_run_state, map_execution_state_to_run_state, market_read_route,
+        parse_string_array, search_news_seam_args, stock_analysis_request,
+        task_run_row_from_analysis_record, task_run_row_from_execution, unix_now_secs,
+        watch_priority_arg,
     };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, error_codes, is_plugin_task_run_state};
     use serde_json::{Value, json};
@@ -2842,6 +3019,12 @@ mod tests {
             super::COMMAND_SAVE_ANALYST_FEEDBACK,
             super::COMMAND_GET_ANALYST_FEEDBACKS,
             super::COMMAND_GET_ANALYST_FEEDBACK_STATS,
+            // #326 F3 首刀四条：两条纯本地 + 两条自行编排 `market.quote` 两现成 op
+            // （不经 `market_read_route` 表，故必须仍是显式臂）。
+            super::COMMAND_ANALYZE_SENTIMENT_DEPTH,
+            super::COMMAND_FACTOR_ANALYSIS_LIST,
+            super::COMMAND_GENERATE_FUNDAMENTALS_REPORT,
+            super::COMMAND_GET_FUNDAMENTALS_REPORT_MARKDOWN,
         ] {
             assert!(market_read_route(command).is_none(), "`{command}` 不得进行情只读表");
             assert!(kline_route(command).is_none(), "`{command}` 不得进 K 线表");
@@ -2864,6 +3047,57 @@ mod tests {
         assert_eq!(refresh.op, "refresh_trading_calendar");
         assert!(refresh.keys.is_none(), "刷新交易日历是零入参 op，不得有标的键");
         assert!(refresh.optional.is_none(), "刷新交易日历不得有可选键");
+    }
+
+    /// #326 F3 首刀：`stock_analyze_sentiment_depth` 的入参键必须是 **camelCase**
+    /// （`stockCode`/`stockName`/`historyJson`），且 `historyJson` 按
+    /// `SentimentSnapshot`（该结构 `rename_all = "camelCase"`）反序列化。
+    ///
+    /// 两头都钉：宿主原命令吃的是 snake_case `history_json`，插件侧换 camelCase 后
+    /// 若有人把内层快照键也写成 snake（`post_count`），serde 会静默落 `None`/默认值，
+    /// 情绪均值恒 0 —— 那种「不报错但算错」最难发现，故用真实两日数据算一遍。
+    #[test]
+    fn analyze_sentiment_depth_takes_camel_case_keys_and_parses_snapshots() {
+        let history = json!([
+            { "date": "2026-11-14", "postCount": 12, "sentimentScore": 0.8, "bullRatio": 0.7, "hotRank": 3 },
+            { "date": "2026-11-13", "postCount": 9, "sentimentScore": 0.2, "bullRatio": 0.4, "hotRank": 9 },
+        ]);
+        let input = json!({
+            "stockCode": "600000",
+            "stockName": "浦发银行",
+            "historyJson": history.to_string(),
+        });
+        let out = analyze_sentiment_depth(&input).expect("合法入参必须成功");
+        assert_eq!(out["stockCode"], "600000");
+        assert_eq!(out["stockName"], "浦发银行");
+        assert_eq!(out["avgSentiment7d"], 0.5, "两日 0.8/0.2 ⇒ 均值 0.5（算错会落 0）");
+
+        // 负控：蛇形键必须被拒（不是静默取默认值），否则调用方传错形状会得到假报告。
+        for missing in ["stockCode", "stockName", "historyJson"] {
+            let mut bad = input.clone();
+            bad.as_object_mut().expect("对象").remove(missing);
+            let Err((code, _)) = analyze_sentiment_depth(&bad) else {
+                panic!("缺 `{missing}` 必须被拒");
+            };
+            assert_eq!(code, error_codes::SEAM_CALL_INVALID_ARGS, "缺 `{missing}` 拒绝码错误");
+        }
+    }
+
+    /// #326：`stock_factor_analysis_list` 零参数、回数组，且键为 camelCase
+    /// （`higherIsBetter`/`defaultWeight`）—— 与宿主原命令 `json!` 的逐键照搬一致。
+    #[test]
+    fn factor_analysis_list_returns_camel_case_items() {
+        let Value::Array(items) = factor_analysis_list().expect("因子清单必须可取") else {
+            panic!("因子清单必须是数组");
+        };
+        assert!(!items.is_empty(), "因子注册表不得为空（空表会让工具面静默返回空）");
+        let first = &items[0];
+        for key in ["id", "name", "category", "higherIsBetter", "defaultWeight", "enabled"] {
+            assert!(first.get(key).is_some(), "因子条目缺 `{key}`：{first}");
+        }
+        for snake in ["higher_is_better", "default_weight"] {
+            assert!(first.get(snake).is_none(), "不得回蛇形键 `{snake}`：{first}");
+        }
     }
 
     /// #311：时间戳量纲必须是**秒**（宿主原命令用 `chrono::Utc::now().timestamp()`）。

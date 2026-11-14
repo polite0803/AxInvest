@@ -107,7 +107,9 @@ const REGISTRY = [
     note: "月度报告：按日期区间列分析，代际应标注而不是过滤",
   },
   {
-    file: "src-tauri/src/commands/stock_workflow/misc.rs",
+    // #323 迁 T2：宿主命令从 stock_workflow/misc.rs 退役，实现体逐字下沉到宿主
+    // provider（stock.analysis::query_decision_backtest）—— 门跟着实现体走。
+    file: "src-tauri/src/init/stock_analysis_service.rs",
     fn: "query_decision_backtest",
     class: "presentation",
     note: "决策↔结果对账列表（观测/回放用）",

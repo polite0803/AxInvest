@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 75 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 78 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -1613,6 +1613,61 @@ function stockManifest({ version, binaryName, sha256 }) {
             configJson: { type: "string", description: "组合配置 JSON 字符串（含 strategies 数组）" },
           },
           required: ["configJson"],
+        },
+      },
+      // ── #324 T2 F7 回测验证三条迁：宿主同名命令同批退役，走新 op ──
+      // 档位按接缝 op 的读写性质（#321/#322/#323 同口径）：写 op 显式 workspace-write
+      // （写 decision_validations 表），两条读 op 显式 read-only。
+      {
+        name: "stock_run_decision_backtest",
+        description: "跑决策回测（对历史荐股拉 T+N 窗口 K 线回放，写验证记录并聚合命中率/因子 IC 报告）",
+        command: "worker://stock_run_decision_backtest",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            tPlusNList: {
+              type: "array",
+              items: { type: "integer" },
+              description: "T+N 验证窗口（缺省 = 四档期望持有交易日权威推导）",
+            },
+            excludeSynthetic: { type: "boolean", description: "排除 synthetic 兜底 pick（默认 true）" },
+            maxPicks: { type: "integer", description: "最大回测 pick 数（默认 200）" },
+            dryRun: { type: "boolean", description: "只出报告不写库（预览用）" },
+            periodFilter: { type: "string", description: "仅回测指定周期：short | mid | long，缺省全部" },
+            includeReplay: { type: "boolean", description: "把回放代一并验证（默认 false，只算实盘分母）" },
+          },
+        },
+      },
+      {
+        name: "stock_list_decision_validations",
+        description: "列出决策验证记录（分页，默认只列实盘代；generation 传某次回放截止日看那一批）",
+        command: "worker://stock_list_decision_validations",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "按股票代码过滤" },
+            hitOutcome: { type: "string", description: "按命中结果过滤" },
+            limit: { type: "integer", description: "分页大小，宿主缺省 100" },
+            offset: { type: "integer", description: "分页偏移，宿主缺省 0" },
+            generation: { type: "string", description: "回放代截止日（YYYY-MM-DD）；缺省只列实盘代" },
+          },
+        },
+      },
+      {
+        name: "stock_compute_validation_report",
+        description: "计算验证报告（基于已写入的验证记录聚合命中率/因子 IC，带代际与窗口排除计数）",
+        command: "worker://stock_compute_validation_report",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            generation: { type: "string", description: "回放代截止日（YYYY-MM-DD）；缺省算实盘出票一代" },
+          },
         },
       },
     ],

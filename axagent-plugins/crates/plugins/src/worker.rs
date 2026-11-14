@@ -489,6 +489,11 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // 模板变量（三段都可观察的持久效应）。同批的 `query_decision_backtest`（子批③）
         // 纯读 ⇒ **必须仍是 `None`**（给读缝加闸会把只读插件无端拒掉）。
         ("stock.analysis", "save_neodata_token") => Some(PluginPermission::Write),
+        // #324 T2 F7 回测验证三条迁：`run_decision_backtest` 是写 op —— 拉历史 K 线
+        // 回放并写 `decision_validations` 表（执行体留宿主，cron 与 CLI 共用同一实现，
+        // 接缝只做触发口）。同批两条读（`list_decision_validations` /
+        // `compute_validation_report`）纯读 ⇒ **必须仍是 `None`**（读缝不加闸）。
+        ("stock.analysis", "run_decision_backtest") => Some(PluginPermission::Write),
         // F6 别名族（#35，#322）：`evolve_analyst` 触发进化（Prompt/配置优化建议落库）
         // 、`save_analyst_feedback` 写反馈表 ⇒ `Write`。四条 get_*（两条进化状态 +
         // 两条反馈读面）是读 ⇒ **必须仍是 `None`**（同上：读缝不加闸）。
@@ -3376,6 +3381,53 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.query_decision_backtest(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── stock.analysis 接缝 · #324 T2 F7 回测验证三条迁 ──────────────────
+            // 宿主 `run_decision_backtest` / `list_decision_validations` /
+            // `compute_validation_report`（backtest_validation.rs）退役后的接缝面。
+            // 写 op `run_decision_backtest` 已在 `required_permission_for` 登记
+            // `Write`（执行体留宿主：cron 与 CLI 共用同一实现）；两条读不登记。
+            // 三条出参 = 宿主 DTO 序列化整块透传，本层不做键名映射。
+            "stock.analysis" if op == "run_decision_backtest" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.run_decision_backtest(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "list_decision_validations" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_decision_validations(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "compute_validation_report" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.compute_validation_report(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {

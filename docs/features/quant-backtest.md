@@ -99,13 +99,10 @@ Agent 模块清单见 `axagent-quant/crates/market-sim/src/agent/mod.rs:3-12`，
 
 | 命令 | 行号 |
 |---|---|
-| `run_decision_backtest` | `src-tauri/src/commands/backtest_validation.rs:168` |
-| `list_decision_validations` | `src-tauri/src/commands/backtest_validation.rs:857` |
-| `serenity_validation_summary` | `src-tauri/src/commands/backtest_validation.rs:1000` |
-| `compute_validation_report` | `src-tauri/src/commands/backtest_validation.rs:1078` |
-| `create_decision_backtest_cron` | `src-tauri/src/commands/backtest_validation.rs:1424` |
+| `serenity_validation_summary` | `src-tauri/src/commands/backtest_validation.rs:987` |
+| `create_decision_backtest_cron` | `src-tauri/src/commands/backtest_validation.rs:1415` |
 
-`run_decision_backtest` 只是薄壳，实体逻辑在同文件 `run_decision_backtest_inner`（`src-tauri/src/commands/backtest_validation.rs:194`）。
+`run_decision_backtest` / `list_decision_validations` / `compute_validation_report` 三条宿主命令已迁 T2（#324）：插件命名命令 `stock_run_decision_backtest` / `stock_list_decision_validations` / `stock_compute_validation_report` 经接缝 `stock.analysis` 同名 op 回宿主，实现体保留在本文件 —— `run_decision_backtest_inner`（`src-tauri/src/commands/backtest_validation.rs:178`）、`list_decision_validations`（`:845`）、`compute_validation_report`（`:1070`）。
 
 （对应版本：当前实现）
 

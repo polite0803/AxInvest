@@ -407,6 +407,55 @@ pub trait StockAnalysisProvider: Send + Sync {
                 .into(),
         ))
     }
+
+    // ── #324 T2 F7 回测验证三条迁（§160 分档表 F7）────────────────────────────
+    // 宿主命令 `run_decision_backtest` / `list_decision_validations` /
+    // `compute_validation_report`（`commands/backtest_validation.rs`）退役后的接缝面。
+    // 三条实现体都只在宿主进程（decision_validations / reco_picks 表 + 行情 API 回放）
+    // ⇒ 插件够不着，必须走 op。`run_decision_backtest` 是写 op（写 decision_validations
+    // 行，权限闸登记在 `worker.rs` 的 `required_permission_for`）；两条读 op 无闸。
+    // 三个静态门（check-generation-scope-registry / check-validation-window-authority /
+    // check-reco-generation）按「文件+fn 名」钉实现体 ⇒ 宿主侧抽 State 化保号留原文件。
+
+    /// 跑决策回测（`run_decision_backtest` op）—— **写 op**，要 `write` 权限。
+    ///
+    /// 入参 `{"request": {tPlusNList?, excludeSynthetic?, maxPicks?, dryRun?,
+    /// periodFilter?, includeReplay?}}` 全可选（camelCase，形状权威在宿主
+    /// `RunDecisionBacktestRequest` 的 serde 结构，`default` 语义 `{}` = 全默认）；
+    /// 出参 = `RunDecisionBacktestResponse` 序列化整块透传（harness 不上收 DTO）。
+    /// 执行体 `run_decision_backtest_inner` 留宿主（cron 与 CLI `axagent-validate-backfill`
+    /// 共用同一实现，接缝只做触发口，照 `sweep_daily_snapshots` 先例）。
+    async fn run_decision_backtest(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::run_decision_backtest 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出决策验证记录（`list_decision_validations` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"stockCode"?, "hitOutcome"?, "limit"?, "offset"?, "generation"?}`
+    /// 全可选；出参 = `DecisionValidationItem` 数组整块透传（harness 不上收 DTO）。
+    /// 代际口径：默认只列实盘验证记录，`generation` = 某次回放的截止日（显式传入，
+    /// 两套样本不并排）—— 与被退役的宿主命令逐字等价。
+    async fn list_decision_validations(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::list_decision_validations 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 计算验证报告（`compute_validation_report` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{"generation"?}`（None = 实盘出票一代）；出参 =
+    /// `ValidationReportResponse` 序列化整块透传（harness 不上收 DTO）。分母筛样
+    /// 按荐股代际常量（statistics 类，门钉），T+N 窗口按 `is_validation_window`
+    /// 现场推导（B3 权威门钉）—— 两判据都在宿主实现体里，接缝只透传。
+    async fn compute_validation_report(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::compute_validation_report 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -538,6 +587,20 @@ mod tests {
             (
                 "query_decision_backtest",
                 futures::executor::block_on(stub.query_decision_backtest(Value::Null)),
+            ),
+            // #324 T2 F7 回测验证三条迁：默认实现同样必须显式报错
+            // （空值会被读成「回测已跑 / 记录为空 / 报告为空」，那是另一种谎）。
+            (
+                "run_decision_backtest",
+                futures::executor::block_on(stub.run_decision_backtest(Value::Null)),
+            ),
+            (
+                "list_decision_validations",
+                futures::executor::block_on(stub.list_decision_validations(Value::Null)),
+            ),
+            (
+                "compute_validation_report",
+                futures::executor::block_on(stub.compute_validation_report(Value::Null)),
             ),
         ];
         for (name, result) in cases {

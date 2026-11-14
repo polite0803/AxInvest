@@ -130,6 +130,14 @@ const COMMAND_QUERY_DECISION_BACKTEST: &str = "stock_query_decision_backtest";
 /// `validate_portfolio_config` op；命令名逐字续宿主名，op 名与命令名不同形照 #322
 /// `run_stress_test` 先例）—— 读命令（纯计算，无 DB/行情副作用）。
 const COMMAND_PORTFOLIO_BACKTEST_RUN: &str = "stock_portfolio_backtest_run";
+// ── #324 T2 F7 回测验证三条迁：宿主同名命令同批退役，走 `stock.analysis` 新 op ──
+/// 跑决策回测（宿主 `run_decision_backtest`，backtest_validation.rs）—— **写命令**
+/// （写 `decision_validations` 表；执行体留宿主，cron 与 CLI 共用）。
+const COMMAND_RUN_DECISION_BACKTEST: &str = "stock_run_decision_backtest";
+/// 列出决策验证记录（宿主 `list_decision_validations`）—— 读命令。
+const COMMAND_LIST_DECISION_VALIDATIONS: &str = "stock_list_decision_validations";
+/// 计算验证报告（宿主 `compute_validation_report`）—— 读命令。
+const COMMAND_COMPUTE_VALIDATION_REPORT: &str = "stock_compute_validation_report";
 /// 行业成分股查询命令（工具 `get_industry_constituents` 的执行面）。
 const COMMAND_INDUSTRY_CONSTITUENTS: &str = "stock_get_industry_constituents";
 /// 市场主线批量 upsert 命令（工具 `market_mainline_batch_upsert` 的执行面）—— **写命令**。
@@ -653,6 +661,35 @@ fn handle_command(
         },
         COMMAND_PORTFOLIO_BACKTEST_RUN => {
             match portfolio_backtest_run(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // ── #324 T2 F7 回测验证三条迁：显式臂三条 ──
+        // 写命令一条（run_decision_backtest，权限闸由宿主分派层 required_permission_for
+        // 把关）；读命令两条（list_decision_validations / compute_validation_report）。
+        // 三条实现体都在宿主进程内（decision_validations / reco_picks 表 + 行情 API），
+        // 插件只透传。
+        COMMAND_RUN_DECISION_BACKTEST => {
+            match run_decision_backtest(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_LIST_DECISION_VALIDATIONS => {
+            match list_decision_validations(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_COMPUTE_VALIDATION_REPORT => {
+            match compute_validation_report(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2036,6 +2073,66 @@ fn portfolio_backtest_run(
         "validate_portfolio_config",
         json!({ "request": { "config_json": config_json } }),
     )
+}
+
+// ── #324 T2 F7 回测验证三条迁：新 op 三条 ──
+// 三条实现体都在宿主进程内（decision_validations / reco_picks 表 + 行情 API 回放），
+// 插件只做命令面 camelCase → 接缝面 `{"request": {...}}` 的平铺透传。
+
+/// 跑决策回测（宿主 `run_decision_backtest`）—— **写命令**。
+///
+/// 命令面六键全可选（camelCase，形状权威在宿主 `RunDecisionBacktestRequest` 的
+/// serde 结构，`default` 语义传空对象即全默认）；出参 = `RunDecisionBacktestResponse`
+/// 序列化整块透传。执行体留宿主（cron 与 CLI 共用），插件只触发。
+fn run_decision_backtest(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    call_analysis_seam(peer, call_chain, "run_decision_backtest", input.clone())
+}
+
+/// 列出决策验证记录（宿主 `list_decision_validations`）—— 读命令。
+///
+/// 命令面五键全可选（存在才透传）；出参 = `DecisionValidationItem` 数组整块透传。
+fn list_decision_validations(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let mut request = serde_json::Map::new();
+    if let Some(v) = input.get("stockCode").and_then(Value::as_str) {
+        request.insert("stockCode".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("hitOutcome").and_then(Value::as_str) {
+        request.insert("hitOutcome".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("limit").and_then(Value::as_u64) {
+        request.insert("limit".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("offset").and_then(Value::as_u64) {
+        request.insert("offset".to_string(), json!(v));
+    }
+    if let Some(v) = input.get("generation").and_then(Value::as_str) {
+        request.insert("generation".to_string(), json!(v));
+    }
+    call_analysis_seam(peer, call_chain, "list_decision_validations", Value::Object(request))
+}
+
+/// 计算验证报告（宿主 `compute_validation_report`）—— 读命令。
+///
+/// 命令面 `generation` 可选（某次回放的截止日；缺省 = 实盘出票一代）；出参 =
+/// `ValidationReportResponse` 序列化整块透传。
+fn compute_validation_report(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let mut request = serde_json::Map::new();
+    if let Some(v) = input.get("generation").and_then(Value::as_str) {
+        request.insert("generation".to_string(), json!(v));
+    }
+    call_analysis_seam(peer, call_chain, "compute_validation_report", Value::Object(request))
 }
 
 /// 分析时间戳（UNIX 秒）：与宿主原命令的 `chrono::Utc::now().timestamp()` 同量纲。

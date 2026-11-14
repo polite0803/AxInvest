@@ -859,4 +859,106 @@ impl StockAnalysisProvider for HostStockAnalysis {
         }
         Ok(Value::Array(results))
     }
+
+    // ── #324 T2 F7 回测验证三条迁（§160 分档表 F7）────────────────────────────
+
+    /// 写 op：跑决策回测（宿主 `run_decision_backtest` 退役后的接缝面）。
+    ///
+    /// 执行体 `run_decision_backtest_inner` **留宿主**（cron 与 CLI
+    /// `axagent-validate-backfill` 共用同一实现，接缝只做触发口，照
+    /// `sweep_daily_snapshots` 先例）；本层只做入参解析与出参透传。权限闸在分派层
+    /// （`required_permission_for` 登记为 `Write`），本层不重复校验。
+    async fn run_decision_backtest(&self, input: Value) -> Result<Value> {
+        let req: crate::commands::backtest_validation::RunDecisionBacktestRequest =
+            serde_json::from_value(input).map_err(|e| {
+                AxAgentError::Validation(format!(
+                    "stock.analysis::run_decision_backtest 参数解析失败: {e}。期望 \
+                     {{tPlusNList?, excludeSynthetic?, maxPicks?, dryRun?, periodFilter?, \
+                     includeReplay?}}（全可选，传空对象即全默认）"
+                ))
+            })?;
+        let resp = crate::commands::backtest_validation::run_decision_backtest_inner(
+            &self.db,
+            &self.astock_client,
+            req,
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::run_decision_backtest 失败: {e}"))
+        })?;
+        serde_json::to_value(resp).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::run_decision_backtest 出参序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 读 op：列出决策验证记录（宿主 `list_decision_validations` 退役后的接缝面）。
+    ///
+    /// 实现体保号留在 `commands/backtest_validation.rs`（三个静态门按「文件+fn 名」
+    /// 钉住，抽 State 化不改名不搬文件）；本层解析 camelCase 入参后调它并整块透传。
+    async fn list_decision_validations(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            stock_code: Option<String>,
+            hit_outcome: Option<String>,
+            limit: Option<u32>,
+            offset: Option<u32>,
+            generation: Option<String>,
+        }
+        let req = serde_json::from_value::<Input>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::list_decision_validations 参数解析失败: {e}。期望 \
+                 {{stockCode?, hitOutcome?, limit?, offset?, generation?}}（全可选）"
+            ))
+        })?;
+        let items = crate::commands::backtest_validation::list_decision_validations(
+            &self.db,
+            req.stock_code,
+            req.hit_outcome,
+            req.limit,
+            req.offset,
+            req.generation,
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::list_decision_validations 失败: {e}"))
+        })?;
+        serde_json::to_value(items).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::list_decision_validations 出参序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 读 op：计算验证报告（宿主 `compute_validation_report` 退役后的接缝面）。
+    ///
+    /// 同上：实现体保号留原文件（窗口权威门 R3 / 代际分母门都钉它），本层透传。
+    async fn compute_validation_report(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            generation: Option<String>,
+        }
+        let req = serde_json::from_value::<Input>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::compute_validation_report 参数解析失败: {e}。期望 \
+                 {{generation?}}（可选，缺省 = 实盘出票一代）"
+            ))
+        })?;
+        let resp = crate::commands::backtest_validation::compute_validation_report(
+            &self.db,
+            req.generation,
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::compute_validation_report 失败: {e}"))
+        })?;
+        serde_json::to_value(resp).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::compute_validation_report 出参序列化失败: {e}"
+            ))
+        })
+    }
 }

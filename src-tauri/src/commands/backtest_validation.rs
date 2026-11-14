@@ -155,24 +155,8 @@ fn screen_by_reco_generation(
     (kept, pre_floor, unknown)
 }
 
-/// 跑决策回测 —— 历史回放回测
-///
-/// 流程：
-/// 1. 读取 reco_picks（默认排除 synthetic 兜底）
-/// 2. 对每条 pick 拉取 T+N 窗口的日 K 线
-/// 3. 用 `build_pick_validation` 构建 PickValidation
-/// 4. 若 dry_run=false，写 decision_validations 表
-/// 5. 聚合所有 validations → HitRateReport
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "跑决策回测")]
-#[tauri::command]
-pub async fn run_decision_backtest(
-    state: State<'_, AppState>,
-    request: RunDecisionBacktestRequest,
-) -> Result<RunDecisionBacktestResponse, String> {
-    run_decision_backtest_inner(state.harness.db(), &state.stock().astock_client, request).await
-}
-
-/// 决策回测的**实际实现** —— 命令层与 cron 层共用的**唯一入口**。
+/// 决策回测的**实际实现** —— 接缝层（`stock.analysis::run_decision_backtest`）、cron 层
+/// 与 CLI（`axagent-validate-backfill`）共用的**唯一入口**。
 ///
 /// # 为什么必须抽出来（2026-09-20，B3 自动触发接线）
 ///
@@ -852,18 +836,21 @@ pub struct DecisionValidationItem {
     pub data_source: String,
 }
 
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出决策验证记录")]
-#[tauri::command]
+/// 验证记录分页列表的实现体（宿主 `list_decision_validations` 命令退役后的接缝面，
+/// `stock.analysis::list_decision_validations` 的宿主 provider 调它）。
+///
+/// ⚠ **fn 名与所在文件不许变**：`check-generation-scope-registry.mjs` 把本 fn 按
+/// 「文件+fn 名」钉为 presentation 类（分页呈现不得按代际常量筛）—— 抽 State 化
+/// 时保号留原文件，门零改指。
 pub async fn list_decision_validations(
-    state: State<'_, AppState>,
+    db: &sea_orm::DatabaseConnection,
     stock_code: Option<String>,
     hit_outcome: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
     generation: Option<String>,
-) -> Result<Vec<DecisionValidationItem>, String> {
+) -> Result<Vec<DecisionValidationItem>, ErrorResponse> {
     use sea_orm::{PaginatorTrait, QueryOrder};
-    let db = state.harness.db();
     let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
         .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
 
@@ -1073,13 +1060,17 @@ pub async fn serenity_validation_summary(
 /// 工作流模板（见 `recommender::RECO_ALGORITHM_VERSION` 的注释），拿错域的整数比大小会让
 /// 筛样恒真或恒假。写侧盖章由 `seed_consistency_tests` 的「每个 `reco_picks::ActiveModel`
 /// 必带 `reco_version`」门守着；`NULL`（含 pick 行已不存在）记为代际未知并**排除**。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "计算验证报告")]
-#[tauri::command]
+/// 验证报告聚合的实现体（宿主 `compute_validation_report` 命令退役后的接缝面，
+/// `stock.analysis::compute_validation_report` 的宿主 provider 调它）。
+///
+/// ⚠ **fn 名与所在文件不许变**：`check-validation-window-authority.mjs` 的 R3 把本文件
+/// 列为三个统计读点之一（必须调 `is_validation_window`），`check-generation-scope-registry.mjs`
+/// 把本 fn 钉为 statistics 类（分母必须引用荐股代际常量）—— 抽 State 化时保号留原文件，
+/// 门零改指。
 pub async fn compute_validation_report(
-    state: State<'_, AppState>,
+    db: &sea_orm::DatabaseConnection,
     generation: Option<String>,
-) -> Result<ValidationReportResponse, String> {
-    let db = state.harness.db();
+) -> Result<ValidationReportResponse, ErrorResponse> {
     let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
         .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
     let all = decision_validations::Entity::find().all(db).await.map_err(|e| {

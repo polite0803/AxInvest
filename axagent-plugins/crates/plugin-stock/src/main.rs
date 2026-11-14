@@ -167,6 +167,11 @@ const COMMAND_STOCK_FACTOR: &str = "stock_get_stock_factor";
 const COMMAND_PIPELINE_HISTORY: &str = "stock_get_pipeline_history";
 /// 单次管道执行详情（宿主 `get_pipeline_run_detail`，前端 `pipelineStore.ts:52`）。
 const COMMAND_PIPELINE_RUN_DETAIL: &str = "stock_get_pipeline_run_detail";
+// ── #328：两条 DB 直读宿主命令迁 T2（新增 `stock.analysis` 读 op）──
+/// 个股最近一次完整分析摘要（宿主 `get_latest_analysis_for_stock`）。
+const COMMAND_LATEST_ANALYSIS_FOR_STOCK: &str = "stock_get_latest_analysis_for_stock";
+/// 参数调整建议列表（宿主 `list_param_suggestions`）。
+const COMMAND_LIST_PARAM_SUGGESTIONS: &str = "stock_list_param_suggestions";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -485,6 +490,28 @@ fn handle_command(
             peer,
             &request.call_chain,
             "pipeline_run_detail",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LATEST_ANALYSIS_FOR_STOCK => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "latest_analysis_for_stock",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_LIST_PARAM_SUGGESTIONS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_param_suggestions",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3025,6 +3052,9 @@ mod tests {
             super::COMMAND_FACTOR_ANALYSIS_LIST,
             super::COMMAND_GENERATE_FUNDAMENTALS_REPORT,
             super::COMMAND_GET_FUNDAMENTALS_REPORT_MARKDOWN,
+            // #328 两条：DB 直读经 `stock.analysis` 新读 op（非行情/K线/cron 三表）。
+            super::COMMAND_LATEST_ANALYSIS_FOR_STOCK,
+            super::COMMAND_LIST_PARAM_SUGGESTIONS,
         ] {
             assert!(market_read_route(command).is_none(), "`{command}` 不得进行情只读表");
             assert!(kline_route(command).is_none(), "`{command}` 不得进 K 线表");

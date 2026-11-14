@@ -19,7 +19,7 @@ export const pipelineAdapter: TaskSourceAdapter = {
   color: "blue",
 
   async list(): Promise<UnifiedRun[]> {
-    // #248 T2 试点批：插件命名命令（原 get_pipeline_history，双声明期宿主命令保留）
+    // #248 T2 试点批：插件命名命令（原 get_pipeline_history，宿主版已于 #328 退役）
     const rows = await invokePluginCommand<PipelineRun[]>("stock_get_pipeline_history", {
       limit: 50,
     });

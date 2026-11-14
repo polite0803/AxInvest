@@ -77,7 +77,10 @@ use crate::commands::recommendation_cron::{
     list_recommendation_crons_core, list_trend_screening_crons_core,
     toggle_recommendation_cron_core, toggle_trend_screening_cron_core,
 };
-use crate::commands::stock_analysis::{run_daily_snapshot_sweep, snapshot_sweep_date};
+use crate::commands::stock_analysis::{
+    get_latest_analysis_for_stock_core, list_param_suggestions_core, run_daily_snapshot_sweep,
+    snapshot_sweep_date,
+};
 use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
 use axagent_astock_data::AStockClient;
@@ -309,6 +312,62 @@ impl StockAnalysisProvider for HostStockAnalysis {
         pipeline_run_detail_row(&self.db, &request.run_id).await.map_err(|e| {
             AxAgentError::Provider(format!("stock.analysis::pipeline_run_detail 查询失败: {e}"))
         })
+    }
+
+    /// 读 op：个股最近一次完整分析摘要（宿主 `get_latest_analysis_for_stock` 的接缝面）。
+    ///
+    /// 入参 `{stockCode: string, asOfDate?: string}`；出参 = `LatestAnalysisSummary` 的
+    /// camelCase JSON，无记录回 `null`（不是 `{}` —— 消费端按 null 判「没有」）。
+    async fn latest_analysis_for_stock(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct LatestRequest {
+            stock_code: String,
+            as_of_date: Option<String>,
+        }
+        let request = serde_json::from_value::<LatestRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::latest_analysis_for_stock 参数解析失败: {e}。期望 \
+                 {{stockCode: string, asOfDate?: string}}"
+            ))
+        })?;
+        let summary = get_latest_analysis_for_stock_core(
+            &self.db,
+            &request.stock_code,
+            request.as_of_date.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::latest_analysis_for_stock 查询失败: {e}"
+            ))
+        })?;
+        serde_json::to_value(summary)
+            .map_err(|e| AxAgentError::Provider(format!("最新分析摘要序列化失败: {e}")))
+    }
+
+    /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
+    ///
+    /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。
+    async fn list_param_suggestions(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ParamSuggestionsRequest {
+            stock_code: Option<String>,
+        }
+        let request = serde_json::from_value::<ParamSuggestionsRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::list_param_suggestions 参数解析失败: {e}。期望 {{stockCode?: string}}"
+            ))
+        })?;
+        let rows = list_param_suggestions_core(&self.db, request.stock_code.as_deref())
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::list_param_suggestions 查询失败: {e}"
+                ))
+            })?;
+        Ok(Value::Array(rows))
     }
 
     /// 读 op：待审批进化计划列表（宿主 `list_pending_evolution_plans` 的接缝面）。

@@ -171,7 +171,10 @@ fn resolve_trend_workflow_id(requested: Option<&str>) -> Result<&'static str, St
 // ── Tauri 命令：趋势智选 cron 删除 ──
 //
 // create / list / toggle 已随 #35 批 1b 退役（插件命令档位等价：Caution / Safe /
-// Caution），delete 因档位不等价暂留，理由同荐股族。
+// Caution）。本命令 `safety = Dangerous`，按 PLAN §142.3 终局裁定保留宿主版。
+// #328 另把插件清单的 `stock_delete_trend_screening_cron` 对齐成 `danger-full-access`
+// （投影同为 Dangerous），关掉插件名那条「确认即可删」的旁路。荐股族不在此列 ——
+// 宿主原档是 Caution，升档会砍掉智能体能力，见 PLAN §142.2 档位等阶与 §186。
 
 /// 删除趋势智选定时任务
 #[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除趋势智选定时任务")]

@@ -7523,14 +7523,12 @@ async function executeCommand<T>(
 
     // ── 股票管道（stock_pipeline）──────────────────────────────────────
     // 浏览器模式没有真实管道执行。必须显式声明，否则会落到 default 分支的
-    // `get_` → `{}` 兜底：`get_pipeline_history` 的消费端按数组使用
+    // `get_` → `{}` 兜底：`stock_get_pipeline_history` 的消费端按数组使用
     // （`pipelineRuns.filter/.length`），收到 `{}` 会直接抛
     // `TypeError: pipelineRuns.filter is not a function`，
     // 令「投资中心 → 管道」整个 tab 被 ErrorBoundary 兜成「页面错误」。
-    case "get_pipeline_history":
-      return [] as unknown as T;
-    case "get_pipeline_run_detail":
-      return null as unknown as T;
+    // 宿主旧名 `get_pipeline_history` / `get_pipeline_run_detail` 已在 #328 退役，
+    // 两个 case 随之下移为插件命名命令（见下方 T2 段）。
     case "run_stock_pipeline":
       return null as unknown as T;
 

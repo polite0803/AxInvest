@@ -24,7 +24,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   stepEvents: [],
   fetchHistory: async (limit = 20) => {
     try {
-      // #248 T2 试点批：经插件命令桥的 stock_ 前缀命名命令（双声明期宿主命令保留）
+      // #248 T2 试点批：经插件命令桥的 stock_ 前缀命名命令（宿主同名命令已于 #328 退役）
       const runs = await invokePluginCommand<PipelineRun[]>("stock_get_pipeline_history", { limit });
       // 契约防御：mock / 异常后端可能返回非数组（例如 `{}`），
       // 直接落库会让任务中心管道作业卡的 `pipelineRuns.filter/.length` 抛
@@ -49,7 +49,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     }
   },
   getRunDetail: async (runId: string) => {
-    // #248 T2 试点批：插件命名命令（原 get_pipeline_run_detail，双声明期宿主命令保留）
+    // #248 T2 试点批：插件命名命令（原 get_pipeline_run_detail，宿主版已于 #328 退役）
     return await invokePluginCommand<PipelineResult>("stock_get_pipeline_run_detail", { runId });
   },
   addStepEvent: (event) => {

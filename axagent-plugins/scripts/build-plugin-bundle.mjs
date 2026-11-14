@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 82 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 84 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -503,7 +503,15 @@ function stockManifest({ version, binaryName, sha256 }) {
     //    `subprocess_execution` 顶不上）⇒ 命令在接缝调用前落 `PLUGIN_PERMISSION_DENIED`；
     // ② 命令入站：该命令 `requiredPermission: "workspace-write"`，`check_command_gate`
     //    要求插件声明 `write | file_system_write`，否则整条命令被拒。
-    permissions: ["subprocess_execution", "write"],
+    //
+    // ⚠ `execute` 是 #328 加的：`stock_delete_{pool_scan,trend_screening}_cron` 两条的宿主
+    // 等价命令是 `Dangerous`，清单对齐成 `danger-full-access`，而 `check_command_gate` 的
+    // DangerFullAccess 分支**只认 `execute`**（`subprocess_execution` 明确不算）⇒ 不声明它，
+    // 这两条会在启动子进程前被拒。副作用仅限 gate 的档位判定：沙箱推导
+    // （`build_sandbox_from_permissions`）只看 `subprocess_execution` / `network_access`。
+    // 本条**部分推翻** PLAN §141 未做③ / §142.3 的「清单不加 danger-full-access」终局裁定，
+    // 评审依据见 PLAN §186；`stock_delete_recommendation_cron` 不在升档面（宿主原档 Caution）。
+    permissions: ["subprocess_execution", "write", "execute"],
     mcp_servers: [],
     skills: [],
     agents: [],
@@ -759,6 +767,35 @@ function stockManifest({ version, binaryName, sha256 }) {
         inputSchema: { type: "object", properties: {} },
       },
       {
+        // #328：宿主 `get_latest_analysis_for_stock` 的接缝面。出参为 `null` 表示「无记录」，
+        // 不是空对象 —— 消费端按 null 判「没有」。
+        name: "stock_get_latest_analysis_for_stock",
+        description: "查询个股最近一次完整分析的决策摘要（经宿主 stock.analysis 接缝，只读；无记录返回 null）",
+        command: "worker://stock_get_latest_analysis_for_stock",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "股票代码" },
+            asOfDate: { type: "string", description: "时间旅行截止日（YYYY-MM-DD）；省略则取最新" },
+          },
+          required: ["stockCode"],
+        },
+      },
+      {
+        // #328：宿主 `list_param_suggestions` 的接缝面；两个参数都可省，缺省返回全部最近建议。
+        name: "stock_list_param_suggestions",
+        description: "列出最近未处理的参数调整建议（经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_list_param_suggestions",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "股票代码；省略则返回所有股票的建议" },
+          },
+        },
+      },
+      {
         // 清单不复刻 DTO（同 stock_market_mainline_batch_upsert 宽形态先例）：形状权威在
         // `commands/wf_des.rs` 的 WfDesRequest（camelCase，四字段全必填），此处只锁最外层。
         name: "stock_wf_des_integration",
@@ -833,6 +870,10 @@ function stockManifest({ version, binaryName, sha256 }) {
         name: "stock_delete_recommendation_cron",
         description: "删除荐股定时任务（经宿主 stock.analysis 接缝）",
         command: "worker://stock_delete_recommendation_cron",
+        // 宿主原命令是 `#[agent_command(safety = Caution)]`（PLAN §142.1），已于 §142 退役；
+        // §142.2 判过「档位等阶」：workspace-write 投影 Caution ⇒ 智能体面授权强度不变。
+        // **不随另外两条升 danger-full-access**：那两条宿主是 Dangerous（升档＝关旁路），
+        // 本条升档会把 Caution 变 Dangerous ⇒ 智能体彻底失去删荐股 cron 的能力（砍功能，非补洞）。
         requiredPermission: "workspace-write",
         inputSchema: {
           type: "object",
@@ -885,7 +926,12 @@ function stockManifest({ version, binaryName, sha256 }) {
         name: "stock_delete_trend_screening_cron",
         description: "删除趋势智选定时任务（经宿主 stock.analysis 接缝）",
         command: "worker://stock_delete_trend_screening_cron",
-        requiredPermission: "workspace-write",
+        // 宿主等价命令 `delete_trend_screening_cron` 是 `#[agent_command(safety = Dangerous)]`，
+        // 按 PLAN §142.3 保留宿主版；只有 danger-full-access 投影成 Dangerous
+        // （`plugin_command_safety`）。标 workspace-write 会投影 Caution ⇒ 智能体经插件名
+        // 绕过宿主的「禁止」（两个名字不同，`merge_plugin_command_specs` 的宿主优先去重不命中）。
+        // 档位等价优先于最小权限；包级 `execute` 的依据见上方 permissions 注释。
+        requiredPermission: "danger-full-access",
         inputSchema: {
           type: "object",
           additionalProperties: false,
@@ -938,7 +984,10 @@ function stockManifest({ version, binaryName, sha256 }) {
         name: "stock_delete_pool_scan_cron",
         description: "删除候选池扫描定时任务（经宿主 stock.analysis 接缝）",
         command: "worker://stock_delete_pool_scan_cron",
-        requiredPermission: "workspace-write",
+        // 同 stock_delete_trend_screening_cron：宿主等价命令 `delete_pool_scan_cron` 是
+        // `Dangerous` 且按 §142.3 保留 ⇒ 清单必须 danger-full-access，否则插件名成为
+        // 「确认即可删」的旁路。包级 `execute` 的依据见上方 permissions 注释。
+        requiredPermission: "danger-full-access",
         inputSchema: {
           type: "object",
           additionalProperties: false,

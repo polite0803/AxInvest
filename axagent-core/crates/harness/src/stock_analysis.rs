@@ -2,7 +2,7 @@
 
 //! 股票分析数据面接缝（`stock.analysis`）— Trait（DTO 留在域包）。
 //!
-//! 宿主把二十条**确定性取数/落库/计算/任务管理**能力经本接缝暴露给插件：
+//! 宿主把二十二条**确定性取数/落库/计算/任务管理**能力经本接缝暴露给插件：
 //! `industry_constituents`（按行业取全 A 股成分股）、`batch_upsert_mainlines`（按日批量
 //! upsert 市场主线）、`list_recent_mainlines`（列出最近 N 天主线，#304 C3）、
 //! `stock_factor`（逐票 1 月涨跌幅，反转因子原料）——E 批三条 + C3 补一条读；
@@ -12,7 +12,11 @@
 //! `stock_get_pipeline_run_detail` / `stock_list_pending_evolution_plans` /
 //! `stock_wf_des_integration` 的取数面；三族定时任务（荐股 / 趋势智选 / 候选池扫描）
 //! 的 CRUD 十二条 —— 批 1a（#35），插件命名命令 `stock_create_*_cron` 等，
-//! 数据面是宿主 `CronJobStore`（不落 sea-orm 表），见下方 trait 内的段落注释。
+//! 数据面是宿主 `CronJobStore`（不落 sea-orm 表），见下方 trait 内的段落注释；
+//! `latest_analysis_for_stock`（个股最近一次完整分析摘要）、`list_param_suggestions`
+//! （最近未处理的参数调整建议）—— #328 两条，原宿主命令直读 sea-orm 表，插件侧
+//! 无法自行取数故新增读 op，插件命名命令 `stock_get_latest_analysis_for_stock` /
+//! `stock_list_param_suggestions`。
 //!
 //! ## 为什么需要它
 //!
@@ -128,6 +132,26 @@ pub trait StockAnalysisProvider: Send + Sync {
     async fn pipeline_run_detail(&self, _input: Value) -> Result<Value> {
         Err(AxAgentError::Provider(
             "StockAnalysisProvider::pipeline_run_detail 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 个股最近一次完整分析摘要（`latest_analysis_for_stock` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{stockCode: string, asOfDate?: string}`；出参 = `LatestAnalysisSummary` 的
+    /// camelCase JSON，无记录回 `null`。
+    async fn latest_analysis_for_stock(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::latest_analysis_for_stock 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
+    async fn list_param_suggestions(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::list_param_suggestions 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 
@@ -601,6 +625,16 @@ mod tests {
             (
                 "compute_validation_report",
                 futures::executor::block_on(stub.compute_validation_report(Value::Null)),
+            ),
+            // #328 两条 DB 直读迁：默认实现同样必须显式报错
+            // （空值会被读成「该股没有分析记录 / 没有任何参数建议」，那是另一种谎）。
+            (
+                "latest_analysis_for_stock",
+                futures::executor::block_on(stub.latest_analysis_for_stock(Value::Null)),
+            ),
+            (
+                "list_param_suggestions",
+                futures::executor::block_on(stub.list_param_suggestions(Value::Null)),
             ),
         ];
         for (name, result) in cases {

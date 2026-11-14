@@ -868,30 +868,6 @@ pub async fn get_stock_kline(
     .await
 }
 
-/// 获取国际股票（美股/港股）K 线
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取国际股票K线")]
-#[tauri::command]
-pub async fn get_international_stock_kline(
-    state: State<'_, AppState>,
-    stock_code: String,
-    period: String,
-    limit: u32,
-) -> Result<Vec<KLine>, String> {
-    if stock_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("stock_code 不能为空").into());
-    }
-    state
-        .stock()
-        .astock_client
-        .get_international_klines(&stock_code, &period, limit, None)
-        .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("获取国际股票 K 线失败: {e}"))
-                .to_string()
-        })
-}
-
 // ── Phase 2: TradingAgents-CN 优势借鉴 — 批量 + 基本面报告 + 缓存统计 ──
 // batch_get_quotes / batch_get_financials 已迁 plugin-stock（T2 命令
 // stock_batch_get_quotes / stock_batch_get_financials，取数面走宿主 market.quote 接缝）；
@@ -5193,18 +5169,15 @@ pub struct LatestAnalysisSummary {
 /// 查询个股最近一次已完成分析的决策摘要
 ///
 /// 若 `as_of_date` 不为 None 则只返回到该日期为止的分析（时间旅行兼容）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询个股最近分析摘要")]
-#[tauri::command]
-pub async fn get_latest_analysis_for_stock(
-    state: tauri::State<'_, AppState>,
-    stock_code: String,
-    as_of_date: Option<String>,
+pub(crate) async fn get_latest_analysis_for_stock_core(
+    db: &sea_orm::DatabaseConnection,
+    stock_code: &str,
+    as_of_date: Option<&str>,
 ) -> Result<Option<LatestAnalysisSummary>, String> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
-    let db = state.harness.db();
     let mut query = stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::StockCode.eq(&stock_code))
+        .filter(stock_analyses::Column::StockCode.eq(stock_code))
         .filter(stock_analyses::Column::Status.eq("completed"))
         // 2026-09-24：排除快速 JEV 链记录。本函数回答的是「该股最近一次**完整**分析
         // 的结论」—— 快速链不跑 10 个分析师节点，其 `data_quality_summary` 所缺的正是
@@ -5219,7 +5192,7 @@ pub async fn get_latest_analysis_for_stock(
         );
 
     // 时间旅行模式：只返回截止日之前的分析
-    if let Some(ref cutoff) = as_of_date {
+    if let Some(cutoff) = as_of_date {
         query = query.filter(stock_analyses::Column::AnalysisDate.lte(cutoff));
     }
 
@@ -5945,20 +5918,17 @@ pub async fn run_reflection_now(
 }
 
 /// 获取某只股票最近未处理的参数调整建议
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取参数调整建议")]
-#[tauri::command]
-pub async fn list_param_suggestions(
-    state: State<'_, AppState>,
-    stock_code: Option<String>,
+pub(crate) async fn list_param_suggestions_core(
+    db: &sea_orm::DatabaseConnection,
+    stock_code: Option<&str>,
 ) -> Result<Vec<serde_json::Value>, String> {
     use axagent_entities::stock_reflections;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-    let db = state.harness.db();
     let mut query = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::Status.eq("completed"))
-        .order_by(stock_reflections::Column::CreatedAt, sea_orm::Order::Desc);
-    if let Some(ref code) = stock_code {
+        .order_by_desc(stock_reflections::Column::CreatedAt);
+    if let Some(code) = stock_code {
         query = query.filter(stock_reflections::Column::StockCode.eq(code));
     }
     let items = query.all(db).await.map_err(|e| {

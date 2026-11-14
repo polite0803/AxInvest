@@ -10,10 +10,10 @@
  * - 外汇 K 线（USD/CNY、HKD/CNY）
  * - 显示最新价、涨跌幅、市值
  *
- * 数据来自后端 Tauri 命令：
- * - get_international_stock_quote / get_international_stock_kline
- * - get_benchmark_kline
- * - get_forex_kline
+ * 数据来自 plugin-stock 命名命令（经 T2 命令桥，取数在 `crossMarketStore`；宿主同名 Tauri 命令已退役）：
+ * - stock_get_international_stock_quote / stock_get_international_stock_kline
+ * - stock_get_benchmark_kline
+ * - stock_get_forex_kline
  */
 
 import { KLineChart } from "@/components/stock-analysis/KLineChart";

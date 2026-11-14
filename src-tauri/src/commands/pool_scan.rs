@@ -600,8 +600,10 @@ async fn analyze_candidate_queue(
 //
 // create / list / toggle 三条宿主命令已在 #35 批 1b 退役：前端与智能体的对应动作
 // 只走插件命令 `stock_{create,list,toggle}_pool_scan_cron`（档位等价：Caution /
-// Safe / Caution）。delete 保留宿主版 —— 它是 `Dangerous`，而插件清单的写档位
-// 只到 `workspace-write`（投影为 Caution），删掉会让智能体删除动作变松。
+// Safe / Caution）。本命令 `safety = Dangerous`，按 PLAN §142.3 终局裁定保留宿主版。
+// #328 另把插件清单的 `stock_delete_pool_scan_cron` 从 `workspace-write` 对齐成
+// `danger-full-access`（投影同为 Dangerous）：两个名字不同，`merge_plugin_command_specs`
+// 的宿主优先去重不命中 ⇒ 对齐前插件那条是「确认即可删」的旁路。对齐后两条都硬拒。
 
 /// 删除候选池扫描定时任务
 #[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除候选池分析定时任务")]

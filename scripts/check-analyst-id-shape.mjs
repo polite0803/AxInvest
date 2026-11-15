@@ -57,7 +57,7 @@ const SCOPE = [
   "src/stores/feature/stockWorkflowChatBridge.ts",
   "src/components/stock-analysis/AnalysisProgress.tsx",
   "src/components/stock-analysis/AnalystReportGrid.tsx",
-  "src/components/settings/AgentProfileList.tsx",
+  "src/components/stock-analysis/AgentProfileList.tsx",
   "src/stores/feature/__tests__/stockAnalysisStore.test.ts",
   "src/stores/__tests__/stockAnalysisStore.test.ts",
   "src/components/stock-analysis/__tests__/AnalystDataQualityModal.scope.test.tsx",
@@ -190,7 +190,7 @@ function run(files, bases) {
   for (const rel of files) {
     const abs = p(rel);
     if (!fs.existsSync(abs)) {
-      out.push({ rel, missing: true });
+      out.push({ rel, missing: true, r1: [], r2: [], r3: 0, registry: false });
       continue;
     }
     const code = codeOnly(fs.readFileSync(abs, "utf8"));

@@ -1,8 +1,8 @@
 {
   "version": "2",
-  "generated": "2026-11-08",
-  "total_entries": 414,
-  "total_files": 414,
+  "generated": "2026-11-15",
+  "total_entries": 415,
+  "total_files": 415,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -203,6 +203,12 @@
       "phase": 3
     },
     {
+      "file": "src/components/chat/CiteBlock.tsx",
+      "lines": "3,12,14,40",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
       "file": "src/components/chat/citeContext.ts",
       "lines": "7,8,14,18,23,24,25",
       "reason": "硬编码中文字符串",
@@ -295,12 +301,6 @@
     {
       "file": "src/components/chat/PromptTemplateSelector.tsx",
       "lines": "61,71,76,77,91,97,182,214",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/chat/CiteBlock.tsx",
-      "lines": "3,12,14,40",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -642,7 +642,7 @@
     },
     {
       "file": "src/components/plugin/PluginPageHost.tsx",
-      "lines": "89",
+      "lines": "89,91",
       "reason": "插件页面的开发者诊断错误（throw new Error 说明不可达分支 / 权限面被扩，不进入 UI；与 console 同属内部日志族）",
       "phase": 3
     },
@@ -809,12 +809,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/stock-analysis/StockAnalysisConfigPanel.tsx",
-      "lines": "765",
-      "reason": "后端数据契约值（Select 选项 value 为后端枚举值）",
-      "phase": 3
-    },
-    {
       "file": "src/components/shared/BaseModal.tsx",
       "lines": "10,12,14,20,22,23,24,45",
       "reason": "硬编码中文字符串",
@@ -905,6 +899,12 @@
       "phase": 3
     },
     {
+      "file": "src/components/stock-analysis/StockAnalysisConfigPanel.tsx",
+      "lines": "765",
+      "reason": "后端数据契约值（Select 选项 value 为后端枚举值）",
+      "phase": 3
+    },
+    {
       "file": "src/components/stock-analysis/WhatIfBacktest.tsx",
       "lines": "553,554,555,556,564,565,566,567",
       "reason": "后端数据契约值（Select 选项 value 为后端枚举值）",
@@ -978,7 +978,7 @@
     },
     {
       "file": "src/components/workflow/AIPanel/AIPanel.tsx",
-      "lines": "32,43,44,45,50,119,124,147,149,153,233,241,256,266,273,278,299,305,313,314,315,350,369,392,399,410,648",
+      "lines": "32,43,44,45,50,119,124,147,149,153,233,241,256,266,273,278,299,305,313,314,315,318,350,367,369,392,399,410,431,454,461,472,648",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
@@ -1134,7 +1134,7 @@
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
-      "lines": "58,68,71,190,203,213,289,290,291,292,309,315,316,317,318,319,320,321,322,324,325,326,327,328,329,330,340,360,369,380,416,432,445,512,513,514,515,547,746,829,909,930,958,968,1079,1100",
+      "lines": "58,68,71,190,203,213,289,290,291,292,293,294,309,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,340,360,369,380,416,432,445,512,513,514,515,547,746,829,909,930,958,968,1079,1100",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
@@ -1152,7 +1152,7 @@
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/CodePropertyPanel.tsx",
-      "lines": "47,53,59,65,71,95,98,108,129,130,131,171,172,188,204,225,273,312,342",
+      "lines": "47,53,59,65,71,95,98,108,129,130,131,132,171,172,173,188,204,225,273,312,342",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
@@ -1200,7 +1200,7 @@
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/LLMPropertyPanel.tsx",
-      "lines": "77,109,110,111,112,130,131,132,133,134,135,136,137,139,140,141,142,143,144,145",
+      "lines": "77,109,110,111,112,113,114,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
@@ -1932,8 +1932,14 @@
     },
     {
       "file": "src/pages/TasksCenterPage/adapters/cron.adapter.ts",
-      "lines": "16",
+      "lines": "16,18",
       "reason": "数据格式哨兵：`[系统兜底轮` 须与后端 record_auxiliary_run 写出的 output 前缀逐字匹配，不是 UI 文案（翻译会致失配）",
+      "phase": 3
+    },
+    {
+      "file": "src/pages/TasksCenterPage/adapters/pluginTaskSource.adapter.ts",
+      "lines": "75",
+      "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
     {

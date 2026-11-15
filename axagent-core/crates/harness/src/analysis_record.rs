@@ -218,7 +218,7 @@ mod tests {
             decision_action: Some("BUY".into()),
             decision_position_state: Some("HOLDING".into()),
             decision_position_pct: Some(12.5),
-            analysis_kind: "live".into(),
+            analysis_kind: crate::analysis_kind::AnalysisKind::Live.as_storage().into(),
             as_of_date: None,
             parent_analysis_id: None,
             template_id: Some("stock-analysis".into()),

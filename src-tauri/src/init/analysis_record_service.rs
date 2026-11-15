@@ -188,7 +188,7 @@ mod tests {
             decision_position_pct: Some(12.5),
             // 大字段：映射函数必须把它丢掉（下面按键集合钉住）。
             decision_json: Some("{\"reasoning\":\"很长的原文……\"}".into()),
-            analysis_kind: "live".into(),
+            analysis_kind: axagent_harness::analysis_kind::AnalysisKind::Live.as_storage().into(),
             as_of_date: None,
             parent_analysis_id: None,
             template_id: Some("stock-analysis".into()),

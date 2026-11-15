@@ -1,4 +1,4 @@
-// i18n-exempt: 纯解析逻辑，不含 UI 文案
+// i18n-exempt: 纯解析逻辑，不含 UI 文案 (until=2026-12-31)
 /**
  * 风险产物解析 —— 主面板（RiskMatrix）、chat 卡片与导出报告共用。
  *

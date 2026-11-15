@@ -291,7 +291,7 @@ describe("normalizeDecision - workflow results map 兜底（修复'决策信息�
   });
 });
 
-// i18n-exempt: 测试内断言值，模拟后端 Rhai 输出的中文业务字段，非 UI 文案。
+// i18n-exempt: 测试内断言值，模拟后端 Rhai 输出的中文业务字段，非 UI 文案。 (until=2026-12-31)
 describe("normalizeDecision 决策前提字段透传（防回归）", () => {
   // 背景（2026-09-11 修复）：该函数此前用**白名单构造** return 对象，
   // `weightsCollapsed` / `collapseReason` / `weightRatio` / `untrustedCount` /

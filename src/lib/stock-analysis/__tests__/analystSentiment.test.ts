@@ -1,4 +1,4 @@
-// i18n-exempt: 计票口径单测，断言全部为结构化输入/输出，无 UI 文案。
+// i18n-exempt: 计票口径单测，断言全部为结构化输入/输出，无 UI 文案。 (until=2026-12-31)
 import {
   classifyAnalystReport,
   computeStockConsensus,

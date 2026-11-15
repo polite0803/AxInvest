@@ -3,7 +3,7 @@
 import { buildDecisionInputsReport, summarizeDecisionInputs } from "@/lib/stock-analysis/decisionInputDiagnosis";
 import { describe, expect, it } from "vitest";
 
-// i18n-exempt: 测试内断言值为模块内硬编码中文技术串（见 decisionInputDiagnosis.ts 文件头），非 UI 文案。
+// i18n-exempt: 测试内断言值为模块内硬编码中文技术串（见 decisionInputDiagnosis.ts 文件头），非 UI 文案。 (until=2026-12-31)
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // 背景（2026-09-20）：cls-risk-level 由 LlmClassifierNode 下沉为 Rhai CodeNode

@@ -1,8 +1,8 @@
 {
   "version": "2",
   "generated": "2026-11-15",
-  "total_entries": 415,
-  "total_files": 415,
+  "total_entries": 408,
+  "total_files": 408,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -587,24 +587,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/office/panels/ChatPanel.tsx",
-      "lines": "4,6,31,36,59,81,107",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/office/panels/DirectMessagePanel.tsx",
-      "lines": "4,6,7,22,37,93,115",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/office/panels/TokenPanel.tsx",
-      "lines": "4,6,7,68,104,116",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/office/phaser/OfficeGame.tsx",
       "lines": "4,6,7,8,9,10,12,13,14,22,24,26,28,30,43,46,50,54,60,65,82,85,105,112,124,125,126",
       "reason": "硬编码中文字符串",
@@ -857,12 +839,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/skill/SkillErrorFallback.tsx",
-      "lines": "50,75,102",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/skill/SkillPageRenderer.tsx",
       "lines": "17,18,19,45",
       "reason": "硬编码中文字符串",
@@ -875,20 +851,8 @@
       "phase": 3
     },
     {
-      "file": "src/components/skill/SkillSandboxContainer.tsx",
-      "lines": "4,6,8,9,10,11,25,59,104,105,191,236,242,246,269",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/skill/SkillStatsPanel.tsx",
       "lines": "4,6",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/skill/SkillStatusBar.tsx",
-      "lines": "19,43,65",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -937,12 +901,6 @@
     {
       "file": "src/components/wiki/BacklinkPanel.tsx",
       "lines": "27,171",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/wiki/GraphView.tsx",
-      "lines": "3,5,6,7,8,9,10,23,84,89,90,91,92,93,137,163,167,192,231,266,277,302,306,316,343,349,353,376,394,399,427,434,441,449,450,454,484,497,508,529,572,575,674,711,765,884",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -1939,7 +1897,7 @@
     {
       "file": "src/pages/TasksCenterPage/adapters/pluginTaskSource.adapter.ts",
       "lines": "75",
-      "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
+      "reason": "插件任务源取数形状校验的**诊断消息**（形如「应返回行数组，实际 object」）：面向插件作者/日志排障，不是用户可见 UI 文案；改为 t() 会把技术细节翻成看不懂的键名。",
       "phase": 3
     },
     {

@@ -1,4 +1,4 @@
-// i18n-exempt: 决策输入诊断的节点/因子数据定义与解析逻辑，技术字符串，非用户可见 UI 文案。
+// i18n-exempt: 决策输入诊断的节点/因子数据定义与解析逻辑，技术字符串，非用户可见 UI 文案。 (until=2026-12-31)
 // 决策输入诊断：纯前端工具，把 portfolio-mgr 实际消费的 16 个上游节点输出
 // 统一解析成"数据符合度"诊断条目，供 DecisionBanner 展示。
 //
@@ -230,7 +230,7 @@ function diagnoseNode(nodeId: string, raw: unknown): NodeDiagResult {
       //   · 这两个字段此前**零消费方**（Rust 侧只取 result.category，本文件只取 category，
       //     store 侧只读节点状态）⇒ 降级只能事后查 node_executions，等于「设计成可见、
       //     实际不可见」。此处把降级带进 note 让它真正可见。
-      // 说明：本文件所有 note 均为硬编码中文技术串（见文件头 i18n-exempt），故不新增 i18n key。
+      // 说明：本文件所有 note 均为硬编码中文技术串（见文件头豁免说明），故不新增 i18n key。 (until=2026-12-31)
       const degraded = getPath(content, "degraded") === true;
       const warnings = getPath(content, "warnings");
       const warnCount = Array.isArray(warnings) ? warnings.length : 0;

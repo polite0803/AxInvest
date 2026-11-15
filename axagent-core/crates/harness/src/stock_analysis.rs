@@ -186,6 +186,26 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 节点质量反馈历史（通用版，`node_feedbacks` op）—— 读 op，无权限闸。
+    ///
+    /// ⚠ 与别名族 `get_analyst_feedbacks`（#322）**不同命令**：本 op 收
+    /// `{nodeType?, nodeId?, limit?, onlyIssues?}` 泛化过滤，出参 `NodeFeedbackSummary` 数组。
+    async fn node_feedbacks(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::node_feedbacks 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 节点反馈统计（通用版，`node_feedback_stats` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{nodeType: string, nodeId: string}`；出参 `NodeFeedbackStats`（含
+    /// `needs_evolution` 与 `consistency_metrics`）。
+    async fn node_feedback_stats(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::node_feedback_stats 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -725,6 +745,11 @@ mod tests {
             (
                 "agreement_score_history",
                 futures::executor::block_on(stub.agreement_score_history(Value::Null)),
+            ),
+            ("node_feedbacks", futures::executor::block_on(stub.node_feedbacks(Value::Null))),
+            (
+                "node_feedback_stats",
+                futures::executor::block_on(stub.node_feedback_stats(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

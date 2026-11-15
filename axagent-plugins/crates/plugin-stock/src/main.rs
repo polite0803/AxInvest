@@ -190,6 +190,10 @@ const COMMAND_LATEST_ANALYSES_FOR_STOCKS: &str = "stock_get_latest_analyses_for_
 const COMMAND_EVOLUTION_DRIFT_TIMELINE: &str = "stock_get_evolution_drift_timeline";
 /// 决策一致性分数历史（宿主 `get_agreement_score_history`，#331）—— 读 op。
 const COMMAND_AGREEMENT_SCORE_HISTORY: &str = "stock_get_agreement_score_history";
+/// 节点反馈历史（通用版，宿主 `get_node_feedbacks`，#332）—— 读 op。
+const COMMAND_NODE_FEEDBACKS: &str = "stock_get_node_feedbacks";
+/// 节点反馈统计（通用版，宿主 `get_node_feedback_stats`，#332）—— 读 op。
+const COMMAND_NODE_FEEDBACK_STATS: &str = "stock_get_node_feedback_stats";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -554,6 +558,29 @@ fn handle_command(
             peer,
             &request.call_chain,
             "agreement_score_history",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #332：节点反馈通用版两条读 op。
+        COMMAND_NODE_FEEDBACKS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "node_feedbacks",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_NODE_FEEDBACK_STATS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "node_feedback_stats",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3223,6 +3250,8 @@ mod tests {
             super::COMMAND_LATEST_ANALYSES_FOR_STOCKS,
             super::COMMAND_EVOLUTION_DRIFT_TIMELINE,
             super::COMMAND_AGREEMENT_SCORE_HISTORY,
+            super::COMMAND_NODE_FEEDBACKS,
+            super::COMMAND_NODE_FEEDBACK_STATS,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

@@ -3225,6 +3225,33 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #332：节点反馈通用版两条读 op（与别名族 get_analyst_feedback* 不同命令）。
+            "stock.analysis" if op == "node_feedbacks" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.node_feedbacks(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "node_feedback_stats" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.node_feedback_stats(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "stock.analysis" if op == "list_param_suggestions" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);

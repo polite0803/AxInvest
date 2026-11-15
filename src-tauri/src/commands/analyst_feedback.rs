@@ -141,21 +141,6 @@ pub(crate) async fn save_node_feedback_core(
 // bull/bear/confidence 拼 quality_metrics_json）。泛化形三条命令保留 —— 与插件
 // provider 共用同一份无 State 核心（`save_node_feedback_core` 等）。
 
-/// 获取节点反馈历史（通用版）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取指定节点的质量反馈历史")]
-pub async fn get_node_feedbacks(
-    state: State<'_, AppState>,
-    request: GetNodeFeedbacksRequest,
-) -> Result<Vec<NodeFeedbackSummary>, String> {
-    get_node_feedbacks_core(state.harness.db(), request).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 /// `get_node_feedbacks` 的无 State 核心（IPC 命令与 `stock.analysis` 接缝
 /// `get_analyst_feedbacks` op 共用，#322）：同一份 filter / 排序 / limit 语义。
 pub(crate) async fn get_node_feedbacks_core(
@@ -209,22 +194,6 @@ pub struct NodeFeedbackStats {
     pub low_score_count: u64,
     pub needs_evolution: bool,
     pub consistency_metrics: std::collections::HashMap<String, f64>,
-}
-
-/// 获取节点反馈统计（通用版）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取节点的反馈统计数据，判断是否需要触发进化")]
-pub async fn get_node_feedback_stats(
-    state: State<'_, AppState>,
-    node_type: String,
-    node_id: String,
-) -> Result<NodeFeedbackStats, String> {
-    get_node_feedback_stats_core(state.harness.db(), node_type, node_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
 }
 
 /// `get_node_feedback_stats` 的无 State 核心（IPC 命令与 `stock.analysis` 接缝

@@ -91,8 +91,6 @@ macro_rules! register_all_commands {
             commands::agent_session::agent_session_list,
             commands::agent_session::agent_session_status,
             commands::analyst_evolution::evolve_node_command,
-            commands::analyst_feedback::get_node_feedback_stats,
-            commands::analyst_feedback::get_node_feedbacks,
             commands::analyst_feedback::save_node_feedback,
             commands::app_config::get_app_config,
             commands::app_config::save_app_config,

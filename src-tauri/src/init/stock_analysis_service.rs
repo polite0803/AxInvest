@@ -432,6 +432,62 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Ok(Value::Array(rows))
     }
 
+    /// 读 op：节点质量反馈历史（通用版，`node_feedbacks` op；#332）。
+    ///
+    /// ⚠ 与别名族 `get_analyst_feedbacks` 不同命令：本 op 收泛化过滤
+    /// `{nodeType?, nodeId?, limit?, onlyIssues?}`，不强制 `analyst`。
+    async fn node_feedbacks(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            #[serde(default)]
+            node_type: Option<String>,
+            #[serde(default)]
+            node_id: Option<String>,
+            #[serde(default)]
+            limit: Option<u64>,
+            #[serde(default)]
+            only_issues: Option<bool>,
+        }
+        let req: Input =
+            Self::parse("node_feedbacks", "{nodeType?, nodeId?, limit?, onlyIssues?}", input)?;
+        let rows = get_node_feedbacks_core(
+            &self.db,
+            GetNodeFeedbacksRequest {
+                node_type: req.node_type,
+                node_id: req.node_id,
+                limit: req.limit,
+                only_issues: req.only_issues,
+            },
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::node_feedbacks 查询失败: {e}"))
+        })?;
+        serde_json::to_value(rows).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::node_feedbacks 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：节点反馈统计（通用版，`node_feedback_stats` op；#332）。
+    async fn node_feedback_stats(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            node_type: String,
+            node_id: String,
+        }
+        let req: Input = Self::parse("node_feedback_stats", "{nodeType, nodeId}", input)?;
+        let stats = get_node_feedback_stats_core(&self.db, req.node_type, req.node_id)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::node_feedback_stats 查询失败: {e}"))
+            })?;
+        serde_json::to_value(stats).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::node_feedback_stats 序列化失败: {e}"))
+        })
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

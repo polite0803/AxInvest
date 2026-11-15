@@ -80,7 +80,8 @@ use crate::commands::recommendation_cron::{
 use crate::commands::stock_analysis::{
     agreement_score_history_core, evolution_drift_timeline_core,
     get_latest_analyses_for_stocks_core, get_latest_analysis_for_stock_core,
-    list_param_suggestions_core, run_daily_snapshot_sweep, snapshot_sweep_date,
+    list_param_suggestions_core, monthly_report_core, run_daily_snapshot_sweep,
+    snapshot_sweep_date,
 };
 use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
@@ -485,6 +486,35 @@ impl StockAnalysisProvider for HostStockAnalysis {
             })?;
         serde_json::to_value(stats).map_err(|e| {
             AxAgentError::Provider(format!("stock.analysis::node_feedback_stats 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：月度投资报告（宿主 `generate_monthly_report` 的接缝面；#333）。
+    async fn monthly_report(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct MonthlyRequest {
+            year: i32,
+            month: u32,
+        }
+        let req: MonthlyRequest = Self::parse("monthly_report", "{year, month}", input)?;
+        let report = monthly_report_core(&self.db, req.year, req.month).await.map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::monthly_report 生成失败: {e}"))
+        })?;
+        serde_json::to_value(report).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::monthly_report 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：宏观经济数据快照（宿主 `macro_data_snapshot` 的接缝面；#333）。
+    ///
+    /// 宿主原命令只 `MacroDataClient::new().snapshot()`、无 State 依赖 ⇒ 此处逐字下沉到
+    /// provider（⚠ 取数发生在宿主进程，与宿主原命令同进程同源）。
+    async fn macro_data_snapshot(&self, _input: Value) -> Result<Value> {
+        let client = axagent_astock_data::macro_data::MacroDataClient::new();
+        let snap = client.snapshot().await;
+        serde_json::to_value(snap).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::macro_data_snapshot 序列化失败: {e}"))
         })
     }
 

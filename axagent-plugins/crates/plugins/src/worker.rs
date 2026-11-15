@@ -3252,6 +3252,34 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #333：月度投资报告（读 op）。
+            "stock.analysis" if op == "monthly_report" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.monthly_report(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #333：宏观数据快照（读 op）。
+            "stock.analysis" if op == "macro_data_snapshot" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.macro_data_snapshot(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "stock.analysis" if op == "list_param_suggestions" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);

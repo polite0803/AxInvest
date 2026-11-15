@@ -1459,20 +1459,13 @@ pub async fn audit_decision_evidence(
     Ok(report)
 }
 
-/// 生成月度投资报告
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "生成月度投资报告")]
-#[tauri::command]
-pub async fn generate_monthly_report(
-    state: State<'_, AppState>,
+/// 月度投资报告（宿主 `generate_monthly_report` 的 core；#333 起命令体退役、接缝复用）。
+pub(crate) async fn monthly_report_core(
+    db: &sea_orm::DatabaseConnection,
     year: i32,
     month: u32,
 ) -> Result<axagent_analysis_engine::monthly_report::MonthlyReport, String> {
-    axagent_analysis_engine::monthly_report::generate_monthly_report(
-        state.harness.db(),
-        year,
-        month,
-    )
-    .await
+    axagent_analysis_engine::monthly_report::generate_monthly_report(db, year, month).await
 }
 
 // 运行组合回测（简化版 — 调用 quant crate）已迁 `trading.engine` 接缝新读 op
@@ -1481,13 +1474,8 @@ pub async fn generate_monthly_report(
 // （前端零 invoke 已核）。
 //配置校验 no-op 的三字段响应形状原样下沉宿主 provider。
 
-/// 获取宏观经济数据快照
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取宏观数据快照")]
-#[tauri::command]
-pub async fn macro_data_snapshot() -> Result<axagent_astock_data::MacroDataSnapshot, String> {
-    let client = axagent_astock_data::macro_data::MacroDataClient::new();
-    Ok(client.snapshot().await)
-}
+// `macro_data_snapshot` 已于 #333 迁 T2：插件侧直调 `MacroDataClient`（零新 op、
+// 无 State 依赖），宿主命令体删除。
 
 // ── Portfolio ──
 

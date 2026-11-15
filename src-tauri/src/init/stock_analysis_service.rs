@@ -582,6 +582,87 @@ impl StockAnalysisProvider for HostStockAnalysis {
         })
     }
 
+    /// 读 op：按 runId 读回测记录（宿主 `quant_run_get` 的接缝面；#336）。
+    ///
+    /// 权威在 commands 层 core；入参 `{runId: string}`，runId 不存在时按宿主原语义报错。
+    async fn quant_run_get(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct QuantRunGetRequest {
+            run_id: String,
+        }
+        let request = serde_json::from_value::<QuantRunGetRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::quant_run_get 参数解析失败: {e}。期望 {{runId: string}}"
+            ))
+        })?;
+        let run = crate::commands::quant_backtest::quant_run_get_core(&self.db, &request.run_id)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        serde_json::to_value(run).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::quant_run_get 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：量化策略列表（宿主 `quant_strategies_list` 的接缝面；#336）。
+    ///
+    /// 入参恒 `{}`；出参 = `quant_strategies::Model` 行数组。
+    async fn quant_strategies_list(&self, _input: Value) -> Result<Value> {
+        let rows = crate::commands::quant_backtest::quant_strategies_list_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        serde_json::to_value(rows).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::quant_strategies_list 序列化失败: {e}"))
+        })
+    }
+
+    /// 读 op：多 run 指标对比（宿主 `quant_metrics_compare` 的接缝面；#336）。
+    ///
+    /// 入参 `{runIds: string[]}`；出参 = `MetricsCompareResponse` 的 camelCase JSON。
+    async fn quant_metrics_compare(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct QuantMetricsCompareRequest {
+            run_ids: Vec<String>,
+        }
+        let request = serde_json::from_value::<QuantMetricsCompareRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::quant_metrics_compare 参数解析失败: {e}。期望 \
+                     {{runIds: string[]}}"
+            ))
+        })?;
+        let response =
+            crate::commands::quant_backtest::quant_metrics_compare_core(&self.db, request.run_ids)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        serde_json::to_value(response).map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::quant_metrics_compare 序列化失败: {e}"))
+        })
+    }
+
+    /// 写 op：注册 Rhai 策略（宿主 `quant_strategy_register_rhai` 的接缝面；#336）。
+    ///
+    /// insert/upsert `quant_strategies` 表；入参 = `RegisterRhaiRequest` 的 camelCase JSON。
+    async fn quant_strategy_register_rhai(&self, input: Value) -> Result<Value> {
+        let request =
+            serde_json::from_value::<crate::commands::quant_backtest::RegisterRhaiRequest>(input)
+                .map_err(|e| {
+                AxAgentError::Validation(format!(
+                    "stock.analysis::quant_strategy_register_rhai 参数解析失败: {e}。期望 \
+                 {{name, version, description?, scriptSource, params, walkForwardEnabled, upsert}}"
+                ))
+            })?;
+        let model =
+            crate::commands::quant_backtest::quant_strategy_register_rhai_core(&self.db, request)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        serde_json::to_value(model).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::quant_strategy_register_rhai 序列化失败: {e}"
+            ))
+        })
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

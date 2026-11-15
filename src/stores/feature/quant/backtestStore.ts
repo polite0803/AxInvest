@@ -8,12 +8,14 @@
 //  - 当前 run 详情（result_json 完整加载）
 //  - 对比结果（runIds 列表 + runs 详情 + bestBy）
 //
-// 通过 invoke 调用 `quant_backtest_run` / `quant_metrics_compare`。
+// 通过 invoke 调用 `quant_backtest_run`；读取/对比两条经 `invokePluginCommand` 走插件
+// `stock_quant_run_get` / `stock_quant_metrics_compare`（#336 迁移）。
 // =====================================================================
 
 import { create } from "zustand";
 
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
   BacktestResult,
   BacktestRunRequest,
@@ -123,7 +125,10 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
   loadRun: async (runId: string) => {
     set({ isLoadingResult: true, error: null });
     try {
-      const run = await invoke<QuantRun | null>("quant_run_get", { runId });
+      // #336：`quant_run_get` 已迁插件（宿主只留 `quant_backtest_run`）。
+      const run = await invokePluginCommand<QuantRun | null>("stock_quant_run_get", {
+        runId,
+      });
       if (!run) {
         set({ isLoadingResult: false });
         return null;
@@ -148,9 +153,10 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
   compareRuns: async (runIds: string[]) => {
     set({ isComparing: true, error: null });
     try {
-      const compare = await invoke<MetricsCompareResponse>("quant_metrics_compare", {
-        runIds,
-      });
+      const compare = await invokePluginCommand<MetricsCompareResponse>(
+        "stock_quant_metrics_compare",
+        { runIds },
+      );
       set({ compare, isComparing: false });
       return compare;
     } catch (e) {

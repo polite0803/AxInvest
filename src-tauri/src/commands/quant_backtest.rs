@@ -2,9 +2,10 @@
 
 //! 量化回测命令 — 封装 `axagent-quant` 回测引擎的 Tauri IPC 接口。
 //!
-//! 提供两个命令：
-//! - `quant_backtest_run`：加载策略 → 拉取 K 线 → 跑回测引擎 → 落库 → 返回结果
-//! - `quant_run_get`：按 runId 读取回测运行记录（含 `resultJson`）
+//! #336 起 `quant_run_get` / `quant_strategies_list` / `quant_metrics_compare` /
+//! `quant_strategy_register_rhai` 四条迁插件（`stock_` 前缀命名命令 + `stock.analysis`
+//! 接缝 op，core 见下）；宿主只留 `quant_backtest_run`（分钟级长跑，命令帧 30s /
+//! 接缝等待 15s 双预算都装不下，且无实测耗时分布 ⇒ 预算覆盖表按判据不收录）。
 //!
 //! ## 数据流
 //! ```text
@@ -30,7 +31,7 @@ use axagent_quant::{
     WalkForwardReport as RawWalkForwardReport,
 };
 use chrono::{NaiveDate, Utc};
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
@@ -235,15 +236,14 @@ pub async fn quant_backtest_run(
     }
 }
 
-/// 按 runId 读取回测运行记录
-#[agent_command(domain = quant, safety = Safe, call_mode = StateInput, description = "获取回测运行记录")]
-#[tauri::command]
-pub async fn quant_run_get(
-    state: State<'_, AppState>,
-    run_id: String,
+/// 按 runId 读取回测运行记录 —— 宿主 `quant_run_get` 的 core（#336）。
+///
+/// 纯读（按 id 查 `quant_runs` 表），经接缝 op `stock.analysis::quant_run_get` 到插件。
+pub(crate) async fn quant_run_get_core(
+    db: &DatabaseConnection,
+    run_id: &str,
 ) -> Result<quant_runs::Model, String> {
-    let db = state.harness.db();
-    quant_runs::Entity::find_by_id(&run_id)
+    quant_runs::Entity::find_by_id(run_id)
         .one(db)
         .await
         .map_err(|e| {
@@ -251,7 +251,7 @@ pub async fn quant_run_get(
         })?
         .ok_or_else(|| {
             ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("回测记录不存在: {}", run_id))
+                .with_detail(format!("回测记录不存在: {run_id}"))
                 .to_string()
         })
 }
@@ -459,14 +459,14 @@ fn kline_to_bar(
 
 // ── 策略列表 ──
 
-/// 列出所有量化策略（内置 + Rhai 注册）
-#[agent_command(domain = quant, safety = Safe, call_mode = StateInput, description = "列出量化策略")]
-#[tauri::command]
-pub async fn quant_strategies_list(
-    state: State<'_, AppState>,
+/// 列出所有量化策略（内置 + Rhai 注册）—— 宿主 `quant_strategies_list` 的 core（#336）。
+///
+/// 纯读（`quant_strategies` 全表），经接缝 op `stock.analysis::quant_strategies_list` 到插件。
+pub(crate) async fn quant_strategies_list_core(
+    db: &DatabaseConnection,
 ) -> Result<Vec<quant_strategies::Model>, String> {
     use sea_orm::EntityTrait;
-    quant_strategies::Entity::find().all(state.harness.db()).await.map_err(|e| {
+    quant_strategies::Entity::find().all(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL)
             .with_detail(format!("查询策略列表失败: {e}"))
             .to_string()
@@ -486,10 +486,12 @@ pub struct RegisterRhaiRequest {
     pub upsert: bool,
 }
 
-#[agent_command(domain = quant, safety = Caution, call_mode = StateInput, description = "注册 Rhai 策略")]
-#[tauri::command]
-pub async fn quant_strategy_register_rhai(
-    state: State<'_, AppState>,
+/// 注册 Rhai 策略 —— 宿主 `quant_strategy_register_rhai` 的 core（#336）。
+///
+/// 写语义（insert / upsert `quant_strategies` 表），经接缝 op
+/// `stock.analysis::quant_strategy_register_rhai` 到插件（op 级要求包有 write）。
+pub(crate) async fn quant_strategy_register_rhai_core(
+    db: &DatabaseConnection,
     request: RegisterRhaiRequest,
 ) -> Result<quant_strategies::Model, String> {
     use sea_orm::ActiveModelTrait;
@@ -497,7 +499,6 @@ pub async fn quant_strategy_register_rhai(
     use sea_orm::QueryFilter;
     use uuid::Uuid;
 
-    let db = state.harness.db();
     let now = Utc::now().timestamp();
     let params_json = serde_json::to_string(&request.params).unwrap_or_else(|_| "{}".to_string());
 
@@ -565,15 +566,16 @@ pub struct MetricsCompareResponse {
     pub best_by: HashMap<String, String>,
 }
 
-#[agent_command(domain = quant, safety = Safe, call_mode = StateInput, description = "对比回测指标")]
-#[tauri::command]
-pub async fn quant_metrics_compare(
-    state: State<'_, AppState>,
+/// 多 run 指标对比 —— 宿主 `quant_metrics_compare` 的 core（#336）。
+///
+/// 纯读（按 id 集合查 `quant_runs` + `quant_strategies`，就地算 MetricsReport），
+/// 经接缝 op `stock.analysis::quant_metrics_compare` 到插件。
+pub(crate) async fn quant_metrics_compare_core(
+    db: &DatabaseConnection,
     run_ids: Vec<String>,
 ) -> Result<MetricsCompareResponse, String> {
     use sea_orm::EntityTrait;
 
-    let db = state.harness.db();
     let mut runs = Vec::with_capacity(run_ids.len());
     for rid in run_ids {
         let run = quant_runs::Entity::find_by_id(&rid).one(db).await.map_err(|e| {

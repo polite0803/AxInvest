@@ -260,6 +260,48 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 按 runId 读取回测运行记录（`quant_run_get` op）—— 读 op（宿主原档 Safe）。
+    ///
+    /// 入参 `{runId: string}`；出参 = `quant_runs::Model` 的 JSON。runId 不存在时
+    /// 报错（与宿主原命令逐字同语义，前端 catch 后按「记录缺失」呈现）。
+    async fn quant_run_get(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::quant_run_get 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出所有量化策略（`quant_strategies_list` op）—— 读 op（宿主原档 Safe）。
+    ///
+    /// 入参恒 `{}`；出参 = `quant_strategies::Model` 行数组的 JSON。
+    async fn quant_strategies_list(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::quant_strategies_list 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 多 run 指标对比（`quant_metrics_compare` op）—— 读 op（宿主原档 Safe）。
+    ///
+    /// 入参 `{runIds: string[]}`；出参 = `MetricsCompareResponse` 的 camelCase JSON
+    /// （`runs` / `bestBy`）。
+    async fn quant_metrics_compare(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::quant_metrics_compare 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 注册 Rhai 策略（`quant_strategy_register_rhai` op）—— 写 op（宿主原档 Caution，
+    /// insert/upsert `quant_strategies` 表）。
+    ///
+    /// 入参 = `RegisterRhaiRequest` 的 camelCase JSON（`name` / `version` / `description` /
+    /// `scriptSource` / `params` / `walkForwardEnabled` / `upsert`）；出参 =
+    /// `quant_strategies::Model` 的 JSON。
+    async fn quant_strategy_register_rhai(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::quant_strategy_register_rhai 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -823,6 +865,21 @@ mod tests {
             (
                 "parse_vlm_portfolio_screenshot",
                 futures::executor::block_on(stub.parse_vlm_portfolio_screenshot(Value::Null)),
+            ),
+            // #336 四条（quant 3 读 + register_rhai 写）：默认实现同样必须显式报错
+            // （空对象入参不能被读成「记录不存在 / 列表为空 / 注册成功」）。
+            ("quant_run_get", futures::executor::block_on(stub.quant_run_get(Value::Null))),
+            (
+                "quant_strategies_list",
+                futures::executor::block_on(stub.quant_strategies_list(Value::Null)),
+            ),
+            (
+                "quant_metrics_compare",
+                futures::executor::block_on(stub.quant_metrics_compare(Value::Null)),
+            ),
+            (
+                "quant_strategy_register_rhai",
+                futures::executor::block_on(stub.quant_strategy_register_rhai(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 97 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 102 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -848,6 +848,82 @@ function stockManifest({ version, binaryName, sha256 }) {
             },
           },
           required: ["rawVlmOutput"],
+        },
+      },
+      {
+        // #336：宿主 `quant_run_get` 的接缝面 —— 回测运行记录读取（只读）。
+        name: "stock_quant_run_get",
+        description: "按 runId 读取量化回测运行记录（经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_quant_run_get",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            runId: { type: "string", description: "回测运行记录 ID" },
+          },
+          required: ["runId"],
+        },
+      },
+      {
+        // #336：宿主 `quant_strategies_list` 的接缝面 —— 量化策略列表（只读、零入参）。
+        name: "stock_quant_strategies_list",
+        description: "列出所有量化策略（内置 + Rhai 注册）（经宿主 stock.analysis 接缝，只读，无参数）",
+        command: "worker://stock_quant_strategies_list",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #336：宿主 `quant_metrics_compare` 的接缝面 —— 多 run 指标对比（只读）。
+        name: "stock_quant_metrics_compare",
+        description: "对比多条回测运行的绩效指标并给出各指标最佳 run（经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_quant_metrics_compare",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            runIds: {
+              type: "array",
+              description: "要对比的回测运行 ID 列表",
+              items: { type: "string" },
+            },
+          },
+          required: ["runIds"],
+        },
+      },
+      {
+        // #336：宿主 `quant_strategy_register_rhai` 的接缝面 —— 注册 Rhai 策略（写 op，
+        // 宿主原档 Caution ⇒ 等阶 workspace-write）。宿主 `quant_backtest_run` 不迁：
+        // 分钟级长跑，命令帧 30s / 接缝等待 15s 双预算都装不下。
+        name: "stock_quant_strategy_register_rhai",
+        description: "注册或更新一个 Rhai 量化策略（经宿主 stock.analysis 接缝，写库）",
+        command: "worker://stock_quant_strategy_register_rhai",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string", description: "策略名称（upsert 时为唯一键）" },
+            version: { type: "string", description: "策略版本" },
+            description: { type: "string", description: "策略描述" },
+            scriptSource: { type: "string", description: "Rhai 脚本源码" },
+            params: {
+              type: "object",
+              description: "策略参数（键值对，序列化为 JSON 落库）",
+              additionalProperties: true,
+            },
+            walkForwardEnabled: { type: "boolean", description: "是否启用 Walk-Forward 验证" },
+            upsert: { type: "boolean", description: "按 name 已存在时更新而非报错" },
+          },
+          required: [
+            "name",
+            "version",
+            "scriptSource",
+            "params",
+            "walkForwardEnabled",
+            "upsert",
+          ],
         },
       },
       {

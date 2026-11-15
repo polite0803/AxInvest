@@ -89,7 +89,7 @@ Agent 模块清单见 `axagent-quant/crates/market-sim/src/agent/mod.rs:3-12`，
 |---|---|
 | `quant_backtest_run` | `src-tauri/src/commands/quant_backtest.rs:151` |
 | `quant_run_get` | `src-tauri/src/commands/quant_backtest.rs:241` |
-| `quant_strategies_list` | `src-tauri/src/commands/quant_backtest.rs:465` |
+| `quant_strategies_list` | `src-tauri/src/commands/quant_backtest.rs:464` |
 | `quant_strategy_register_rhai` | `src-tauri/src/commands/quant_backtest.rs:491` |
 | `quant_metrics_compare` | `src-tauri/src/commands/quant_backtest.rs:570` |
 

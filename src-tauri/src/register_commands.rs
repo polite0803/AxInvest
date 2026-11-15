@@ -875,10 +875,6 @@ macro_rules! register_all_commands {
             #[cfg(not(mobile))]
             commands::pty::pty_write,
             commands::quant_backtest::quant_backtest_run,
-            commands::quant_backtest::quant_metrics_compare,
-            commands::quant_backtest::quant_run_get,
-            commands::quant_backtest::quant_strategies_list,
-            commands::quant_backtest::quant_strategy_register_rhai,
             #[cfg(not(mobile))]
             commands::quickbar::hide_quickbar,
             #[cfg(not(mobile))]

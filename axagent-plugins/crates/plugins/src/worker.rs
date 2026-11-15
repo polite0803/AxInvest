@@ -509,6 +509,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "evolve_analyst" | "save_analyst_feedback",
         ) => Some(PluginPermission::Write),
+        // #336：`quant_strategy_register_rhai` insert/upsert `quant_strategies` 表 ⇒
+        // `Write`。同批三条 quant 读（`quant_run_get` / `quant_strategies_list` /
+        // `quant_metrics_compare`）纯读 ⇒ **必须仍是 `None`**（读缝不加闸，不登记）。
+        ("stock.analysis", "quant_strategy_register_rhai") => Some(PluginPermission::Write),
         // F2 组合与风控（#35，#322）：`update_portfolio_holding` 改持仓行 /
         // `import_portfolio_from_vlm` 批量落库（可选清空旧持仓）⇒ `Write`。
         // `get_position_limits` / `run_stress_test` 是读/纯计算面 ⇒ 不登记。
@@ -3330,6 +3334,64 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.list_param_suggestions(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #336 四条（quant 3 读 + register_rhai 写）：`quant_run_get` /
+            // `quant_strategies_list` / `quant_metrics_compare` 是读 op（宿主原档 Safe，
+            // 权威在宿主 commands 层 core）；`quant_strategy_register_rhai` 写
+            // `quant_strategies` 表（宿主原档 Caution ⇒ op 级要求包有 write）。宿主只留
+            // `quant_backtest_run`（分钟级长跑，命令帧 / 接缝双预算装不下，见其模块注释）。
+            "stock.analysis" if op == "quant_run_get" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.quant_run_get(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "quant_strategies_list" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.quant_strategies_list(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "quant_metrics_compare" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.quant_metrics_compare(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "quant_strategy_register_rhai" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.quant_strategy_register_rhai(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -13665,6 +13727,26 @@ mod tests {
         assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.1, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.2, None, "读 op `discover_stock_candidates` 不得设权限闸");
+    }
+
+    /// #336 quant 四条：`quant_strategy_register_rhai` insert/upsert `quant_strategies`
+    /// 表 ⇒ `Write`；三条读（`quant_run_get` / `quant_strategies_list` /
+    /// `quant_metrics_compare`）纯读 ⇒ `None`（读缝不加闸）。
+    #[test]
+    fn stock_analysis_336_quant_ops_permissions_follow_read_write_split() {
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #336 权限表", || {
+                (
+                    required_permission_for("stock.analysis", "quant_strategy_register_rhai"),
+                    required_permission_for("stock.analysis", "quant_run_get"),
+                    required_permission_for("stock.analysis", "quant_strategies_list"),
+                    required_permission_for("stock.analysis", "quant_metrics_compare"),
+                )
+            });
+        assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
+        assert_eq!(verdict.1, None, "读 op `quant_run_get` 不得设权限闸");
+        assert_eq!(verdict.2, None, "读 op `quant_strategies_list` 不得设权限闸");
+        assert_eq!(verdict.3, None, "读 op `quant_metrics_compare` 不得设权限闸");
     }
 
     /// 批 1a（#35）十二 cron op 的权限档：3 create + 3 toggle + 3 delete = `Write`，

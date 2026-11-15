@@ -7561,6 +7561,17 @@ async function executeCommand<T>(
         sourceType: "unknown",
         rawOutput: String(args?.raw_vlm_output ?? ""),
       } as unknown as T;
+    // #336：quant 四条（3 读 + register_rhai 写）。浏览器模式无回测/策略数据与真实
+    // 写库 ⇒ 读取两条各自回诚实空态；注册是写语义，显式抛错（消费端走 error 状态）。
+    // ⚠ 宿主命令时代这四条无显式 case、落 default 返回 undefined——这里显式化。
+    case "stock_quant_run_get":
+      return null as unknown as T;
+    case "stock_quant_strategies_list":
+      return [] as unknown as T;
+    case "stock_quant_metrics_compare":
+      return { runs: [], bestBy: {} } as unknown as T;
+    case "stock_quant_strategy_register_rhai":
+      throw new Error("browser-mock: Rhai 策略注册仅在桌面端可用");
     case "stock_get_evolution_drift_timeline":
     case "stock_get_agreement_score_history":
       return [] as unknown as T;

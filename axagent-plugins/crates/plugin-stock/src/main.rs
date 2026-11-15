@@ -204,6 +204,16 @@ const COMMAND_MOVER_REFLOW_CANDIDATES: &str = "stock_list_mover_reflow_candidate
 const COMMAND_ANALYZE_BACKTEST_FEEDBACK: &str = "stock_analyze_backtest_feedback";
 /// VLM 持仓截图解析（宿主 `parse_vlm_portfolio_screenshot`，#335）—— 读 op（纯解析）。
 const COMMAND_PARSE_VLM_PORTFOLIO_SCREENSHOT: &str = "stock_parse_vlm_portfolio_screenshot";
+/// 回测运行记录读取（宿主 `quant_run_get`，#336）—— 读 op。
+const COMMAND_QUANT_RUN_GET: &str = "stock_quant_run_get";
+/// 量化策略列表（宿主 `quant_strategies_list`，#336）—— 读 op。
+const COMMAND_QUANT_STRATEGIES_LIST: &str = "stock_quant_strategies_list";
+/// 多 run 指标对比（宿主 `quant_metrics_compare`，#336）—— 读 op。
+const COMMAND_QUANT_METRICS_COMPARE: &str = "stock_quant_metrics_compare";
+/// 注册 Rhai 策略（宿主 `quant_strategy_register_rhai`，#336）—— 写 op（insert/upsert
+/// `quant_strategies` 表，op 级要求包有 write）。宿主只留 `quant_backtest_run`：分钟级
+/// 长跑，命令帧 30s / 接缝等待 15s 双预算都装不下（见宿主模块注释）。
+const COMMAND_QUANT_STRATEGY_REGISTER_RHAI: &str = "stock_quant_strategy_register_rhai";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -650,6 +660,51 @@ fn handle_command(
             peer,
             &request.call_chain,
             "parse_vlm_portfolio_screenshot",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #336：quant 四条（3 读 + register_rhai 写，整块透传 camelCase 平铺 JSON）。
+        COMMAND_QUANT_RUN_GET => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "quant_run_get",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_QUANT_STRATEGIES_LIST => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "quant_strategies_list",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_QUANT_METRICS_COMPARE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "quant_metrics_compare",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_QUANT_STRATEGY_REGISTER_RHAI => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "quant_strategy_register_rhai",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3327,6 +3382,11 @@ mod tests {
             // #335 两条：回测反馈分析（计算型）+ VLM 持仓截图解析（读 op）。
             super::COMMAND_ANALYZE_BACKTEST_FEEDBACK,
             super::COMMAND_PARSE_VLM_PORTFOLIO_SCREENSHOT,
+            // #336 四条：quant 3 读 + register_rhai 写（均走 stock.analysis）。
+            super::COMMAND_QUANT_RUN_GET,
+            super::COMMAND_QUANT_STRATEGIES_LIST,
+            super::COMMAND_QUANT_METRICS_COMPARE,
+            super::COMMAND_QUANT_STRATEGY_REGISTER_RHAI,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

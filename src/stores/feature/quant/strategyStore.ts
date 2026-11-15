@@ -7,12 +7,13 @@
 //  - Rhai 编辑器草稿（与 store 解耦，组件级 useState 即可）
 //  - 注册 / 刷新 actions
 //
-// 通过 invoke 调用 Rust `quant_strategies_list` / `quant_strategy_register_rhai`。
+// 经 `invokePluginCommand` 调用插件 `stock_quant_strategies_list` /
+// `stock_quant_strategy_register_rhai`（#336 迁移）。
 // =====================================================================
 
 import { create } from "zustand";
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { RegisterRhaiRequest, StrategyMeta } from "@/types/quant";
 
 interface StrategyState {
@@ -45,7 +46,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
     if (!force && state.strategies.length > 0) { return; }
     set({ isLoading: true, error: null });
     try {
-      const result = await invoke<StrategyMeta[]>("quant_strategies_list");
+      const result = await invokePluginCommand<StrategyMeta[]>("stock_quant_strategies_list");
       set({
         strategies: result,
         isLoading: false,
@@ -62,9 +63,10 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
   registerRhai: async (request: RegisterRhaiRequest) => {
     set({ isRegistering: true, error: null });
     try {
-      const newStrategy = await invoke<StrategyMeta>(
-        "quant_strategy_register_rhai",
-        { request },
+      // #336：插件命令入参平铺（无 request 包裹），与清单 inputSchema 对齐。
+      const newStrategy = await invokePluginCommand<StrategyMeta>(
+        "stock_quant_strategy_register_rhai",
+        { ...request },
       );
       // 追加 / 替换到列表
       const list = get().strategies;

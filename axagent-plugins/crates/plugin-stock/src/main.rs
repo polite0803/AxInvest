@@ -214,6 +214,10 @@ const COMMAND_QUANT_METRICS_COMPARE: &str = "stock_quant_metrics_compare";
 /// `quant_strategies` 表，op 级要求包有 write）。宿主只留 `quant_backtest_run`：分钟级
 /// 长跑，命令帧 30s / 接缝等待 15s 双预算都装不下（见宿主模块注释）。
 const COMMAND_QUANT_STRATEGY_REGISTER_RHAI: &str = "stock_quant_strategy_register_rhai";
+/// 手动设置 vendor 健康状态（宿主 `set_vendor_status`，#337）—— 写语义 op。
+const COMMAND_SET_VENDOR_STATUS: &str = "stock_set_vendor_status";
+/// 取消进行中的分析任务（宿主 `cancel_stock_analysis`，#337）—— 写语义 op。
+const COMMAND_CANCEL_STOCK_ANALYSIS: &str = "stock_cancel_stock_analysis";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -705,6 +709,29 @@ fn handle_command(
             peer,
             &request.call_chain,
             "quant_strategy_register_rhai",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #337：两条写语义 op（vendor 状态 / 取消令牌，均走 stock.analysis）。
+        COMMAND_SET_VENDOR_STATUS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "set_vendor_status",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_CANCEL_STOCK_ANALYSIS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "cancel_stock_analysis",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3387,6 +3414,9 @@ mod tests {
             super::COMMAND_QUANT_STRATEGIES_LIST,
             super::COMMAND_QUANT_METRICS_COMPARE,
             super::COMMAND_QUANT_STRATEGY_REGISTER_RHAI,
+            // #337 两条：vendor 状态 / 取消令牌（写语义，均走 stock.analysis）。
+            super::COMMAND_SET_VENDOR_STATUS,
+            super::COMMAND_CANCEL_STOCK_ANALYSIS,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

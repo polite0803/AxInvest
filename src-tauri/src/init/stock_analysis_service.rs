@@ -94,9 +94,11 @@ use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::stock_analysis::StockAnalysisProvider;
 use axagent_runtime_core::CronJobStore;
+use dashmap::DashMap;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// `list_recent_mainlines` op 的缺省窗口（宿主命令 `market_mainline_list_recent` 原值，#304 C3）。
 const DEFAULT_RECENT_DAYS: usize = 7;
@@ -133,6 +135,9 @@ pub struct HostStockAnalysis {
     /// F1 余三条（#35）：`sweep_daily_snapshots` 是触发口，真正的采集走 vendor 网络
     /// ⇒ 执行体 `run_daily_snapshot_sweep` 仍留宿主（后台定时服务同源复用），本层只传客户端。
     astock_client: Arc<AStockClient>,
+    /// 与 `AppState.agent_cancel_tokens` **同一个**实例（`Arc` 共享）—— `cancel_stock_analysis`
+    /// 翻转的就是运行中分析任务在看的那个令牌，必须是同一份，否则插件取消的令牌没人读。
+    agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
 }
 
 impl HostStockAnalysis {
@@ -140,8 +145,9 @@ impl HostStockAnalysis {
         db: DatabaseConnection,
         cron_job_store: Arc<CronJobStore>,
         astock_client: Arc<AStockClient>,
+        agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
     ) -> Self {
-        Self { db, cron_job_store, astock_client }
+        Self { db, cron_job_store, astock_client, agent_cancel_tokens }
     }
 
     /// 无参 op 的入参闸：只收 `null` / `{}`。
@@ -661,6 +667,68 @@ impl StockAnalysisProvider for HostStockAnalysis {
                 "stock.analysis::quant_strategy_register_rhai 序列化失败: {e}"
             ))
         })
+    }
+
+    /// 写 op：手动设置 vendor 健康状态（宿主 `set_vendor_status` 的接缝面；#337）。
+    ///
+    /// 与宿主原命令同判据：status ∈ healthy/degraded/disabled，非法值报错不落任何状态。
+    async fn set_vendor_status(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct VendorStatusRequest {
+            vendor: String,
+            status: String,
+        }
+        let request = serde_json::from_value::<VendorStatusRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::set_vendor_status 参数解析失败: {e}。期望 {{vendor, status}}"
+            ))
+        })?;
+        use axagent_astock_data::vendor_health::VendorStatus;
+        let st = match request.status.as_str() {
+            "healthy" => VendorStatus::Healthy,
+            "degraded" => VendorStatus::Degraded,
+            "disabled" => VendorStatus::Disabled,
+            other => {
+                return Err(AxAgentError::Validation(format!(
+                    "stock.analysis::set_vendor_status: 无效的 vendor 状态: \
+                     {other}（可选: healthy/degraded/disabled）"
+                )));
+            },
+        };
+        self.astock_client.health_tracker.set_vendor_status(&request.vendor, st).await;
+        tracing::info!(
+            "[P3-B5] vendor '{}' 状态已手动设置为 '{}'（经 stock.analysis 接缝）",
+            request.vendor,
+            request.status
+        );
+        Ok(Value::Null)
+    }
+
+    /// 写 op：取消进行中的分析任务（宿主 `cancel_stock_analysis` 的接缝面；#337）。
+    ///
+    /// 与宿主原命令同判据：令牌不存在（任务不存在或已完成）报错，不伪造成功。
+    async fn cancel_stock_analysis(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CancelRequest {
+            analysis_id: String,
+        }
+        let request = serde_json::from_value::<CancelRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::cancel_stock_analysis 参数解析失败: {e}。期望 {{analysisId}}"
+            ))
+        })?;
+        if let Some(token) = self.agent_cancel_tokens.get(&request.analysis_id) {
+            token.store(true, Ordering::Relaxed);
+            tracing::info!("cancel_stock_analysis: 已设置取消令牌 {}", request.analysis_id);
+            Ok(Value::Null)
+        } else {
+            Err(AxAgentError::Validation(format!(
+                "stock.analysis::cancel_stock_analysis: 分析任务不存在或已完成: {}",
+                request.analysis_id
+            )))
+        }
     }
 
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。

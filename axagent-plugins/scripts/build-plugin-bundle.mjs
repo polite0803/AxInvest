@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 102 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 104 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -848,6 +848,44 @@ function stockManifest({ version, binaryName, sha256 }) {
             },
           },
           required: ["rawVlmOutput"],
+        },
+      },
+      {
+        // #337：宿主 `set_vendor_status` 的接缝面 —— 手动设置 vendor 健康状态（写语义，
+        // 宿主原档 Safe 但改运行态 ⇒ 等阶 workspace-write）。
+        name: "stock_set_vendor_status",
+        description:
+          "手动设置数据源（vendor）健康状态 healthy/degraded/disabled（经宿主 stock.analysis 接缝，写运行态）",
+        command: "worker://stock_set_vendor_status",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            vendor: { type: "string", description: "数据源标识" },
+            status: {
+              type: "string",
+              description: "目标状态",
+              enum: ["healthy", "degraded", "disabled"],
+            },
+          },
+          required: ["vendor", "status"],
+        },
+      },
+      {
+        // #337：宿主 `cancel_stock_analysis` 的接缝面 —— 取消进行中的分析任务（写语义）。
+        name: "stock_cancel_stock_analysis",
+        description:
+          "取消一个进行中的股票分析任务（翻转取消令牌；任务不存在或已完成时报错）（经宿主 stock.analysis 接缝，写运行态）",
+        command: "worker://stock_cancel_stock_analysis",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analysisId: { type: "string", description: "分析任务 ID" },
+          },
+          required: ["analysisId"],
         },
       },
       {

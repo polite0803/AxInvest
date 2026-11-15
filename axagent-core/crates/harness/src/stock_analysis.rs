@@ -302,6 +302,28 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 手动设置数据源健康状态（`set_vendor_status` op）—— 写 op（宿主原档 Safe 但
+    /// 改写 `health_tracker` 运行态 ⇒ op 级要求包有 write，#337）。
+    ///
+    /// 入参 `{vendor: string, status: string}`（status ∈ healthy/degraded/disabled）；
+    /// 出参恒 `null`。无效状态值报错（与宿主原命令同判据）。
+    async fn set_vendor_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::set_vendor_status 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取消进行中的分析任务（`cancel_stock_analysis` op）—— 写 op（翻转取消令牌，
+    /// op 级要求包有 write，#337）。
+    ///
+    /// 入参 `{analysisId: string}`；出参恒 `null`。令牌不存在（任务已完成）报错
+    /// （与宿主原命令同判据）。
+    async fn cancel_stock_analysis(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::cancel_stock_analysis 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -880,6 +902,13 @@ mod tests {
             (
                 "quant_strategy_register_rhai",
                 futures::executor::block_on(stub.quant_strategy_register_rhai(Value::Null)),
+            ),
+            // #337 两条（写语义）：默认实现同样必须显式报错（空对象入参不能被读成
+            // 「vendor 状态已改 / 取消已下发」）。
+            ("set_vendor_status", futures::executor::block_on(stub.set_vendor_status(Value::Null))),
+            (
+                "cancel_stock_analysis",
+                futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

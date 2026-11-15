@@ -752,7 +752,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
-use std::sync::atomic::Ordering;
 use tauri::State;
 
 /// 获取当前全局 as-of 降级条目总数(进程级,跨 live/replay)。
@@ -897,24 +896,10 @@ pub async fn batch_get_klines(
     Ok(runner.get_klines_batch(codes, &period, limit).await)
 }
 
-/// 取消分析 — 设置取消令牌让后台任务停止
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "取消股票分析任务")]
-#[tauri::command]
-pub async fn cancel_stock_analysis(
-    state: State<'_, AppState>,
-    analysis_id: String,
-) -> Result<(), String> {
-    let tokens = std::sync::Arc::new(state.agent_cancel_tokens.clone());
-    if let Some(token) = tokens.get(&analysis_id) {
-        token.store(true, Ordering::Relaxed);
-        tracing::info!("cancel_stock_analysis: 已设置取消令牌 {}", analysis_id);
-        Ok(())
-    } else {
-        Err(ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("分析任务不存在或已完成: {}", analysis_id))
-            .into())
-    }
-}
+// `cancel_stock_analysis` 已迁 `stock.analysis` 接缝写 op（#337）：翻转
+// `AppState.agent_cancel_tokens` 的运行态语义逐字下沉宿主 provider
+// （`init/stock_analysis_service.rs`，与 AppState 同 `Arc` 共享令牌表），
+// 插件命名命令 `stock_cancel_stock_analysis` 接管（前端零 invoke 已核）。
 
 /// 历史分析列表精简 DTO（列表场景专用）
 ///
@@ -3562,34 +3547,10 @@ pub async fn get_vendor_fallback_log(
     Ok(state.stock().astock_client.health_tracker.get_fallback_log().await)
 }
 
-/// P3-B5(B): 手动设置 vendor 状态（healthy/degraded/disabled）
-/// 用于前端设置页"vendor 健康面板"手动启停 vendor
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "设置数据源状态")]
-#[tauri::command]
-pub async fn set_vendor_status(
-    state: State<'_, AppState>,
-    vendor: String,
-    status: String,
-) -> Result<(), String> {
-    use axagent_astock_data::vendor_health::VendorStatus;
-
-    let st = match status.as_str() {
-        "healthy" => VendorStatus::Healthy,
-        "degraded" => VendorStatus::Degraded,
-        "disabled" => VendorStatus::Disabled,
-        other => {
-            return Err(ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!(
-                    "无效的 vendor 状态: {other}（可选: healthy/degraded/disabled）"
-                ))
-                .to_string());
-        },
-    };
-
-    state.stock().astock_client.health_tracker.set_vendor_status(&vendor, st).await;
-    tracing::info!("[P3-B5] vendor '{vendor}' 状态已手动设置为 '{status}'");
-    Ok(())
-}
+// `set_vendor_status` 已迁 `stock.analysis` 接缝写 op（#337）：health_tracker
+// 运行态改写逐字下沉宿主 provider（`init/stock_analysis_service.rs`，同一
+// `astock_client` 句柄），插件命名命令 `stock_set_vendor_status` 接管
+// （前端零 invoke 已核）。
 
 // 将 NeoData token 保存到 Python 脚本缓存已迁 `stock.analysis` 接缝新写 op
 // `save_neodata_token`（#323 子批②）：三段效应（脚本缓存 / 共享内存 /

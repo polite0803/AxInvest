@@ -134,7 +134,10 @@ export function EvolutionDriftPanel() {
     setSelectedKey(key);
     setTimelineLoading(true);
     try {
-      const points = await (await import("@/lib/invoke")).invoke<
+      // #331：切插件命名命令（宿主同名命令已退役）。
+      const points = await (
+        await import("@/lib/pluginCommand")
+      ).invokePluginCommand<
         Array<{
           appliedAt: number;
           newWeight: number;
@@ -142,7 +145,7 @@ export function EvolutionDriftPanel() {
           deltaPct: number;
           trigger: string;
         }>
-      >("get_evolution_drift_timeline", {
+      >("stock_get_evolution_drift_timeline", {
         strategyId: record.strategyId,
         period: record.period,
         limit: 30,

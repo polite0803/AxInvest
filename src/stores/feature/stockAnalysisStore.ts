@@ -2023,7 +2023,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   fetchAgreementScoreHistory: async (limit = 50) => {
     set({ agreementScoreHistoryLoading: true });
     try {
-      const data = await invoke<
+      // #331：切插件命名命令（宿主同名命令已退役）。
+      const data = await invokePluginCommand<
         Array<
           {
             exitAt: number;
@@ -2035,7 +2036,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }
         >
       >(
-        "get_agreement_score_history",
+        "stock_get_agreement_score_history",
         { limit },
       );
       set({ agreementScoreHistory: data, agreementScoreHistoryLoading: false });

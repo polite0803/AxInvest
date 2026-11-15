@@ -6556,20 +6556,17 @@ pub async fn get_evolution_drift_dashboard(
     axagent_analysis_engine::evolution_drift::get_dashboard(db, as_of_date.as_deref()).await
 }
 
-/// 拉取某条 (strategy, period) 的权重时间线
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取权重时间线")]
-#[tauri::command]
-pub async fn get_evolution_drift_timeline(
-    state: State<'_, AppState>,
-    strategy_id: String,
-    period: String,
+/// 权重时间线（宿主 `get_evolution_drift_timeline` 的 core；#331 起命令体退役、接缝复用）。
+pub(crate) async fn evolution_drift_timeline_core(
+    db: &sea_orm::DatabaseConnection,
+    strategy_id: &str,
+    period: &str,
     limit: Option<u32>,
 ) -> Result<Vec<axagent_analysis_engine::evolution_drift::TimelinePoint>, String> {
-    let db = state.harness.db();
     axagent_analysis_engine::evolution_drift::get_timeline(
         db,
-        &strategy_id,
-        &period,
+        strategy_id,
+        period,
         limit.unwrap_or(60),
     )
     .await
@@ -6624,11 +6621,12 @@ pub async fn trigger_stock_evolution(
         })
 }
 
-/// 拉取近期决策一致性分数趋势（Phase 3: 双视角一致性趋势图）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取一致性分数历史")]
-#[tauri::command]
-pub async fn get_agreement_score_history(
-    state: State<'_, AppState>,
+/// 决策一致性分数历史（宿主 `get_agreement_score_history` 的 core；#331 起命令体退役、接缝复用）。
+///
+/// 判据：只取 `agreement_score IS NOT NULL` 的行、按 `created_at` 倒序、默认 50 条；
+/// 出参键序与前端 `AgreementScorePoint` 逐字对齐（`exitAt` / `agreementScore` / ...）。
+pub(crate) async fn agreement_score_history_core(
+    db: &sea_orm::DatabaseConnection,
     limit: Option<u32>,
 ) -> Result<Vec<serde_json::Value>, String> {
     use axagent_entities::strategy_performance;
@@ -6639,7 +6637,7 @@ pub async fn get_agreement_score_history(
         .filter(strategy_performance::Column::AgreementScore.is_not_null())
         .order_by_desc(strategy_performance::Column::CreatedAt)
         .limit(limit)
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL)

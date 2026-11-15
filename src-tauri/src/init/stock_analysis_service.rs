@@ -78,6 +78,7 @@ use crate::commands::recommendation_cron::{
     toggle_recommendation_cron_core, toggle_trend_screening_cron_core,
 };
 use crate::commands::stock_analysis::{
+    agreement_score_history_core, evolution_drift_timeline_core,
     get_latest_analyses_for_stocks_core, get_latest_analysis_for_stock_core,
     list_param_suggestions_core, run_daily_snapshot_sweep, snapshot_sweep_date,
 };
@@ -377,6 +378,58 @@ impl StockAnalysisProvider for HostStockAnalysis {
         })?;
         serde_json::to_value(summaries)
             .map_err(|e| AxAgentError::Provider(format!("批量分析摘要序列化失败: {e}")))
+    }
+
+    /// 读 op：权重时间线（宿主 `get_evolution_drift_timeline` 的接缝面）。
+    ///
+    /// 入参 `{strategyId, period, limit?}`（limit 缺省 60）；出参 = `TimelinePoint` 数组。
+    async fn evolution_drift_timeline(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct TimelineRequest {
+            strategy_id: String,
+            period: String,
+            limit: Option<u32>,
+        }
+        let request = serde_json::from_value::<TimelineRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::evolution_drift_timeline 参数解析失败: {e}。期望                  {{strategyId: string, period: string, limit?: number}}"
+            ))
+        })?;
+        let points = evolution_drift_timeline_core(
+            &self.db,
+            &request.strategy_id,
+            &request.period,
+            request.limit,
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::evolution_drift_timeline 查询失败: {e}"
+            ))
+        })?;
+        serde_json::to_value(points)
+            .map_err(|e| AxAgentError::Provider(format!("权重时间线序列化失败: {e}")))
+    }
+
+    /// 读 op：决策一致性分数历史（宿主 `get_agreement_score_history` 的接缝面）。
+    ///
+    /// 入参 `{limit?: number}`（缺省 50）；出参 = 行数组（键序见 core 注释）。
+    async fn agreement_score_history(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct AgreementHistoryRequest {
+            limit: Option<u32>,
+        }
+        let request = serde_json::from_value::<AgreementHistoryRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::agreement_score_history 参数解析失败: {e}。期望 {{limit?: number}}"
+            ))
+        })?;
+        let rows = agreement_score_history_core(&self.db, request.limit).await.map_err(|e| {
+            AxAgentError::Provider(format!("stock.analysis::agreement_score_history 查询失败: {e}"))
+        })?;
+        Ok(Value::Array(rows))
     }
 
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。

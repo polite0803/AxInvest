@@ -7546,6 +7546,10 @@ async function executeCommand<T>(
     // #330：批量最近分析摘要（插件命名命令）。浏览器模式没有分析记录 ⇒ 每个 code 回 null，
     // key 恒在（消费端取 map[code] 后判 null；回 undefined 会被读成「键缺失」）。
     // ⚠ 入参已被 convertToSnakeCase 转成 stock_codes。
+    // #331：两条读 op（浏览器模式无演化数据 / 无一致性样本 ⇒ 各自回空数组）。
+    case "stock_get_evolution_drift_timeline":
+    case "stock_get_agreement_score_history":
+      return [] as unknown as T;
     case "stock_get_latest_analyses_for_stocks": {
       const raw = args?.stock_codes;
       const codes = Array.isArray(raw) ? (raw as string[]) : [];

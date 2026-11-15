@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 88 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 90 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -780,6 +780,37 @@ function stockManifest({ version, binaryName, sha256 }) {
             asOfDate: { type: "string", description: "时间旅行截止日（YYYY-MM-DD）；省略则取最新" },
           },
           required: ["stockCode"],
+        },
+      },
+      {
+        // #331：宿主 `get_evolution_drift_timeline` 的接缝面 —— 权重时间线（只读）。
+        name: "stock_get_evolution_drift_timeline",
+        description: "查询某条 (策略, 周期) 的权重演化时间线（经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_get_evolution_drift_timeline",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            strategyId: { type: "string", description: "策略标识" },
+            period: { type: "string", description: "周期（如 mid / long）" },
+            limit: { type: "integer", description: "返回条数上限（缺省 60）" },
+          },
+          required: ["strategyId", "period"],
+        },
+      },
+      {
+        // #331：宿主 `get_agreement_score_history` 的接缝面 —— 一致性分数趋势（只读）。
+        name: "stock_get_agreement_score_history",
+        description: "查询近期决策一致性分数趋势（经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_get_agreement_score_history",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "返回条数上限（缺省 50）" },
+          },
         },
       },
       {

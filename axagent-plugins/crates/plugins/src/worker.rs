@@ -3198,6 +3198,33 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #331：权重时间线 / 一致性分数历史（两条读 op）。
+            "stock.analysis" if op == "evolution_drift_timeline" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.evolution_drift_timeline(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "agreement_score_history" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.agreement_score_history(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "stock.analysis" if op == "list_param_suggestions" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);

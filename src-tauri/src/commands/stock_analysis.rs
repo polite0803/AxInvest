@@ -30,7 +30,7 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchResult, BatchRunner, MarketBatchQuery};
 use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
-    stock_analyses, trades, watchlist_items,
+    stock_analyses, strategy_performance, trades, watchlist_items,
 };
 use axagent_harness::AnalysisKind;
 use axagent_harness::market_data::KLine;
@@ -6629,9 +6629,6 @@ pub(crate) async fn agreement_score_history_core(
     db: &sea_orm::DatabaseConnection,
     limit: Option<u32>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    use axagent_entities::strategy_performance;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-
     let limit = limit.unwrap_or(50) as u64;
     let rows = strategy_performance::Entity::find()
         .filter(strategy_performance::Column::AgreementScore.is_not_null())

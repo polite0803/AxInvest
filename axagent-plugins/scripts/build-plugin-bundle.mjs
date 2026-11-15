@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 94 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 95 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -781,6 +781,14 @@ function stockManifest({ version, binaryName, sha256 }) {
           },
           required: ["stockCode"],
         },
+      },
+      {
+        // #334：宿主 `list_mover_reflow_candidates` 的接缝面 —— 漏检回灌清单（只读、零入参）。
+        name: "stock_list_mover_reflow_candidates",
+        description: "读取漏检回灌清单与转正就绪度（经宿主接缝，只读，无参数）",
+        command: "worker://stock_list_mover_reflow_candidates",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
       },
       {
         // #333：宿主 `generate_monthly_report` 的接缝面 —— 月度投资报告（只读）。

@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import type {
   MoverRecallEventReview,
@@ -241,14 +242,15 @@ export function MoverRecallPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const v = await invoke<
+        // #334：切插件命名命令（宿主同名命令已退役）。
+        const v = await invokePluginCommand<
           {
             items?: { stockCode?: string }[];
             settled?: number;
             required?: number;
             ready?: boolean;
           } | null
-        >("list_mover_reflow_candidates", {});
+        >("stock_list_mover_reflow_candidates", {});
         if (cancelled) { return; }
         if (!v || !Array.isArray(v.items) || typeof v.settled !== "number") {
           setReflow(null);

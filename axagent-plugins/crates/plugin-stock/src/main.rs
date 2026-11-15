@@ -198,6 +198,8 @@ const COMMAND_NODE_FEEDBACK_STATS: &str = "stock_get_node_feedback_stats";
 const COMMAND_MONTHLY_REPORT: &str = "stock_generate_monthly_report";
 /// 宏观经济数据快照（宿主 `macro_data_snapshot`，#333）—— 读 op（每 op 新增于宿主 provider）。
 const COMMAND_MACRO_DATA_SNAPSHOT: &str = "stock_macro_data_snapshot";
+/// 漏检回灌清单与转正就绪度（宿主 `list_mover_reflow_candidates`，#334）—— 读 op。
+const COMMAND_MOVER_REFLOW_CANDIDATES: &str = "stock_list_mover_reflow_candidates";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -608,6 +610,18 @@ fn handle_command(
             peer,
             &request.call_chain,
             "macro_data_snapshot",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #334：漏检回灌清单（读 op，零入参）。
+        COMMAND_MOVER_REFLOW_CANDIDATES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "mover_reflow_candidates",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3281,6 +3295,7 @@ mod tests {
             super::COMMAND_NODE_FEEDBACK_STATS,
             super::COMMAND_MONTHLY_REPORT,
             super::COMMAND_MACRO_DATA_SNAPSHOT,
+            super::COMMAND_MOVER_REFLOW_CANDIDATES,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

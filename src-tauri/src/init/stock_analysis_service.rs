@@ -518,6 +518,22 @@ impl StockAnalysisProvider for HostStockAnalysis {
         })
     }
 
+    /// 读 op：漏检回灌清单与转正就绪度（宿主 `list_mover_reflow_candidates` 的接缝面；#334）。
+    async fn mover_reflow_candidates(&self, _input: Value) -> Result<Value> {
+        let view = crate::commands::mover_recall::mover_reflow_candidates_core(&self.db)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::mover_reflow_candidates 查询失败: {e}"
+                ))
+            })?;
+        serde_json::to_value(view).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::mover_reflow_candidates 序列化失败: {e}"
+            ))
+        })
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

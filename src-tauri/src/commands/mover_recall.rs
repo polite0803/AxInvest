@@ -1027,18 +1027,13 @@ pub struct MoverReflowView {
     pub ready: bool,
 }
 
-/// 读回灌清单（只读；不改状态）。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "读取漏检回灌清单与转正就绪度"
-)]
-#[tauri::command]
-pub async fn list_mover_reflow_candidates(
-    state: tauri::State<'_, AppState>,
+/// 读回灌清单（只读；不改状态）—— 宿主 `list_mover_reflow_candidates` 的 core（#334）。
+///
+/// dao 取最近 100 条回灌候选 → 按 codes 统计已结算样本 → 与引擎 `REFLOW_MIN_SETTLED` /
+/// `reflow_ready` 对照；出参 `MoverReflowView` 原样（三态由面板成句）。
+pub(crate) async fn mover_reflow_candidates_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<MoverReflowView, String> {
-    let db = state.harness.db();
     let rows = axagent_dao::repo::mover_recall_events::list_reflow_candidates(db, 100)
         .await
         .map_err(|e| run_read_err(format!("读回灌清单失败: {e}")))?;

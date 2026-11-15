@@ -224,6 +224,17 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 漏检回灌清单与转正就绪度（`mover_reflow_candidates` op）—— 读 op，无权限闸。
+    ///
+    /// 入参恒 `{}`（宿主原命令零参）；出参 = `MoverReflowView` 的 camelCase JSON
+    /// （`items` / `settled` / `required` / `ready`）。
+    async fn mover_reflow_candidates(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::mover_reflow_candidates 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -773,6 +784,10 @@ mod tests {
             (
                 "macro_data_snapshot",
                 futures::executor::block_on(stub.macro_data_snapshot(Value::Null)),
+            ),
+            (
+                "mover_reflow_candidates",
+                futures::executor::block_on(stub.mover_reflow_candidates(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

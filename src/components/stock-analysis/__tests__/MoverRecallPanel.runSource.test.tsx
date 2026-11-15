@@ -135,7 +135,7 @@ describe("MoverRecallPanel 轮次来源", () => {
     invokeMock.mockImplementation(async (name: string) => {
       if (name === "list_mover_recall_runs") { return [makeRun()]; }
       if (name === "get_mover_recall_run_view") { return makeRunView(); }
-      if (name === "list_mover_reflow_candidates") {
+      if (name === "stock_list_mover_reflow_candidates") {
         return { items: [{ stockCode: "002696" }], settled: 3, required: 30, ready: false };
       }
       return null;
@@ -152,7 +152,7 @@ describe("MoverRecallPanel 轮次来源", () => {
     invokeMock.mockImplementation(async (name: string) => {
       if (name === "list_mover_recall_runs") { return [makeRun()]; }
       if (name === "get_mover_recall_run_view") { return makeRunView(); }
-      if (name === "list_mover_reflow_candidates") {
+      if (name === "stock_list_mover_reflow_candidates") {
         return { items: [{ stockCode: "600519" }], settled: 30, required: 30, ready: true };
       }
       return null;

@@ -7547,6 +7547,9 @@ async function executeCommand<T>(
     // key 恒在（消费端取 map[code] 后判 null；回 undefined 会被读成「键缺失」）。
     // ⚠ 入参已被 convertToSnakeCase 转成 stock_codes。
     // #331：两条读 op（浏览器模式无演化数据 / 无一致性样本 ⇒ 各自回空数组）。
+    // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
+    case "stock_list_mover_reflow_candidates":
+      return { items: [], settled: 0, required: 30, ready: false } as unknown as T;
     case "stock_get_evolution_drift_timeline":
     case "stock_get_agreement_score_history":
       return [] as unknown as T;

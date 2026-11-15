@@ -3280,6 +3280,20 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #334：漏检回灌清单（读 op，零入参）。
+            "stock.analysis" if op == "mover_reflow_candidates" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.mover_reflow_candidates(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "stock.analysis" if op == "list_param_suggestions" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);

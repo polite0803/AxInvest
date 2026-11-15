@@ -5218,84 +5218,21 @@ pub(crate) async fn get_latest_analysis_for_stock_core(
     }))
 }
 
-/// 批量查询多只个股的最近分析摘要
+/// 批量查询多只个股的最近分析摘要 —— 逐票复用 `get_latest_analysis_for_stock_core`。
 ///
-/// 一次 SQL 查询返回 HashMap，key 为 stock_code。
-/// `as_of_date` 语义同 `get_latest_analysis_for_stock`。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "批量查询个股最近分析摘要")]
-#[tauri::command]
-pub async fn get_latest_analyses_for_stocks(
-    state: tauri::State<'_, AppState>,
-    stock_codes: Vec<String>,
-    as_of_date: Option<String>,
+/// 2026-11-15 #330：本条原为自建 SQL（与单数版「各自建查询」，两处口径只能靠注释同步），
+/// 改为一律走同一 core ⇒ 「同一判据只写一处」。批量循环仍是逐 code 查（连接池 + SQLite
+/// 行级缓存，40 只以内足够快），语义与逐条调用完全一致。
+pub(crate) async fn get_latest_analyses_for_stocks_core(
+    db: &sea_orm::DatabaseConnection,
+    stock_codes: &[String],
+    as_of_date: Option<&str>,
 ) -> Result<std::collections::HashMap<String, Option<LatestAnalysisSummary>>, String> {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-
-    let db = state.harness.db();
-    let mut result: std::collections::HashMap<String, Option<LatestAnalysisSummary>> =
-        std::collections::HashMap::new();
-
-    // 批量查询：循环查询每只 stock_code，利用连接池和 SQLite 的行级缓存，40 只以内足够快
-    for code in &stock_codes {
-        let mut query = stock_analyses::Entity::find()
-            .filter(stock_analyses::Column::StockCode.eq(code))
-            .filter(stock_analyses::Column::Status.eq("completed"))
-            // 2026-09-24：同 `get_latest_analysis_for_stock`，排除快速 JEV 链记录
-            // （口径一致性由「同一判据只写一处」无法覆盖 —— 两个函数各自建查询，
-            // 故此处的过滤理由是上面那段注释，改动时须同步）。
-            .filter(
-                sea_orm::Condition::any()
-                    .add(stock_analyses::Column::TemplateId.is_null())
-                    .add(stock_analyses::Column::TemplateId.ne(FAST_TEMPLATE_ID)),
-            );
-
-        if let Some(ref cutoff) = as_of_date {
-            query = query.filter(stock_analyses::Column::AnalysisDate.lte(cutoff));
-        }
-
-        let row =
-            query.order_by_desc(stock_analyses::Column::CreatedAt).limit(1).one(db).await.map_err(
-                |e| {
-                    ErrorResponse::new(wf_err::INTERNAL)
-                        .with_detail(format!("批量查询 stock_analyses({code}) 失败: {e}"))
-                },
-            )?;
-
-        let summary = row.map(|model| {
-            let confidence: Option<i32> = model.decision_json.as_ref().and_then(|raw| {
-                serde_json::from_str::<serde_json::Value>(raw).ok().and_then(|v| {
-                    v.get("confidence")
-                        .or_else(|| v.get("weighted_confidence"))
-                        .and_then(|c| c.as_i64())
-                        .map(|i| i as i32)
-                })
-            });
-
-            LatestAnalysisSummary {
-                analysis_id: model.id,
-                analysis_date: model.analysis_date,
-                // P0-5 遗漏修复(2026-09-14): 此处原为硬编码 "uncertain"，与单数版
-                // （ACTION_UNAVAILABLE）构成「同一缺失两种语义」；且 "uncertain" 本身
-                // 是「有数据但判不了」的语义，用它表达「无记录」是语义挪用。
-                decision_action: model
-                    .decision_action
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or_else(|| {
-                        axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string()
-                    }),
-                decision_position_state: model.decision_position_state,
-                decision_position_pct: model.decision_position_pct,
-                confidence,
-                status: model.status,
-                outcome: model.outcome,
-                decision_time_horizon: model.decision_time_horizon,
-                decision_expected_holding_days: model.decision_expected_holding_days,
-            }
-        });
-
+    let mut result = std::collections::HashMap::new();
+    for code in stock_codes {
+        let summary = get_latest_analysis_for_stock_core(db, code, as_of_date).await?;
         result.insert(code.clone(), summary);
     }
-
     Ok(result)
 }
 

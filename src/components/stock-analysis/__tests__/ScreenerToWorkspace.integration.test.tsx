@@ -65,7 +65,8 @@ function installInvokeStub() {
         return Promise.resolve({ taskId: "bt-integration" });
       case "get_background_task_output":
         return Promise.resolve(null);
-      case "get_latest_analyses_for_stocks":
+      // #330：已切插件命名命令（invokePluginCommand 非 Tauri 时仍走 invoke(name)）。
+      case "stock_get_latest_analyses_for_stocks":
       case "get_reco_strategy_weights":
         return Promise.resolve({});
       case "get_market_status":

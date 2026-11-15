@@ -78,8 +78,8 @@ use crate::commands::recommendation_cron::{
     toggle_recommendation_cron_core, toggle_trend_screening_cron_core,
 };
 use crate::commands::stock_analysis::{
-    get_latest_analysis_for_stock_core, list_param_suggestions_core, run_daily_snapshot_sweep,
-    snapshot_sweep_date,
+    get_latest_analyses_for_stocks_core, get_latest_analysis_for_stock_core,
+    list_param_suggestions_core, run_daily_snapshot_sweep, snapshot_sweep_date,
 };
 use crate::commands::stock_pipeline::core::{pipeline_history_rows, pipeline_run_detail_row};
 use crate::commands::wf_des::{WfDesRequest, wf_des_integration};
@@ -346,6 +346,37 @@ impl StockAnalysisProvider for HostStockAnalysis {
         })?;
         serde_json::to_value(summary)
             .map_err(|e| AxAgentError::Provider(format!("最新分析摘要序列化失败: {e}")))
+    }
+
+    /// 读 op：批量个股最近分析摘要（宿主 `get_latest_analyses_for_stocks` 的接缝面）。
+    ///
+    /// 入参 `{stockCodes: string[], asOfDate?: string}`；出参 = `{code: Summary|null}`
+    /// 对象。逐票复用单数版 core（见宿主 core 注释）⇒ 与单数版同一 SQL 判据。
+    async fn latest_analyses_for_stocks(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct LatestBatchRequest {
+            stock_codes: Vec<String>,
+            as_of_date: Option<String>,
+        }
+        let request = serde_json::from_value::<LatestBatchRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::latest_analyses_for_stocks 参数解析失败: {e}。期望                  {{stockCodes: string[], asOfDate?: string}}"
+            ))
+        })?;
+        let summaries = get_latest_analyses_for_stocks_core(
+            &self.db,
+            &request.stock_codes,
+            request.as_of_date.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::latest_analyses_for_stocks 查询失败: {e}"
+            ))
+        })?;
+        serde_json::to_value(summaries)
+            .map_err(|e| AxAgentError::Provider(format!("批量分析摘要序列化失败: {e}")))
     }
 
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。

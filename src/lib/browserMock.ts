@@ -7543,6 +7543,14 @@ async function executeCommand<T>(
     // 以 s 结尾碰上空数组兜底，其余三条兜底返回 undefined ⇒ 消费端
     // `.filter` / `setReport` 直接踩空。同形对照：上方「股票管道」段、下方
     // P4 审批段的宿主命令 mock。
+    // #330：批量最近分析摘要（插件命名命令）。浏览器模式没有分析记录 ⇒ 每个 code 回 null，
+    // key 恒在（消费端取 map[code] 后判 null；回 undefined 会被读成「键缺失」）。
+    // ⚠ 入参已被 convertToSnakeCase 转成 stock_codes。
+    case "stock_get_latest_analyses_for_stocks": {
+      const raw = args?.stock_codes;
+      const codes = Array.isArray(raw) ? (raw as string[]) : [];
+      return Object.fromEntries(codes.map((c) => [c, null])) as unknown as T;
+    }
     case "stock_get_pipeline_history":
       return [] as unknown as T;
     case "stock_get_pipeline_run_detail":

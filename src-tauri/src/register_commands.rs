@@ -1059,7 +1059,6 @@ macro_rules! register_all_commands {
             commands::stock_analysis::get_evolution_drift_timeline,
             commands::stock_analysis::get_evolution_history,
             commands::stock_analysis::get_interface_health_history,
-            commands::stock_analysis::get_latest_analyses_for_stocks,
             commands::stock_analysis::get_market_status,
             commands::stock_analysis::get_mover_asof_summary,
             commands::stock_analysis::get_mover_reflow_merge,

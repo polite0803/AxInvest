@@ -3183,6 +3183,21 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #330：批量最近分析摘要（读 op，逐票复用单数版 core）。
+            "stock.analysis" if op == "latest_analyses_for_stocks" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.latest_analyses_for_stocks(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "stock.analysis" if op == "list_param_suggestions" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);

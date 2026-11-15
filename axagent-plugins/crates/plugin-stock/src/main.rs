@@ -183,6 +183,9 @@ const COMMAND_INVALIDATE_RECOMMENDATION_CACHE: &str = "stock_invalidate_recommen
 /// 自改进分析循环（宿主 `run_self_improving_stock_analysis`）：写 op —— 执行体在
 /// 宿主 agent crate（consumer 层，插件不可链接）。
 const COMMAND_RUN_SELF_IMPROVING: &str = "stock_run_self_improving_stock_analysis";
+/// 批量个股最近分析摘要（宿主 `get_latest_analyses_for_stocks`，#330）—— 读 op，
+/// 宿主 core 逐票复用单数版 SQL 判据（两版口径只有一处）。
+const COMMAND_LATEST_ANALYSES_FOR_STOCKS: &str = "stock_get_latest_analyses_for_stocks";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -512,6 +515,18 @@ fn handle_command(
             peer,
             &request.call_chain,
             "latest_analysis_for_stock",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #330：批量摘要（读 op；宿主 core 逐票复用单数版判据）。
+        COMMAND_LATEST_ANALYSES_FOR_STOCKS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "latest_analyses_for_stocks",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3178,6 +3193,7 @@ mod tests {
             super::COMMAND_GET_FUNDAMENTALS_REPORT_MARKDOWN,
             // #328 两条：DB 直读经 `stock.analysis` 新读 op（非行情/K线/cron 三表）。
             super::COMMAND_LATEST_ANALYSIS_FOR_STOCK,
+            super::COMMAND_LATEST_ANALYSES_FOR_STOCKS,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

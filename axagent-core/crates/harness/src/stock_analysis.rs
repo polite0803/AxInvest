@@ -152,6 +152,18 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 批量个股最近分析摘要（`latest_analyses_for_stocks` op）—— 读 op，无权限闸。
+    ///
+    /// 入参 `{stockCodes: string[], asOfDate?: string}`；出参 = `{code: Summary|null}`
+    /// 的 JSON 对象。逐票复用单数版同一 SQL 判据（宿主 `get_latest_analyses_for_stocks_core`
+    /// 循环调 `get_latest_analysis_for_stock_core`）⇒ 两版口径只有一处。
+    async fn latest_analyses_for_stocks(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::latest_analyses_for_stocks 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -679,6 +691,10 @@ mod tests {
             (
                 "list_param_suggestions",
                 futures::executor::block_on(stub.list_param_suggestions(Value::Null)),
+            ),
+            (
+                "latest_analyses_for_stocks",
+                futures::executor::block_on(stub.latest_analyses_for_stocks(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

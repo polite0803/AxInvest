@@ -3,6 +3,7 @@ import { ReplayBadge, ReplayWatermark } from "@/components/shared/ReplayBadge";
 import { useStockJump } from "@/hooks/useStockJump";
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   actionToDirection,
   getActionColor,
@@ -298,8 +299,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       }
       if (allCodes.size > 0) {
         try {
-          const result = await invoke<Record<string, LatestAnalysisSummary | null>>(
-            "get_latest_analyses_for_stocks",
+          const result = await invokePluginCommand<Record<string, LatestAnalysisSummary | null>>(
+            "stock_get_latest_analyses_for_stocks",
             { stockCodes: Array.from(allCodes), asOfDate },
           );
           if (myToken === reqTokenRef.current && result) {

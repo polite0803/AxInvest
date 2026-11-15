@@ -6718,37 +6718,30 @@ pub async fn set_t0_config(
 
 // ── P0-2: 回测→Prompt 优化 ──
 
-/// 分析回测结果，生成分析师反馈报告
+/// 分析回测结果，生成分析师反馈报告 —— 宿主 `analyze_backtest_feedback` 的 core（#335）。
 ///
 /// 输入回测参与记录，输出每位分析师的表现分析、趋势判断和 Prompt 调整建议。
-/// 前端 BacktestPanel 完成回测后调用此命令，展示分析和调整建议。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "分析回测反馈")]
-#[tauri::command]
-pub fn analyze_backtest_feedback(
+/// 纯计算（无 IO / 无状态），经接缝 op `stock.analysis::analyze_backtest_feedback` 到插件。
+pub(crate) fn analyze_backtest_feedback_core(
     participations: Vec<backtest_feedback::AnalysisParticipation>,
-) -> Result<backtest_feedback::BacktestFeedbackReport, String> {
-    let input = backtest_feedback::FeedbackInput { participations };
-    Ok(backtest_feedback::analyze_backtest_feedback(input))
+) -> backtest_feedback::BacktestFeedbackReport {
+    backtest_feedback::analyze_backtest_feedback(backtest_feedback::FeedbackInput {
+        participations,
+    })
 }
 
 // ── P1-2: VLM 截图导入持仓 ──
 
-/// 解析 VLM 截图识别结果，返回结构化持仓数据
+/// 解析 VLM 截图识别结果，返回结构化持仓数据 —— 宿主 `parse_vlm_portfolio_screenshot` 的
+/// core（#335）。
 ///
-/// 前端将截图发送给 vision 模型后，将 VLM 的文本输出传入此命令进行结构化解析。
-/// VLM 调用由前端通过现有 conversation 系统完成（复用已有的 LLM provider 适配层）。
-///
-/// 使用流程：
-/// 1. 前端选择截图 → 调用 conversation 系统发送给 vision 模型
-/// 2. 前端将 VLM 返回的文本传入本命令
-/// 3. 后端解析并返回结构化持仓列表
-/// 4. 前端确认后逐条调用 add_portfolio_holding
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "解析VLM持仓截图")]
-#[tauri::command]
-pub fn parse_vlm_portfolio_screenshot(
-    raw_vlm_output: String,
-) -> Result<axagent_analysis_engine::vlm_import::VlmParseResult, String> {
-    Ok(axagent_analysis_engine::vlm_import::parse_vlm_output(&raw_vlm_output))
+/// 纯解析（无 IO / 无状态），经接缝 op `stock.analysis::parse_vlm_portfolio_screenshot` 到
+/// 插件；VLM 调用由前端通过现有 conversation 系统完成（复用已有的 LLM provider 适配层），
+/// 前端确认后逐条调用 `add_portfolio_holding` 入库。
+pub(crate) fn parse_vlm_portfolio_screenshot_core(
+    raw_vlm_output: &str,
+) -> axagent_analysis_engine::vlm_import::VlmParseResult {
+    axagent_analysis_engine::vlm_import::parse_vlm_output(raw_vlm_output)
 }
 
 /// 解析 CSV 交易记录文件（不写入数据库，仅预览）

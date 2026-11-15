@@ -7550,6 +7550,17 @@ async function executeCommand<T>(
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
     case "stock_list_mover_reflow_candidates":
       return { items: [], settled: 0, required: 30, ready: false } as unknown as T;
+    // #335：VLM 持仓截图解析。解析器在 Rust 侧（analysis-engine），浏览器模式没有
+    // ⇒ 显式失败形态（success=false），消费端走 importFailed 提示，不伪装成正常结果。
+    // ⚠ 入参已被 convertToSnakeCase 转成 raw_vlm_output。
+    case "stock_parse_vlm_portfolio_screenshot":
+      return {
+        success: false,
+        holdings: [],
+        error: "browser-mock: VLM 持仓解析仅在桌面端可用",
+        sourceType: "unknown",
+        rawOutput: String(args?.raw_vlm_output ?? ""),
+      } as unknown as T;
     case "stock_get_evolution_drift_timeline":
     case "stock_get_agreement_score_history":
       return [] as unknown as T;

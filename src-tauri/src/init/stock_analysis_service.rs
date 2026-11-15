@@ -534,6 +534,54 @@ impl StockAnalysisProvider for HostStockAnalysis {
         })
     }
 
+    /// 计算型 op：回测反馈分析（宿主 `analyze_backtest_feedback` 的接缝面；#335）。
+    ///
+    /// 纯计算，权威在 commands 层 core；入参 = `FeedbackInput` 的 camelCase JSON。
+    async fn analyze_backtest_feedback(&self, input: Value) -> Result<Value> {
+        let parsed = serde_json::from_value::<
+            axagent_analysis_engine::backtest_feedback::FeedbackInput,
+        >(input)
+        .map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::analyze_backtest_feedback 参数解析失败: {e}。期望 \
+                 {{participations: [{{analystId, timeHorizon, date, stance, confidence, \
+                 wasCorrect}}]}}"
+            ))
+        })?;
+        let report =
+            crate::commands::stock_analysis::analyze_backtest_feedback_core(parsed.participations);
+        serde_json::to_value(report).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::analyze_backtest_feedback 序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 读 op：VLM 持仓截图解析（宿主 `parse_vlm_portfolio_screenshot` 的接缝面；#335）。
+    ///
+    /// 纯解析，权威在 commands 层 core；入参 `{rawVlmOutput: string}`。
+    async fn parse_vlm_portfolio_screenshot(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct VlmParseRequest {
+            raw_vlm_output: String,
+        }
+        let request = serde_json::from_value::<VlmParseRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::parse_vlm_portfolio_screenshot 参数解析失败: {e}。期望 \
+                 {{rawVlmOutput: string}}"
+            ))
+        })?;
+        let result = crate::commands::stock_analysis::parse_vlm_portfolio_screenshot_core(
+            &request.raw_vlm_output,
+        );
+        serde_json::to_value(result).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::parse_vlm_portfolio_screenshot 序列化失败: {e}"
+            ))
+        })
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

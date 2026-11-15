@@ -235,6 +235,31 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 回测反馈分析（`analyze_backtest_feedback` op）—— 计算型 op（宿主原档 Caution）。
+    ///
+    /// 纯计算（无 IO / 无状态），权威在 `analysis-engine::backtest_feedback`。入参 =
+    /// `FeedbackInput` 的 camelCase JSON（`participations` 数组，元素含 `analystId` /
+    /// `timeHorizon` / `date` / `stance`（"bullish"|"bearish"|"neutral"）/ `confidence` /
+    /// `wasCorrect`）；出参 = `BacktestFeedbackReport` 的 camelCase JSON。
+    async fn analyze_backtest_feedback(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::analyze_backtest_feedback 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// VLM 持仓截图解析（`parse_vlm_portfolio_screenshot` op）—— 读 op（宿主原档 Safe）。
+    ///
+    /// 纯解析（无 IO / 无状态），权威在 `analysis-engine::vlm_import::parse_vlm_output`。
+    /// 入参 `{rawVlmOutput: string}`（VLM 文本输出）；出参 = `VlmParseResult` 的
+    /// camelCase JSON（`success` / `holdings` / `error` / `sourceType` / `rawOutput`）。
+    async fn parse_vlm_portfolio_screenshot(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::parse_vlm_portfolio_screenshot 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -788,6 +813,16 @@ mod tests {
             (
                 "mover_reflow_candidates",
                 futures::executor::block_on(stub.mover_reflow_candidates(Value::Null)),
+            ),
+            // #335 两条：纯计算 op（回测反馈分析 / VLM 截图解析），默认实现同样必须
+            // 显式报错（空对象入参不能被读成「解析成功 / 报告为空」）。
+            (
+                "analyze_backtest_feedback",
+                futures::executor::block_on(stub.analyze_backtest_feedback(Value::Null)),
+            ),
+            (
+                "parse_vlm_portfolio_screenshot",
+                futures::executor::block_on(stub.parse_vlm_portfolio_screenshot(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

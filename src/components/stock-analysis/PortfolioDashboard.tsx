@@ -4,6 +4,7 @@ import { ScheduledAnalysisPanel } from "@/components/stock-analysis/ScheduledAna
 import { useStockJump } from "@/hooks/useStockJump";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { PortfolioSignalPayload } from "@/types/stock-analysis";
 import { Alert, App, Button, Card, Col, Modal, Row, Spin, Statistic, Table, Tabs, Tag } from "antd";
 import type { TFunction } from "i18next";
@@ -192,10 +193,10 @@ function HoldingsTab() {
     if (!vlmRaw.trim()) { return; }
     setImportLoading(true);
     try {
-      const result = await invoke<{ success: boolean; holdings: Holding[] }>(
-        "parse_vlm_portfolio_screenshot",
-        { rawVlmOutput: vlmRaw },
-      );
+      const result = await invokePluginCommand<{
+        success: boolean;
+        holdings: Holding[];
+      }>("stock_parse_vlm_portfolio_screenshot", { rawVlmOutput: vlmRaw });
       if (result.success && result.holdings.length > 0) {
         setVlmResult(result.holdings);
         // 批量导入：逐条执行并收集成功/失败明细，避免中途失败后静默部分写入且无提示

@@ -3294,6 +3294,36 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // #335：回测反馈分析（计算型 op，宿主原档 Caution）。
+            "stock.analysis" if op == "analyze_backtest_feedback" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.analyze_backtest_feedback(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(report) => FrameResponse::success(report),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #335：VLM 持仓截图解析（读 op，宿主原档 Safe）。
+            "stock.analysis" if op == "parse_vlm_portfolio_screenshot" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.parse_vlm_portfolio_screenshot(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(parsed) => FrameResponse::success(parsed),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "stock.analysis" if op == "list_param_suggestions" => {
                 let Some(provider) = self.registry.get_stock_analysis() else {
                     return self.unavailable(seam);

@@ -200,6 +200,10 @@ const COMMAND_MONTHLY_REPORT: &str = "stock_generate_monthly_report";
 const COMMAND_MACRO_DATA_SNAPSHOT: &str = "stock_macro_data_snapshot";
 /// 漏检回灌清单与转正就绪度（宿主 `list_mover_reflow_candidates`，#334）—— 读 op。
 const COMMAND_MOVER_REFLOW_CANDIDATES: &str = "stock_list_mover_reflow_candidates";
+/// 回测反馈分析（宿主 `analyze_backtest_feedback`，#335）—— 计算型 op（宿主原档 Caution）。
+const COMMAND_ANALYZE_BACKTEST_FEEDBACK: &str = "stock_analyze_backtest_feedback";
+/// VLM 持仓截图解析（宿主 `parse_vlm_portfolio_screenshot`，#335）—— 读 op（纯解析）。
+const COMMAND_PARSE_VLM_PORTFOLIO_SCREENSHOT: &str = "stock_parse_vlm_portfolio_screenshot";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -622,6 +626,30 @@ fn handle_command(
             peer,
             &request.call_chain,
             "mover_reflow_candidates",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #335：回测反馈分析（计算型 op，宿主原档 Caution）。
+        COMMAND_ANALYZE_BACKTEST_FEEDBACK => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "analyze_backtest_feedback",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #335：VLM 持仓截图解析（读 op，纯解析）。
+        COMMAND_PARSE_VLM_PORTFOLIO_SCREENSHOT => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "parse_vlm_portfolio_screenshot",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3296,6 +3324,9 @@ mod tests {
             super::COMMAND_MONTHLY_REPORT,
             super::COMMAND_MACRO_DATA_SNAPSHOT,
             super::COMMAND_MOVER_REFLOW_CANDIDATES,
+            // #335 两条：回测反馈分析（计算型）+ VLM 持仓截图解析（读 op）。
+            super::COMMAND_ANALYZE_BACKTEST_FEEDBACK,
+            super::COMMAND_PARSE_VLM_PORTFOLIO_SCREENSHOT,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

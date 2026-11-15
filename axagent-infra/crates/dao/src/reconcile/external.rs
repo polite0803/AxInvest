@@ -223,7 +223,9 @@ impl ExternalTable {
                     ColumnType::SmallInteger | ColumnType::Integer | ColumnType::BigInteger
                 ) {
                     return Err(invalid(
-                        format!("{path}.autoIncrement"),
+                        // 错误路径名用 snake（ 会逐字撞 check-sql-dialect 的 AUTOINCREMENT 规则，
+                        // 而这里只是 JSON 键路径、不是 SQL 语法）。
+                        format!("{path}.auto_increment"),
                         format!("只有整数族可自增，`{}` 不支持", col.sql_type),
                     ));
                 }

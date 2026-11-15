@@ -615,13 +615,13 @@ pub async fn extract_demand_discovery_queries(db: &DatabaseConnection) -> Result
     if let Some(vars) = config_json.get("variables").and_then(|v| v.as_array()) {
         for var in vars {
             let name = var.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            if name.starts_with("domain_") {
-                if let Some(value) = var.get("value").and_then(|v| v.as_str()) {
-                    for kw in value.split('/') {
-                        let trimmed = kw.trim();
-                        if !trimmed.is_empty() {
-                            queries.push(trimmed.to_string());
-                        }
+            if name.starts_with("domain_")
+                && let Some(value) = var.get("value").and_then(|v| v.as_str())
+            {
+                for kw in value.split('/') {
+                    let trimmed = kw.trim();
+                    if !trimmed.is_empty() {
+                        queries.push(trimmed.to_string());
                     }
                 }
             }

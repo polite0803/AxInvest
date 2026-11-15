@@ -357,6 +357,9 @@ pub async fn create_delivery(
 /// 更新交付执行面字段（`status` 必写；其余可选缺席 = 不动 —— 迁移前同语义）。
 ///
 /// `completed_at`：迁移前由命令层按 `completed|failed` 写 now，此处保持同判据。
+// 交付写入口的 8 参是迁移前命令层的既有形状（逐列可选更新），拆结构体会
+// 改变调用方签名面 ⇒ 按仓内既有先例（agent_profile / agent_role 等 190+ 处）就地豁免。
+#[allow(clippy::too_many_arguments)]
 pub async fn update_delivery(
     db: &DatabaseConnection,
     delivery_id: &str,

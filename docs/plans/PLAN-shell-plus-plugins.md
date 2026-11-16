@@ -9865,3 +9865,22 @@ harness trait `latest_analyses_for_stocks`（默认实现报错 + `default_impls
 - `quant_backtest_run`（§194.2 两条出路待拍板）。
 - 8 条 Dangerous：§142.3 终局判据已定 ⇒ 待办是逐条核实标注后登记「留宿主」（下一批）。
 - F9 43 条；`tauri dev` 实机核对待用户。
+
+## §197 批 #339：8 条 `Dangerous` 逐条裁定（全部留宿主终局，不迁）
+
+**2026-11-15。** 销账 §195.3 第 2 条与 §196.4 第 2 条的「8 条 Dangerous 逐条裁定」。判据骨架 = §142.3 终局裁定（`command_bridge.rs` 派发层：`CommandSafety::Dangerous => CommandDecision::Block` 无条件，含 full_access 会话 ⇒ 删宿主 Dangerous 版 = 把「禁止」放松成「需确认」的安全回归）；本批**逐条核实三件事实**后落表：① 标注确为 `Dangerous`；② 插件侧**无同名命令**（`build-plugin-bundle.mjs` 与 `plugin-stock/main.rs` 零命中 ⇒ 不存在像 `delete_pool_scan_cron` 那样的「插件名旁路」需要对齐档位）；③ 前端**有直调**（UI 删除按钮走 `invoke`，不受智能体安全闸约束 ⇒ 删宿主命令 = UI 功能消失）。
+
+| # | 命令（`src-tauri/src/commands/stock_analysis.rs`） | 删的是什么 | 插件同名 | 前端直调 | 裁定 |
+|---|---|---|---|---|---|
+| 1 | `batch_delete_stock_analyses`（`:1202`） | 批量删除历史分析（不可逆） | 无 | 1 处 | **留宿主** |
+| 2 | `clear_asof_degradation_log`（`:777`） | 清空 as-of 降级日志（诊断历史） | 无 | 3 处 | **留宿主** |
+| 3 | `delete_price_alert`（`:1902`） | 删除价格告警 | 无 | 1 处 | **留宿主** |
+| 4 | `delete_reflection`（`:5567`） | 删除反思记录 | 无 | 2 处 | **留宿主** |
+| 5 | `delete_stock_analysis`（`:1189`） | 删除单条历史分析 | 无 | 1 处 | **留宿主** |
+| 6 | `delete_stock_cron`（`:3458`） | 删除股票定时任务 | 无 | 1 处 | **留宿主** |
+| 7 | `delete_validate_decisions_cron`（`:5467`） | 删除决策校验定时任务 | 无 | 1 处 | **留宿主** |
+| 8 | `remove_from_watchlist`（`:1284`） | 移除自选股 | 无 | 1 处 | **留宿主** |
+
+**裁定陈述**：8 条全部留宿主，**不留待办**。后果两面都是设计内的：智能体面恒 `Block`（LLM 不可调用删除动作）；UI 面直接 `invoke` 照常可用（安全闸只架在智能体命令桥，不拦 IPC）。与 `delete_pool_scan_cron` / `delete_trend_screening_cron` 的差别：那两条有插件同名命令（清单已对齐 `danger-full-access` 关旁路），这 8 条无同名 ⇒ 本批**零清单改动**。
+
+**计数影响**：零（不删命令）⇒ `commandTotal` 1290 / 边界 183/18 / 审计 180/15 全部不动；待迁余量按本裁定再销 8 条（见 §0.12 账）。

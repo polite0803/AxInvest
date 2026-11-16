@@ -8771,7 +8771,7 @@ const FAST_DQ_DIMENSIONS: [(&str, &str, &str); 9] = [
 /// 后 4 个是**原文类**（新闻 / 政策 / 研报 / 公告原文，直接喂 LLM —— 这正是 F1 风险
 /// 登记的对象，上线前须做影子比对）。
 // 七元组逐位含义在下方各条目里注释：始终以字面元组声明（不抽 type 别名），
-// 让声明处即可看到每列的类型 —— 与本仓既有先例同一手法（`src-tauri/src/commands/stock_analysis.rs:449` 等）。
+// 让声明处即可看到每列的类型 —— 与本仓既有先例同一手法（`src-tauri/src/commands/stock_analysis.rs:443` 等）。
 #[allow(clippy::type_complexity)]
 const FAST_JEV_DIMENSIONS: [(&str, &str, &str, &str, &str, [&str; 3], &str); 10] = [
     (

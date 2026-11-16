@@ -488,7 +488,7 @@ pub async fn search_memory(
 /// FTS5 全文索引健康（前端投影，camelCase）。
 ///
 /// 与向量索引不同，FTS5 基于 rusqlite，**PG 后端下不可用**
-/// （见 `src/init/state.rs:151`）。修复前这一状态在 API 层不可观测 ——
+/// （见 `src-tauri/src/init/state.rs:202`）。修复前这一状态在 API 层不可观测 ——
 /// 全文检索恒返回空结果，UI 无法区分「无命中」与「功能未挂载」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -564,7 +564,7 @@ pub async fn get_memory_fts_health(state: State<'_, AppState>) -> Result<MemoryF
 ///
 /// **本次修复的缺口**：修复前本命令只重建**向量**索引，用户点「重建索引」
 /// 之后 FTS5（关键词检索）索引既不重建、也不报告状态 ——
-/// 而 FTS5 基于 rusqlite，在 PG 后端下压根没挂载（`src/init/state.rs:151`）。
+/// 而 FTS5 基于 rusqlite，在 PG 后端下压根没挂载（`src-tauri/src/init/state.rs:202`）。
 /// 于是「重建成功」是一句关于向量索引的真话 + 一句关于全文索引的沉默。
 ///
 /// 现在 FTS 部分作为**尽力而为**的附加步骤：可用则重建并回报计数，

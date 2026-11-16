@@ -10263,3 +10263,12 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 - 铁律遵守：本切片**未迁任何宿主命令、未加粗 147 方法接缝**（`commandTotal` 1173 未变，判定档 hard 判据全一致）。
 - 既存红灯已随本批修复（用户裁定「i18n 正统化后提交」）：`src/lib/stockTask.ts:37-52` 三条 CJK 错误串（来自 HEAD 既存 #349 `6443e3a38`）改为 `i18n.t("error.STOCK_TASK_*", {…})`，11 语言 locale 各补 `STOCK_TASK_FAILED` / `STOCK_TASK_CANCELLED` / `STOCK_TASK_TIMEOUT` 三码（占位符 `{{task}}` / `{{seconds}}` / `{{taskId}}`）。修复后 `check-hardcoded-i18n.sh --strict` exit 1→0、i18n parity 11 语言一致、`check_i18n.py --strict` 全过、tsc 0、dprint 0。保留 `snap.output ||` 的后端文本优先语义（后端给结构化错误时仍优先透传）。
 - 另一条 HEAD 既存红灯**不在本批范围、按用户裁定不修**：`node scripts/check-single-source-facts.mjs --ci` exit 1，91 条行号引用腐烂，全部来自本批未碰的源码（`domain_ontology.rs` / `domain_semantics.rs` / `market_mainline.rs` / `extras.rs` 等，最后提交为拆 workspace 的 `8dfaeb4db` 与 #240 的 `21a743fa5`，均早于本批 HEAD `6443e3a38`），基线 `single-source-facts-allowlist.json` 的 known=0。属拆 workspace 后源码注释引用的文档行号未回正的大规模漂移，需独立批次处理；本批按「按 pathspec 提交 + push，不跑全量门」推进。
+
+### §207.5 #351 追修：single-source 硬错 + 错误码契约对齐（2026-11-17）
+
+用户后续裁定「修复那条既存红灯再提交」。复核发现上条 91 条里**真正硬拦的只有 4 条**（其余 87 条是 `--ci` 设计容忍的软判据 / 信息性自陈 / `.rs→.md` 豁免），且 4 条全是「引用指向空行」——根因正是拆 workspace 后 `src/init/state.rs` 迁到 `src-tauri/src/init/state.rs`、行号也漂移：
+- `fts5.rs:1010` / `storage.rs:1608` / `memory.rs:491` / `memory.rs:567` 四处 `src/init/state.rs:151`（指向空行）→ 回正为 `src-tauri/src/init/state.rs:202`（"PostgreSQL 下 FTS5 不可用"注释，正是被引用语义）；
+- `seed_stock_analysis.rs:8774` 的 `stock_analysis.rs:449`（空行）→ 回正为 `stock_analysis.rs:443`（内联元组 `LazyLock<Mutex<HashMap<String, (…)>>>`，正是"字面元组不抽别名"的先例）。
+- 修复后 `check-single-source-facts.mjs --ci` exit 1→0（4 条硬错清零，`--selftest` 0）。
+
+顺带暴露并修复 #350 遗留的契约缺口：#350 为 stockTask 三条错误串加的前端 `error.STOCK_TASK_*` 三码，在 `check-errorcode-alignment.mjs`（此前被 pre-push 跳过开关掩盖）判为孤儿码（前端有、后端无定义）。按后端码唯一契约，在 `src-tauri/src/commands/error_code.rs` 新增 `pub mod stock_task { FAILED / CANCELLED / TIMEOUT }` 三常量（纯前端契约、Rust 零引用，沿用本文件头 `dead_code` allow）。修复后对齐门 exit 0（后端 453 码 ↔ 前端 11 语言一致、无孤儿），`rustfmt --check` 0、定点 clippy `-p axagent` 绿。

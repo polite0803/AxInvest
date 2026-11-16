@@ -352,6 +352,21 @@ pub mod stock_sim {
     pub const CANCELLED: &str = "STOCK_SIM_CANCELLED";
 }
 
+/// 股票域长任务（start/poll/cancel seam）前端错误码。
+///
+/// 消费方是 `src/lib/stockTask.ts` 的 `invokeStockTask`：轮询终态 `failed` / `stopped`
+/// 与本地超时分别抛 `error.STOCK_TASK_*`（后端给了 `snap.output` 时优先透传后端文本，
+/// 这三条只在后端无 output 的降级路径生效）。码值在此登记只为对齐前后端契约
+/// （`check-errorcode-alignment.mjs`），Rust 侧无直接引用点，见本文件头 `dead_code` 说明。
+pub mod stock_task {
+    /// 长任务轮询到 failed 且后端未给 output 时的兜底错误
+    pub const FAILED: &str = "STOCK_TASK_FAILED";
+    /// 长任务被停止且后端未给 output 时的兜底错误
+    pub const CANCELLED: &str = "STOCK_TASK_CANCELLED";
+    /// 前端轮询超过 deadline 的本地超时
+    pub const TIMEOUT: &str = "STOCK_TASK_TIMEOUT";
+}
+
 /// 时间旅行批次复盘相关错误码
 pub mod time_travel {
     /// 请求参数非法（日期格式 / 日期与回看数同时缺失或冲突 / 周期档名无法识别等）

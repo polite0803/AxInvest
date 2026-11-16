@@ -1007,7 +1007,7 @@ pub struct FTS5Health {
     /// FTS5 子系统是否真正被挂载。
     ///
     /// 这一位是本次修复的核心补充。修复前，「FTS 不可用」（PG 后端下
-    /// `fts_searcher` 为 `None`，见 `src/init/state.rs:151`）与「搜索无命中」
+    /// `fts_searcher` 为 `None`，见 `src-tauri/src/init/state.rs:202`）与「搜索无命中」
     /// 在 API 层完全同形 —— 都表现为 `Ok(Vec::new())`。
     /// 于是 UI 上的「0 条结果」是一句**无法证伪的话**：它既可能是真的没有匹配，
     /// 也可能是整个检索子系统从未工作过。这一位把它拆开。

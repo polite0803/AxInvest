@@ -1605,7 +1605,7 @@ impl TrajectoryStorage {
     /// 将永远只存在于 `tracing::warn!` 里，UI 与诊断入口都看不到。
     ///
     /// `fts_searcher` 为 `None` 时返回 `available: false` 的健康报告，**不是** `Err`：
-    /// PG 后端下这就是设计内的降级（`src/init/state.rs:151` 有明确注释），
+    /// PG 后端下这就是设计内的降级（`src-tauri/src/init/state.rs:202` 有明确注释），
     /// 用错误表达它会让上层把「已知的降级」当成「故障」处理。
     /// 但也不能像修复前那样返回一份全零报告 —— 那会让调用方以为「索引是空的，
     /// 一切正常」，而事实是这个存储的 FTS 读写**全部是 no-op**。

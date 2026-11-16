@@ -1300,7 +1300,7 @@ function AutoCalibrateButton({ t }: { t: TFunction }) {
     }
     setApplying(true);
     try {
-      const result = await invoke<{ applied: number }>("apply_reco_weights", {
+      const result = await invokePluginCommand<{ applied: number }>("stock_apply_reco_weights", {
         weights: validPayload,
       });
       messageApi.success(t("stockAnalysis.recommendation.calibrateApplied", { count: result.applied }));

@@ -25,7 +25,6 @@ import type { ReactNode } from "react";
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { agreementColor } from "@/lib/stock-analysis-utils";
 import {
@@ -171,7 +170,7 @@ export function EvolutionDriftPanel() {
     setCalibrating(true);
     setCalibrateResult(null);
     try {
-      const result = await invoke<{
+      const result = await invokePluginCommand<{
         bestParams: Record<string, number> | null;
         grid: Array<Record<string, number>>;
         totalReflections: number;
@@ -179,7 +178,7 @@ export function EvolutionDriftPanel() {
         structuralExcluded?: number;
         tierUnlabelled?: number;
         message?: string;
-      }>("calibrate_portfolio_mgr_params");
+      }>("stock_calibrate_portfolio_mgr_params");
       setCalibrateResult(result);
       setCalibrateModalOpen(true);
       if (result.bestParams) {
@@ -205,7 +204,7 @@ export function EvolutionDriftPanel() {
         return { param: paramName, value };
       });
     try {
-      await invoke("apply_param_suggestions", { updates });
+      await invokePluginCommand("stock_apply_param_suggestions", { updates });
       message.success(t("stockAnalysis.evolutionDrift.calibrateApplyDone"));
       setCalibrateModalOpen(false);
     } catch (e) {
@@ -909,7 +908,7 @@ function ParamChangeLedger() {
   const rollback = useCallback(
     async (id: string) => {
       try {
-        await invoke("rollback_param_change", { changeId: id });
+        await invokePluginCommand("stock_rollback_param_change", { changeId: id });
         message.success(t("stockAnalysis.evolutionDrift.paramChangesRolledBack"));
         await load();
       } catch (e) {

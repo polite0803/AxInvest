@@ -119,7 +119,7 @@ async function computeDecisionBackend(
     if (snapshot) {
       invokeParams.blackboardSnapshot = JSON.stringify(snapshot);
     }
-    const result = await invoke("compute_what_if", {
+    const result = await invokePluginCommand("stock_compute_what_if", {
       params: invokeParams,
     }) as Record<string, unknown>;
     if (result) {

@@ -1871,6 +1871,147 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Ok(v.map(|b| serde_json::to_value(b).unwrap_or(Value::Null)).unwrap_or(Value::Null))
     }
 
+    // ── #346 批 B20：11 条（权重/参数台账/估值/工具/What-If）──
+
+    /// 读 op：荐股策略权重（`get_reco_strategy_weights`）。
+    async fn get_reco_strategy_weights(&self, _input: Value) -> Result<Value> {
+        crate::commands::stock_analysis::get_reco_strategy_weights_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：手动重算策略权重（`manual_recalc_strategy_weights`）。
+    async fn manual_recalc_strategy_weights(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct AsOfRequest {
+            as_of_date: Option<String>,
+        }
+        let req =
+            Self::parse::<AsOfRequest>("manual_recalc_strategy_weights", "{asOfDate?}", input)?;
+        crate::commands::stock_analysis::manual_recalc_strategy_weights_core(
+            &self.db,
+            req.as_of_date,
+        )
+        .await
+        .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：重算荐股闭环逐格权重（`recalc_reco_loop_weights`）。
+    async fn recalc_reco_loop_weights(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct AsOfRequest {
+            as_of_date: Option<String>,
+        }
+        let req = Self::parse::<AsOfRequest>("recalc_reco_loop_weights", "{asOfDate?}", input)?;
+        crate::commands::stock_analysis::recalc_reco_loop_weights_core(&self.db, req.as_of_date)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：应用参数调整建议（`apply_param_suggestions`）。
+    async fn apply_param_suggestions(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SuggestionsRequest {
+            updates: Vec<Value>,
+        }
+        let req = Self::parse::<SuggestionsRequest>(
+            "apply_param_suggestions",
+            "{updates: [...]}",
+            input,
+        )?;
+        crate::commands::stock_analysis::apply_param_suggestions_core(&self.db, req.updates)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：回滚参数变更（`rollback_param_change`）。
+    async fn rollback_param_change(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RollbackRequest {
+            change_id: String,
+        }
+        let req = Self::parse::<RollbackRequest>("rollback_param_change", "{changeId}", input)?;
+        crate::commands::stock_analysis::rollback_param_change_core(&self.db, req.change_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：应用荐股策略权重（`apply_reco_weights`）。
+    async fn apply_reco_weights(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ApplyWeightsRequest {
+            weights: Option<Vec<Value>>,
+        }
+        let req = Self::parse::<ApplyWeightsRequest>("apply_reco_weights", "{weights?}", input)?;
+        crate::commands::stock_analysis::apply_reco_weights_core(&self.db, req.weights)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：校准组合管理参数（`calibrate_portfolio_mgr_params`）。
+    async fn calibrate_portfolio_mgr_params(&self, _input: Value) -> Result<Value> {
+        crate::commands::stock_analysis::calibrate_portfolio_mgr_params_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：优化评分权重（`optimize_scoring_weights`）。
+    async fn optimize_scoring_weights(&self, _input: Value) -> Result<Value> {
+        let w = crate::commands::stock_analysis::optimize_scoring_weights_core(
+            &self.db,
+            &self.astock_client,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("optimize_scoring_weights", &w)
+    }
+
+    /// 读 op：估值带（`compute_valuation_band`，读并回填 financial_snapshots）。
+    async fn compute_valuation_band(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BandRequest {
+            stock_code: String,
+            years: Option<u32>,
+        }
+        let req =
+            Self::parse::<BandRequest>("compute_valuation_band", "{stockCode, years?}", input)?;
+        let band = crate::commands::stock_analysis::compute_valuation_band_core(
+            &self.db,
+            &self.astock_client,
+            req.stock_code,
+            req.years,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("compute_valuation_band", &band)
+    }
+
+    /// 读 op：股票分析工具名清单（`list_stock_tools`）。
+    async fn list_stock_tools(&self, _input: Value) -> Result<Value> {
+        let names = crate::commands::stock_analysis::list_stock_tools_core()
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_stock_tools", &names)
+    }
+
+    /// 读 op：What-If 确定性公式（`compute_what_if`，纯计算）。
+    async fn compute_what_if(&self, input: Value) -> Result<Value> {
+        let req = Self::parse::<crate::commands::stock_analysis::WhatIfRequest>(
+            "compute_what_if",
+            "WhatIfRequest（camelCase）",
+            input,
+        )?;
+        let out = crate::commands::stock_analysis::compute_what_if_core(req)
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("compute_what_if", &out)
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { analystBaseOf, horizonSuffix } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { ExpandOutlined, LineChartOutlined } from "@ant-design/icons";
@@ -748,7 +748,7 @@ export function ValueAssessmentPanel() {
         return;
       }
       setValuationBandLoading(true);
-      invoke<ValuationBandData>("compute_valuation_band", { stockCode: code, years: 5 })
+      invokePluginCommand<ValuationBandData>("stock_compute_valuation_band", { stockCode: code, years: 5 })
         .then((d) => {
           if (!cancelled) { setValuationBand(d); }
         })

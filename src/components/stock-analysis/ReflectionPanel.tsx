@@ -1477,7 +1477,7 @@ export function ExpandedReflectionRow(
     if (selected.length === 0) { return; }
     setApplying(true);
     try {
-      await invoke("apply_param_suggestions", {
+      await invokePluginCommand("stock_apply_param_suggestions", {
         updates: selected.map((s) => ({
           param: s.param,
           value: s.suggested_value,

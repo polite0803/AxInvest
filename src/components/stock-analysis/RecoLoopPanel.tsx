@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { formatFixed } from "@/lib/format";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import { invalidateRecoIcStats, loadRecoIcStats } from "@/lib/stock-analysis/recoIcStats";
 import type { RecoLoopCell, RecoLoopView } from "@/types/stock-analysis";
@@ -49,7 +49,7 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
   const recalc = useCallback(async () => {
     setRecalculating(true);
     try {
-      const result = await invoke<{ written: number }>("recalc_reco_loop_weights", {
+      const result = await invokePluginCommand<{ written: number }>("stock_recalc_reco_loop_weights", {
         asOfDate: asOfDate ?? null,
       });
       // 权重已回写：观测面缓存必须失效，否则 TTL 内刷新到的还是旧权重

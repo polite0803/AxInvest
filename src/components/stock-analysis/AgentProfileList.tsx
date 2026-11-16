@@ -8,6 +8,7 @@
  *   暴露工具 (🤖) — 模板节点 exposed_tools，LLM 自主决定调用
  */
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { App, Button, Input, Popover, Select, Space, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -75,7 +76,7 @@ export function AgentProfileList() {
     try {
       const [template, tools, expertsRaw, rolesRaw] = await Promise.all([
         invoke<{ nodes: unknown[] }>("get_workflow_template", { id: "stock-analysis" }),
-        invoke<string[]>("list_stock_tools"),
+        invokePluginCommand<string[]>("stock_list_stock_tools"),
         invoke<{ id: string; name: string; system_prompt: string }[]>("list_agency_experts"),
         invoke<{ id: string; name: string; system_prompt: string }[]>("list_agent_roles", { source: "stock-analysis" }),
       ]);
@@ -163,7 +164,7 @@ export function AgentProfileList() {
       setLoading(true);
       return Promise.all([
         invoke<{ nodes: unknown[] }>("get_workflow_template", { id: "stock-analysis" }),
-        invoke<string[]>("list_stock_tools"),
+        invokePluginCommand<string[]>("stock_list_stock_tools"),
         invoke<{ id: string; name: string; system_prompt: string }[]>("list_agency_experts"),
         invoke<{ id: string; name: string; system_prompt: string }[]>("list_agent_roles", { source: "stock-analysis" }),
       ]);

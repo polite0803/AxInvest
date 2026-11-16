@@ -190,9 +190,7 @@ fn push_json_to_scope(scope: &mut rhai::Scope<'_>, key: &str, val: &serde_json::
 
 /// 执行 portfolio-mgr 确定性公式（Rhai 引擎）。
 /// 修复 D2: 从文件加载完整 portfolio-mgr.rhai，通过 blackboard_snapshot 提供完整参数。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "执行What-If回测计算")]
-#[tauri::command]
-pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
+pub fn compute_what_if_core(params: WhatIfRequest) -> Result<WhatIfResult, String> {
     use rhai::Scope;
 
     // 沙箱档位与宿主函数集统一走 rhai_registry::build_stock_rhai_engine。
@@ -733,7 +731,7 @@ pub async fn replay_tool_chain(
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     };
-    let decision = compute_what_if(what_if)?;
+    let decision = compute_what_if_core(what_if)?;
 
     let _ = client;
     let _ = state;
@@ -2260,16 +2258,11 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
 // ── Scoring Weights Optimization ──
 
 /// 基于回测结果优化评分权重
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "优化评分权重")]
-#[tauri::command]
-pub async fn optimize_scoring_weights(
-    state: State<'_, AppState>,
+pub async fn optimize_scoring_weights_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
 ) -> Result<axagent_analysis_engine::decision::ScoringWeights, String> {
-    axagent_analysis_engine::backtest::optimize_weights(
-        &*state.stock().astock_client,
-        state.harness.db(),
-    )
-    .await
+    axagent_analysis_engine::backtest::optimize_weights(client, db).await
 }
 
 /// 荐股策略历史回测（两组对比）
@@ -2508,18 +2501,14 @@ pub async fn preview_adjust_reco_weights(
 /// 应用荐股策略权重调整（用户确认后）
 ///
 /// 如果传了 `weights` 则只应用其中列出的策略；不传则全部应用（向后兼容）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "应用荐股策略权重调整")]
-#[tauri::command]
-pub async fn apply_reco_weights(
-    state: State<'_, AppState>,
+pub async fn apply_reco_weights_core(
+    db: &axagent_harness::DatabaseConnection,
     weights: Option<Vec<serde_json::Value>>,
 ) -> Result<serde_json::Value, String> {
     use axagent_entities::workflow_template;
     use sea_orm::sea_query::Expr;
     use sea_orm::{EntityTrait, QueryFilter};
     use std::collections::BTreeMap;
-
-    let db = state.harness.db();
 
     // 1. 读取模板
     let tmpl = workflow_template::Entity::find_by_id("stock-analysis")
@@ -2860,10 +2849,9 @@ pub async fn check_position_limits_core(
 /// 节点直接写本命令名会解析为 `None` 并被 `degraded` 静默吞掉。
 /// 本命令走 `State<AppState>`，读**并回填**本机表，供前端图表与设置面板使用。
 /// 两者的窗口口径刻意共享（`valuation_band::since_date_from_years` + `clip_valuation_history`）。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "计算估值带")]
-#[tauri::command]
-pub async fn compute_valuation_band(
-    state: State<'_, AppState>,
+pub async fn compute_valuation_band_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
     stock_code: String,
     years: Option<u32>,
 ) -> Result<axagent_astock_data::ValuationBand, String> {
@@ -2874,8 +2862,6 @@ pub async fn compute_valuation_band(
     // 共用同一个函数。⚠ 不要在这里自己算日期 —— 两条路径窗口不同会让同一个 PE 得到
     // 两个分位（前端图一个、决策锚腿另一个），且**没有任何报错**。
     let since_date = axagent_astock_data::valuation_band::since_date_from_years(years);
-
-    let db = state.harness.db();
 
     // 估值带的数据源是本机 financial_snapshots 表，但该表此前只有"建表迁移 + 两个读命令"
     // ——全项目没有任何写入路径，样本恒为 0，图表永远空白（verdict=insufficient）。
@@ -2892,15 +2878,7 @@ pub async fn compute_valuation_band(
     let stale =
         historical.last().map(|m| m.snapshot_date.as_str() < stale_before.as_str()).unwrap_or(true);
     if historical.len() < VALUATION_MIN_SAMPLES || stale {
-        match backfill_financial_snapshots(
-            db,
-            &state.stock().astock_client,
-            &stock_code,
-            years,
-            &since_date,
-        )
-        .await
-        {
+        match backfill_financial_snapshots(db, client, &stock_code, years, &since_date).await {
             Ok(0) => {},
             Ok(n) => {
                 tracing::info!("[valuation_band] {stock_code} 回填 {n} 条历史估值快照");
@@ -2948,9 +2926,7 @@ pub async fn compute_valuation_band(
     //   （分位数与顺序无关，只有"当前分位"错）。
     // P0-4：周期股 PE 置空须与工作流工具路径同口径（防「图表显示 PE 8% 分位便宜、
     // 决策侧却已置空」的双结论）。行业接口失败不阻断图表（按普通股给全口径带）。
-    let pe_suppressed = state
-        .stock()
-        .astock_client
+    let pe_suppressed = client
         .get_sector_info(&stock_code)
         .await
         .ok()
@@ -4535,12 +4511,10 @@ pub(crate) async fn reco_loop_view(
     call_mode = StateInput,
     description = "重算荐股闭环逐格权重"
 )]
-#[tauri::command]
-pub async fn recalc_reco_loop_weights(
-    state: State<'_, AppState>,
+pub async fn recalc_reco_loop_weights_core(
+    db: &axagent_harness::DatabaseConnection,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
     let served_vars =
         axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
     // C-2：as-of 线优先（缺席时该函数内部回退 live）；两条线不得相加。
@@ -5548,17 +5522,13 @@ const PARAM_EVAL_MIN_SAMPLES: i32 = 10;
 type ParamAuditRow = (String, String, String, Option<String>, Option<String>);
 
 /// 应用用户选中的参数调整建议到 stock-analysis 模板变量
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "应用参数调整建议")]
-#[tauri::command]
-pub async fn apply_param_suggestions(
-    state: State<'_, AppState>,
+pub async fn apply_param_suggestions_core(
+    db: &axagent_harness::DatabaseConnection,
     updates: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     use axagent_analysis_engine::portfolio_formula::{PortfolioMgrParamSet, resolve_param_name};
     use axagent_entities::workflow_template;
     use sea_orm::EntityTrait;
-
-    let db = state.harness.db();
 
     // 1. 读取 stock-analysis 模板的 variables
     let tmpl = workflow_template::Entity::find_by_id("stock-analysis")
@@ -5942,12 +5912,10 @@ pub async fn evaluate_param_changes_core(
 ///
 /// 只在人确认后调用（`rollback_suggested` 不是自动动作）：模板是共享配置，
 /// 自动回滚会让「谁改了、为什么改」再次失去落点。
-#[tauri::command]
-pub async fn rollback_param_change(
-    state: State<'_, AppState>,
+pub async fn rollback_param_change_core(
+    db: &axagent_harness::DatabaseConnection,
     change_id: String,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
     let change = axagent_dao::repo::workflow_param_changes::fetch_by_id(db, &change_id)
         .await
         .map_err(|e| {
@@ -6033,18 +6001,14 @@ pub async fn rollback_param_change(
 }
 
 // ── Path 1: WFO 参数校准 ──
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "校准组合管理参数")]
-#[tauri::command]
-pub async fn calibrate_portfolio_mgr_params(
-    state: State<'_, AppState>,
+pub async fn calibrate_portfolio_mgr_params_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<serde_json::Value, String> {
     use axagent_analysis_engine::portfolio_formula::{
         PortfolioMgrParamSet, score_param_set, try_parse_param_suggestion,
     };
     use axagent_entities::stock_reflections;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-
-    let db = state.harness.db();
 
     let reflections = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::Status.eq("completed"))
@@ -6300,13 +6264,10 @@ pub(crate) async fn agreement_score_history_core(
 }
 
 /// 手动触发权重重算（用户在前端 EvolutionDriftPanel 点"立即重算"时使用）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "手动重算策略权重")]
-#[tauri::command]
-pub async fn manual_recalc_strategy_weights(
-    state: State<'_, AppState>,
+pub async fn manual_recalc_strategy_weights_core(
+    db: &axagent_harness::DatabaseConnection,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
     let (written, new_weights) = axagent_analysis_engine::evolution_drift::recalc_and_persist(
         db,
         "manual",
@@ -6329,12 +6290,11 @@ pub async fn manual_recalc_strategy_weights(
 /// 现改为**投影 `load_reco_served_vars_db` 的实际输出**：前端展示什么，评分链就消费什么。
 /// 旧形态直接读 `load_current_weights`（未按 trigger 过滤、未过闸），会与 gate/换源语义漂移
 /// ——面板显示一套权重、荐股实际用另一套（`PLAN-reco-reflection-closure.md` Q3 归属分离）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取荐股策略权重")]
-#[tauri::command]
-pub async fn get_reco_strategy_weights(
-    state: State<'_, AppState>,
+pub async fn get_reco_strategy_weights_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<serde_json::Value, String> {
-    let served = load_reco_served_vars(&state).await?;
+    let served =
+        axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
     Ok(served
         .into_iter()
         .find(|(k, _)| k == "reco_strategy_weights")
@@ -6718,9 +6678,7 @@ pub async fn quick_backtest(
 /// 列出所有可用的股票分析工具名称（用于 Agent 配置页工具选择列表）
 ///
 /// P2-8: 合并 G3 产业链工具（来自 axagent_analysis_engine::mcp_tools）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "列出股票分析工具")]
-#[tauri::command]
-pub async fn list_stock_tools() -> Result<Vec<String>, String> {
+pub async fn list_stock_tools_core() -> Result<Vec<String>, String> {
     let mut tools = axagent_astock_data::mcp_tools::stock_mcp_tools();
     tools.extend(axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools());
     let names: Vec<String> = tools

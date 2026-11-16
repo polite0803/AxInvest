@@ -11,6 +11,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 const invokeMock = vi.fn((..._args: unknown[]) => Promise.resolve(null));
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (name: string, input?: unknown) => invokeMock(name, input ?? {}),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
@@ -125,7 +129,7 @@ describe("ValueAssessmentPanel 真实数据渲染复现（页面错误回归）"
     render(<ValueAssessmentPanel />);
     await waitFor(() => {
       const called = invokeMock.mock.calls.some(
-        (c) => c[0] === "compute_valuation_band" && (c[1] as { stockCode?: string })?.stockCode === "300620",
+        (c) => c[0] === "stock_compute_valuation_band" && (c[1] as { stockCode?: string })?.stockCode === "300620",
       );
       expect(called).toBe(true);
     });
@@ -134,7 +138,7 @@ describe("ValueAssessmentPanel 真实数据渲染复现（页面错误回归）"
   it("stockCode 为空 → 不发请求、不渲染估值带", () => {
     seedStore(REPORT_300620, "");
     render(<ValueAssessmentPanel />);
-    expect(invokeMock.mock.calls.some((c) => c[0] === "compute_valuation_band")).toBe(false);
+    expect(invokeMock.mock.calls.some((c) => c[0] === "stock_compute_valuation_band")).toBe(false);
   });
 });
 

@@ -1151,7 +1151,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       return cached.value;
     }
     try {
-      const tmpl = await invoke<Record<string, unknown>>("get_workflow_template", { id: "stock-analysis" });
+      const tmpl = await invokePluginCommand<Record<string, unknown>>("get_workflow_template", {
+        id: "stock-analysis",
+      });
       const vars = (tmpl?.variables ?? []) as Record<string, unknown>[];
       const v = vars.find((x: Record<string, unknown>) => x.name === "analysis_dry_run");
       const value = !!v?.value;
@@ -1299,7 +1301,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       if (options?.templateId) {
         runArgs.templateId = options.templateId;
       }
-      const result = await invoke<Record<string, unknown>>(
+      const result = await invokePluginCommand<Record<string, unknown>>(
         "run_stock_workflow",
         runArgs,
       );
@@ -1997,7 +1999,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({ evolutionRecalculating: true, evolutionLastError: null });
     try {
       await invoke<{ written: number; currentWeights: Array<[string, string, number]> }>(
-        "manual_recalc_strategy_weights",
+        "stock_manual_recalc_strategy_weights",
         { asOfDate: asOfDate ?? null },
       );
       // 重算后立即拉一次新 dashboard
@@ -2012,7 +2014,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   loadRecoStrategyWeights: async () => {
     try {
-      const data = await invoke<Record<string, number>>("get_reco_strategy_weights");
+      const data = await invoke<Record<string, number>>("stock_get_reco_strategy_weights");
       return data;
     } catch (e) {
       console.warn("[EvolutionDrift] load reco strategy weights failed:", e);

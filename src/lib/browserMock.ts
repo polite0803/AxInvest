@@ -7550,6 +7550,22 @@ async function executeCommand<T>(
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
     // #342：watchlist 5 + cron 9。浏览器模式无真实库/调度器：列表回诚实空态，
     // 写类命令返回 undefined（消费端本就不取返回值）；watch/unwatch 改本地假集合。
+    // #346：权重/参数台账/估值/工具/What-If（浏览器模式诚实空态）。
+    case "stock_get_reco_strategy_weights":
+      return {} as unknown as T;
+    case "stock_list_stock_tools":
+      return [] as unknown as T;
+    case "stock_compute_valuation_band":
+      return null as unknown as T;
+    case "stock_manual_recalc_strategy_weights":
+    case "stock_recalc_reco_loop_weights":
+    case "stock_apply_param_suggestions":
+    case "stock_rollback_param_change":
+    case "stock_apply_reco_weights":
+    case "stock_calibrate_portfolio_mgr_params":
+    case "stock_optimize_scoring_weights":
+    case "stock_compute_what_if":
+      return undefined as unknown as T;
     // #345：报价/K线双声明收口 + 进化/荐股留痕族（浏览器模式诚实空态）。
     case "stock_parse_trades_csv":
     case "stock_get_evolution_history":

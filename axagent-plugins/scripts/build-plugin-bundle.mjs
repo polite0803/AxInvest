@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批/分析读写与台账/监控与数据源/进化与荐股留痕）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批/分析读写与台账/监控与数据源/进化与荐股留痕/权重与参数台账/估值与工具）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -886,6 +886,137 @@ function stockManifest({ version, binaryName, sha256 }) {
             analysisId: { type: "string", description: "分析任务 ID" },
           },
           required: ["analysisId"],
+        },
+      },
+      {
+        // #346：宿主 `get_reco_strategy_weights` 的接缝面。
+        name: "stock_get_reco_strategy_weights",
+        description: "荐股策略权重（投影评分链实际消费的 served_vars）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_reco_strategy_weights",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #346：宿主 `manual_recalc_strategy_weights` 的接缝面。
+        name: "stock_manual_recalc_strategy_weights",
+        description: "手动重算策略权重并落库（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_manual_recalc_strategy_weights",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string" },
+          },
+        },
+      },
+      {
+        // #346：宿主 `recalc_reco_loop_weights` 的接缝面。
+        name: "stock_recalc_reco_loop_weights",
+        description: "重算荐股闭环逐格权重（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_recalc_reco_loop_weights",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string" },
+          },
+        },
+      },
+      {
+        // #346：宿主 `apply_param_suggestions` 的接缝面。
+        name: "stock_apply_param_suggestions",
+        description: "应用参数调整建议到模板变量（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_apply_param_suggestions",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            updates: { type: "array", items: { type: "object" }, description: "建议条目数组" },
+          },
+        },
+      },
+      {
+        // #346：宿主 `rollback_param_change` 的接缝面。
+        name: "stock_rollback_param_change",
+        description: "回滚参数变更（写回旧值并换代）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_rollback_param_change",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            changeId: { type: "string" },
+          },
+        },
+      },
+      {
+        // #346：宿主 `apply_reco_weights` 的接缝面。
+        name: "stock_apply_reco_weights",
+        description: "应用荐股策略权重调整（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_apply_reco_weights",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            weights: { type: "array", items: { type: "object" }, description: "省略 = 全部应用" },
+          },
+        },
+      },
+      {
+        // #346：宿主 `calibrate_portfolio_mgr_params` 的接缝面。
+        name: "stock_calibrate_portfolio_mgr_params",
+        description: "WFO 校准组合管理参数（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_calibrate_portfolio_mgr_params",
+        requiredPermission: "workspace-write",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #346：宿主 `optimize_scoring_weights` 的接缝面。
+        name: "stock_optimize_scoring_weights",
+        description: "基于回测优化评分权重（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_optimize_scoring_weights",
+        requiredPermission: "workspace-write",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #346：宿主 `compute_valuation_band` 的接缝面。
+        name: "stock_compute_valuation_band",
+        description: "估值带（读并回填 financial_snapshots）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_compute_valuation_band",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            years: { type: "integer", description: "回溯年数（缺省 5）" },
+          },
+        },
+      },
+      {
+        // #346：宿主 `list_stock_tools` 的接缝面。
+        name: "stock_list_stock_tools",
+        description: "股票分析工具名清单（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_stock_tools",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #346：宿主 `compute_what_if` 的接缝面。
+        name: "stock_compute_what_if",
+        description: "What-If 确定性公式（Rhai，纯计算）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_compute_what_if",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            params: { type: "object", description: "WhatIfRequest（camelCase 全字段）" },
+          },
         },
       },
       {

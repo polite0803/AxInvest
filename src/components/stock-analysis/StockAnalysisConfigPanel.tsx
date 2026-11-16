@@ -71,7 +71,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
     let cancelled = false;
     // 并行加载 workflow 模板和估值参数
     Promise.all([
-      invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID }),
+      invokePluginCommand<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID }),
       invokePluginCommand<ValuationParamsConfig>("stock_get_valuation_params").catch(() => DEFAULT_VALUATION_PARAMS),
     ])
       .then(async ([rsp, valuation]) => {
@@ -682,7 +682,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
   const handleOptimize = async () => {
     setSaving(true);
     try {
-      const weights = await invoke<Record<string, unknown>>("optimize_scoring_weights");
+      const weights = await invoke<Record<string, unknown>>("stock_optimize_scoring_weights");
       if (weights) {
         const map: Record<string, number> = {
           scoring_trend: weights.trendWeight as number,

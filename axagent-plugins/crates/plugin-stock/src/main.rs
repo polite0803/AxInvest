@@ -369,6 +369,28 @@ const COMMAND_GET_RECO_BOARD_SCOPE: &str = "stock_get_reco_board_scope";
 const COMMAND_SET_RECO_BOARD_SCOPE: &str = "stock_set_reco_board_scope";
 /// `get_reco_pool_batch`（宿主同名，#345）—— 读 op。
 const COMMAND_GET_RECO_POOL_BATCH: &str = "stock_get_reco_pool_batch";
+/// `get_reco_strategy_weights`（宿主同名，#346）—— 读 op。
+const COMMAND_GET_RECO_STRATEGY_WEIGHTS: &str = "stock_get_reco_strategy_weights";
+/// `manual_recalc_strategy_weights`（宿主同名，#346）—— 写 op。
+const COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS: &str = "stock_manual_recalc_strategy_weights";
+/// `recalc_reco_loop_weights`（宿主同名，#346）—— 写 op。
+const COMMAND_RECALC_RECO_LOOP_WEIGHTS: &str = "stock_recalc_reco_loop_weights";
+/// `apply_param_suggestions`（宿主同名，#346）—— 写 op。
+const COMMAND_APPLY_PARAM_SUGGESTIONS: &str = "stock_apply_param_suggestions";
+/// `rollback_param_change`（宿主同名，#346）—— 写 op。
+const COMMAND_ROLLBACK_PARAM_CHANGE: &str = "stock_rollback_param_change";
+/// `apply_reco_weights`（宿主同名，#346）—— 写 op。
+const COMMAND_APPLY_RECO_WEIGHTS: &str = "stock_apply_reco_weights";
+/// `calibrate_portfolio_mgr_params`（宿主同名，#346）—— 写 op。
+const COMMAND_CALIBRATE_PORTFOLIO_MGR_PARAMS: &str = "stock_calibrate_portfolio_mgr_params";
+/// `optimize_scoring_weights`（宿主同名，#346）—— 写 op。
+const COMMAND_OPTIMIZE_SCORING_WEIGHTS: &str = "stock_optimize_scoring_weights";
+/// `compute_valuation_band`（宿主同名，#346）—— 读 op。
+const COMMAND_COMPUTE_VALUATION_BAND: &str = "stock_compute_valuation_band";
+/// `list_stock_tools`（宿主同名，#346）—— 读 op。
+const COMMAND_LIST_STOCK_TOOLS: &str = "stock_list_stock_tools";
+/// `compute_what_if`（宿主同名，#346）—— 读 op。
+const COMMAND_COMPUTE_WHAT_IF: &str = "stock_compute_what_if";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -906,6 +928,138 @@ fn handle_command(
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // #346：get_reco_strategy_weights
+        COMMAND_GET_RECO_STRATEGY_WEIGHTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_reco_strategy_weights",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：manual_recalc_strategy_weights
+        COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "manual_recalc_strategy_weights",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：recalc_reco_loop_weights
+        COMMAND_RECALC_RECO_LOOP_WEIGHTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "recalc_reco_loop_weights",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：apply_param_suggestions
+        COMMAND_APPLY_PARAM_SUGGESTIONS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "apply_param_suggestions",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：rollback_param_change
+        COMMAND_ROLLBACK_PARAM_CHANGE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "rollback_param_change",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：apply_reco_weights
+        COMMAND_APPLY_RECO_WEIGHTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "apply_reco_weights",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：calibrate_portfolio_mgr_params
+        COMMAND_CALIBRATE_PORTFOLIO_MGR_PARAMS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "calibrate_portfolio_mgr_params",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：optimize_scoring_weights
+        COMMAND_OPTIMIZE_SCORING_WEIGHTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "optimize_scoring_weights",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：compute_valuation_band
+        COMMAND_COMPUTE_VALUATION_BAND => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "compute_valuation_band",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：list_stock_tools
+        COMMAND_LIST_STOCK_TOOLS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_stock_tools",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #346：compute_what_if
+        COMMAND_COMPUTE_WHAT_IF => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "compute_what_if",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // #345：parse_trades_csv
         COMMAND_PARSE_TRADES_CSV => match call_analysis_seam(
@@ -4648,6 +4802,17 @@ mod tests {
             super::COMMAND_GET_RECO_BOARD_SCOPE,
             super::COMMAND_SET_RECO_BOARD_SCOPE,
             super::COMMAND_GET_RECO_POOL_BATCH,
+            super::COMMAND_GET_RECO_STRATEGY_WEIGHTS,
+            super::COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS,
+            super::COMMAND_RECALC_RECO_LOOP_WEIGHTS,
+            super::COMMAND_APPLY_PARAM_SUGGESTIONS,
+            super::COMMAND_ROLLBACK_PARAM_CHANGE,
+            super::COMMAND_APPLY_RECO_WEIGHTS,
+            super::COMMAND_CALIBRATE_PORTFOLIO_MGR_PARAMS,
+            super::COMMAND_OPTIMIZE_SCORING_WEIGHTS,
+            super::COMMAND_COMPUTE_VALUATION_BAND,
+            super::COMMAND_LIST_STOCK_TOOLS,
+            super::COMMAND_COMPUTE_WHAT_IF,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

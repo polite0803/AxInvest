@@ -774,6 +774,65 @@ pub trait StockAnalysisProvider: Send + Sync {
         Err(AxAgentError::Provider("get_reco_pool_batch 未实现（该提供者不支持此数据面）".into()))
     }
 
+    /// `get_reco_strategy_weights`（宿主命令迁 T2，#346）—— 读 op。
+    async fn get_reco_strategy_weights(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_reco_strategy_weights 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `manual_recalc_strategy_weights`（宿主命令迁 T2，#346）—— 写 op。
+    async fn manual_recalc_strategy_weights(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "manual_recalc_strategy_weights 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `recalc_reco_loop_weights`（宿主命令迁 T2，#346）—— 写 op。
+    async fn recalc_reco_loop_weights(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "recalc_reco_loop_weights 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `apply_param_suggestions`（宿主命令迁 T2，#346）—— 写 op。
+    async fn apply_param_suggestions(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "apply_param_suggestions 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `rollback_param_change`（宿主命令迁 T2，#346）—— 写 op。
+    async fn rollback_param_change(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("rollback_param_change 未实现（该提供者不支持此数据面）".into()))
+    }
+    /// `apply_reco_weights`（宿主命令迁 T2，#346）—— 写 op。
+    async fn apply_reco_weights(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("apply_reco_weights 未实现（该提供者不支持此数据面）".into()))
+    }
+    /// `calibrate_portfolio_mgr_params`（宿主命令迁 T2，#346）—— 写 op。
+    async fn calibrate_portfolio_mgr_params(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "calibrate_portfolio_mgr_params 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `optimize_scoring_weights`（宿主命令迁 T2，#346）—— 写 op。
+    async fn optimize_scoring_weights(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "optimize_scoring_weights 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `compute_valuation_band`（宿主命令迁 T2，#346）—— 读 op。
+    async fn compute_valuation_band(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "compute_valuation_band 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+    /// `list_stock_tools`（宿主命令迁 T2，#346）—— 读 op。
+    async fn list_stock_tools(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_stock_tools 未实现（该提供者不支持此数据面）".into()))
+    }
+    /// `compute_what_if`（宿主命令迁 T2，#346）—— 读 op。
+    async fn compute_what_if(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("compute_what_if 未实现（该提供者不支持此数据面）".into()))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -1413,6 +1472,44 @@ mod tests {
                 "get_reco_pool_batch",
                 futures::executor::block_on(stub.get_reco_pool_batch(Value::Null)),
             ),
+            (
+                "get_reco_strategy_weights",
+                futures::executor::block_on(stub.get_reco_strategy_weights(Value::Null)),
+            ),
+            (
+                "manual_recalc_strategy_weights",
+                futures::executor::block_on(stub.manual_recalc_strategy_weights(Value::Null)),
+            ),
+            (
+                "recalc_reco_loop_weights",
+                futures::executor::block_on(stub.recalc_reco_loop_weights(Value::Null)),
+            ),
+            (
+                "apply_param_suggestions",
+                futures::executor::block_on(stub.apply_param_suggestions(Value::Null)),
+            ),
+            (
+                "rollback_param_change",
+                futures::executor::block_on(stub.rollback_param_change(Value::Null)),
+            ),
+            (
+                "apply_reco_weights",
+                futures::executor::block_on(stub.apply_reco_weights(Value::Null)),
+            ),
+            (
+                "calibrate_portfolio_mgr_params",
+                futures::executor::block_on(stub.calibrate_portfolio_mgr_params(Value::Null)),
+            ),
+            (
+                "optimize_scoring_weights",
+                futures::executor::block_on(stub.optimize_scoring_weights(Value::Null)),
+            ),
+            (
+                "compute_valuation_band",
+                futures::executor::block_on(stub.compute_valuation_band(Value::Null)),
+            ),
+            ("list_stock_tools", futures::executor::block_on(stub.list_stock_tools(Value::Null))),
+            ("compute_what_if", futures::executor::block_on(stub.compute_what_if(Value::Null))),
             // #344 批 B18：29 条（默认实现必须显式报错）。
             (
                 "get_asof_degradation_count",

@@ -105,7 +105,7 @@ describe("RecoLoopPanel", () => {
       if (cmd === "reco_ic_stats") {
         return Promise.resolve(statsResponse(LOOP));
       }
-      if (cmd === "recalc_reco_loop_weights") {
+      if (cmd === "stock_recalc_reco_loop_weights") {
         return Promise.resolve({ written: 2 });
       }
       return Promise.resolve({});
@@ -138,12 +138,12 @@ describe("RecoLoopPanel", () => {
     });
 
     await waitFor(() => {
-      expect(invokeMock.mock.calls.some((c) => c[0] === "recalc_reco_loop_weights")).toBe(true);
+      expect(invokeMock.mock.calls.some((c) => c[0] === "stock_recalc_reco_loop_weights")).toBe(true);
     });
     const statsCalls = invokeMock.mock.calls.filter((c) => c[0] === "reco_ic_stats");
     expect(statsCalls.length).toBeGreaterThanOrEqual(2);
     expect(statsCalls.at(-1)?.[1]).toEqual({ generation: null });
-    expect(invokeMock.mock.calls.find((c) => c[0] === "recalc_reco_loop_weights")?.[1]).toEqual({
+    expect(invokeMock.mock.calls.find((c) => c[0] === "stock_recalc_reco_loop_weights")?.[1]).toEqual({
       asOfDate: null,
     });
   });

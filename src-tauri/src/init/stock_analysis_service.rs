@@ -1898,6 +1898,169 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Self::to_value("list_time_travel_batches", &rows)
     }
 
+    // ── #347 批 B22：8 条（IC/信号史/缓存读 + 代理写 + 荐股历史三件 + 反思统计）──
+    /// 读 op：荐股 IC 统计（宿主 `reco_ic_stats` 的接缝面，#347）。
+    async fn reco_ic_stats(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct IcRequest {
+            generation: Option<String>,
+        }
+        let req = Self::parse::<IcRequest>("reco_ic_stats", "{generation?}", input)?;
+        let stats = crate::commands::stock_analysis::reco_ic_stats_core(&self.db, req.generation)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("reco_ic_stats", &stats)
+    }
+
+    /// 读 op：最近一次荐股的策略信号明细（宿主 `get_reco_signal_history` 的接缝面，#347）。
+    async fn get_reco_signal_history(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SigRequest {
+            strategy_id: String,
+        }
+        let req = Self::parse::<SigRequest>("get_reco_signal_history", "{strategyId}", input)?;
+        let rows = crate::commands::stock_analysis::get_reco_signal_history_core(
+            &self.db,
+            &self.astock_client,
+            req.strategy_id,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_reco_signal_history", &rows)
+    }
+
+    /// 读 op：最新荐股缓存（宿主 `get_cached_recommendation` 的接缝面，#347）。
+    async fn get_cached_recommendation(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CachedRequest {
+            period: axagent_analysis_engine::recommender::Period,
+            as_of_date: Option<String>,
+        }
+        let req = Self::parse::<CachedRequest>(
+            "get_cached_recommendation",
+            "{period, asOfDate?}",
+            input,
+        )?;
+        let cached = crate::commands::stock_analysis::get_cached_recommendation_core(
+            &self.db,
+            req.period,
+            req.as_of_date,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_cached_recommendation", &cached)
+    }
+
+    /// 写 op：东财代理热更新 + 持久化（宿主 `save_eastmoney_proxy` 的接缝面，#347）。
+    ///
+    /// 写语义两段：热更新共享 `AStockClient` 运行态 + 写 `workflow_template` 模板变量。
+    async fn save_eastmoney_proxy(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ProxyRequest {
+            proxy_url: String,
+        }
+        let req = Self::parse::<ProxyRequest>("save_eastmoney_proxy", "{proxyUrl}", input)?;
+        crate::commands::stock_analysis::save_eastmoney_proxy_core(
+            &self.db,
+            &self.astock_client,
+            req.proxy_url,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：荐股历史列表（宿主 `list_reco_history` 的接缝面，#347）。
+    async fn list_reco_history(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ListRequest {
+            style_filter: Option<String>,
+            exclude_styles: Option<String>,
+            limit: Option<u32>,
+            offset: Option<u32>,
+            generation: Option<String>,
+        }
+        let req = Self::parse::<ListRequest>(
+            "list_reco_history",
+            "{styleFilter?, excludeStyles?, limit?, offset?, generation?}",
+            input,
+        )?;
+        let rows = crate::commands::stock_workflow::reco_history::list_reco_history_core(
+            &self.db,
+            req.style_filter,
+            req.exclude_styles,
+            req.limit,
+            req.offset,
+            req.generation,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_reco_history", &rows)
+    }
+
+    /// 读 op：荐股历史明细（宿主 `get_reco_detail` 的接缝面，#347）。
+    async fn get_reco_detail(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DetailRequest {
+            generated_at: String,
+            style_filter: Option<String>,
+            exclude_styles: Option<String>,
+        }
+        let req = Self::parse::<DetailRequest>(
+            "get_reco_detail",
+            "{generatedAt, styleFilter?, excludeStyles?}",
+            input,
+        )?;
+        let rows = crate::commands::stock_workflow::reco_history::get_reco_detail_core(
+            &self.db,
+            req.generated_at,
+            req.style_filter,
+            req.exclude_styles,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_reco_detail", &rows)
+    }
+
+    /// 写 op：决策信任记录（宿主 `record_decision_trust` 的接缝面，#347）。
+    async fn record_decision_trust(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct TrustRequest {
+            analysis_id: String,
+            trust_model: String,
+        }
+        let req = Self::parse::<TrustRequest>(
+            "record_decision_trust",
+            "{analysisId, trustModel}",
+            input,
+        )?;
+        let out = crate::commands::stock_workflow::misc::record_decision_trust_core(
+            &self.db,
+            req.analysis_id,
+            req.trust_model,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("record_decision_trust", &out)
+    }
+
+    /// 读 op：反思命中率统计（宿主 `reflection_stats` 的接缝面，#347）。
+    async fn reflection_stats(&self, input: Value) -> Result<Value> {
+        Self::require_no_params("reflection_stats", &input)?;
+        let stats =
+            crate::commands::stock_workflow::reflection_stats::reflection_stats_core(&self.db)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        Self::to_value("reflection_stats", &stats)
+    }
+
     // ── #346 批 B20：11 条（权重/参数台账/估值/工具/What-If）──
 
     /// 读 op：荐股策略权重（`get_reco_strategy_weights`）。

@@ -101,7 +101,7 @@ describe("SerenityScreeningPanel · 历史弹窗代际切换", () => {
     expect(screen.getByText(LIVE_GEN_LABEL)).toBeTruthy();
     const calls = historyCalls();
     expect(calls.length).toBe(1);
-    expect(calls[0][0]).toBe("list_reco_history");
+    expect(calls[0][0]).toBe("stock_list_reco_history");
     expect(calls[0][1]).toEqual({ styleFilter: "serenity,bottleneck", limit: 50, generation: null });
   });
 

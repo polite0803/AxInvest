@@ -833,6 +833,50 @@ pub trait StockAnalysisProvider: Send + Sync {
         Err(AxAgentError::Provider("compute_what_if 未实现（该提供者不支持此数据面）".into()))
     }
 
+    /// `reco_ic_stats`（宿主命令迁 T2，#347）—— 读 op。
+    async fn reco_ic_stats(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("reco_ic_stats 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `get_reco_signal_history`（宿主命令迁 T2，#347）—— 读 op。
+    async fn get_reco_signal_history(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_reco_signal_history 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `get_cached_recommendation`（宿主命令迁 T2，#347）—— 读 op。
+    async fn get_cached_recommendation(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_cached_recommendation 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `save_eastmoney_proxy`（宿主命令迁 T2，#347）—— 写 op。
+    async fn save_eastmoney_proxy(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("save_eastmoney_proxy 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `list_reco_history`（宿主命令迁 T2，#347）—— 读 op。
+    async fn list_reco_history(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_reco_history 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `get_reco_detail`（宿主命令迁 T2，#347）—— 读 op。
+    async fn get_reco_detail(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_reco_detail 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `record_decision_trust`（宿主命令迁 T2，#347）—— 写 op。
+    async fn record_decision_trust(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("record_decision_trust 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `reflection_stats`（宿主命令迁 T2，#347）—— 读 op。
+    async fn reflection_stats(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("reflection_stats 未实现（该提供者不支持此数据面）".into()))
+    }
+
     /// `list_time_travel_batches`（宿主命令迁 T2，#347）—— 读 op。
     async fn list_time_travel_batches(&self, _input: Value) -> Result<Value> {
         Err(AxAgentError::Provider(
@@ -1517,6 +1561,26 @@ mod tests {
             ),
             ("list_stock_tools", futures::executor::block_on(stub.list_stock_tools(Value::Null))),
             ("compute_what_if", futures::executor::block_on(stub.compute_what_if(Value::Null))),
+            ("reflection_stats", futures::executor::block_on(stub.reflection_stats(Value::Null))),
+            (
+                "record_decision_trust",
+                futures::executor::block_on(stub.record_decision_trust(Value::Null)),
+            ),
+            ("get_reco_detail", futures::executor::block_on(stub.get_reco_detail(Value::Null))),
+            ("list_reco_history", futures::executor::block_on(stub.list_reco_history(Value::Null))),
+            (
+                "save_eastmoney_proxy",
+                futures::executor::block_on(stub.save_eastmoney_proxy(Value::Null)),
+            ),
+            (
+                "get_cached_recommendation",
+                futures::executor::block_on(stub.get_cached_recommendation(Value::Null)),
+            ),
+            (
+                "get_reco_signal_history",
+                futures::executor::block_on(stub.get_reco_signal_history(Value::Null)),
+            ),
+            ("reco_ic_stats", futures::executor::block_on(stub.reco_ic_stats(Value::Null))),
             (
                 "list_time_travel_batches",
                 futures::executor::block_on(stub.list_time_travel_batches(Value::Null)),

@@ -57,17 +57,14 @@ pub async fn export_md_to_pptx(
     Ok(result.content)
 }
 
-/// 记录用户对决策的信任选择（公式 vs LLM），存储到 decision_json.userTrustDecision。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "记录用户决策信任选择")]
-#[tauri::command]
-pub async fn record_decision_trust(
-    state: State<'_, AppState>,
+pub async fn record_decision_trust_core(
+    db: &axagent_harness::DatabaseConnection,
     analysis_id: String,
     trust_model: String,
 ) -> Result<serde_json::Value, String> {
     use sea_orm::sea_query::Expr;
 
-    let db = state.harness.db();
     // 查原始记录获取 current decision_json
     let original = stock_analyses::Entity::find_by_id(&analysis_id)
         .one(db)

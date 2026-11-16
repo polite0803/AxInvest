@@ -35,7 +35,7 @@ function stubInvokes(cronJobs: unknown[]) {
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "stock_list_reflections") { return Promise.resolve([]); }
     if (cmd === "stock_list_validate_decisions_crons") { return Promise.resolve(cronJobs); }
-    if (cmd === "reflection_stats") { return Promise.resolve({}); }
+    if (cmd === "stock_reflection_stats") { return Promise.resolve({}); }
     return Promise.resolve(null);
   });
 }
@@ -198,6 +198,6 @@ function stubInvokesResult(cmd: string): unknown {
       },
     ];
   }
-  if (cmd === "reflection_stats") { return {}; }
+  if (cmd === "stock_reflection_stats") { return {}; }
   return null;
 }

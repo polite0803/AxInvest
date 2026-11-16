@@ -1,7 +1,8 @@
+import { invoke } from "@/lib/invoke";
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonSuffix, recoTagPreset } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { App, Button, Card, Checkbox, Collapse, Empty, Modal, Table, Tag, Typography } from "antd";
@@ -87,7 +88,7 @@ export function RecoHistoryModal() {
       // 智能荐股历史：排除趋势智选专属风格（serenity-screening 工作流 'serenity'
       // + 智能荐股内置 SerenityStrategy 落库 'bottleneck'）——这两类在趋势智选
       // 面板（SerenityScreeningPanel）的历史弹窗里展示，两个面板各管各的。
-      const list = await invoke<RecoHistoryRow[]>("list_reco_history", {
+      const list = await invokePluginCommand<RecoHistoryRow[]>("stock_list_reco_history", {
         excludeStyles: "serenity,bottleneck",
         limit: 50,
       });
@@ -101,7 +102,7 @@ export function RecoHistoryModal() {
     setDetailOpen(true);
     setDetailLoading(true);
     try {
-      const items = await invoke<RecoDetailItem[]>("get_reco_detail", {
+      const items = await invokePluginCommand<RecoDetailItem[]>("stock_get_reco_detail", {
         generatedAt: row.generatedAt,
         excludeStyles: "serenity,bottleneck",
       });

@@ -222,7 +222,7 @@ describe("兜底合成候选（F6）", () => {
 describe("逐档 rank IC 观测面（R-E）", () => {
   it("有 IC 的格报数，够不到门槛的格必须分句报「样本不足」而不是留空", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve({
           styles: [{
             style: "trend",
@@ -259,7 +259,7 @@ describe("逐档 rank IC 观测面（R-E）", () => {
 
   it("闭环硬停格在矩阵里单列一句，不显示成「闭环已校准」", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve({
           styles: [],
           totalCells: 0,
@@ -298,7 +298,7 @@ describe("逐档 rank IC 观测面（R-E）", () => {
 
   it("完全没有已验证样本的格也要显式说明，不显示成空白", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve({ styles: [], totalCells: 0, usableCells: 0, totalSamples: 0 });
       }
       return Promise.resolve(comparisonResponse([stats("trend", "short", 55, 8)]));
@@ -313,7 +313,7 @@ describe("逐档 rank IC 观测面（R-E）", () => {
 describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
   it("当前档 short=60% 时徽章是 60%，不是四档算术平均的 50%", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_cached_recommendation" || cmd === "recommend_stocks") {
+      if (cmd === "stock_get_cached_recommendation" || cmd === "recommend_stocks") {
         return Promise.resolve(recoResponse({ trend: [makePick()] }));
       }
       if (cmd === "backtest_reco_strategies") {
@@ -355,7 +355,7 @@ describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
 describe("缺席不冒充读数（F4）", () => {
   it("持有天数与证据强度缺失时渲染「—」，不渲染 0d / 强度 0", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_cached_recommendation" || cmd === "recommend_stocks") {
+      if (cmd === "stock_get_cached_recommendation" || cmd === "recommend_stocks") {
         return Promise.resolve(recoResponse({
           trend: [makePick({ holdingDays: undefined, confidence: undefined })],
         }));
@@ -413,7 +413,7 @@ describe("口径标注透传与跨档同分（R-C / R-D / R-F）", () => {
           failedHorizons: {},
         });
       }
-      if (cmd === "get_cached_recommendation") { return Promise.resolve(tier); }
+      if (cmd === "stock_get_cached_recommendation") { return Promise.resolve(tier); }
       return Promise.resolve(null);
     });
     return tier;
@@ -471,11 +471,11 @@ describe("一次拿四档（R-0）", () => {
   it("刷新走批量命令；切到另一档不再发任何扫描/缓存请求", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "recommend_stocks_all_periods") { return Promise.resolve(batchFourTiers()); }
-      if (cmd === "get_cached_recommendation") { return Promise.resolve(null); }
+      if (cmd === "stock_get_cached_recommendation") { return Promise.resolve(null); }
       return Promise.resolve({});
     });
     renderWithI18n(<RecommendationPanel />);
-    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
+    await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
     await waitNotLoading();
 
     // 点刷新 → 一次批量扫描
@@ -502,7 +502,7 @@ describe("一次拿四档（R-0）", () => {
       return Promise.resolve(null);
     });
     renderWithI18n(<RecommendationPanel />);
-    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
+    await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
     await waitNotLoading();
     fireEvent.click(findRefreshButton());
 
@@ -577,7 +577,7 @@ function icStats(matrix: MatrixCell[] | undefined): Record<string, unknown> {
 describe("矩阵契约驱动（S4）", () => {
   it("趋势智选有自己的行，四个不成立格各带理由而不是空白", async () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "reco_ic_stats"
+      cmd === "stock_reco_ic_stats"
         ? Promise.resolve(icStats(contractFixture()))
         : Promise.resolve(comparisonResponse([]))
     );
@@ -598,7 +598,7 @@ describe("矩阵契约驱动（S4）", () => {
 
   it("serenity 行的统计经 dbStyles 别名归一（落库写 bottleneck 也算趋势智选）", async () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "reco_ic_stats"
+      cmd === "stock_reco_ic_stats"
         ? Promise.resolve(icStats(contractFixture()))
         : Promise.resolve(comparisonResponse([stats("bottleneck", "mid", 58, 7)]))
     );
@@ -608,7 +608,7 @@ describe("矩阵契约驱动（S4）", () => {
 
   it("出票但已知档-因子错配的格带错配声明（第三种状态，不混进不成立）", async () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "reco_ic_stats"
+      cmd === "stock_reco_ic_stats"
         ? Promise.resolve(icStats(contractFixture()))
         : Promise.resolve(comparisonResponse([stats("value", "ultra_short", 51, 9)]))
     );
@@ -621,7 +621,7 @@ describe("矩阵契约驱动（S4）", () => {
 
   it("观测面取不到时退回兜底行集合，主表不崩也不白屏", async () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "reco_ic_stats"
+      cmd === "stock_reco_ic_stats"
         ? Promise.reject(new Error("观测面不可得"))
         : Promise.resolve(comparisonResponse([stats("trend", "short", 55, 8)]))
     );

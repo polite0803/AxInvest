@@ -366,8 +366,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     setEmptyKind(null);
     setErrorDetail(null);
     try {
-      const r = await invoke<RecoResponse | null>(
-        "get_cached_recommendation",
+      const r = await invokePluginCommand<RecoResponse | null>(
+        "stock_get_cached_recommendation",
         anchorMode === "live" ? { period } : { period, asOfDate },
       );
       if (myToken !== reqTokenRef.current) { return; }

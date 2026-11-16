@@ -905,6 +905,95 @@ function stockManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        // #348：宿主 `reco_ic_stats` 的接缝面。
+        name: "stock_reco_ic_stats",
+        description: "荐股逐档 rank IC 与预测半衰期统计（宿主 stock.analysis 接缝）",
+        command: "worker://stock_reco_ic_stats",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: { generation: { type: "string" } } },
+      },
+      {
+        // #348：宿主 `get_reco_signal_history` 的接缝面。
+        name: "stock_get_reco_signal_history",
+        description: "最近一次荐股的策略信号明细（宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_reco_signal_history",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: { strategyId: { type: "string" } }, required: ["strategyId"] },
+      },
+      {
+        // #348：宿主 `get_cached_recommendation` 的接缝面。
+        name: "stock_get_cached_recommendation",
+        description: "读取缓存荐股结果（宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_cached_recommendation",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { period: { type: "string" }, asOfDate: { type: "string" } },
+          required: ["period"],
+        },
+      },
+      {
+        // #348：宿主 `save_eastmoney_proxy` 的接缝面。
+        name: "stock_save_eastmoney_proxy",
+        description: "保存东财代理（热更新运行态并持久化到工作流模板变量）",
+        command: "worker://stock_save_eastmoney_proxy",
+        requiredPermission: "workspace-write",
+        inputSchema: { type: "object", properties: { proxyUrl: { type: "string" } }, required: ["proxyUrl"] },
+      },
+      {
+        // #348：宿主 `list_reco_history` 的接缝面。
+        name: "stock_list_reco_history",
+        description: "荐股历史列表（宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_reco_history",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: {
+            styleFilter: { type: "string" },
+            excludeStyles: { type: "string" },
+            limit: { type: "number" },
+            offset: { type: "number" },
+            generation: { type: "string" },
+          },
+        },
+      },
+      {
+        // #348：宿主 `get_reco_detail` 的接缝面。
+        name: "stock_get_reco_detail",
+        description: "荐股历史明细（宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_reco_detail",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: {
+            generatedAt: { type: "string" },
+            styleFilter: { type: "string" },
+            excludeStyles: { type: "string" },
+          },
+          required: ["generatedAt"],
+        },
+      },
+      {
+        // #348：宿主 `record_decision_trust` 的接缝面。
+        name: "stock_record_decision_trust",
+        description: "记录决策信任（写 stock_analyses 决策 JSON）",
+        command: "worker://stock_record_decision_trust",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { analysisId: { type: "string" }, trustModel: { type: "string" } },
+          required: ["analysisId", "trustModel"],
+        },
+      },
+      {
+        // #348：宿主 `reflection_stats` 的接缝面。
+        name: "stock_reflection_stats",
+        description: "反思命中率统计（宿主 stock.analysis 接缝）",
+        command: "worker://stock_reflection_stats",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         // #346：宿主 `get_reco_strategy_weights` 的接缝面。
         name: "stock_get_reco_strategy_weights",
         description: "荐股策略权重（投影评分链实际消费的 served_vars）（经宿主 stock.analysis 接缝）",

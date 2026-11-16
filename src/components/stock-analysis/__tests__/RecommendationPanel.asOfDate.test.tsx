@@ -94,8 +94,8 @@ describe("RecommendationPanel — as-of propagation", () => {
   it("live 模式: 挂载时调用 get_cached_recommendation(period),不带 asOfDate", async () => {
     renderWithProviders();
     // 等待特定的命令被调用,避免只等任意 call(可能只等到 backtest)
-    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
-    const call = findCall("get_cached_recommendation");
+    await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
+    const call = findCall("stock_get_cached_recommendation");
     expect(call).toBeDefined();
     // args[1] 是 { period } 对象,确认不含 asOfDate
     expect(call?.[1]).toEqual({ period: "short" });
@@ -126,8 +126,8 @@ describe("RecommendationPanel — as-of propagation", () => {
     // 每切一档重扫一次 ⇒ 扫描能不能出货只取决于那一刻 push2his 可不可达（用户看到的「无候选」）。
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     renderWithProviders();
-    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
-    expect(findCall("get_cached_recommendation")?.[1]).toEqual({
+    await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
+    expect(findCall("stock_get_cached_recommendation")?.[1]).toEqual({
       period: "short",
       asOfDate: "2026-06-01",
     });
@@ -141,7 +141,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     invokeMock.mockReset();
     invokeMock.mockImplementation((cmd: string) =>
       Promise.resolve(
-        cmd === "get_cached_recommendation"
+        cmd === "stock_get_cached_recommendation"
           ? {
             period: "short",
             picks: {
@@ -279,7 +279,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(null);
     renderWithProviders();
-    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
+    await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
     await waitFor(() => {
       const btn = findRefreshButton();
       expect(btn).not.toHaveClass("ant-btn-loading");
@@ -287,8 +287,8 @@ describe("RecommendationPanel — as-of propagation", () => {
     invokeMock.mockClear();
     invokeMock.mockResolvedValue(null);
     fireEvent.click(screen.getByText(i18n.t("stockAnalysis.timeHorizonMid")));
-    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
-    expect(findCall("get_cached_recommendation")?.[1]).toEqual({ period: "mid" });
+    await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
+    expect(findCall("stock_get_cached_recommendation")?.[1]).toEqual({ period: "mid" });
   });
 
   it("replay 模式下点击刷新按钮调用 recommend_stocks_all_periods 带 asOfDate", async () => {

@@ -102,7 +102,7 @@ describe("RecoLoopPanel", () => {
     invalidateRecoIcStats();
     invokeMock.mockReset();
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve(statsResponse(LOOP));
       }
       if (cmd === "stock_recalc_reco_loop_weights") {
@@ -140,7 +140,7 @@ describe("RecoLoopPanel", () => {
     await waitFor(() => {
       expect(invokeMock.mock.calls.some((c) => c[0] === "stock_recalc_reco_loop_weights")).toBe(true);
     });
-    const statsCalls = invokeMock.mock.calls.filter((c) => c[0] === "reco_ic_stats");
+    const statsCalls = invokeMock.mock.calls.filter((c) => c[0] === "stock_reco_ic_stats");
     expect(statsCalls.length).toBeGreaterThanOrEqual(2);
     expect(statsCalls.at(-1)?.[1]).toEqual({ generation: null });
     expect(invokeMock.mock.calls.find((c) => c[0] === "stock_recalc_reco_loop_weights")?.[1]).toEqual({
@@ -154,7 +154,7 @@ describe("RecoLoopPanel", () => {
       const btn = screen.getByTestId("reco-loop-recalc") as HTMLButtonElement;
       expect(btn.disabled).toBe(true);
     });
-    expect(invokeMock.mock.calls.find((c) => c[0] === "reco_ic_stats")?.[1]).toEqual({
+    expect(invokeMock.mock.calls.find((c) => c[0] === "stock_reco_ic_stats")?.[1]).toEqual({
       generation: "2026-09-28",
     });
     // 回放代际与闭环样本不是同一分母：必须显式声明，不得让两套数看起来可比
@@ -164,7 +164,7 @@ describe("RecoLoopPanel", () => {
 
   it("观测面取不到时显示错误而不是空白", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.reject(new Error("boom"));
       }
       return Promise.resolve({});
@@ -175,7 +175,7 @@ describe("RecoLoopPanel", () => {
 
   it("负期望硬停单列成一句，权重 0 不得渲染成「已校准」", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve(statsResponse(DISABLED_LOOP));
       }
       return Promise.resolve({});
@@ -204,7 +204,7 @@ describe("RecoLoopPanel", () => {
       ],
     };
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reco_ic_stats") {
+      if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve(statsResponse(loop));
       }
       return Promise.resolve({});

@@ -7554,6 +7554,22 @@ async function executeCommand<T>(
     case "stock_list_time_travel_batches":
       return [] as unknown as T;
     // #346：权重/参数台账/估值/工具/What-If（浏览器模式诚实空态）。
+    case "stock_reco_ic_stats":
+      return null as unknown as T;
+    case "stock_get_reco_signal_history":
+      return [] as unknown as T;
+    case "stock_get_cached_recommendation":
+      return null as unknown as T;
+    case "stock_save_eastmoney_proxy":
+      return null as unknown as T;
+    case "stock_list_reco_history":
+      return [] as unknown as T;
+    case "stock_get_reco_detail":
+      return [] as unknown as T;
+    case "stock_record_decision_trust":
+      return null as unknown as T;
+    case "stock_reflection_stats":
+      return null as unknown as T;
     case "stock_get_reco_strategy_weights":
       return {} as unknown as T;
     case "stock_list_stock_tools":

@@ -524,6 +524,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "manual_recalc_strategy_weights" | "recalc_reco_loop_weights" | "apply_param_suggestions" | "rollback_param_change" | "apply_reco_weights" | "calibrate_portfolio_mgr_params" | "optimize_scoring_weights",
         ) => Some(PluginPermission::Write),
+        // #347 批 B22：两条写 op ⇒ `Write`（代理热更新 + 模板变量 / 决策信任写 stock_analyses）。
+        ("stock.analysis", "save_eastmoney_proxy" | "record_decision_trust") => {
+            Some(PluginPermission::Write)
+        },
         // #345 批 B19：六条写 op ⇒ `Write`。
         (
             "stock.analysis",
@@ -3464,6 +3468,119 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.recalc_reco_loop_weights(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：reco_ic_stats
+            "stock.analysis" if op == "reco_ic_stats" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.reco_ic_stats(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：get_reco_signal_history
+            "stock.analysis" if op == "get_reco_signal_history" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_reco_signal_history(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：get_cached_recommendation
+            "stock.analysis" if op == "get_cached_recommendation" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_cached_recommendation(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：save_eastmoney_proxy
+            "stock.analysis" if op == "save_eastmoney_proxy" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.save_eastmoney_proxy(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：list_reco_history
+            "stock.analysis" if op == "list_reco_history" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_reco_history(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：get_reco_detail
+            "stock.analysis" if op == "get_reco_detail" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_reco_detail(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：record_decision_trust
+            "stock.analysis" if op == "record_decision_trust" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.record_decision_trust(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #348：reflection_stats
+            "stock.analysis" if op == "reflection_stats" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.reflection_stats(request)) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -14990,6 +15107,39 @@ mod tests {
         assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.1, None, "读 op `mover_recall_analysis_batch` 不得设权限闸");
         assert_eq!(verdict.2, None, "读 op `mover_recall_analysis_batches` 不得设权限闸");
+    }
+
+    /// #347 批 B22：2 写 + 6 读分档 —— 写必须 Write、读必须 None。
+    #[test]
+    fn stock_analysis_348_permissions() {
+        const WRITES: &[&str] = &["save_eastmoney_proxy", "record_decision_trust"];
+        const READS: &[&str] = &[
+            "reco_ic_stats",
+            "get_reco_signal_history",
+            "get_cached_recommendation",
+            "list_reco_history",
+            "get_reco_detail",
+            "reflection_stats",
+        ];
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #347 权限表", || {
+                (
+                    WRITES
+                        .iter()
+                        .map(|op| required_permission_for("stock.analysis", op))
+                        .collect::<Vec<_>>(),
+                    READS
+                        .iter()
+                        .map(|op| required_permission_for("stock.analysis", op))
+                        .collect::<Vec<_>>(),
+                )
+            });
+        for op in verdict.0 {
+            assert_eq!(op, Some(PluginPermission::Write), "写 op 必须要求 write");
+        }
+        for op in verdict.1 {
+            assert_eq!(op, None, "读 op 不得设权限闸");
+        }
     }
 
     /// #342 批 A15：watchlist 5 + cron 9 的读写分档 —— 十写必须 Write、四读必须 None。

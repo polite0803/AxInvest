@@ -325,7 +325,7 @@ export function ReflectionPanel() {
       const [r, c, h] = await Promise.all([
         invokePluginCommand<ReflectionRow[]>("stock_list_reflections", {}),
         invokePluginCommand<CronJobResponse[]>("stock_list_validate_decisions_crons", {}),
-        invoke<HitrateStats>("reflection_stats", {}),
+        invokePluginCommand<HitrateStats>("stock_reflection_stats", {}),
       ]);
       if (myToken !== loadTokenRef.current) { return; }
       if (Array.isArray(r)) { setReflections(r); }

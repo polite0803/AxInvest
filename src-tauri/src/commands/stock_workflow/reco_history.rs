@@ -18,9 +18,8 @@ pub struct RecoHistoryItem {
 }
 
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description =  "列出荐股历史记录")]
-#[tauri::command]
-pub async fn list_reco_history(
-    state: State<'_, AppState>,
+pub async fn list_reco_history_core(
+    db: &axagent_harness::DatabaseConnection,
     style_filter: Option<String>,
     exclude_styles: Option<String>,
     limit: Option<u32>,
@@ -28,7 +27,6 @@ pub async fn list_reco_history(
     generation: Option<String>,
 ) -> Result<Vec<RecoHistoryItem>, String> {
     use sea_orm::{ConnectionTrait, Statement};
-    let db = state.harness.db();
     // 2026-07-31 修复：DB 已切 PostgreSQL（db_config.json db_type=postgres），
     // 原 SQLite 方言 SQL（GROUP_CONCAT + `?` 占位符）在 PG 上必然报错
     // （function group_concat does not exist）→ 前端 catch 静默 → 历史记录永远为空。
@@ -210,9 +208,8 @@ pub struct RecoDetailItem {
 }
 
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description =  "获取荐股详情")]
-#[tauri::command]
-pub async fn get_reco_detail(
-    state: State<'_, AppState>,
+pub async fn get_reco_detail_core(
+    db: &axagent_harness::DatabaseConnection,
     generated_at: String,
     style_filter: Option<String>,
     exclude_styles: Option<String>,
@@ -220,7 +217,6 @@ pub async fn get_reco_detail(
     use axagent_entities::reco_picks;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-    let db = state.harness.db();
     let mut query =
         reco_picks::Entity::find().filter(reco_picks::Column::GeneratedAt.eq(&generated_at));
 

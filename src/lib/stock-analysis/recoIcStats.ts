@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { RecoIcStats } from "@/types/stock-analysis";
 
 /**
@@ -27,7 +27,7 @@ export async function loadRecoIcStats(generation?: string | null): Promise<RecoI
 
   const task = (async (): Promise<RecoIcStats> => {
     try {
-      const data = await invoke<RecoIcStats>("reco_ic_stats", { generation: generation ?? null });
+      const data = await invokePluginCommand<RecoIcStats>("stock_reco_ic_stats", { generation: generation ?? null });
       // 测试里 invoke 可能被 mock 成同步 undefined；空值不写缓存，避免后续测试命中脏数据
       if (data) { cache.set(key, { at: Date.now(), data }); }
       return data;

@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { StrategySignalResult } from "@/types/stock-analysis";
 import { Card, Empty, Select, Spin, Table, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -27,7 +27,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<StrategySignalResult[]>("get_reco_signal_history", { strategyId });
+      return invokePluginCommand<StrategySignalResult[]>("stock_get_reco_signal_history", { strategyId });
     })
       .then((data) => {
         if (!cancelled) { setSignals(data ?? []); }

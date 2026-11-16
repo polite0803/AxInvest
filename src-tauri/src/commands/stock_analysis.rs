@@ -2601,11 +2601,10 @@ pub async fn apply_reco_weights_core(
 
 // ── RecoSignalTimeline ──
 
-/// 获取指定策略的历史信号明细
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取策略历史信号明细")]
-#[tauri::command]
-pub async fn get_reco_signal_history(
-    state: State<'_, AppState>,
+pub async fn get_reco_signal_history_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
     strategy_id: String,
 ) -> Result<Vec<axagent_analysis_engine::backtest_strategy::StrategySignalResult>, String> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -2625,7 +2624,7 @@ pub async fn get_reco_signal_history(
         // 与同文件 `backtest_reco_strategies_inner` 同口径；下方第 2 步必须一起加。
         .filter(reco_picks::Column::Synthetic.eq(0))
         .order_by_desc(reco_picks::Column::GeneratedAt)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询荐股记录失败: {e}"))
@@ -2646,7 +2645,7 @@ pub async fn get_reco_signal_history(
         .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
         .filter(reco_picks::Column::AsOfDate.is_null())
         .filter(reco_picks::Column::Synthetic.eq(0))
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询荐股记录失败: {e}"))
@@ -2671,7 +2670,7 @@ pub async fn get_reco_signal_history(
 
     // 4. 调用信号历史
     axagent_analysis_engine::backtest_strategy::run_signal_history(
-        state.stock().astock_client.clone(),
+        client.clone(),
         &strategy_id,
         Some(&stock_list),
     )
@@ -3250,25 +3249,16 @@ pub async fn get_vendor_fallback_log_core(
 // workflow_template 持久化）逐字下沉宿主 provider（`init/stock_analysis_service.rs`），
 // 插件命名命令 `stock_save_neodata_token` 接管（前端零 invoke 已核）。
 
-/// 保存东财代理地址（设置页配置，运行时热更新，无需重启）
-///
-/// 背景：本机直连 push2his.eastmoney.com 的 IPv4 链路会被服务器 RST
-/// （2026-08-01 / 2026-09-07 两次复发，所有 CDN 镜像节点一致），配置本地
-/// 代理后 em_get 在连接被掐断时自动切换代理重试。
-/// - 空字符串 = 清除代理（回退直连）
-/// - 非空 = 校验并启用（URL 非法返回错误，不修改现有状态）
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存东财代理地址")]
-#[tauri::command]
-pub async fn save_eastmoney_proxy(
-    state: State<'_, AppState>,
+pub async fn save_eastmoney_proxy_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
     proxy_url: String,
 ) -> Result<(), String> {
     let proxy_url = proxy_url.trim().to_string();
 
     // 1) 校验 + 热更新内存（非法 URL 在 set 内部返回错误，状态不被破坏）
-    state
-        .stock()
-        .astock_client
+    client
         .set_eastmoney_proxy(if proxy_url.is_empty() {
             None
         } else {
@@ -3280,10 +3270,8 @@ pub async fn save_eastmoney_proxy(
     // 2) 持久化到 stock-analysis 模板变量（设置页下次加载时自动读取）
     use axagent_entities::workflow_template;
     use sea_orm::EntityTrait;
-    if let Some(t) = workflow_template::Entity::find_by_id("stock-analysis")
-        .one(state.harness.db())
-        .await
-        .map_err(|e| {
+    if let Some(t) =
+        workflow_template::Entity::find_by_id("stock-analysis").one(db).await.map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
         })?
     {
@@ -3312,7 +3300,7 @@ pub async fn save_eastmoney_proxy(
         use sea_orm::ActiveModelTrait;
         let mut am: ActiveModel = t.into();
         am.variables = sea_orm::ActiveValue::Set(Some(json_str));
-        am.update(state.harness.db()).await.map_err(|e| {
+        am.update(db).await.map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("持久化东财代理配置失败: {e}"))
         })?;
     }
@@ -4320,20 +4308,14 @@ pub async fn recommend_stocks_all_periods(
     Ok(RecoBatchResponse { by_horizon, failed_horizons })
 }
 
-/// 荐股链的逐档预测力度量（Phase R-E）：从 `decision_validations` 取
-/// 「当时的置信度」与「T+N 实际收盘价」成对样本，按 `(风格, 档位)` 算 rank IC 与预测半衰期。
-///
-/// **只报数，不回写任何权重**（IC 面板未稳就自调 = 用噪声标定噪声）。
-/// 缺席必须分句：样本不足 / 一侧方差退化 / 档位不够拟合半衰期，三者要做的事完全不同。
 #[agent_command(
     domain = "finance",
     safety = Safe,
     call_mode = StateInput,
     description = "荐股逐档 rank IC 与预测半衰期"
 )]
-#[tauri::command]
-pub async fn reco_ic_stats(
-    state: State<'_, AppState>,
+pub async fn reco_ic_stats_core(
+    db: &axagent_harness::DatabaseConnection,
     generation: Option<String>,
 ) -> Result<axagent_analysis_engine::recommender::ic::RecoIcStats, String> {
     use axagent_analysis_engine::recommender::ic::{RecoIcRow, aggregate_reco_ic};
@@ -4342,7 +4324,8 @@ pub async fn reco_ic_stats(
     // 分不清是「SQL 慢」还是「等连接池」—— 这一行把它拆开（仅慢时打印）。
     let t_start = std::time::Instant::now();
     let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())?;
-    let served_vars = load_reco_served_vars(&state).await?;
+    let served_vars =
+        axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
     let t_vars = t_start.elapsed();
     // 代际：默认只算**实盘**样本（既有 IC 口径不变）。传 `generation`=某次回放的截止日，
     // 则只算那一批回放样本，回答「同一批历史数据上算法的预测力如何」。
@@ -4352,7 +4335,7 @@ pub async fn reco_ic_stats(
             Some(d) => decision_validations::Column::AsOfDate.eq(d),
             None => decision_validations::Column::AsOfDate.is_null(),
         })
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| format!("{e}"))?;
     let t_rows = t_start.elapsed();
@@ -4375,7 +4358,7 @@ pub async fn reco_ic_stats(
     // 代际归属：与闭环侧共用同一个取数函数（两处看到的归属必须一致，禁区 12）。
     // 查不到 ⇒ 该样本按「代际未知」被 `aggregate_reco_ic` 剔除并计入排除数，不冒充当代。
     let versions = axagent_analysis_engine::recommender::reco_loop::load_pick_versions(
-        state.harness.db(),
+        db,
         &rows.iter().map(|r| r.pick_id.clone()).collect::<Vec<_>>(),
     )
     .await;
@@ -4399,7 +4382,7 @@ pub async fn reco_ic_stats(
         .collect();
     let mut stats = aggregate_reco_ic(&samples);
     let t_agg = t_start.elapsed();
-    stats.loop_view = reco_loop_view(state.harness.db(), &served_vars).await;
+    stats.loop_view = reco_loop_view(db, &served_vars).await;
     let t_loop = t_start.elapsed();
     if t_loop.as_millis() >= 1000 {
         tracing::warn!(
@@ -4613,37 +4596,14 @@ pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
     }
 }
 
-/// 读取**某一代**最近一次荐股结果(缓存) —— 智能荐股页打开时优先调此命令,
-/// 避免每次打开都触发一次新的后端推荐任务。
-///
-/// `as_of_date` 决定读哪一代（同 2026-10-13 的落库裁定：实盘与回放同表，靠本列分池）：
-/// - `None` ⇒ 读**实盘**代（`as_of_date IS NULL`），与历史行为逐字一致；
-/// - `Some("2026-09-28")` ⇒ 读那一天的**回放**代。
-///
-/// ⚠ 这条参数是 2026-10-19 补上的，缺它时本命令把谓词**写死**成 `AsOfDate.is_null()`，
-/// 于是库内明明已经有回放批次（实测 09-28 那批真实样本 170 行 / 45 只、四档齐、
-/// `seed_pool_json` 1059 字符），前端在回放态**一行都读不到**，只能每切一档重跑一次扫描；
-/// 而扫描能否出货取决于那一刻 push2his 可不可达（同轮日志：814 次行情合成里 173 次被掐断）
-/// ⇒ 用户看到的就是「as-of 根本跑不出候选」。落库白落，缺的正是读侧。
-///
-/// 返回值:
-/// - `Some(RecoResponse)` —— 缓存存在,直接展示
-/// - `None` —— 该 period 在该代下还没有历史荐股(前端回退到实时扫描)
-///
-/// 行为:
-/// 1. 查 reco_picks 表:按 period + 代际过滤,取最新 generated_at 对应的所有行
-/// 2. 反序列化每行 pick_data → RecoPick
-/// 3. 按 style 分组,组装 RecoResponse,mode = "cached"
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "读取缓存荐股结果")]
-#[tauri::command]
-pub async fn get_cached_recommendation(
-    state: State<'_, AppState>,
+pub async fn get_cached_recommendation_core(
+    db: &axagent_harness::DatabaseConnection,
     period: axagent_analysis_engine::recommender::Period,
     as_of_date: Option<String>,
 ) -> Result<Option<RecoResponse>, String> {
     use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
-    let db = state.harness.db();
     let period_str = period.as_str();
 
     // 代际判据复用同一个解析权威（`recommend_stocks_all_periods` 也是它），不在这里自己

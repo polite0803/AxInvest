@@ -373,6 +373,23 @@ const COMMAND_GET_RECO_POOL_BATCH: &str = "stock_get_reco_pool_batch";
 const COMMAND_LIST_TIME_TRAVEL_BATCHES: &str = "stock_list_time_travel_batches";
 /// `get_reco_strategy_weights`（宿主同名，#346）—— 读 op。
 const COMMAND_GET_RECO_STRATEGY_WEIGHTS: &str = "stock_get_reco_strategy_weights";
+/// `reco_ic_stats`（宿主同名，#348）—— 读 op。
+const COMMAND_RECO_IC_STATS: &str = "stock_reco_ic_stats";
+/// `get_reco_signal_history`（宿主同名，#348）—— 读 op。
+const COMMAND_GET_RECO_SIGNAL_HISTORY: &str = "stock_get_reco_signal_history";
+/// `get_cached_recommendation`（宿主同名，#348）—— 读 op。
+const COMMAND_GET_CACHED_RECOMMENDATION: &str = "stock_get_cached_recommendation";
+/// `save_eastmoney_proxy`（宿主同名，#348）—— 写 op。
+const COMMAND_SAVE_EASTMONEY_PROXY: &str = "stock_save_eastmoney_proxy";
+/// `list_reco_history`（宿主同名，#348）—— 读 op。
+const COMMAND_LIST_RECO_HISTORY: &str = "stock_list_reco_history";
+/// `get_reco_detail`（宿主同名，#348）—— 读 op。
+const COMMAND_GET_RECO_DETAIL: &str = "stock_get_reco_detail";
+/// `record_decision_trust`（宿主同名，#348）—— 写 op。
+const COMMAND_RECORD_DECISION_TRUST: &str = "stock_record_decision_trust";
+/// `reflection_stats`（宿主同名，#348）—— 读 op。
+const COMMAND_REFLECTION_STATS: &str = "stock_reflection_stats";
+
 /// `manual_recalc_strategy_weights`（宿主同名，#346）—— 写 op。
 const COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS: &str = "stock_manual_recalc_strategy_weights";
 /// `recalc_reco_loop_weights`（宿主同名，#346）—— 写 op。
@@ -936,6 +953,102 @@ fn handle_command(
             peer,
             &request.call_chain,
             "list_time_travel_batches",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：reco_ic_stats
+        COMMAND_RECO_IC_STATS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "reco_ic_stats",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：get_reco_signal_history
+        COMMAND_GET_RECO_SIGNAL_HISTORY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_reco_signal_history",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：get_cached_recommendation
+        COMMAND_GET_CACHED_RECOMMENDATION => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_cached_recommendation",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：save_eastmoney_proxy
+        COMMAND_SAVE_EASTMONEY_PROXY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "save_eastmoney_proxy",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：list_reco_history
+        COMMAND_LIST_RECO_HISTORY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_reco_history",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：get_reco_detail
+        COMMAND_GET_RECO_DETAIL => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_reco_detail",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：record_decision_trust
+        COMMAND_RECORD_DECISION_TRUST => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "record_decision_trust",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #348：reflection_stats
+        COMMAND_REFLECTION_STATS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "reflection_stats",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -4817,6 +4930,14 @@ mod tests {
             super::COMMAND_SET_RECO_BOARD_SCOPE,
             super::COMMAND_GET_RECO_POOL_BATCH,
             super::COMMAND_GET_RECO_STRATEGY_WEIGHTS,
+            super::COMMAND_RECO_IC_STATS,
+            super::COMMAND_GET_RECO_SIGNAL_HISTORY,
+            super::COMMAND_GET_CACHED_RECOMMENDATION,
+            super::COMMAND_SAVE_EASTMONEY_PROXY,
+            super::COMMAND_LIST_RECO_HISTORY,
+            super::COMMAND_GET_RECO_DETAIL,
+            super::COMMAND_RECORD_DECISION_TRUST,
+            super::COMMAND_REFLECTION_STATS,
             super::COMMAND_LIST_TIME_TRAVEL_BATCHES,
             super::COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS,
             super::COMMAND_RECALC_RECO_LOOP_WEIGHTS,

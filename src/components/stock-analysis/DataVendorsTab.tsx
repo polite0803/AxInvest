@@ -371,7 +371,7 @@ export function DataVendorsTab() {
     setSaving(true);
     try {
       // 东财代理：先校验+热更新+持久化（非法 URL 会在后端报错并中止保存）
-      await invoke("save_eastmoney_proxy", { proxyUrl: emProxy.trim() });
+      await invokePluginCommand("stock_save_eastmoney_proxy", { proxyUrl: emProxy.trim() });
       // 先加载全量模板，只更新 vendor_ 变量值，保留 varType/isSecret 等字段
       const tmpl = await invoke("get_workflow_template", { id: "stock-analysis" }) as Record<string, unknown>;
       const allVars = (tmpl?.variables as Record<string, unknown>[]) ?? [];

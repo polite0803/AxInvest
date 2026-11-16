@@ -58,7 +58,7 @@ function makeReco(): RecoResponse {
 function installInvokeStub() {
   invokeMock.mockImplementation((command: string, args?: Record<string, unknown>) => {
     switch (command) {
-      case "get_cached_recommendation":
+      case "stock_get_cached_recommendation":
       case "recommend_stocks":
         return Promise.resolve(makeReco());
       case "backtest_reco_strategies":

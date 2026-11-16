@@ -2,6 +2,7 @@ import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
 import { showBackendError, translateFailureText } from "@/lib/errorI18n";
 import { invoke, listen, TimeoutError as InvokeTimeoutError } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import {
   type SerenityCandidate,
@@ -907,7 +908,7 @@ export function SerenityScreeningPanel() {
       try {
         // 同时认 'serenity'（serenity-screening 工作流）和 'bottleneck'
         // （智能荐股内置 SerenityStrategy）——业务上都是"趋势智选"。
-        const list = await invoke<typeof serenityHistory>("list_reco_history", {
+        const list = await invokePluginCommand<typeof serenityHistory>("stock_list_reco_history", {
           styleFilter: "serenity,bottleneck",
           limit: 50,
           generation,
@@ -1028,15 +1029,15 @@ export function SerenityScreeningPanel() {
       setLastRunLoading(true);
       try {
         // 先查最近一次真正的趋势智选（serenity）记录
-        let list = await invoke<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
-          "list_reco_history",
+        let list = await invokePluginCommand<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
+          "stock_list_reco_history",
           { styleFilter: "serenity", limit: 1 },
         );
         let restoreStyle = "serenity";
         // 无 serenity 历史 → 回退到智能荐股 SerenityStrategy（bottleneck）记录
         if (!list || list.length === 0) {
-          list = await invoke<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
-            "list_reco_history",
+          list = await invokePluginCommand<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
+            "stock_list_reco_history",
             { styleFilter: "bottleneck", limit: 1 },
           );
           restoreStyle = "bottleneck";

@@ -982,7 +982,7 @@ pub struct SerenityValidationSummary {
     description = "汇总智选后验样本"
 )]
 pub async fn serenity_validation_summary_core(
-    db: &sea_orm::DatabaseConnection,
+    db: &axagent_harness::DatabaseConnection,
     generation: Option<String>,
 ) -> Result<SerenityValidationSummary, String> {
     let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())

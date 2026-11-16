@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Failed to query mover-recall backfill batch history; try again later.",
     "TRADING_DISABLED": "Trading is disabled. Turn it on before recording trades.",
     "KEY_FROM_OTHER_DEVICE": "This ciphertext was encrypted by another device's master key (cipher fingerprint {{cipherFingerprint}}, local fingerprint {{localFingerprint}}) — export the key from that device (Settings → Database → Master Key) and import it here.",
-    "MASTER_KEY_NOT_FOUND": "No master.key file on this device; cannot export/import the master key."
+    "MASTER_KEY_NOT_FOUND": "No master.key file on this device; cannot export/import the master key.",
+    "STOCK_TASK_FAILED": "Task {{task}} failed",
+    "STOCK_TASK_CANCELLED": "Task {{task}} was cancelled",
+    "STOCK_TASK_TIMEOUT": "Task {{task}} timed out (>{{seconds}}s, taskId={{taskId}})"
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -3813,6 +3816,7 @@
     "link": "Link",
     "memory": "Memory",
     "multiAgent": "Multi-Agent",
+    "pluginPage": "Plugin Pages",
     "settings": "Settings",
     "tasksCenter": "Task Center",
     "terminal": "Terminal",
@@ -4368,6 +4372,16 @@
     "planRestored": "Plan restored. Review the steps above.",
     "rejectFailed": "Failed to reject plan: {{error}}",
     "resumeFailed": "Failed to resume plan: {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "Plugin Pages",
+      "empty": "No installed plugin provides pages in this environment",
+      "browserNotice": "Browser demo mode: plugin pages load in the desktop app. On a real install, the actual plugin-provided content appears here.",
+      "detected": "{{count}} page(s) available (demo)",
+      "loadFailed": "Failed to load the plugin page list",
+      "selectPage": "Select a plugin page"
+    }
   },
   "proactive": {
     "estimatedTime": "Estimated Time",

@@ -18,6 +18,9 @@ import { DevToolsPage } from "@/pages/DevTools/DevToolsPage";
 import { FilesPage } from "@/pages/FilesPage";
 import { KnowledgeHubPage } from "@/pages/KnowledgeHubPage";
 import { MultiAgentPage } from "@/pages/MultiAgentPage";
+// pages 层薄中转：组件中立性门禁禁止 components/layout 直引 components/plugin（plugin 非中性目标）。
+// 容器本体仍在 components/plugin/PluginPageExplorer.tsx，这里只经 pages 转一层（与其余 8 个 Tab 同源形态）。
+import { PluginPageExplorerPage } from "@/pages/PluginPageExplorerPage";
 import { TerminalPage } from "@/pages/TerminalPage";
 import { WorkflowPage } from "@/pages/WorkflowPage";
 import { useWorkspaceTabStore } from "@/stores";
@@ -179,6 +182,8 @@ function renderWorkspaceTab(tab: WorkspaceTab) {
       return <KnowledgeHubPage />;
     case "multiAgent":
       return <MultiAgentPage />;
+    case "pluginPage":
+      return <PluginPageExplorerPage />;
     case "devtools":
       return <DevToolsPage />;
     default:

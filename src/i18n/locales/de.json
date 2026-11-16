@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Abfrage des Rally-Lücken-Stapelverlaufs fehlgeschlagen; später erneut versuchen.",
     "TRADING_DISABLED": "Handelsfunktion ist deaktiviert. Aktivieren Sie sie vor der Erfassung von Trades.",
     "KEY_FROM_OTHER_DEVICE": "Dieses Chiffrat wurde mit dem Hauptschlüssel eines anderen Geräts verschlüsselt (Chiffrat-Fingerabdruck {{cipherFingerprint}}, lokaler Fingerabdruck {{localFingerprint}}) — exportieren Sie den Schlüssel auf dem anderen Gerät (Einstellungen → Datenbank → Hauptschlüssel) und importieren Sie ihn hier.",
-    "MASTER_KEY_NOT_FOUND": "Keine master.key-Datei auf diesem Gerät; der Hauptschlüssel kann nicht exportiert/importiert werden."
+    "MASTER_KEY_NOT_FOUND": "Keine master.key-Datei auf diesem Gerät; der Hauptschlüssel kann nicht exportiert/importiert werden.",
+    "STOCK_TASK_FAILED": "Aufgabe {{task}} fehlgeschlagen",
+    "STOCK_TASK_CANCELLED": "Aufgabe {{task}} wurde abgebrochen",
+    "STOCK_TASK_TIMEOUT": "Zeitüberschreitung bei Aufgabe {{task}} (>{{seconds}}s, taskId={{taskId}})"
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -3813,6 +3816,7 @@
     "link": "Verknüpfung",
     "memory": "Gedächtnis",
     "multiAgent": "Multi-Agenten",
+    "pluginPage": "Plugin-Seiten",
     "settings": "Einstellungen",
     "tasksCenter": "Aufgaben-Center",
     "terminal": "Terminal",
@@ -4368,6 +4372,16 @@
     "planRestored": "Plan wiederhergestellt. Überprüfen Sie die obigen Schritte.",
     "rejectFailed": "Ablehnung des Plans fehlgeschlagen: {{error}}",
     "resumeFailed": "Fortsetzung des Plans fehlgeschlagen: {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "Plugin-Seiten",
+      "empty": "In dieser Umgebung ist kein Plugin mit Seiten installiert",
+      "browserNotice": "Browser-Demomodus: Plugin-Seiten werden in der Desktop-App geladen. In einer echten Installation erscheint hier der vom Plugin bereitgestellte Inhalt.",
+      "detected": "{{count}} Seite(n) verfügbar (Demo)",
+      "loadFailed": "Plugin-Seitenliste konnte nicht geladen werden",
+      "selectPage": "Plugin-Seite auswählen"
+    }
   },
   "proactive": {
     "estimatedTime": "Geschätzte Zeit",

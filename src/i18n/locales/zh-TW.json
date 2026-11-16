@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查詢漏檢補分析批次歷史失敗，請稍後重試。",
     "TRADING_DISABLED": "交易功能未啟用，請先開啟後再記錄交易",
     "KEY_FROM_OTHER_DEVICE": "這段密文由其他裝置的主金鑰加密（密文指紋 {{cipherFingerprint}}，本機指紋 {{localFingerprint}}）—— 請到該裝置「設定 → 資料庫 → 主金鑰」匯出，再於本機匯入。",
-    "MASTER_KEY_NOT_FOUND": "本機沒有 master.key 檔案，無法匯出 / 匯入主金鑰。"
+    "MASTER_KEY_NOT_FOUND": "本機沒有 master.key 檔案，無法匯出 / 匯入主金鑰。",
+    "STOCK_TASK_FAILED": "任務 {{task}} 執行失敗",
+    "STOCK_TASK_CANCELLED": "任務 {{task}} 已取消",
+    "STOCK_TASK_TIMEOUT": "任務 {{task}} 逾時（>{{seconds}}s，taskId={{taskId}}）"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -3813,6 +3816,7 @@
     "link": "連接",
     "memory": "記憶",
     "multiAgent": "多智能體協作",
+    "pluginPage": "外掛頁面",
     "settings": "設定",
     "tasksCenter": "任務中心",
     "terminal": "終端",
@@ -4368,6 +4372,16 @@
     "planRestored": "計劃已恢復，可在上方查看和審批",
     "rejectFailed": "拒絕計劃失敗: {{error}}",
     "resumeFailed": "恢復計劃失敗: {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "外掛頁面",
+      "empty": "本環境未安裝提供頁面的外掛",
+      "browserNotice": "瀏覽器演示模式：外掛頁面需在桌面端載入，真機下這裡將顯示外掛提供的實際內容。",
+      "detected": "偵測到 {{count}} 個可用頁面（演示）",
+      "loadFailed": "外掛頁面清單載入失敗",
+      "selectPage": "選擇外掛頁面"
+    }
   },
   "proactive": {
     "estimatedTime": "預計時間",

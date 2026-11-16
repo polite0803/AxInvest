@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查询漏检补分析批次历史失败，请稍后重试。",
     "TRADING_DISABLED": "交易功能未启用，请先开启后再记录交易",
     "KEY_FROM_OTHER_DEVICE": "这段密文由其他设备的主密钥加密（密文指纹 {{cipherFingerprint}}，本机指纹 {{localFingerprint}}）—— 请到该设备「设置 → 数据库 → 主密钥」导出，再在本机导入。",
-    "MASTER_KEY_NOT_FOUND": "本机没有 master.key 文件，无法导出 / 导入主密钥。"
+    "MASTER_KEY_NOT_FOUND": "本机没有 master.key 文件，无法导出 / 导入主密钥。",
+    "STOCK_TASK_FAILED": "任务 {{task}} 执行失败",
+    "STOCK_TASK_CANCELLED": "任务 {{task}} 已取消",
+    "STOCK_TASK_TIMEOUT": "任务 {{task}} 超时（>{{seconds}}s，taskId={{taskId}}）"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -3813,6 +3816,7 @@
     "link": "连接",
     "memory": "记忆",
     "multiAgent": "多智能体协作",
+    "pluginPage": "插件页",
     "settings": "设置",
     "tasksCenter": "任务中心",
     "terminal": "终端",
@@ -4368,6 +4372,16 @@
     "planRestored": "计划已恢复，可在上方查看和审批",
     "rejectFailed": "拒绝计划失败: {{error}}",
     "resumeFailed": "恢复计划失败: {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "插件页面",
+      "empty": "本环境未安装提供页面的插件",
+      "browserNotice": "浏览器演示模式：插件页面需在桌面端装载，真机下这里将显示插件提供的实际内容。",
+      "detected": "检测到 {{count}} 个可用页面（演示）",
+      "loadFailed": "插件页面清单加载失败",
+      "selectPage": "选择插件页面"
+    }
   },
   "proactive": {
     "estimatedTime": "预计时间",

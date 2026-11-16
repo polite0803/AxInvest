@@ -11,6 +11,10 @@ vi.mock("@/pages/DevTools/DevToolsPage", () => ({ DevToolsPage: () => <div data-
 vi.mock("@/pages/FilesPage", () => ({ FilesPage: () => <div data-testid="page-files" /> }));
 vi.mock("@/pages/KnowledgeHubPage", () => ({ KnowledgeHubPage: () => <div data-testid="page-knowledge" /> }));
 vi.mock("@/pages/MultiAgentPage", () => ({ MultiAgentPage: () => <div data-testid="page-multiagent" /> }));
+vi.mock(
+  "@/pages/PluginPageExplorerPage",
+  () => ({ PluginPageExplorerPage: () => <div data-testid="page-pluginPage" /> }),
+);
 vi.mock("@/pages/TerminalPage", () => ({ TerminalPage: () => <div data-testid="page-terminal" /> }));
 vi.mock("@/pages/WorkflowPage", () => ({ WorkflowPage: () => <div data-testid="page-workflow" /> }));
 
@@ -179,6 +183,7 @@ describe("WorkspaceHub — ?ws= URL 通路（Tab 可深链 / 可刷新恢复）"
       files: "page-files",
       knowledge: "page-knowledge",
       multiAgent: "page-multiagent",
+      pluginPage: "page-pluginPage",
       devtools: "page-devtools",
     };
     for (const tab of WORKSPACE_TABS) {

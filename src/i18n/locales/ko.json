@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "누락 보완 분석 배치 기록 조회에 실패했습니다. 나중에 다시 시도하세요.",
     "TRADING_DISABLED": "거래 기능이 비활성화되었습니다. 거래를 기록하기 전에 활성화하세요",
     "KEY_FROM_OTHER_DEVICE": "이 암문은 다른 기기의 마스터 키로 암호화되었습니다(암문 지문 {{cipherFingerprint}}, 로컬 지문 {{localFingerprint}}). 해당 기기의 '설정 → 데이터베이스 → 마스터 키'에서 내보낸 뒤 여기서 가져오세요.",
-    "MASTER_KEY_NOT_FOUND": "이 기기에 master.key 파일이 없어 마스터 키를 내보내거나 가져올 수 없습니다."
+    "MASTER_KEY_NOT_FOUND": "이 기기에 master.key 파일이 없어 마스터 키를 내보내거나 가져올 수 없습니다.",
+    "STOCK_TASK_FAILED": "작업 {{task}} 실행에 실패했습니다",
+    "STOCK_TASK_CANCELLED": "작업 {{task}} 이(가) 취소되었습니다",
+    "STOCK_TASK_TIMEOUT": "작업 {{task}} 시간이 초과되었습니다 (>{{seconds}}s, taskId={{taskId}})"
   },
   "errorBoundary": {
     "copied": "복사됨",
@@ -3813,6 +3816,7 @@
     "link": "링크",
     "memory": "메모리",
     "multiAgent": "멀티 에이전트",
+    "pluginPage": "플러그인 페이지",
     "settings": "설정",
     "tasksCenter": "작업 센터",
     "terminal": "터미널",
@@ -4368,6 +4372,16 @@
     "planRestored": "계획이 복원되었습니다. 위의 단계를 검토하세요.",
     "rejectFailed": "계획 거부 실패: {{error}}",
     "resumeFailed": "계획 재개 실패: {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "플러그인 페이지",
+      "empty": "이 환경에는 페이지를 제공하는 플러그인이 설치되어 있지 않습니다",
+      "browserNotice": "브라우저 데모 모드: 플러그인 페이지는 데스크톱 앱에서 로드됩니다. 실제 설치 환경에서는 여기에 플러그인이 제공하는 내용이 표시됩니다.",
+      "detected": "사용 가능한 페이지 {{count}}개(데모)",
+      "loadFailed": "플러그인 페이지 목록을 불러오지 못했습니다",
+      "selectPage": "플러그인 페이지 선택"
+    }
   },
   "proactive": {
     "estimatedTime": "예상 시간",

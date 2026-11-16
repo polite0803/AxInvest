@@ -95,7 +95,7 @@ describe("WorkspaceSwitcher — 活动指示点", () => {
     expect(busyLabel?.length ?? 0).toBeGreaterThan(quietLabel?.length ?? 0);
   });
 
-  it("切换栏仍渲染全部 8 个 Tab（活动点改造不得影响 Tab 清单）", () => {
+  it("切换栏仍渲染 WORKSPACE_TABS 中全部 Tab（活动点改造不得影响 Tab 清单）", () => {
     renderSwitcher("chat");
     expect(document.querySelectorAll(".ax-workspace-switcher button")).toHaveLength(
       WORKSPACE_TABS.length,

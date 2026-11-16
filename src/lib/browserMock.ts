@@ -5551,9 +5551,29 @@ async function executeCommand<T>(
     }
 
     case "plugin_list_pages":
-      // 列表侧在浏览器模式没有插件安装根 ⇒ 返回空清单（UI 上合法 =「没有页面」）。
-      // 不抛错：这里抛错会让 `npm run dev` 下整个插件页列表报错，与 dashboard_list_plugins 同口径。
-      return [] as T;
+      // 浏览器演示清单：1 个插件 + 1 张 schema 占位页，让 `npm run dev` 下「插件页」Tab
+      // 能列出内容（而不是空态）。⚠ 这是**演示数据**，不是真机清单 —— 浏览器既没有插件
+      // 安装根，也没有 asset 协议与预置的动态 UI schema，故容器层（PluginPageExplorer）
+      // 在 `!isTauri()` 时不把这张页交给 PluginPageHost，而是显示说明态，避免白屏/报错。
+      // 真机（tauri）下本命令由后端 PluginManager 实时投影，返回真实清单。
+      return [
+        {
+          id: "browser-demo",
+          name: "浏览器演示插件",
+          version: "0.0.0",
+          description: "npm run dev 演示态占位页（真机由插件安装目录投影真实清单）",
+          author: null,
+          enabled: true,
+          pages: [
+            {
+              id: "demo",
+              title: "演示页面",
+              entry: "demo-schema",
+              loading: "schema",
+            },
+          ],
+        },
+      ] as T;
 
     case "plugin_list_task_sources":
       // 同 plugin_list_pages：浏览器模式无安装根 ⇒ 空清单 =「没有插件任务源」，

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import i18n from "@/i18n";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 
 /**
@@ -34,10 +35,18 @@ export async function invokeStockTask<T>(
       result?: T | null;
     }>("stock_poll_task", { taskId });
     if (snap.status === "completed") { return snap.result as T; }
-    if (snap.status === "failed") { throw new Error(snap.output || `任务 ${task} 执行失败`); }
-    if (snap.status === "stopped") { throw new Error(snap.output || `任务 ${task} 已取消`); }
+    if (snap.status === "failed") {
+      throw new Error(snap.output || i18n.t("error.STOCK_TASK_FAILED", { task }));
+    }
+    if (snap.status === "stopped") {
+      throw new Error(snap.output || i18n.t("error.STOCK_TASK_CANCELLED", { task }));
+    }
     if (Date.now() > deadline) {
-      throw new Error(`任务 ${task} 超时（>${Math.round(timeoutMs / 1000)}s，taskId=${taskId}）`);
+      throw new Error(i18n.t("error.STOCK_TASK_TIMEOUT", {
+        task,
+        seconds: Math.round(timeoutMs / 1000),
+        taskId,
+      }));
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }

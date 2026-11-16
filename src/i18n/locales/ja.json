@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "捕捉漏れバックフィルの履歴取得に失敗しました。後でもう一度お試しください。",
     "TRADING_DISABLED": "取引機能がオフです。取引を記録する前に有効にしてください",
     "KEY_FROM_OTHER_DEVICE": "この暗文は他のデバイスのマスターキーで暗号化されています（暗文指紋 {{cipherFingerprint}}、ローカル指紋 {{localFingerprint}}）。そのデバイスの「設定 → データベース → マスターキー」でエクスポートし、こちらでインポートしてください。",
-    "MASTER_KEY_NOT_FOUND": "このデバイスに master.key ファイルがなく、マスターキーのエクスポート / インポートができません。"
+    "MASTER_KEY_NOT_FOUND": "このデバイスに master.key ファイルがなく、マスターキーのエクスポート / インポートができません。",
+    "STOCK_TASK_FAILED": "タスク {{task}} の実行に失敗しました",
+    "STOCK_TASK_CANCELLED": "タスク {{task}} はキャンセルされました",
+    "STOCK_TASK_TIMEOUT": "タスク {{task}} がタイムアウトしました（>{{seconds}}s、taskId={{taskId}}）"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -3813,6 +3816,7 @@
     "link": "リンク",
     "memory": "メモリ",
     "multiAgent": "マルチエージェント",
+    "pluginPage": "プラグインページ",
     "settings": "設定",
     "tasksCenter": "タスクセンター",
     "terminal": "ターミナル",
@@ -4368,6 +4372,16 @@
     "planRestored": "プランが復元されました。上記のステップを確認してください。",
     "rejectFailed": "プランの拒否に失敗しました：{{error}}",
     "resumeFailed": "プランの再開に失敗しました：{{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "プラグインページ",
+      "empty": "ページを提供するプラグインがこの環境にインストールされていません",
+      "browserNotice": "ブラウザデモモード：プラグインページはデスクトップアプリで読み込まれます。実際のインストール環境では、ここにプラグインが提供する内容が表示されます。",
+      "detected": "利用可能なページ：{{count}} 件（デモ）",
+      "loadFailed": "プラグインページ一覧の読み込みに失敗しました",
+      "selectPage": "プラグインページを選択"
+    }
   },
   "proactive": {
     "estimatedTime": "予想時間",

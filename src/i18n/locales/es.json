@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Falló la consulta del historial de lotes de cobertura; reintente más tarde.",
     "TRADING_DISABLED": "La función de trading está desactivada. Actívela antes de registrar operaciones.",
     "KEY_FROM_OTHER_DEVICE": "Este cifrado fue creado con la clave maestra de otro dispositivo (huella del cifrado {{cipherFingerprint}}, huella local {{localFingerprint}}): exporta la clave en ese dispositivo (Ajustes → Base de datos → Clave maestra) e impórtala aquí.",
-    "MASTER_KEY_NOT_FOUND": "No hay archivo master.key en este dispositivo; no se puede exportar/importar la clave maestra."
+    "MASTER_KEY_NOT_FOUND": "No hay archivo master.key en este dispositivo; no se puede exportar/importar la clave maestra.",
+    "STOCK_TASK_FAILED": "La tarea {{task}} falló",
+    "STOCK_TASK_CANCELLED": "La tarea {{task}} fue cancelada",
+    "STOCK_TASK_TIMEOUT": "La tarea {{task}} agotó el tiempo de espera (>{{seconds}}s, taskId={{taskId}})"
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -3813,6 +3816,7 @@
     "link": "Enlace",
     "memory": "Memoria",
     "multiAgent": "Multiagente",
+    "pluginPage": "Páginas de plugins",
     "settings": "Configuración",
     "tasksCenter": "Centro de tareas",
     "terminal": "Terminal",
@@ -4368,6 +4372,16 @@
     "planRestored": "Plan restaurado. Revise los pasos anteriores.",
     "rejectFailed": "Error al rechazar plan: {{error}}",
     "resumeFailed": "Error al reanudar plan: {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "Páginas de plugins",
+      "empty": "No hay plugins instalados que proporcionen páginas en este entorno",
+      "browserNotice": "Modo demo del navegador: las páginas de plugins se cargan en la aplicación de escritorio. En una instalación real, aquí aparece el contenido proporcionado por el plugin.",
+      "detected": "{{count}} página(s) disponible(s) (demo)",
+      "loadFailed": "No se pudo cargar la lista de páginas de plugins",
+      "selectPage": "Seleccionar una página de plugin"
+    }
   },
   "proactive": {
     "estimatedTime": "Tiempo estimado",

@@ -10205,3 +10205,61 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 - 定点测试：harness stub 默认错 2/2、worker `stock_analysis_349_permissions` 1/1、plugin-stock 16/0；bundle `--check` 3 ✅（清单 +5，sha `3bcc4b0d…`）。
 - 前端：tsc 0、dprint 0；vitest 股票域 + time-travel + stores + lib 共 205 文件 2466/2470——4 红全部 **HEAD 既存**（`fallbackProbe` ×2、`PriceAlertPanel.conditionTrigger` ×1、`pluginCommand.test` ×1；后两者经「临时还原我批改动复跑同红」正控坐实）。
 - 判定档：8 锚回写（commandTotal 1193→1173 / 模块 145→142 / 边界 89→70·11 / 审计 87→69·10 / FE 91 297·319 / 67 585·240 / 标注面 1179）+ reflector/evolver 证据重锚（worker.rs 9360 / 9452 / 9481，+75 行漂移）；registryFileLines 1268→1240（构建期自动重生成）。
+
+
+## §207 B 线回正：T3 页面贡献垂直切片实测账（2026-11-17）
+
+**背景**：用户裁定 T2 命令迁移线（#301–#349，47 批）整体失败（见 `AUDIT-t2-migration-axis-2026-11-16.md`），批准回正到 B 线 = 补 P6.0-④ T3 页面贡献通道 + 一个垂直切片。**铁律：切片期间不迁任何新命令、不加粗 147 方法接缝**。本节把 §6.1 ①⑤⑥ 三行的「改动面（实测）」列从立项时外推更新为**盘上机械实读**，并登记切片的真实消耗；**人日不重写**——理由见 §207.3（切片只覆盖 ③④ 通道与命令消费，①⑤⑥ 本身未实施，无法从本轮直接推出它们的人日）。
+
+### §207.1 垂直切片实测账（B1 + B2，全部盘上实读）
+
+切片目标 = 章程 §6「清单声明 → 派发 → 渲染」第一个真实里程碑：让**用户点得到**一个插件页面，端到端消费 10 条 `stock_*` 命令（全读，不新增）。
+
+| 刀 | 内容 | 落点（file:line 为本节收口后实读） | 实测量 |
+|---|---|---|---|
+| B1 | 插件页挂载点接通：`PluginPageHost` 从零生产挂载点 → 工作台「插件页」Tab | `src/components/plugin/PluginPageExplorer.tsx:50-160`（四态容器：加载/错误/空态/浏览器降级）；`src/pages/PluginPageExplorerPage.tsx`（组件中立性薄中转）；`src/lib/workspaceTabs.tsx:33/75/96/109` 加静态 key `pluginPage`；`src/components/layout/WorkspaceHub.tsx:185` switch 分支；`src/lib/browserMock.ts:5553-5576` 演示清单桩 | 宿主侧改动 tracked 17 文件 +172/−22 行；新增 3 文件（160+15+98 行）；i18n 11 语言各 +11 行（7 key） |
+| B2 | plugin-stock 真实 bundle 页：vendored 桥 + 10 命令消费 | `axagent-plugins/crates/plugin-stock/src-web/main.ts:18-124`（顶层 `createAxAgentPluginClient()` + `announceReady()`、10 条 `executeCommand`、`beforeunload` 调 `dispose()`、空数据显式文案「本环境不提供该数据」）；`vendor/sdk/` 三件套 = 宿主 `src/sdk/` 逐字节 sha256 一致（无协议第二副本）；`web/pages/bundle.js` 334 行（checked-in 产物，esbuild 复用仓根已有依赖，未 npm install） | 页面入口 124 行 + vendor 1060 行（逐字节复制，不算新写）+ bundle 334 行；`--check` 3 ✅，桥单测 28 passed，bundle 动态验证 10 命令各一次/10 空态/ready 1 帧/dispose 全 PASS |
+
+**验收读数（逐条 exit code + 正文）**：`npm run typecheck` 0；B1 vitest 5 文件 65 passed；B2 桥单测 1 文件 28 passed + `verify-bundle.mjs` exit 0 全 PASS；`node axagent-plugins/scripts/build-plugin-bundle.mjs --plugin stock --check` exit 0（3 ✅）；组件中立性门 0（无新增违规）；dprint/i18n parity/JSX i18n 全 0；判定档 `check-capability-register.mjs` exit 0（硬判据 37 全一致，B1/B2 未触发 FE 锚漂移）。**真机（`npm run tauri dev`）实机核对待用户执行**（本环境无 GUI 会话）。
+
+**切片暴露的形态事实（非红灯，但影响后续估工）**：
+1. 桥白名单只有 `plugin_ui_action` / `plugin_execute_command` 两条（`vendor/sdk/pluginBridgeProtocol.ts:41-58`），10 条业务命令必须走 `client.executeCommand({name, input})`，**不是**逐命令进桥白名单 ⇒ 页面贡献的边际成本不随命令数线性增长（与 T2「9 环/命令」形成对照）。
+2. 宿主 `pluginSandboxBridge.ts:38/52` 的 `PLUGIN_BRIDGE_COMMANDS` 从 vendored protocol 再导出 ⇒ 宿主与插件桥同源，沙箱帧两端一致。
+3. vendor 三件套与 TS 入口放 `web/` 外（`build-plugin-bundle.mjs:235-237` 前端资产白名单只收 html/htm/js/css），只让 `bundle.js` 落 `web/pages/` 被整树复制进产物。
+
+### §207.2 §6.1 ①⑤⑥ 改动面实测复核（替换外推读数）
+
+以下只更新「改动面（实测）」列的事实读数；**估工（人日）列不动**（见 §207.3）。口径 = 当前盘上机械 grep 与 `check-capability-register.mjs --dump-readings`，行号均实读。
+
+**① `WorkflowNode` 开放化**：§6.1 原记「新增一个节点类型要改 8 处」。实测 8 类位点全部仍存在，且部分位点内含双份表：
+- enum `WorkflowNode` **32 variant**（`axagent-core/crates/harness/src/workflow_types.rs:1366-1418`）；
+- 穷举 match `node_type_name` 32 臂（`axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:233-266`，同文件 `:271` `node_kind` 又一份）；
+- deserializer 32 臂 + 32 名 `unknown_variant` 白名单双表（`axagent-core/crates/harness/src/workflow_node_deserializer.rs:31-99`）；
+- dispatcher `init_builtin` 27 个 register + agent 共享 Arc 段（`axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:80-110`、`axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs:1214-1230`）；
+- `axagent-runtime/crates/rt-workflow/src/work_engine/engine/schema_validator.rs:43-64`（9 契约 + 兜底）；
+- 前端 nodeTypes 表（`src/components/workflow/WorkflowEditor.tsx:111` 等 3 处）；
+- PropertyPanels 33 文件 + `RightPanel.tsx:63-312` 32 case；
+- i18n `nodeTypes` 段 11 语言。
+⇒ 改为「**8 类位点 / 至少 16 个机械位点（Rust 强制位点更多，§1168 自记 13 处/9 文件）**」。
+
+**⑤ 引擎去域化**：§6.1 原记「生产区股票词 32 行」。三处锚点行号**全部仍准**：`PREFETCHABLE_TOOLS`（`agent_executor.rs:4385`）、`stock_code` 预取（`:1232-1246`）、prompt 文本（`:854`）。「32 行」原口径**不可机械复现**（PLAN 未记正则与排除口径）：实测 `agent_executor.rs` 全文 51 行匹配、生产区（`:1-6244`，测试起于 `:6245`）36 行、其中注释 7 行⇒**非注释 29 行**；`engine/mod.rs` 生产区 17 行；整个 `rt-workflow/src` 非 tests 目录 120 行。⇒ 改为「**agent_executor 生产区 36 行（注释 7 / 非注释 29）；原『32 行』口径不可复现，保留为历史读数**」，不强填一个假精确数。
+
+**⑥ 执行器与接缝单轨化**：§6.1 原记「32 个执行器 0 个走注册表；document_parser_executor.rs（59 行空壳）、notification_executor.rs（165 行自带四平台 webhook）」。实测：
+- 生产执行器 **32 个**（`NodeExecutorTrait` dump = 33，含 1 个 `axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:516` TestExecutor 测试替身），32 文件各 1 处 `impl NodeExecutorTrait for`；
+- `document_parser_executor.rs` **58 行**（原 59，差 1）；`:38-56` 仅回显 `status:"parsed"` / `content_preview`，全文无 `DocumentParser` trait 引用 ⇒ 仍空壳；
+- `notification_executor.rs` **164 行**（原 165，差 1）；slack `:33` / wecom `:36` / dingtalk `:42` / feishu `:49` 四平台分支 + `reqwest` 构造 `:123` ⇒ 仍自带 webhook；
+- 「0 个走能力注册表」仍成立：能力注册表 `capability_registry.rs:635-1330` 无 executor 槽位，执行器只进 dispatcher 自有 map。
+⇒ 改为「**32 生产执行器（dump 33 含 1 测试替身），0 走能力注册表；两个目标文件 58/164 行**」。
+
+### §207.3 估工结论：人日列为何不重写
+
+§6.1 的估工是「改动点数 × 单点成本」外推。本轮切片是 **P6.0-④（T3 页面）+ 消费既有 P6.0-③（T2 命令）** 的第一个真实样本，它给出的方法学结论是：
+- **页面贡献（④）的单点成本已被实测锚定**：1 个插件 / 1 个 bundle 页 / 10 条命令 = B1+B2 全部消耗（上表），且边际命令不进桥白名单 ⇒ ④ 的「3–5 人日（选 A）」在切片尺度上**有了一个可对照的实测锚点**（本次是机制打通后的首例，含一次性构建链与 vendor，故不能反推「每页 N 人日」的线性外推；后续第 2 个插件页是更好的稳态锚点）。
+- **①⑤⑥ 本轮未实施** ⇒ 它们的改动面虽已实测复核（§207.2），但**没有对应的实施消耗**，对这三行的人日做任何"实测化"都会是构造性编数，违背复盘「可核证」的底线。故人日列保留，**只把改动面列换成机械实读**；待 ①⑤⑥ 各自有真实实施批次时再按同法回填。
+
+### §207.4 判据对账
+
+- 终局四条意义判据：本切片首次让判据①「用户点得到的插件页面」有真实落点（B1），判据②「页面消费 ≥10 条命令端到端」有真实落点（B2，10/10 命令验证通过）；其余两条（发布解耦 / 可替换可关）与资产独立仓仍为 0——**不夸大**。
+- 铁律遵守：本切片**未迁任何宿主命令、未加粗 147 方法接缝**（`commandTotal` 1173 未变，判定档 hard 判据全一致）。
+- 既存红灯已随本批修复（用户裁定「i18n 正统化后提交」）：`src/lib/stockTask.ts:37-52` 三条 CJK 错误串（来自 HEAD 既存 #349 `6443e3a38`）改为 `i18n.t("error.STOCK_TASK_*", {…})`，11 语言 locale 各补 `STOCK_TASK_FAILED` / `STOCK_TASK_CANCELLED` / `STOCK_TASK_TIMEOUT` 三码（占位符 `{{task}}` / `{{seconds}}` / `{{taskId}}`）。修复后 `check-hardcoded-i18n.sh --strict` exit 1→0、i18n parity 11 语言一致、`check_i18n.py --strict` 全过、tsc 0、dprint 0。保留 `snap.output ||` 的后端文本优先语义（后端给结构化错误时仍优先透传）。
+- 另一条 HEAD 既存红灯**不在本批范围、按用户裁定不修**：`node scripts/check-single-source-facts.mjs --ci` exit 1，91 条行号引用腐烂，全部来自本批未碰的源码（`domain_ontology.rs` / `domain_semantics.rs` / `market_mainline.rs` / `extras.rs` 等，最后提交为拆 workspace 的 `8dfaeb4db` 与 #240 的 `21a743fa5`，均早于本批 HEAD `6443e3a38`），基线 `single-source-facts-allowlist.json` 的 known=0。属拆 workspace 后源码注释引用的文档行号未回正的大规模漂移，需独立批次处理；本批按「按 pathspec 提交 + push，不跑全量门」推进。

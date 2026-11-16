@@ -18,7 +18,7 @@
  * 定义在 lib/devtoolsSubTabs.ts —— 别在本文件重复子页列表。
  */
 
-import { Database, Folder, FolderTree, Grid, MessageSquare, SquareTerminal, Users, Wrench } from "lucide-react";
+import { Database, Folder, FolderTree, Grid, MessageSquare, Puzzle, SquareTerminal, Users, Wrench } from "lucide-react";
 import { DEVTOOLS_SUB_PARAM } from "./devtoolsSubTabs";
 
 /** 工作台功能 Tab key */
@@ -30,6 +30,7 @@ export type WorkspaceTab =
   | "knowledge"
   | "files"
   | "multiAgent"
+  | "pluginPage"
   | "devtools";
 
 export interface WorkspaceTabMeta {
@@ -72,6 +73,7 @@ export const WORKSPACE_TABS: readonly WorkspaceTabMeta[] = [
   { key: "files", labelKey: "nav.files", keepAlive: true },
   { key: "knowledge", labelKey: "nav.knowledge", keepAlive: true },
   { key: "multiAgent", labelKey: "nav.multiAgent", keepAlive: true },
+  { key: "pluginPage", labelKey: "nav.pluginPage", keepAlive: true },
   { key: "devtools", labelKey: "nav.devTools", keepAlive: true },
 ];
 
@@ -92,6 +94,7 @@ export const WORKSPACE_TAB_ICONS: Record<WorkspaceTab, typeof MessageSquare> = {
   files: Folder,
   knowledge: Database,
   multiAgent: Users,
+  pluginPage: Puzzle,
   devtools: Wrench,
 };
 
@@ -104,6 +107,7 @@ export const WORKSPACE_TAB_ICON_COLORS: Record<WorkspaceTab, string> = {
   files: "#64748b",
   knowledge: "#10b981",
   multiAgent: "#f59e0b",
+  pluginPage: "#a855f7",
   devtools: "#f97316",
 };
 

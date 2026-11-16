@@ -1,17 +1,17 @@
 <!doctype html>
 <!--
-  股票插件的 bundle 页面 —— 前端贡献的**通道探针**（#35 B8-0）。
+  股票插件的 bundle 页面（B2 垂直切片）。
 
-  这一页的职责只有一条：证明「插件自带的前端资产能被打进产物、按 `pages[]` 声明、
-  由宿主的 `resolve_page_asset` 解析成安装根内的绝对路径、并在页面容器里渲染」这条链是通的。
-  真实的股票 UI 迁移（渲染器注册表 / 页面与任务中心 / DTO / 共享基元）排在 B8-1 之后，
-  不在本文件里预演 —— 这里刻意**不含脚本**：桥客户端是 TS 源码模块
-  （`src/sdk/pluginClientBridge.ts`，由插件作者 vendored 进自己的构建图），
-  静态页没有构建步骤，写内联脚本只会变成协议的第二份副本。
+  本页只装载构建产物 `bundle.js`：真正的桥客户端以 TS 源码 vendored 在插件仓
+  （vendor/sdk/ 三件套），由 esbuild 连同页面入口 src-web/main.ts 一起打成单文件 iife。
+  页面本身**不内联任何协议帧 / 命令白名单 / ready / dispose 逻辑**——那些都只有
+  vendored 桥一份来源，内联即成为第二份副本（章程明令禁止）。
+
+  入口契约（PluginPageHost）：bundle 顶层创建客户端并 announceReady()、卸载调 dispose()；
+  iframe sandbox="allow-scripts"，页面只经桥 postMessage 与宿主通信，不碰 Tauri IPC。
 
   装载契约见 `axagent-plugins/crates/plugins/src/types.rs` 的 `PluginPage`：
-  `entry` 是相对安装目录的资产路径，扩展名必须在 html/htm/js/css 白名单内；
-  宿主只认 `(pluginId, pageId)`，前端不得自行拼路径。
+  `entry` 是相对安装目录的资产路径，宿主只认 `(pluginId, pageId)`，前端不自行拼路径。
 -->
 <html lang="zh">
   <head>
@@ -19,13 +19,8 @@
     <title>股票插件</title>
   </head>
   <body style="margin:0;padding:16px;font:13px/1.6 system-ui,sans-serif;color:inherit">
-    <h1 style="margin:0 0 8px;font-size:16px">股票插件前端通道已打通</h1>
-    <p style="margin:0 0 8px">
-      本页来自插件安装目录内的 <code>pages/index.html</code>，经 <code>pages[]</code>
-      声明、由宿主解析资产路径后装入页面容器。
-    </p>
-    <p style="margin:0;color:#888">
-      真实股票界面将在后续批次从宿主前端迁入本插件的构建产物；此探针页只验证装载通道。
-    </p>
+    <h1 style="margin:0 0 8px;font-size:16px">股票插件 · 数据切片</h1>
+    <div id="root"></div>
+    <script src="./bundle.js"></script>
   </body>
 </html>

@@ -2967,7 +2967,10 @@
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Échec de la requête d'historique des lots de rattrapage ; réessayez plus tard.",
     "TRADING_DISABLED": "La fonction de trading est désactivée. Activez-la avant d'enregistrer des transactions.",
     "KEY_FROM_OTHER_DEVICE": "Ce chiffré a été créé avec la clé maîtresse d'un autre appareil (empreinte du chiffré {{cipherFingerprint}}, empreinte locale {{localFingerprint}}) — exportez la clé depuis cet appareil (Paramètres → Base de données → Clé maîtresse) puis importez-la ici.",
-    "MASTER_KEY_NOT_FOUND": "Aucun fichier master.key sur cet appareil ; impossible d'exporter/importer la clé maîtresse."
+    "MASTER_KEY_NOT_FOUND": "Aucun fichier master.key sur cet appareil ; impossible d'exporter/importer la clé maîtresse.",
+    "STOCK_TASK_FAILED": "Échec de la tâche {{task}}",
+    "STOCK_TASK_CANCELLED": "Tâche {{task}} annulée",
+    "STOCK_TASK_TIMEOUT": "Délai dépassé pour la tâche {{task}} (>{{seconds}}s, taskId={{taskId}})"
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -3813,6 +3816,7 @@
     "link": "Lien",
     "memory": "Mémoire",
     "multiAgent": "Multi-agent",
+    "pluginPage": "Pages des plugins",
     "settings": "Paramètres",
     "tasksCenter": "Centre des tâches",
     "terminal": "Terminal",
@@ -4368,6 +4372,16 @@
     "planRestored": "Plan restauré. Examinez les étapes ci-dessus.",
     "rejectFailed": "Échec du rejet du plan : {{error}}",
     "resumeFailed": "Échec de la reprise du plan : {{error}}"
+  },
+  "plugin": {
+    "pages": {
+      "title": "Pages des plugins",
+      "empty": "Aucun plugin fournissant des pages n'est installé dans cet environnement",
+      "browserNotice": "Mode démo navigateur : les pages des plugins se chargent dans l'application de bureau. Lors d'une vraie installation, le contenu fourni par le plugin s'affiche ici.",
+      "detected": "{{count}} page(s) disponible(s) (démo)",
+      "loadFailed": "Échec du chargement de la liste des pages des plugins",
+      "selectPage": "Sélectionner une page de plugin"
+    }
   },
   "proactive": {
     "estimatedTime": "Temps estimé",

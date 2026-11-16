@@ -7550,6 +7550,24 @@ async function executeCommand<T>(
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
     // #342：watchlist 5 + cron 9。浏览器模式无真实库/调度器：列表回诚实空态，
     // 写类命令返回 undefined（消费端本就不取返回值）；watch/unwatch 改本地假集合。
+    // #343：组合/交易 + 进化审批。浏览器模式无真实引擎：读类回诚实空态，写类 no-op。
+    case "stock_get_trade_positions":
+    case "stock_list_trades":
+    case "stock_list_portfolio":
+    case "stock_get_portfolio_correlations":
+      return [] as unknown as T;
+    case "stock_get_trading_enabled":
+      return true as unknown as T;
+    case "stock_record_trade":
+    case "stock_validate_trade":
+      return { valid: true, errors: [], warnings: [] } as unknown as T;
+    case "stock_add_portfolio_holding":
+    case "stock_remove_portfolio_holding":
+    case "stock_toggle_trading_enabled":
+    case "stock_import_trades":
+    case "stock_reject_evolution_plan":
+    case "stock_rollback_evolution":
+      return undefined as unknown as T;
     case "stock_list_watchlist":
       return [] as unknown as T;
     case "stock_watchlist_list_groups":

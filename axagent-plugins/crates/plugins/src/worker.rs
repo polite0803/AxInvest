@@ -519,6 +519,12 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "set_vendor_status" | "cancel_stock_analysis",
         ) => Some(PluginPermission::Write),
+        // #343 批 B17：组合/交易与进化审批写 op ⇒ `Write`；两条读（持仓列表 /
+        // 相关性快照）不登记。
+        (
+            "stock.analysis",
+            "add_portfolio_holding" | "remove_portfolio_holding" | "toggle_trading_enabled" | "import_trades" | "reject_evolution_plan" | "rollback_evolution",
+        ) => Some(PluginPermission::Write),
         // #342 批 A15（watchlist 5 + cron 9）：自选股/定时任务的增删改 ⇒ `Write`；
         // 四处列表读（`list_watchlist` / `watchlist_list_groups` / `list_stock_crons` /
         // `list_validate_decisions_crons`）纯读 ⇒ **不登记**（读缝不加闸）。
@@ -3385,6 +3391,119 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.cancel_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：list_portfolio
+            "stock.analysis" if op == "list_portfolio" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_portfolio(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：add_portfolio_holding
+            "stock.analysis" if op == "add_portfolio_holding" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.add_portfolio_holding(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：remove_portfolio_holding
+            "stock.analysis" if op == "remove_portfolio_holding" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.remove_portfolio_holding(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：get_portfolio_correlations
+            "stock.analysis" if op == "get_portfolio_correlations" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_portfolio_correlations(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：toggle_trading_enabled
+            "stock.analysis" if op == "toggle_trading_enabled" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.toggle_trading_enabled(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：import_trades
+            "stock.analysis" if op == "import_trades" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.import_trades(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：reject_evolution_plan
+            "stock.analysis" if op == "reject_evolution_plan" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.reject_evolution_plan(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #343：rollback_evolution
+            "stock.analysis" if op == "rollback_evolution" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.rollback_evolution(request)) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -14076,6 +14195,37 @@ mod tests {
     }
 
     /// #342 批 A15：watchlist 5 + cron 9 的读写分档 —— 十写必须 Write、四读必须 None。
+    #[test]
+    fn stock_analysis_343_portfolio_and_approval_permissions() {
+        const WRITES: &[&str] = &[
+            "add_portfolio_holding",
+            "remove_portfolio_holding",
+            "toggle_trading_enabled",
+            "import_trades",
+            "reject_evolution_plan",
+            "rollback_evolution",
+        ];
+        const READS: &[&str] = &["list_portfolio", "get_portfolio_correlations"];
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #343 权限表", || {
+                (WRITES, READS)
+            });
+        for op in verdict.0 {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                Some(PluginPermission::Write),
+                "写 op `{op}` 必须要求 write"
+            );
+        }
+        for op in verdict.1 {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                None,
+                "读 op `{op}` 不得设权限闸"
+            );
+        }
+    }
+
     #[test]
     fn stock_analysis_342_watchlist_and_cron_permissions() {
         const WRITES: &[&str] = &[

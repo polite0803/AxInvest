@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -887,6 +887,195 @@ function stockManifest({ version, binaryName, sha256 }) {
           },
           required: ["analysisId"],
         },
+      },
+      {
+        // #343：宿主 `list_portfolio` 的接缝面 —— 持仓列表。
+        name: "stock_list_portfolio",
+        description: "持仓列表（含实时行情盈亏，经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_list_portfolio",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #343：宿主 `add_portfolio_holding` 的接缝面 —— 添加持仓。
+        name: "stock_add_portfolio_holding",
+        description: "添加持仓（写 portfolio_holdings 表）",
+        command: "worker://stock_add_portfolio_holding",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            stockName: { type: "string" },
+            shares: { type: "number", description: "持有数量（股）" },
+            avgCost: { type: "number", description: "成本价" },
+          },
+          required: ["stockCode", "stockName", "shares", "avgCost"],
+        },
+      },
+      {
+        // #343：宿主 `remove_portfolio_holding` 的接缝面 —— 移除持仓。
+        name: "stock_remove_portfolio_holding",
+        description: "移除持仓（按 id 删除）",
+        command: "worker://stock_remove_portfolio_holding",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "持仓记录 ID" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        // #343：宿主 `get_portfolio_correlations` 的接缝面 —— 组合两两相关性快照。
+        name: "stock_get_portfolio_correlations",
+        description: "组合两两相关性快照（按 asOfDate 时间旅行）",
+        command: "worker://stock_get_portfolio_correlations",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string", description: "时间旅行截止日（YYYY-MM-DD）；省略取最新" },
+          },
+        },
+      },
+      {
+        // #343：宿主 `toggle_trading_enabled` 的接缝面 —— 开关交易功能。
+        name: "stock_toggle_trading_enabled",
+        description: "开关交易功能（settings 表）",
+        command: "worker://stock_toggle_trading_enabled",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            enabled: { type: "boolean", description: "true=开启 false=关闭" },
+          },
+          required: ["enabled"],
+        },
+      },
+      {
+        // #343：宿主 `import_trades` 的接缝面 —— 批量导入交易记录 CSV。
+        name: "stock_import_trades",
+        description: "批量导入交易记录 CSV（含交易开关闸）",
+        command: "worker://stock_import_trades",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            filePath: { type: "string", description: "CSV 文件绝对路径" },
+          },
+          required: ["filePath"],
+        },
+      },
+      {
+        // #343：宿主 `reject_evolution_plan` 的接缝面 —— 拒绝待审批进化计划。
+        name: "stock_reject_evolution_plan",
+        description: "拒绝待审批进化计划（原因必填）",
+        command: "worker://stock_reject_evolution_plan",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            historyId: { type: "string" },
+            reason: { type: "string", description: "拒绝原因（截断 500 字）" },
+            reviewer: { type: "string" },
+          },
+          required: ["historyId", "reason"],
+        },
+      },
+      {
+        // #343：宿主 `rollback_evolution` 的接缝面 —— 回滚进化版本到上一已接受版本。
+        name: "stock_rollback_evolution",
+        description: "回滚进化版本到上一已接受版本",
+        command: "worker://stock_rollback_evolution",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            historyId: { type: "string", description: "指定当前生效版本；省略取最近 accepted" },
+            reviewer: { type: "string" },
+          },
+        },
+      },
+      {
+        // #343：宿主 `record_trade` 的接缝面 —— 记录一笔交易。
+        name: "stock_record_trade",
+        description: "记录一笔交易（经 trading.engine 接缝）",
+        command: "worker://stock_record_trade",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            stockName: { type: "string" },
+            direction: { type: "string", description: '"buy" | "sell"' },
+            price: { type: "number" },
+            quantity: { type: "integer" },
+            tradeDate: { type: "string", description: "YYYY-MM-DD" },
+            tradeTime: { type: "string", description: "HH:MM" },
+            notes: { type: "string" },
+            analysisId: { type: "string" },
+          },
+          required: ["stockCode", "stockName", "direction", "price", "quantity", "tradeDate", "tradeTime"],
+        },
+      },
+      {
+        // #343：宿主 `list_trades` 的接缝面 —— 交易历史。
+        name: "stock_list_trades",
+        description: "交易历史（经 trading.engine 接缝，只读）",
+        command: "worker://stock_list_trades",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            limit: { type: "integer", description: "缺省 50（宿主 clamp 1..=500）" },
+          },
+        },
+      },
+      {
+        // #343：宿主 `get_trade_positions` 的接缝面 —— 交易日志驱动的持仓汇总。
+        name: "stock_get_trade_positions",
+        description: "交易日志驱动的持仓汇总（经 trading.engine 接缝，只读）",
+        command: "worker://stock_get_trade_positions",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #343：宿主 `validate_trade` 的接缝面 —— 交易校验。
+        name: "stock_validate_trade",
+        description: "交易校验（提交前预览，经 trading.engine 接缝）",
+        command: "worker://stock_validate_trade",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            direction: { type: "string", description: '"buy" | "sell"' },
+            quantity: { type: "integer" },
+            price: { type: "number" },
+          },
+          required: ["stockCode", "direction", "quantity", "price"],
+        },
+      },
+      {
+        // #343：宿主 `get_trading_enabled` 的接缝面 —— 读取交易功能开关状态。
+        name: "stock_get_trading_enabled",
+        description: "读取交易功能开关状态（经 trading.engine 接缝）",
+        command: "worker://stock_get_trading_enabled",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
       },
       {
         // #342：宿主 `watch_stock_quotes` 的接缝面 —— 加入实时行情监控（写语义，零新 op）。

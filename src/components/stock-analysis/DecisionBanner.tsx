@@ -1964,7 +1964,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       }
                       const analysisId = useStockAnalysisStore.getState().analysisId;
                       try {
-                        await invoke("record_trade", {
+                        await invokePluginCommand("stock_record_trade", {
                           stockCode,
                           stockName,
                           direction,

@@ -2,6 +2,7 @@ import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
 import { investPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { getActionColor, getActionTKey } from "@/lib/stock-analysis-utils";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Card, Table, Tag, Typography } from "antd";
@@ -66,7 +67,7 @@ export function InvestDashboard() {
     setLoading(true);
     try {
       const [pos, anl, regime] = await Promise.all([
-        invoke<PositionSummary[]>("get_trade_positions").catch(() => []),
+        invokePluginCommand<PositionSummary[]>("stock_get_trade_positions").catch(() => []),
         invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
         loadMarketRegime(),
       ]);
@@ -79,7 +80,7 @@ export function InvestDashboard() {
 
   useEffect(() => {
     Promise.all([
-      invoke<PositionSummary[]>("get_trade_positions").catch(() => []),
+      invokePluginCommand<PositionSummary[]>("stock_get_trade_positions").catch(() => []),
       invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
       loadMarketRegime().catch(() => null),
     ]).then(([pos, anl, regime]) => {

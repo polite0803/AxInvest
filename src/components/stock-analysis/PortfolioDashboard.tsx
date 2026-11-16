@@ -2,7 +2,7 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { ScheduledAnalysisPanel } from "@/components/stock-analysis/ScheduledAnalysisPanel";
 import { useStockJump } from "@/hooks/useStockJump";
-import { invoke, listen } from "@/lib/invoke";
+import { listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { PortfolioSignalPayload } from "@/types/stock-analysis";
@@ -154,7 +154,7 @@ function HoldingsTab() {
   const loadHoldings = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await invoke<Holding[]>("list_portfolio");
+      const result = await invokePluginCommand<Holding[]>("stock_list_portfolio");
       setHoldings(result.sort((a, b) => b.marketValue - a.marketValue));
     } catch (_e) {
       console.error("[portfolio] load failed:", _e);
@@ -181,7 +181,7 @@ function HoldingsTab() {
 
   const handleDelete = async (id: string) => {
     try {
-      await invoke("remove_portfolio_holding", { id });
+      await invokePluginCommand("stock_remove_portfolio_holding", { id });
       messageApi.success(t("common.deleted"));
       loadHoldings();
     } catch {
@@ -204,7 +204,7 @@ function HoldingsTab() {
         const failed: { code: string; reason: string }[] = [];
         for (const h of result.holdings) {
           try {
-            await invoke("add_portfolio_holding", {
+            await invokePluginCommand("stock_add_portfolio_holding", {
               stockCode: h.stockCode,
               stockName: h.stockName,
               shares: h.shares,
@@ -251,7 +251,7 @@ function HoldingsTab() {
           const avgCost = parseFloat(parts[2]);
           const stockName = parts.length > 3 ? parts[3] : stockCode;
           if (!isNaN(shares) && !isNaN(avgCost) && shares > 0) {
-            await invoke("add_portfolio_holding", {
+            await invokePluginCommand("stock_add_portfolio_holding", {
               stockCode,
               stockName,
               shares,

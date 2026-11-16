@@ -1,5 +1,5 @@
 import { showBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { actionToDirection, getActionColor, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
@@ -75,8 +75,8 @@ export function TradePanel() {
     setFetchError(false);
     try {
       const [t, p] = await Promise.all([
-        invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 100 }),
-        invoke<PositionSummary[]>("get_trade_positions"),
+        invokePluginCommand<TradeRecord[]>("stock_list_trades", { stockCode: null, limit: 100 }),
+        invokePluginCommand<PositionSummary[]>("stock_get_trade_positions"),
       ]);
       if (Array.isArray(t)) { setTrades(t); }
       if (Array.isArray(p)) { setPositions(p); }
@@ -95,7 +95,7 @@ export function TradePanel() {
     let cancelled = false;
     const readBack = async () => {
       try {
-        const v = await invoke<boolean>("get_trading_enabled");
+        const v = await invokePluginCommand<boolean>("stock_get_trading_enabled");
         if (!cancelled && typeof v === "boolean") { setEnabled(v); }
       } catch {
         // 读不到时保持本地默认（关闭）—— 保守方向，且后端门禁独立生效
@@ -176,7 +176,7 @@ export function TradePanel() {
     const now = dayjs();
     const analysisId = storeAnalysisId;
     try {
-      await invoke("record_trade", {
+      await invokePluginCommand("stock_record_trade", {
         stockCode: form.stockCode,
         stockName: form.stockName,
         direction: form.direction,
@@ -196,7 +196,7 @@ export function TradePanel() {
 
   const handleToggle = async (val: boolean) => {
     try {
-      await invoke("toggle_trading_enabled", { enabled: val });
+      await invokePluginCommand("stock_toggle_trading_enabled", { enabled: val });
       setEnabled(val);
     } catch {
       message.error(t("trade.toggleFailed"));

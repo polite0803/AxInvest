@@ -14,6 +14,12 @@ import { OverviewTab } from "../OverviewTab";
 const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const invokeMock = vi.fn();
+const pluginInvokeMock = vi.hoisted(() => ({ fn: vi.fn() }));
+
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (...args: unknown[]) => pluginInvokeMock.fn(...args),
+}));
+
 vi.mock("@/lib/invoke", async (importOriginal) => {
   // @/stores barrel 会消费 isTauri / listen 等导出，保留原模块仅替换 invoke
   const actual = await importOriginal<typeof import("@/lib/invoke")>();
@@ -47,7 +53,7 @@ const HOST_CARDS: PluginTaskCardsInfoDto[] = [
           {
             id: "reject",
             title: "stockAnalysis.evolutionApproval.reject",
-            command: "reject_evolution_plan",
+            command: "stock_reject_evolution_plan",
             mutating: true,
           },
         ],
@@ -81,6 +87,8 @@ function clickConfirmPrimary() {
 beforeEach(() => {
   __resetCardRegistryForTests();
   invokeMock.mockReset();
+  pluginInvokeMock.fn.mockReset();
+  pluginInvokeMock.fn.mockImplementation((...args: unknown[]) => invokeMock(...args));
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "task_card_host_cards") {
       return Promise.resolve(HOST_CARDS);
@@ -169,7 +177,7 @@ describe("OverviewTab 待审批进化卡（宿主投影驱动）", () => {
       fireEvent.click(okBtn!);
       await flushPromises();
     });
-    expect(invokeMock).not.toHaveBeenCalledWith("reject_evolution_plan", expect.anything());
+    expect(pluginInvokeMock.fn).not.toHaveBeenCalledWith("stock_reject_evolution_plan", expect.anything());
     // 正控：填原因 → 按钮解禁 → invoke 带上 reason
     await act(async () => {
       fireEvent.change(screen.getByRole("textbox"), { target: { value: "参数回退风险过高" } });
@@ -180,7 +188,7 @@ describe("OverviewTab 待审批进化卡（宿主投影驱动）", () => {
       fireEvent.click(okBtn!);
       await flushPromises();
     });
-    expect(invokeMock).toHaveBeenCalledWith("reject_evolution_plan", {
+    expect(pluginInvokeMock.fn).toHaveBeenCalledWith("stock_reject_evolution_plan", {
       historyId: "evo-overview-1",
       reviewer: null,
       reason: "参数回退风险过高",

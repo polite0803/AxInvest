@@ -24,13 +24,12 @@ use axagent_analysis_engine::position_limits::PositionLimits;
 use axagent_analysis_engine::recommender::{self, RecoPick, RecoResponse};
 use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
 use axagent_analysis_engine::screener::{ScreenCriteria, ScreenResult, StockScreener};
-use axagent_analysis_engine::trading::PositionSummary;
 use axagent_astock_data::StockQuote;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchResult, BatchRunner, MarketBatchQuery};
 use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
-    stock_analyses, strategy_performance, trades, watchlist_items,
+    stock_analyses, strategy_performance, watchlist_items,
 };
 use axagent_harness::AnalysisKind;
 use axagent_harness::market_data::KLine;
@@ -1456,11 +1455,9 @@ pub(crate) async fn monthly_report_core(
 
 // ── Portfolio ──
 
-/// 添加持仓
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "添加持仓")]
-#[tauri::command]
-pub async fn add_portfolio_holding(
-    state: State<'_, AppState>,
+/// 添加持仓 —— 宿主 `add_portfolio_holding` 的 core（#343）。
+pub(crate) async fn add_portfolio_holding_core(
+    db: &axagent_harness::DatabaseConnection,
     stock_code: String,
     stock_name: String,
     shares: f64,
@@ -1477,7 +1474,7 @@ pub async fn add_portfolio_holding(
         created_at: Set(now),
         updated_at: Set(now),
     };
-    model.insert(state.harness.db()).await.map_err(|e| {
+    model.insert(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("添加持仓失败: {e}")).to_string()
     })
 }
@@ -1503,29 +1500,27 @@ pub(crate) async fn update_portfolio_holding_core(
         .map(|_| ())
 }
 
-/// 移除持仓
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "移除持仓")]
-#[tauri::command]
-pub async fn remove_portfolio_holding(
-    state: State<'_, AppState>,
+/// 移除持仓 —— 宿主 `remove_portfolio_holding` 的 core（#343）。
+pub(crate) async fn remove_portfolio_holding_core(
+    db: &axagent_harness::DatabaseConnection,
     id: String,
 ) -> Result<(), String> {
-    portfolio_holdings::Entity::delete_by_id(id).exec(state.harness.db()).await.map_err(|e| {
+    portfolio_holdings::Entity::delete_by_id(id).exec(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("移除持仓失败: {e}"))
     })?;
     Ok(())
 }
 
-/// 持仓列表（含实时盈亏）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "获取持仓列表")]
-#[tauri::command]
-pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let holdings =
-        portfolio_holdings::Entity::find().all(state.harness.db()).await.map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询持仓列表失败: {e}"))
-        })?;
+/// 持仓列表（含实时盈亏）—— 宿主 `list_portfolio` 的 core（#343）。
+pub(crate) async fn list_portfolio_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let holdings = portfolio_holdings::Entity::find().all(db).await.map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询持仓列表失败: {e}"))
+    })?;
 
-    let client = state.stock().astock_client.clone();
+    let client = client.clone();
     let codes: Vec<String> = holdings.iter().map(|h| h.stock_code.clone()).collect();
     let mut quote_tasks = tokio::task::JoinSet::new();
     for code in codes {
@@ -2194,88 +2189,32 @@ pub async fn generate_stock_report(
 
 // ── 手动交易日志 ──
 
-/// 记录一笔交易
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "记录交易")]
-#[tauri::command]
-pub async fn record_trade(
-    state: State<'_, AppState>,
-    stock_code: String,
-    stock_name: String,
-    direction: String,
-    price: f64,
-    quantity: i32,
-    trade_date: String,
-    trade_time: String,
-    notes: Option<String>,
-    analysis_id: Option<String>,
-) -> Result<trades::Model, String> {
-    let engine = state.stock().trading_engine.read().await;
-    engine
-        .execute_trade(
-            &stock_code,
-            &stock_name,
-            &direction,
-            price,
-            quantity,
-            &trade_date,
-            &trade_time,
-            notes.as_deref(),
-            analysis_id.as_deref(),
-        )
-        .await
-}
+// `record_trade` 已迁插件（`stock_record_trade`，#343）—— 零新 op：走既有
+// `trading.engine::execute_trade`（`TradeExecutionRequest` camelCase 同形）。
 
-/// 获取交易历史
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取交易历史")]
-#[tauri::command]
-pub async fn list_trades(
-    state: State<'_, AppState>,
-    stock_code: Option<String>,
-    limit: Option<u32>,
-) -> Result<Vec<trades::Model>, String> {
-    let engine = state.stock().trading_engine.read().await;
-    engine.get_trades(stock_code.as_deref(), limit.unwrap_or(50)).await
-}
+// `list_trades` 已迁插件（`stock_list_trades`，#343）—— 零新 op：走既有
+// `trading.engine::get_trades`（`{stockCode?, limit?}`）。
 
-/// 获取持仓汇总（交易日志驱动的成本跟踪）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "获取持仓汇总")]
-#[tauri::command]
-pub async fn get_trade_positions(
-    state: State<'_, AppState>,
-) -> Result<Vec<PositionSummary>, String> {
-    let engine = state.stock().trading_engine.read().await;
-    engine.get_positions().await
-}
+// `get_trade_positions` 已迁插件（`stock_get_trade_positions`，#343）—— 零新 op：
+// 走既有 `trading.engine::get_positions`（零入参 = live）。
 
-/// 开启 / 关闭交易功能
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关交易功能")]
-#[tauri::command]
-pub async fn toggle_trading_enabled(
-    state: State<'_, AppState>,
+/// 开启 / 关闭交易功能 —— 宿主 `toggle_trading_enabled` 的 core（#343）。
+pub(crate) async fn toggle_trading_enabled_core(
+    db: &axagent_harness::DatabaseConnection,
     enabled: bool,
 ) -> Result<(), String> {
     tracing::info!("Trading system {}abled", if enabled { "en" } else { "dis" });
-    axagent_dao::repo::settings::set_setting(
-        state.harness.db(),
-        "trading_enabled",
-        &enabled.to_string(),
-    )
-    .await
-    .map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("切换交易功能失败: {e}"))
-            .to_string()
-    })
+    axagent_dao::repo::settings::set_setting(db, "trading_enabled", &enabled.to_string())
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("切换交易功能失败: {e}"))
+                .to_string()
+        })
 }
 
-/// 读取交易功能开关的真实状态（面板挂载时回读）。
-/// 此前本域只有写口：前端把开关当本地 useState，重进面板就显示成本地默认值，
-/// 与 settings 里的实际状态可能相反 —— 界面看着关着、后端仍在放行录入。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "读取交易功能开关")]
-#[tauri::command]
-pub async fn get_trading_enabled(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(axagent_analysis_engine::trading::is_trading_enabled(state.harness.db()).await)
-}
+// `get_trading_enabled` 已迁插件（`stock_get_trading_enabled`，#343）—— 零新 op：
+// 走既有 `trading.engine::trading_enabled`（出参 `{enabled}`，插件侧解包成裸 bool）。
 
 /// 获取最近分析记录（用于 Dashboard）
 /// 接线：register_commands.rs 注册 IPC handler + agent_command 宏注册 agent 工具索引
@@ -2310,24 +2249,8 @@ pub async fn get_recent_analyses(
     Ok(result)
 }
 
-/// 校验交易（提交前预览）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "校验交易")]
-#[tauri::command]
-pub async fn validate_trade(
-    state: State<'_, AppState>,
-    stock_code: String,
-    direction: String,
-    quantity: i32,
-    price: f64,
-) -> Result<serde_json::Value, String> {
-    let engine = state.stock().trading_engine.read().await;
-    let result = engine.validate_trade(&stock_code, &direction, quantity, price).await;
-    Ok(serde_json::json!({
-        "valid": result.valid,
-        "errors": result.errors,
-        "warnings": result.warnings,
-    }))
-}
+// `validate_trade` 已迁插件（`stock_validate_trade`，#343）—— 零新 op：走既有
+// `trading.engine::validate_trade`（`TradeValidationRequest` camelCase 同形）。
 
 // ── Screen Commands ──
 
@@ -2977,14 +2900,13 @@ pub async fn refresh_portfolio_metrics(
     serde_json::to_value(&summary).map_err(|e| format!("serialize refresh summary: {e}"))
 }
 
-/// 拉取最近一次两两相关性快照（按 as_of_date 时间旅行）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "获取组合相关性快照")]
-#[tauri::command]
-pub async fn get_portfolio_correlations(
-    state: State<'_, AppState>,
+/// 拉取最近一次两两相关性快照（按 as_of_date 时间旅行）—— 宿主
+/// `get_portfolio_correlations` 的 core（#343）。
+pub(crate) async fn get_portfolio_correlations_core(
+    db: &axagent_harness::DatabaseConnection,
     as_of_date: Option<String>,
 ) -> Result<Vec<CorrelationCell>, String> {
-    portfolio_monitor::get_correlation_snapshot(state.harness.db(), as_of_date.as_deref()).await
+    portfolio_monitor::get_correlation_snapshot(db, as_of_date.as_deref()).await
 }
 
 // `run_portfolio_stress_test` / `get_position_limits` / `import_portfolio_from_vlm`
@@ -6620,25 +6542,22 @@ pub fn parse_trades_csv(
     axagent_analysis_engine::trade_import::parse_csv(&file_path)
 }
 
-/// 批量导入交易记录到数据库
+/// 批量导入交易记录到数据库 —— 宿主 `import_trades` 的 core（#343）。
 ///
 /// 内部调用 `batch_import_trades`：写入 trades 表 + 同步更新 portfolio_holdings。
 /// 支持查重（同股票+同方向+同日期+同价格+同数量跳过）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "批量导入交易记录")]
-#[tauri::command]
-pub async fn import_trades(
-    state: State<'_, AppState>,
+pub(crate) async fn import_trades_core(
+    db: &axagent_harness::DatabaseConnection,
     file_path: String,
 ) -> Result<axagent_analysis_engine::trade_import::ImportSummary, String> {
     // 交易开关关闭时不得写库。单条录入 `record_trade` 一直有这道检查，批量导入此前
     // 完全没有 —— 用户显式关闭功能后，仍可被一次 CSV 导入绕过并写入 trades + 持仓。
-    if !axagent_analysis_engine::trading::is_trading_enabled(state.harness.db()).await {
+    if !axagent_analysis_engine::trading::is_trading_enabled(db).await {
         return Err(ErrorResponse::new(trading_err::DISABLED)
             .with_category(crate::commands::error::ErrorCategory::PermissionDenied)
             .to_string());
     }
     let rows = axagent_analysis_engine::trade_import::parse_csv(&file_path)?;
-    let db = state.harness.db();
     axagent_analysis_engine::trade_import::batch_import_trades(db, &rows).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL)
             .with_detail(format!("批量导入交易失败: {e}"))

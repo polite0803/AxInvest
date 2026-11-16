@@ -1,6 +1,6 @@
 import { useStockJump } from "@/hooks/useStockJump";
 import { investPath } from "@/lib/investRoutes";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Spin, Table, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -31,7 +31,7 @@ export function PositionsMiniPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const p = await invoke<PositionSummary[]>("get_trade_positions");
+      const p = await invokePluginCommand<PositionSummary[]>("stock_get_trade_positions");
       if (Array.isArray(p)) { setPositions(p); }
     } catch {
       // 静默 — 交易功能可能未启用
@@ -41,7 +41,7 @@ export function PositionsMiniPanel() {
   }, []);
 
   useEffect(() => {
-    invoke<PositionSummary[]>("get_trade_positions")
+    invokePluginCommand<PositionSummary[]>("stock_get_trade_positions")
       .then((p) => {
         if (Array.isArray(p)) { setPositions(p); }
       })

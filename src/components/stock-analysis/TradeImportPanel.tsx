@@ -4,6 +4,7 @@
 // 支持通达信/东方财富/通用 CSV 格式（后端自动识别列名）。
 
 import { invoke, isTauri } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { FileOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Space, Statistic, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -88,7 +89,7 @@ export function TradeImportPanel() {
     }
     setImporting(true);
     try {
-      const result = await invoke<ImportSummary>("import_trades", { filePath });
+      const result = await invokePluginCommand<ImportSummary>("stock_import_trades", { filePath });
       setSummary(result);
       message.success(
         t("trade.import.imported", {

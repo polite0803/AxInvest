@@ -2096,7 +2096,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   rejectEvolutionPlan: async (historyId: string, reason: string, reviewer?: string) => {
-    const row = await invoke<EvolutionHistoryEntry>("reject_evolution_plan", {
+    const row = await invokePluginCommand<EvolutionHistoryEntry>("stock_reject_evolution_plan", {
       historyId,
       reason,
       reviewer: reviewer ?? null,
@@ -2108,7 +2108,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   rollbackEvolution: async (historyId?: string | null, reviewer?: string) => {
-    return invoke<EvolutionHistoryEntry>("rollback_evolution", {
+    return invokePluginCommand<EvolutionHistoryEntry>("stock_rollback_evolution", {
       historyId: historyId ?? null,
       reviewer: reviewer ?? null,
     });
@@ -2150,8 +2150,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   fetchPortfolioCorrelations: async (asOfDate?: string | null) => {
     try {
-      const data = await invoke<PortfolioCorrelationCell[]>(
-        "get_portfolio_correlations",
+      const data = await invokePluginCommand<PortfolioCorrelationCell[]>(
+        "stock_get_portfolio_correlations",
         { asOfDate: asOfDate ?? null },
       );
       set({ portfolioCorrelations: data, portfolioCorrelationsError: null });

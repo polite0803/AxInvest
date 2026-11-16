@@ -116,7 +116,9 @@ export function ScheduledAnalysisPanel() {
   /** P1: 从持仓一键导入 */
   const handleImportFromPortfolio = async () => {
     try {
-      const holdings = await invoke<Array<{ stockCode: string; stockName: string }>>("list_portfolio");
+      const holdings = await invokePluginCommand<Array<{ stockCode: string; stockName: string }>>(
+        "stock_list_portfolio",
+      );
       if (!Array.isArray(holdings) || holdings.length === 0) {
         message.info(t("stockAnalysis.scheduledAnalysis.noPortfolioData"));
         return;

@@ -116,13 +116,19 @@ export function OverviewTab({
       setRejectReason("");
       return;
     }
-    const run = (extra: Record<string, unknown>) =>
-      invoke(action.command, { historyId: rowId, reviewer: null, ...extra })
-        .then(() => {
-          message.success(t(`stockAnalysis.evolutionApproval.${action.id}Success`));
-          fetchCardRows([card]);
-        })
-        .catch((e) => showBackendError(message, e));
+    const run = (extra: Record<string, unknown>) => {
+      // #343：动作命令可能是宿主或插件命名命令 —— 与 summaryCommand 同一路由。
+      void (async () => {
+        const pluginId = await resolvePluginForCommand(action.command);
+        const invoker = pluginId ? invokePluginCommand : invoke;
+        invoker(action.command, { historyId: rowId, reviewer: null, ...extra })
+          .then(() => {
+            message.success(t(`stockAnalysis.evolutionApproval.${action.id}Success`));
+            fetchCardRows([card]);
+          })
+          .catch((e) => showBackendError(message, e));
+      })();
+    };
     if (!action.mutating) {
       void run({});
       return;
@@ -138,7 +144,7 @@ export function OverviewTab({
     if (!card || rejectRowId === null) {
       return;
     }
-    void invoke("reject_evolution_plan", {
+    void invokePluginCommand("stock_reject_evolution_plan", {
       historyId: rejectRowId,
       reviewer: null,
       reason: rejectReason.trim(),

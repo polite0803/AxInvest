@@ -43,7 +43,8 @@ fn task_card_host_actions() -> [PluginTaskCardAction; 2] {
         PluginTaskCardAction {
             id: "reject".to_string(),
             title: "stockAnalysis.evolutionApproval.reject".to_string(),
-            command: "reject_evolution_plan".to_string(),
+            // #343：拒绝命令已迁插件命名命令，前端执行器按插件注册表解析路由。
+            command: "stock_reject_evolution_plan".to_string(),
             mutating: true,
         },
     ]

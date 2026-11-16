@@ -473,6 +473,52 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 持仓列表（含实时行情盈亏）（`list_portfolio` op）—— 读 op（宿主原命令迁 T2，#343）。
+    async fn list_portfolio(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_portfolio 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 添加持仓（`add_portfolio_holding` op）—— 写 op（宿主原命令迁 T2，#343）。
+    async fn add_portfolio_holding(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("add_portfolio_holding 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 移除持仓（`remove_portfolio_holding` op）—— 写 op（宿主原命令迁 T2，#343）。
+    async fn remove_portfolio_holding(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "remove_portfolio_holding 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 组合两两相关性快照（`get_portfolio_correlations` op）—— 读 op（宿主原命令迁 T2，#343）。
+    async fn get_portfolio_correlations(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_portfolio_correlations 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 开关交易功能（`toggle_trading_enabled` op）—— 写 op（宿主原命令迁 T2，#343）。
+    async fn toggle_trading_enabled(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "toggle_trading_enabled 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 批量导入交易记录 CSV（`import_trades` op）—— 写 op（宿主原命令迁 T2，#343）。
+    async fn import_trades(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("import_trades 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 拒绝待审批进化计划（`reject_evolution_plan` op）—— 写 op（宿主原命令迁 T2，#343）。
+    async fn reject_evolution_plan(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("reject_evolution_plan 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 回滚进化版本到上一已接受版本（`rollback_evolution` op）—— 写 op（宿主原命令迁 T2，#343）。
+    async fn rollback_evolution(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("rollback_evolution 未实现（该提供者不支持此数据面）".into()))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -1058,6 +1104,33 @@ mod tests {
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
+            ),
+            // #343 批 B17：组合/交易 6 + 进化审批 2，默认实现必须显式报错。
+            ("list_portfolio", futures::executor::block_on(stub.list_portfolio(Value::Null))),
+            (
+                "add_portfolio_holding",
+                futures::executor::block_on(stub.add_portfolio_holding(Value::Null)),
+            ),
+            (
+                "remove_portfolio_holding",
+                futures::executor::block_on(stub.remove_portfolio_holding(Value::Null)),
+            ),
+            (
+                "get_portfolio_correlations",
+                futures::executor::block_on(stub.get_portfolio_correlations(Value::Null)),
+            ),
+            (
+                "toggle_trading_enabled",
+                futures::executor::block_on(stub.toggle_trading_enabled(Value::Null)),
+            ),
+            ("import_trades", futures::executor::block_on(stub.import_trades(Value::Null))),
+            (
+                "reject_evolution_plan",
+                futures::executor::block_on(stub.reject_evolution_plan(Value::Null)),
+            ),
+            (
+                "rollback_evolution",
+                futures::executor::block_on(stub.rollback_evolution(Value::Null)),
             ),
             // #342 批 A15：watchlist 5 + cron 9（四处读十写），默认实现同样必须显式报错
             // （空入参不能被读成「列表为空 / 已创建」）。

@@ -177,15 +177,13 @@ pub async fn approve_evolution_plan(
 }
 
 /// 拒绝一条待审批进化计划（原因必填，截断 500 字）。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "拒绝进化计划")]
-#[tauri::command]
-pub async fn reject_evolution_plan(
-    state: State<'_, AppState>,
+/// 拒绝一条待审批进化计划 —— 宿主 `reject_evolution_plan` 的 core（#343）。
+pub(crate) async fn reject_evolution_plan_core(
+    db: &axagent_harness::DatabaseConnection,
     history_id: String,
     reason: String,
     reviewer: Option<String>,
 ) -> Result<EvolutionHistoryModel, String> {
-    let db = state.harness.db();
     let reason = reason.trim();
     if reason.is_empty() {
         return Err(internal_err("拒绝原因不能为空"));
@@ -230,14 +228,13 @@ pub async fn reject_evolution_plan(
 /// 做法（全部留痕、不删数据）：新插一条 accepted 行，参数结果复制自回滚目标行；
 /// 当前行置 rejected，reject_reason 指向新行。`load_active_weight_decay_config`
 /// 取「最新 accepted」自然读到旧配置。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "回滚进化版本")]
-#[tauri::command]
-pub async fn rollback_evolution(
-    state: State<'_, AppState>,
+/// 回滚当前生效（最近 accepted）的进化版本到上一已接受版本 —— 宿主
+/// `rollback_evolution` 的 core（#343）。
+pub(crate) async fn rollback_evolution_core(
+    db: &axagent_harness::DatabaseConnection,
     history_id: Option<String>,
     reviewer: Option<String>,
 ) -> Result<EvolutionHistoryModel, String> {
-    let db = state.harness.db();
     let reviewer = reviewer
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())

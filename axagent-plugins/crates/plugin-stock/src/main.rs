@@ -67,7 +67,7 @@ const STOCK_ANALYSIS_SEAM: &str = "stock.analysis";
 /// 自选行情监视列表接缝（本批宿主 `list_watched_quotes` 的取数面）：
 /// 自选列表的权威存储在宿主 `quote_watcher_service`，`list_watched` 只读不设闸。
 const QUOTE_WATCHER_SEAM: &str = "quote.watcher";
-/// 交易引擎接缝（#311）：持仓与交易对比的权威只有宿主持有的 `TradingEngine` 知道。
+/// 交易引擎接缝（#311；#343 五条零新 op 复用同一常量）：持仓与交易对比的权威只有宿主持有的 `TradingEngine` 知道。
 /// 本批只用两个读 op（`get_positions` / `compare_trade`），`execute_trade` 那个写 op 不碰。
 const TRADING_ENGINE_SEAM: &str = "trading.engine";
 // ── #311：四条零新 op 的纯智能体工具迁 T2（宿主同名命令同批退役）──
@@ -257,6 +257,32 @@ const COMMAND_CREATE_WATCHLIST_SCAN_CRON: &str = "stock_create_watchlist_scan_cr
 const COMMAND_WATCH_STOCK_QUOTES: &str = "stock_watch_stock_quotes";
 /// 移除实时行情监控（宿主 `unwatch_stock_quotes`，#342）—— 写语义。
 const COMMAND_UNWATCH_STOCK_QUOTES: &str = "stock_unwatch_stock_quotes";
+/// list_portfolio（宿主同名命令迁 T2，#343）—— 读 op，经 stock.analysis 接缝。
+const COMMAND_LIST_PORTFOLIO: &str = "stock_list_portfolio";
+/// add_portfolio_holding（宿主同名命令迁 T2，#343）—— 写 op，经 stock.analysis 接缝。
+const COMMAND_ADD_PORTFOLIO_HOLDING: &str = "stock_add_portfolio_holding";
+/// remove_portfolio_holding（宿主同名命令迁 T2，#343）—— 写 op，经 stock.analysis 接缝。
+const COMMAND_REMOVE_PORTFOLIO_HOLDING: &str = "stock_remove_portfolio_holding";
+/// get_portfolio_correlations（宿主同名命令迁 T2，#343）—— 读 op，经 stock.analysis 接缝。
+const COMMAND_GET_PORTFOLIO_CORRELATIONS: &str = "stock_get_portfolio_correlations";
+/// toggle_trading_enabled（宿主同名命令迁 T2，#343）—— 写 op，经 stock.analysis 接缝。
+const COMMAND_TOGGLE_TRADING_ENABLED: &str = "stock_toggle_trading_enabled";
+/// import_trades（宿主同名命令迁 T2，#343）—— 写 op，经 stock.analysis 接缝。
+const COMMAND_IMPORT_TRADES: &str = "stock_import_trades";
+/// reject_evolution_plan（宿主同名命令迁 T2，#343）—— 写 op，经 stock.analysis 接缝。
+const COMMAND_REJECT_EVOLUTION_PLAN: &str = "stock_reject_evolution_plan";
+/// rollback_evolution（宿主同名命令迁 T2，#343）—— 写 op，经 stock.analysis 接缝。
+const COMMAND_ROLLBACK_EVOLUTION: &str = "stock_rollback_evolution";
+/// record_trade（宿主同名命令迁 T2，#343）—— 写，零新 op：走既有 trading.engine 接缝。
+const COMMAND_RECORD_TRADE: &str = "stock_record_trade";
+/// list_trades（宿主同名命令迁 T2，#343）—— 读，零新 op：走既有 trading.engine 接缝。
+const COMMAND_LIST_TRADES: &str = "stock_list_trades";
+/// get_trade_positions（宿主同名命令迁 T2，#343）—— 读，零新 op：走既有 trading.engine 接缝。
+const COMMAND_GET_TRADE_POSITIONS: &str = "stock_get_trade_positions";
+/// validate_trade（宿主同名命令迁 T2，#343）—— 读，零新 op：走既有 trading.engine 接缝。
+const COMMAND_VALIDATE_TRADE: &str = "stock_validate_trade";
+/// get_trading_enabled（宿主同名命令迁 T2，#343）—— 读，零新 op：走既有 trading.engine 接缝。
+const COMMAND_GET_TRADING_ENABLED: &str = "stock_get_trading_enabled";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -789,6 +815,147 @@ fn handle_command(
         },
         COMMAND_UNWATCH_STOCK_QUOTES => {
             match unwatch_stock_quotes_fn(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #343：list_portfolio
+        COMMAND_LIST_PORTFOLIO => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_portfolio",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：add_portfolio_holding
+        COMMAND_ADD_PORTFOLIO_HOLDING => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "add_portfolio_holding",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：remove_portfolio_holding
+        COMMAND_REMOVE_PORTFOLIO_HOLDING => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "remove_portfolio_holding",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：get_portfolio_correlations
+        COMMAND_GET_PORTFOLIO_CORRELATIONS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_portfolio_correlations",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：toggle_trading_enabled
+        COMMAND_TOGGLE_TRADING_ENABLED => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "toggle_trading_enabled",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：import_trades
+        COMMAND_IMPORT_TRADES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "import_trades",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：reject_evolution_plan
+        COMMAND_REJECT_EVOLUTION_PLAN => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "reject_evolution_plan",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：rollback_evolution
+        COMMAND_ROLLBACK_EVOLUTION => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "rollback_evolution",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #343：record_trade（零新 op，走 trading.engine 接缝）
+        COMMAND_RECORD_TRADE => {
+            match trading_command(&frame.input, &request.call_chain, peer, "record_trade") {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #343：list_trades（零新 op，走 trading.engine 接缝）
+        COMMAND_LIST_TRADES => {
+            match trading_command(&frame.input, &request.call_chain, peer, "list_trades") {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #343：get_trade_positions（零新 op，走 trading.engine 接缝）
+        COMMAND_GET_TRADE_POSITIONS => {
+            match trading_command(&frame.input, &request.call_chain, peer, "get_trade_positions") {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #343：validate_trade（零新 op，走 trading.engine 接缝）
+        COMMAND_VALIDATE_TRADE => {
+            match trading_command(&frame.input, &request.call_chain, peer, "validate_trade") {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #343：get_trading_enabled（零新 op，走 trading.engine 接缝）
+        COMMAND_GET_TRADING_ENABLED => {
+            match trading_command(&frame.input, &request.call_chain, peer, "get_trading_enabled") {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -2439,6 +2606,57 @@ fn watch_priority_arg(priority: &str) -> &'static str {
 /// 超限**截断不报错**），而 `set_priority` 是无条件 insert ⇒ 集合已满且该码未在监控时，
 /// 原命令会加进去、接缝会静默不加。这里 fail-closed：`applied == 0` 即报错，不假装成功。
 /// 出参保持宿主原命令的 `()`（JSON `null`），不透出 `WatchOutcome`。
+/// #343：`trading.engine` 接缝的五条零新 op 路由（入参 camelCase 平铺 → 接缝 snake_case）。
+///
+/// 语义与宿主原命令逐字对齐：`record_trade` 业务拒绝（`accepted=false`）是**数据**、
+/// 原样回给前端；`get_trading_enabled` 把接缝的 `{enabled}` 解包成裸 bool（宿主原形）。
+fn trading_command(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+    op: &str,
+) -> Result<Value, (String, String)> {
+    let (seam_op, args) = match op {
+        "record_trade" => ("execute_trade", json!({ "request": input.clone() })),
+        "list_trades" => (
+            "get_trades",
+            json!({
+                "stock_code": input.get("stockCode").cloned().unwrap_or(Value::Null),
+                "limit": input.get("limit").cloned().unwrap_or(Value::Null),
+            }),
+        ),
+        "get_trade_positions" => ("get_positions", json!({})),
+        "validate_trade" => ("validate_trade", json!({ "request": input.clone() })),
+        "get_trading_enabled" => ("trading_enabled", json!({})),
+        other => {
+            return Err((
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("未知 trading 命令: {other}"),
+            ));
+        },
+    };
+    let reply =
+        peer.call_seam(TRADING_ENGINE_SEAM, seam_op, args, call_chain.to_vec()).map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("交易引擎接缝（{seam_op}）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => {
+            let value = reply.value.unwrap_or(Value::Null);
+            if op == "get_trading_enabled" {
+                return Ok(value.get("enabled").cloned().unwrap_or(Value::Bool(false)));
+            }
+            Ok(value)
+        },
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| format!("交易引擎接缝（{seam_op}）返回错误但未说明")),
+        )),
+    }
+}
+
 /// #342：加入行情监控 —— 宿主原命令语义逐字保留：`priority` 缺省 `active`、
 /// `bg` 别名 → `Background`、未知串回落 `Active`；数量闸**截断不报错**（宿主
 /// `watch_many` 同口径），出参恒 `null`（不透出 `WatchOutcome`）。
@@ -3772,6 +3990,19 @@ mod tests {
             super::COMMAND_CREATE_WATCHLIST_SCAN_CRON,
             super::COMMAND_WATCH_STOCK_QUOTES,
             super::COMMAND_UNWATCH_STOCK_QUOTES,
+            super::COMMAND_LIST_PORTFOLIO,
+            super::COMMAND_ADD_PORTFOLIO_HOLDING,
+            super::COMMAND_REMOVE_PORTFOLIO_HOLDING,
+            super::COMMAND_GET_PORTFOLIO_CORRELATIONS,
+            super::COMMAND_TOGGLE_TRADING_ENABLED,
+            super::COMMAND_IMPORT_TRADES,
+            super::COMMAND_REJECT_EVOLUTION_PLAN,
+            super::COMMAND_ROLLBACK_EVOLUTION,
+            super::COMMAND_RECORD_TRADE,
+            super::COMMAND_LIST_TRADES,
+            super::COMMAND_GET_TRADE_POSITIONS,
+            super::COMMAND_VALIDATE_TRADE,
+            super::COMMAND_GET_TRADING_ENABLED,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

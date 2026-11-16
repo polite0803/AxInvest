@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // 组件用 antd 的 `App.useApp()` 取 message。这里只替 message —— 包真 `<App>` 反而会让
 // 本文件的渲染产出为空（实测 container 拿到空 div）。message 记下调用参数供断言。
-const { messageErrorMock, isTauriMock } = vi.hoisted(() => ({
+const { messageErrorMock, isTauriMock, invokeMockRef } = vi.hoisted(() => ({
   messageErrorMock: vi.fn(),
   isTauriMock: vi.fn(() => true),
+  invokeMockRef: { fn: vi.fn() },
 }));
 
 vi.mock("antd", async (importOriginal) => {
@@ -28,6 +29,12 @@ vi.mock("react-i18next", () => ({
 }));
 
 const invokeMock = vi.fn();
+invokeMockRef.fn = invokeMock;
+
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (...args: unknown[]) => invokeMockRef.fn(...args),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   isTauri: () => isTauriMock(),
@@ -74,7 +81,7 @@ const settle = async () => {
 async function runImport(container: HTMLElement, importResult: unknown) {
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "parse_trades_csv") { return Promise.resolve([row]); }
-    if (cmd === "import_trades") { return Promise.resolve(importResult); }
+    if (cmd === "stock_import_trades") { return Promise.resolve(importResult); }
     return Promise.resolve(null);
   });
 
@@ -95,7 +102,7 @@ async function runImport(container: HTMLElement, importResult: unknown) {
     confirm?.click();
   });
   await waitFor(() => {
-    expect(invokeMock).toHaveBeenCalledWith("import_trades", expect.anything());
+    expect(invokeMock).toHaveBeenCalledWith("stock_import_trades", expect.anything());
   });
 }
 

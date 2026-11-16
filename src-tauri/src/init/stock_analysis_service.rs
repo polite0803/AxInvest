@@ -1089,6 +1089,149 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Self::to_value("create_watchlist_scan_cron", &job)
     }
 
+    // ── #343 批 B17：组合/交易 6 + 进化审批 2（宿主命令体下沉 commands 层 core）──
+
+    /// 读 op：持仓列表（`list_portfolio`，含实时行情盈亏）。
+    async fn list_portfolio(&self, _input: Value) -> Result<Value> {
+        let rows =
+            crate::commands::stock_analysis::list_portfolio_core(&self.db, &self.astock_client)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_portfolio", &rows)
+    }
+
+    /// 写 op：添加持仓（`add_portfolio_holding`）。
+    async fn add_portfolio_holding(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AddHoldingRequest {
+            stock_code: String,
+            stock_name: String,
+            shares: f64,
+            avg_cost: f64,
+        }
+        let req = Self::parse::<AddHoldingRequest>(
+            "add_portfolio_holding",
+            "{stockCode, stockName, shares, avgCost}",
+            input,
+        )?;
+        let model = crate::commands::stock_analysis::add_portfolio_holding_core(
+            &self.db,
+            req.stock_code,
+            req.stock_name,
+            req.shares,
+            req.avg_cost,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("add_portfolio_holding", &model)
+    }
+
+    /// 写 op：移除持仓（`remove_portfolio_holding`）。
+    async fn remove_portfolio_holding(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct IdRequest {
+            id: String,
+        }
+        let req = Self::parse::<IdRequest>("remove_portfolio_holding", "{id}", input)?;
+        crate::commands::stock_analysis::remove_portfolio_holding_core(&self.db, req.id)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：组合相关性快照（`get_portfolio_correlations`）。
+    async fn get_portfolio_correlations(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct CorrRequest {
+            as_of_date: Option<String>,
+        }
+        let req = Self::parse::<CorrRequest>("get_portfolio_correlations", "{asOfDate?}", input)?;
+        let rows = crate::commands::stock_analysis::get_portfolio_correlations_core(
+            &self.db,
+            req.as_of_date,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_portfolio_correlations", &rows)
+    }
+
+    /// 写 op：交易功能开关（`toggle_trading_enabled`）。
+    async fn toggle_trading_enabled(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ToggleTradingRequest {
+            enabled: bool,
+        }
+        let req =
+            Self::parse::<ToggleTradingRequest>("toggle_trading_enabled", "{enabled}", input)?;
+        crate::commands::stock_analysis::toggle_trading_enabled_core(&self.db, req.enabled)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：批量导入交易记录（`import_trades`，含交易开关闸）。
+    async fn import_trades(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ImportTradesRequest {
+            file_path: String,
+        }
+        let req = Self::parse::<ImportTradesRequest>("import_trades", "{filePath}", input)?;
+        let summary = crate::commands::stock_analysis::import_trades_core(&self.db, req.file_path)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("import_trades", &summary)
+    }
+
+    /// 写 op：拒绝进化计划（`reject_evolution_plan`）。
+    async fn reject_evolution_plan(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RejectPlanRequest {
+            history_id: String,
+            reason: String,
+            reviewer: Option<String>,
+        }
+        let req = Self::parse::<RejectPlanRequest>(
+            "reject_evolution_plan",
+            "{historyId, reason, reviewer?}",
+            input,
+        )?;
+        let row = crate::commands::stock_evolution_approval::reject_evolution_plan_core(
+            &self.db,
+            req.history_id,
+            req.reason,
+            req.reviewer,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("reject_evolution_plan", &row)
+    }
+
+    /// 写 op：回滚进化版本（`rollback_evolution`）。
+    async fn rollback_evolution(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct RollbackRequest {
+            history_id: Option<String>,
+            reviewer: Option<String>,
+        }
+        let req =
+            Self::parse::<RollbackRequest>("rollback_evolution", "{historyId?, reviewer?}", input)?;
+        let row = crate::commands::stock_evolution_approval::rollback_evolution_core(
+            &self.db,
+            req.history_id,
+            req.reviewer,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("rollback_evolution", &row)
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

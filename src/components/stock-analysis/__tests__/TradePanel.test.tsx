@@ -40,7 +40,7 @@ const invokeMock = vi.mocked(invoke);
 function stubInvoke(tradingEnabled: boolean) {
   invokeMock.mockImplementation(
     ((cmd: string) => {
-      if (cmd === "get_trading_enabled") { return Promise.resolve(tradingEnabled); }
+      if (cmd === "stock_get_trading_enabled") { return Promise.resolve(tradingEnabled); }
       return Promise.resolve([]);
     }) as typeof invoke,
   );
@@ -102,7 +102,7 @@ describe("TradePanel", () => {
     stubInvoke(false);
     const { container } = render(<TradePanel />);
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("get_trading_enabled");
+      expect(invokeMock).toHaveBeenCalledWith("stock_get_trading_enabled", expect.anything());
     });
     expect(container.querySelector(".ant-switch-checked")).toBeNull();
   });
@@ -111,7 +111,7 @@ describe("TradePanel", () => {
   it("读取失败时显示提示，而不是静默留空", async () => {
     invokeMock.mockImplementation(
       ((cmd: string) => {
-        if (cmd === "get_trading_enabled") { return Promise.resolve(true); }
+        if (cmd === "stock_get_trading_enabled") { return Promise.resolve(true); }
         return Promise.reject(new Error("boom"));
       }) as typeof invoke,
     );
@@ -126,7 +126,7 @@ describe("TradePanel", () => {
     stubInvoke(true);
     const { container } = render(<TradePanel />);
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("get_trading_enabled");
+      expect(invokeMock).toHaveBeenCalledWith("stock_get_trading_enabled", expect.anything());
     });
     await waitFor(() => {
       expect(container.querySelector(".ant-switch-checked")).toBeTruthy();
@@ -139,8 +139,8 @@ describe("TradePanel", () => {
   it("交易列表带成交日期列", async () => {
     invokeMock.mockImplementation(
       ((cmd: string) => {
-        if (cmd === "get_trading_enabled") { return Promise.resolve(true); }
-        if (cmd === "list_trades") {
+        if (cmd === "stock_get_trading_enabled") { return Promise.resolve(true); }
+        if (cmd === "stock_list_trades") {
           return Promise.resolve([{
             id: "t1",
             stockCode: "600519",

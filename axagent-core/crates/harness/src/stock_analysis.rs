@@ -833,6 +833,13 @@ pub trait StockAnalysisProvider: Send + Sync {
         Err(AxAgentError::Provider("compute_what_if 未实现（该提供者不支持此数据面）".into()))
     }
 
+    /// `list_time_travel_batches`（宿主命令迁 T2，#347）—— 读 op。
+    async fn list_time_travel_batches(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "list_time_travel_batches 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -1510,6 +1517,10 @@ mod tests {
             ),
             ("list_stock_tools", futures::executor::block_on(stub.list_stock_tools(Value::Null))),
             ("compute_what_if", futures::executor::block_on(stub.compute_what_if(Value::Null))),
+            (
+                "list_time_travel_batches",
+                futures::executor::block_on(stub.list_time_travel_batches(Value::Null)),
+            ),
             // #344 批 B18：29 条（默认实现必须显式报错）。
             (
                 "get_asof_degradation_count",

@@ -7550,6 +7550,9 @@ async function executeCommand<T>(
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
     // #342：watchlist 5 + cron 9。浏览器模式无真实库/调度器：列表回诚实空态，
     // 写类命令返回 undefined（消费端本就不取返回值）；watch/unwatch 改本地假集合。
+    // #347：时间旅行批次历史（浏览器模式诚实空态）。
+    case "stock_list_time_travel_batches":
+      return [] as unknown as T;
     // #346：权重/参数台账/估值/工具/What-If（浏览器模式诚实空态）。
     case "stock_get_reco_strategy_weights":
       return {} as unknown as T;

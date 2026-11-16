@@ -369,6 +369,8 @@ const COMMAND_GET_RECO_BOARD_SCOPE: &str = "stock_get_reco_board_scope";
 const COMMAND_SET_RECO_BOARD_SCOPE: &str = "stock_set_reco_board_scope";
 /// `get_reco_pool_batch`（宿主同名，#345）—— 读 op。
 const COMMAND_GET_RECO_POOL_BATCH: &str = "stock_get_reco_pool_batch";
+/// `list_time_travel_batches`（宿主同名，#347）—— 读 op。
+const COMMAND_LIST_TIME_TRAVEL_BATCHES: &str = "stock_list_time_travel_batches";
 /// `get_reco_strategy_weights`（宿主同名，#346）—— 读 op。
 const COMMAND_GET_RECO_STRATEGY_WEIGHTS: &str = "stock_get_reco_strategy_weights";
 /// `manual_recalc_strategy_weights`（宿主同名，#346）—— 写 op。
@@ -928,6 +930,18 @@ fn handle_command(
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // #347：list_time_travel_batches
+        COMMAND_LIST_TIME_TRAVEL_BATCHES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_time_travel_batches",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // #346：get_reco_strategy_weights
         COMMAND_GET_RECO_STRATEGY_WEIGHTS => match call_analysis_seam(
@@ -4803,6 +4817,7 @@ mod tests {
             super::COMMAND_SET_RECO_BOARD_SCOPE,
             super::COMMAND_GET_RECO_POOL_BATCH,
             super::COMMAND_GET_RECO_STRATEGY_WEIGHTS,
+            super::COMMAND_LIST_TIME_TRAVEL_BATCHES,
             super::COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS,
             super::COMMAND_RECALC_RECO_LOOP_WEIGHTS,
             super::COMMAND_APPLY_PARAM_SUGGESTIONS,

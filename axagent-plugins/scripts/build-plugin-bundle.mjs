@@ -889,6 +889,22 @@ function stockManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        // #347：宿主 `list_time_travel_batches` 的接缝面。
+        name: "stock_list_time_travel_batches",
+        description: "时间旅行批次历史（摘要列表，经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_time_travel_batches",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "缺省 50，上限 200" },
+            statusFilter: { type: "string" },
+            asOf: { type: "string", description: "as-of 代际过滤" },
+          },
+        },
+      },
+      {
         // #346：宿主 `get_reco_strategy_weights` 的接缝面。
         name: "stock_get_reco_strategy_weights",
         description: "荐股策略权重（投影评分链实际消费的 served_vars）（经宿主 stock.analysis 接缝）",

@@ -771,17 +771,16 @@ pub async fn get_time_travel_batch(
 
 /// 查询批次复盘历史（任务中心用）：按创建时间倒序，默认 50 条；
 /// 摘要不含 analyses / horizons 明细，明细走 [`get_time_travel_batch`]。
-#[agent_command(domain = time_travel, safety = Safe, call_mode = StateInput, description = "查询时间旅行批次历史")]
-#[tauri::command]
-pub async fn list_time_travel_batches(
-    state: State<'_, AppState>,
+/// 宿主 `list_time_travel_batches` 的 core（#347）。
+///
+/// ⚠ 纯读：`ensure_stale_reaped` 不跟随进接缝读 op（写库副作用留在宿主
+/// `get_time_travel_batch` / `run_time_travel_batch` 入口）。
+pub async fn list_time_travel_batches_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: Option<u64>,
     status_filter: Option<String>,
     as_of: Option<String>,
 ) -> Result<Vec<BatchRunState>, String> {
-    let db = state.harness.db();
-    ensure_stale_reaped(db).await;
-
     // 查询下沉 dao（分层护栏：命令层不得直连 sea_orm / entity）
     let rows = axagent_dao::repo::time_travel_batch_runs::list_recent_batch_runs(
         db,

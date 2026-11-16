@@ -1871,6 +1871,33 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Ok(v.map(|b| serde_json::to_value(b).unwrap_or(Value::Null)).unwrap_or(Value::Null))
     }
 
+    /// 读 op：时间旅行批次历史（宿主 `list_time_travel_batches` 的接缝面，#347）。
+    ///
+    /// 入参 `{limit?, statusFilter?, asOf?}`；出参 = `BatchRunState[]`（摘要，不含明细）。
+    async fn list_time_travel_batches(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ListRequest {
+            limit: Option<u64>,
+            status_filter: Option<String>,
+            as_of: Option<String>,
+        }
+        let req = Self::parse::<ListRequest>(
+            "list_time_travel_batches",
+            "{limit?, statusFilter?, asOf?}",
+            input,
+        )?;
+        let rows = crate::commands::time_travel_batch::list_time_travel_batches_core(
+            &self.db,
+            req.limit,
+            req.status_filter,
+            req.as_of,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_time_travel_batches", &rows)
+    }
+
     // ── #346 批 B20：11 条（权重/参数台账/估值/工具/What-If）──
 
     /// 读 op：荐股策略权重（`get_reco_strategy_weights`）。

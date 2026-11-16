@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import i18n from "@/i18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { TimeTravelBatchSummary } from "@/types";
 import { createElement } from "react";
 import { BatchRunDetailDrawer } from "../jobs/BatchRunDetailDrawer";
@@ -19,7 +19,7 @@ export const timeTravelAdapter: TaskSourceAdapter = {
   color: "purple",
 
   async list(): Promise<UnifiedRun[]> {
-    const rows = await invoke<TimeTravelBatchSummary[]>("list_time_travel_batches", {
+    const rows = await invokePluginCommand<TimeTravelBatchSummary[]>("stock_list_time_travel_batches", {
       limit: 50,
     });
     if (!Array.isArray(rows)) {

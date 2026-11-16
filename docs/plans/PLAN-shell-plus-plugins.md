@@ -9884,3 +9884,31 @@ harness trait `latest_analyses_for_stocks`（默认实现报错 + `default_impls
 **裁定陈述**：8 条全部留宿主，**不留待办**。后果两面都是设计内的：智能体面恒 `Block`（LLM 不可调用删除动作）；UI 面直接 `invoke` 照常可用（安全闸只架在智能体命令桥，不拦 IPC）。与 `delete_pool_scan_cron` / `delete_trend_screening_cron` 的差别：那两条有插件同名命令（清单已对齐 `danger-full-access` 关旁路），这 8 条无同名 ⇒ 本批**零清单改动**。
 
 **计数影响**：零（不删命令）⇒ `commandTotal` 1290 / 边界 183/18 / 审计 180/15 全部不动；待迁余量按本裁定再销 8 条（见 §0.12 账）。
+
+## §198 `quant_backtest_run` 预算取证（2026-11-15，PG 现网直查，结论：维持留宿主）
+
+**取证入口**：`node scripts/pg-connect.mjs sql "<SQL>"`（口令从 `~/.axagent` 解密，明文不入 argv/源码）。本机 PG = `192.168.85.1:5432/axinvest`。
+
+**取证读数（2026-11-15 08:29 时点）**：
+- `SELECT status, count(*) … FROM quant_runs GROUP BY status` ⇒ **0 行**（`finished_at IS NOT NULL` 亦 0）。
+- `SELECT count(*) FROM quant_strategies` ⇒ **0 行**（连可执行策略都没有）。
+- 旧 SQLite 快照 `~/.axagent/axagent.db`（2026-11-06 5 MB）同查 `quant_runs` ⇒ **0 行**。
+
+**裁定**：**维持留宿主，不迁、不加覆盖表**。判据两条：
+1. `SEAM_OP_TIMEOUT_OVERRIDES` 收录判据是「逐接缝过证据（盘上实测或有出处的宿主预算）」—— 现网与快照两处 store 的完成记录都是 0 条 ⇒ **实测分布不存在**，任何取值都是猜；一个合成样本也不构成分布。
+2. 命令帧 30s / 接缝 15s 两预算不变，直迁 = 长回测必被放弃（§194.2 已论证）。
+
+**解锁条件（可执行）**：你先在应用里真实跑 **≥20 条**回测（不同日期跨度/是否 Walk-Forward 混合），我再按下面 SQL 取分布，届时在 §194.2 两条出路里拍板（① 若 p99 有界 ⇒ 写覆盖表 + 放宽命令帧预算；② 若长尾无界 ⇒ 改异步触发）：
+```sql
+SELECT count(*) n,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY finished_at-started_at)) p50,
+       round(percentile_cont(0.9) WITHIN GROUP (ORDER BY finished_at-started_at)) p90,
+       round(percentile_cont(0.99) WITHIN GROUP (ORDER BY finished_at-started_at)) p99,
+       max(finished_at-started_at) max_s
+FROM quant_runs WHERE finished_at IS NOT NULL AND finished_at > started_at;
+```
+
+**附带基线（供 #338 重启核对）**：`mover_recall_analysis_batches` 现网 = completed 6 / partial 5 / interrupted 11 / **running 1**（那条 running 的 `created_at_ms=1794371483988`，约 5 天前进程退出遗留）。启动钩子 `start_mover_recall_batch_reclaim` 生效后预期：running 0、interrupted 12；核对 SQL：
+```sql
+SELECT status, count(*) FROM mover_recall_analysis_batches GROUP BY status;
+```

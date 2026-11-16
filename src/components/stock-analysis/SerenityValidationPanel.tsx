@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 
 /**
@@ -53,7 +53,7 @@ export function SerenityValidationPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke<SerenityValidationSummary>("serenity_validation_summary", {
+      const data = await invokePluginCommand<SerenityValidationSummary>("stock_serenity_validation_summary", {
         generation,
       });
       setSummary(data);

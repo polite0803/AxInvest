@@ -772,92 +772,9 @@ pub fn clear_asof_degradation_log() {
     as_of::reset_global_degradation_log();
 }
 
-/// 获取实时行情
-///
-/// spec §4.1: `as_of_date` 非空时,所有 vendor 调用以"截至该日"语义截断,
-/// 并在 task_local 中标记 `AsOfContext`,让上层 LLM / 缓存 / 校验能感知。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取实时行情")]
-#[tauri::command]
-pub async fn get_stock_quote(
-    state: State<'_, AppState>,
-    stock_code: String,
-    as_of_date: Option<String>,
-) -> Result<axagent_astock_data::StockQuote, String> {
-    // 修复 L-12: 参数非空校验，避免空代码触发无意义的 vendor 请求
-    if stock_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("stock_code 不能为空").into());
-    }
-    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref()).map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("as_of_date 解析失败: {e}"))
-    })?;
-    axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
-        axagent_astock_data::as_of::with_degradation_log(async {
-            state.stock().astock_client.get_quote(&stock_code).await.map_err(|e| {
-                ErrorResponse::new(wf_err::INTERNAL)
-                    .with_detail(format!("获取实时行情失败: {e}"))
-                    .to_string()
-            })
-        })
-        .await
-    })
-    .await
-}
-
-/// 获取K线数据
-///
-/// spec §4.1: K 线在 as-of 模式下保留 date <= as_of_date 的行(live 模式原样返回)。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取K线数据")]
-#[tauri::command]
-pub async fn get_stock_kline(
-    state: State<'_, AppState>,
-    stock_code: String,
-    period: String,
-    limit: u32,
-    as_of_date: Option<String>,
-    adj: Option<String>,
-) -> Result<Vec<axagent_astock_data::KLine>, String> {
-    // 修复 L-12: 参数非空校验，避免空值触发无意义的 vendor 请求
-    if stock_code.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("stock_code 不能为空").into());
-    }
-    if period.trim().is_empty() {
-        return Err(ErrorResponse::new(wf_err::INTERNAL).with_detail("period 不能为空").into());
-    }
-    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref()).map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("as_of_date 解析失败: {e}"))
-    })?;
-    let adj_type = match adj.as_deref() {
-        None | Some("") | Some("auto") => None,
-        Some("none") | Some("forward") | Some("backward") => {
-            let parsed: axagent_astock_data::types::AdjType =
-                serde_json::from_value(serde_json::Value::String(adj.unwrap())).map_err(|e| {
-                    ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("adj 解析失败: {e}"))
-                })?;
-            Some(parsed)
-        },
-        Some(other) => {
-            return Err(ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("adj 必须是 none/forward/backward/auto, 收到: {other}"))
-                .into());
-        },
-    };
-    axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
-        axagent_astock_data::as_of::with_degradation_log(async {
-            state
-                .stock()
-                .astock_client
-                .get_klines_with_adj(&stock_code, &period, limit, adj_type)
-                .await
-                .map_err(|e| {
-                    ErrorResponse::new(wf_err::INTERNAL)
-                        .with_detail(format!("获取 K 线数据失败: {e}"))
-                        .to_string()
-                })
-        })
-        .await
-    })
-    .await
-}
+// `get_stock_quote` / `get_stock_kline` 已迁插件（`stock_get_quote` / `stock_get_kline`，
+// 路由表承接早在 #327 之前即存在，#345 只退役宿主双声明）。
+// `get_stock_kline` 已迁插件（`stock_get_kline`，#345）。
 
 // ── Phase 2: TradingAgents-CN 优势借鉴 — 批量 + 基本面报告 + 缓存统计 ──
 // batch_get_quotes / batch_get_financials 已迁 plugin-stock（T2 命令
@@ -3844,11 +3761,12 @@ pub(crate) async fn refresh_user_seed_db(db: &DatabaseConnection) -> usize {
 /// 与 `recommender::boards::VALID_SCOPES` 逐字一致（后端写入前按它校验）。
 pub const RECO_BOARD_SCOPE_KEY: &str = "reco_board_scope";
 
-/// 读取扫描板块范围（UI 下拉的持久化值）。缺失或非法一律回落 `auto`。
-#[tauri::command]
-pub async fn get_reco_board_scope(state: State<'_, AppState>) -> Result<String, String> {
+/// 读取扫描板块范围 —— core（#345）。
+pub async fn get_reco_board_scope_core(
+    db: &axagent_harness::DatabaseConnection,
+) -> Result<String, String> {
     use axagent_analysis_engine::recommender::boards::VALID_SCOPES;
-    let raw = axagent_dao::repo::settings::get_setting(state.harness.db(), RECO_BOARD_SCOPE_KEY)
+    let raw = axagent_dao::repo::settings::get_setting(db, RECO_BOARD_SCOPE_KEY)
         .await
         .map_err(|e| format!("读取扫描板块设置失败: {e}"))?;
     Ok(raw.filter(|s| VALID_SCOPES.contains(&s.as_str())).unwrap_or_else(|| "auto".to_string()))
@@ -3856,8 +3774,10 @@ pub async fn get_reco_board_scope(state: State<'_, AppState>) -> Result<String, 
 
 /// 保存扫描板块范围。非法值**不静默放大成 all**（一次手误会把请求量放大 4 倍）：
 /// 回落 `auto` 并留痕。UI 只会发合法值，因此这里不向用户抛业务错误。
-#[tauri::command]
-pub async fn set_reco_board_scope(state: State<'_, AppState>, scope: String) -> Result<(), String> {
+pub async fn set_reco_board_scope_core(
+    db: &axagent_harness::DatabaseConnection,
+    scope: String,
+) -> Result<(), String> {
     use axagent_analysis_engine::recommender::boards::VALID_SCOPES;
     let normalized = if VALID_SCOPES.contains(&scope.as_str()) {
         scope
@@ -3865,7 +3785,7 @@ pub async fn set_reco_board_scope(state: State<'_, AppState>, scope: String) -> 
         tracing::warn!("[reco] 非法扫描板块范围 {scope:?}，回落 auto");
         "auto".to_string()
     };
-    axagent_dao::repo::settings::set_setting(state.harness.db(), RECO_BOARD_SCOPE_KEY, &normalized)
+    axagent_dao::repo::settings::set_setting(db, RECO_BOARD_SCOPE_KEY, &normalized)
         .await
         .map_err(|e| format!("保存扫描板块设置失败: {e}"))
 }
@@ -3897,24 +3817,24 @@ pub struct RecoPoolBatchInfo {
 ///
 /// 返回 `None` = 该链还没有实盘批次留痕 —— 与「有批次但 `hasSnapshot=false`（未留痕）」
 /// 「`stockCount=0`（池真的空）」是三种不同的缺席，面板必须各占一句（同 0-C 裁定）。
-#[tauri::command]
-pub async fn get_reco_pool_batch(
-    state: State<'_, AppState>,
-) -> Result<Option<RecoPoolBatchInfo>, ErrorResponse> {
+pub async fn get_reco_pool_batch_core(
+    db: &axagent_harness::DatabaseConnection,
+) -> Result<Option<RecoPoolBatchInfo>, String> {
     let chain = axagent_analysis_engine::mover_recall::RecoChain::Reco.as_str();
-    let row = axagent_dao::repo::reco_pool::latest_live_pool_batch(state.harness.db(), chain)
+    let row = axagent_dao::repo::reco_pool::latest_live_pool_batch(db, chain)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取候选池批次留痕失败: {e}"))
-        })?;
-    Ok(row.map(|r| RecoPoolBatchInfo {
-        generated_at: r.generated_at,
-        period: r.period,
-        stock_count: r.stock_count,
-        degraded: r.degraded,
-        purpose: r.purpose,
-        has_snapshot: r.has_snapshot,
-    }))
+        })?
+        .map(|r| RecoPoolBatchInfo {
+            generated_at: r.generated_at,
+            period: r.period,
+            stock_count: r.stock_count,
+            degraded: r.degraded,
+            purpose: r.purpose,
+            has_snapshot: r.has_snapshot,
+        });
+    Ok(row)
 }
 
 /// 当日涨幅榜来源（第五来源，2026-10-20）：从 `market_daily_close` 取该交易日涨幅前 N 只。
@@ -4238,10 +4158,11 @@ pub const MOVER_REFLOW_MERGE_OFF: &str = "off";
 /// 打开值。
 pub const MOVER_REFLOW_MERGE_ON: &str = "on";
 
-/// 读回灌并入开关（缺省/读不到 ⇒ `off`）。
-#[tauri::command]
-pub async fn get_mover_reflow_merge(state: State<'_, AppState>) -> Result<String, String> {
-    let v = axagent_dao::repo::settings::get_setting(state.harness.db(), MOVER_REFLOW_MERGE_KEY)
+/// 读回灌并入开关（缺省/读不到 ⇒ `off`）—— core（#345）。
+pub async fn get_mover_reflow_merge_core(
+    db: &axagent_harness::DatabaseConnection,
+) -> Result<String, String> {
+    let v = axagent_dao::repo::settings::get_setting(db, MOVER_REFLOW_MERGE_KEY)
         .await
         .map_err(|e| format!("读回灌开关失败: {e}"))?
         .unwrap_or_else(|| MOVER_REFLOW_MERGE_OFF.to_string());
@@ -4253,10 +4174,9 @@ pub async fn get_mover_reflow_merge(state: State<'_, AppState>) -> Result<String
     .to_string())
 }
 
-/// 写回灌并入开关（只接受 `on` / `off`，其它值显式拒绝 —— 不静默折成 off）。
-#[tauri::command]
-pub async fn set_mover_reflow_merge(
-    state: State<'_, AppState>,
+/// 写回灌并入开关 —— core（#345）。
+pub async fn set_mover_reflow_merge_core(
+    db: &axagent_harness::DatabaseConnection,
     value: String,
 ) -> Result<String, String> {
     let v = value.trim().to_ascii_lowercase();
@@ -4266,7 +4186,7 @@ pub async fn set_mover_reflow_merge(
             format!("回灌开关只接受 on/off，收到 {value:?}"),
         ));
     }
-    axagent_dao::repo::settings::set_setting(state.harness.db(), MOVER_REFLOW_MERGE_KEY, &v)
+    axagent_dao::repo::settings::set_setting(db, MOVER_REFLOW_MERGE_KEY, &v)
         .await
         .map_err(|e| format!("写回灌开关失败: {e}"))?;
     Ok(v)
@@ -4279,11 +4199,10 @@ pub async fn set_mover_reflow_merge(
 /// - `layers` = 机械归因层计数；
 /// - `summary` = 面板六桶 + byStyle + 失败清单；
 /// - 三者全空 ⇒ 返回 `None`（该轮还没跑过 as-of 回放），而不是空对象。
-#[tauri::command]
-pub async fn get_mover_asof_summary(
-    state: State<'_, AppState>,
+pub async fn get_mover_asof_summary_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<Option<serde_json::Value>, String> {
-    let row = axagent_dao::repo::mover_recall_runs::latest_reco_run_asof(state.harness.db())
+    let row = axagent_dao::repo::mover_recall_runs::latest_reco_run_asof(db)
         .await
         .map_err(|e| format!("读最新漏检轮次失败: {e}"))?;
     let Some((run_id, date_to, layers_raw, summary_raw)) = row else { return Ok(None) };
@@ -4297,7 +4216,7 @@ pub async fn get_mover_asof_summary(
     };
     // C-5 后半：最近一次闭环重算的逐格权重变化（只带 |Δ|≥1% 的格，最多 6 条）。
     let weight_changes = axagent_analysis_engine::evolution_drift::load_recent_weight_changes(
-        state.harness.db(),
+        db,
         axagent_analysis_engine::recommender::reco_loop::RECO_LOOP_TRIGGER,
         0.01,
         6,
@@ -6275,13 +6194,10 @@ pub async fn calibrate_portfolio_mgr_params(
 } // ── R1 复盘→进化：EvolutionDriftPanel 命令 ──
 
 /// 查询进化漂移仪表盘（前端 EvolutionDriftPanel 主页用）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询进化漂移仪表盘")]
-#[tauri::command]
-pub async fn get_evolution_drift_dashboard(
-    state: State<'_, AppState>,
+pub async fn get_evolution_drift_dashboard_core(
+    db: &axagent_harness::DatabaseConnection,
     as_of_date: Option<String>,
 ) -> Result<axagent_analysis_engine::evolution_drift::EvolutionDriftDashboard, String> {
-    let db = state.harness.db();
     axagent_analysis_engine::evolution_drift::get_dashboard(db, as_of_date.as_deref()).await
 }
 
@@ -6303,16 +6219,13 @@ pub(crate) async fn evolution_drift_timeline_core(
 
 /// 查询进化闭环留痕（`stock_evolution_history`）—— 供前端事后回看某次进化
 /// "为何触发、改了啥、回测概要"。按创建时间倒序返回。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询进化历史")]
-#[tauri::command]
-pub async fn get_evolution_history(
-    state: State<'_, AppState>,
+pub async fn get_evolution_history_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: Option<u32>,
 ) -> Result<Vec<axagent_entities::stock_evolution_history::Model>, String> {
     use axagent_entities::stock_evolution_history;
     use sea_orm::{EntityTrait, QueryOrder};
 
-    let db = state.harness.db();
     let rows = stock_evolution_history::Entity::find()
         .order_by_desc(stock_evolution_history::Column::CreatedAt)
         .limit(limit.unwrap_or(50) as u64)
@@ -6481,16 +6394,7 @@ pub(crate) fn parse_vlm_portfolio_screenshot_core(
     axagent_analysis_engine::vlm_import::parse_vlm_output(raw_vlm_output)
 }
 
-/// 解析 CSV 交易记录文件（不写入数据库，仅预览）
-///
-/// 支持 通达信/东方财富/通用 CSV 格式，自动识别中文列名。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "解析CSV交易记录")]
-#[tauri::command]
-pub fn parse_trades_csv(
-    file_path: String,
-) -> Result<Vec<axagent_analysis_engine::trade_import::ImportRow>, String> {
-    axagent_analysis_engine::trade_import::parse_csv(&file_path)
-}
+// `parse_trades_csv` 已迁插件（`stock_parse_trades_csv`，#345）—— service 直调引擎纯函数。
 
 /// 批量导入交易记录到数据库 —— 宿主 `import_trades` 的 core（#343）。
 ///
@@ -6827,13 +6731,10 @@ pub async fn list_stock_tools() -> Result<Vec<String>, String> {
 }
 
 /// 演化漂移重算（EvolutionDriftPanel 重算按钮）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "演化漂移重算")]
-#[tauri::command]
-pub async fn stock_evolution_recalc(
-    state: State<'_, AppState>,
+pub async fn stock_evolution_recalc_core(
+    db: &axagent_harness::DatabaseConnection,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
     let (written, new_weights) = axagent_analysis_engine::evolution_drift::recalc_and_persist(
         db,
         "manual",

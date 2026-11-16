@@ -1676,6 +1676,201 @@ impl StockAnalysisProvider for HostStockAnalysis {
             .map_err(AxAgentError::Provider)
     }
 
+    // ── #345 批 B19：16 条（2 零新 op 之外 14 条新 op）──
+
+    /// 读 op：解析 CSV 交易记录（`parse_trades_csv`，纯函数）。
+    async fn parse_trades_csv(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ParseCsvRequest {
+            file_path: String,
+        }
+        let req = Self::parse::<ParseCsvRequest>("parse_trades_csv", "{filePath}", input)?;
+        let rows = axagent_analysis_engine::trade_import::parse_csv(&req.file_path)
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("parse_trades_csv", &rows)
+    }
+
+    /// 写 op：通用节点进化（`evolve_node_command`）。
+    async fn evolve_node_command(&self, input: Value) -> Result<Value> {
+        let req = Self::parse::<crate::commands::analyst_evolution::NodeEvolveRequest>(
+            "evolve_node_command",
+            "NodeEvolveRequest（{nodeType, nodeId}，camelCase）",
+            input,
+        )?;
+        let node_type = crate::commands::analyst_evolution::parse_node_type(&req.node_type);
+        let status = axagent_analysis_engine::evolve_node(&self.db, &node_type, &req.node_id)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("evolve_node_command", &status)
+    }
+
+    /// 写 op：保存节点反馈（`save_node_feedback`）。
+    async fn save_node_feedback(&self, input: Value) -> Result<Value> {
+        let req = Self::parse::<crate::commands::analyst_feedback::SaveNodeFeedbackRequest>(
+            "save_node_feedback",
+            "SaveNodeFeedbackRequest（camelCase）",
+            input,
+        )?;
+        let id = crate::commands::analyst_feedback::save_node_feedback_core(&self.db, req)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("stock.analysis::save_node_feedback 落库失败: {e}"))
+            })?;
+        Ok(Value::String(id))
+    }
+
+    /// 读 op：智选后验摘要（`serenity_validation_summary`）。
+    async fn serenity_validation_summary(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct GenRequest {
+            generation: Option<String>,
+        }
+        let req = Self::parse::<GenRequest>("serenity_validation_summary", "{generation?}", input)?;
+        let summary = crate::commands::backtest_validation::serenity_validation_summary_core(
+            &self.db,
+            req.generation,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("serenity_validation_summary", &summary)
+    }
+
+    /// 写 op：创建决策回测定时任务（`create_decision_backtest_cron`）。
+    async fn create_decision_backtest_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateDcCronRequest {
+            cron_expression: Option<String>,
+            t_plus_n_list: Option<Vec<i32>>,
+            max_picks: Option<u32>,
+            period_filter: Option<String>,
+            enabled: Option<bool>,
+        }
+        let req = Self::parse::<CreateDcCronRequest>(
+            "create_decision_backtest_cron",
+            "{cronExpression?, tPlusNList?, maxPicks?, periodFilter?, enabled?}",
+            input,
+        )?;
+        let job = crate::commands::backtest_validation::create_decision_backtest_cron_core(
+            &self.cron_job_store,
+            req.cron_expression,
+            req.t_plus_n_list,
+            req.max_picks,
+            req.period_filter,
+            req.enabled,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("create_decision_backtest_cron", &job)
+    }
+
+    /// 读 op：进化漂移仪表盘（`get_evolution_drift_dashboard`）。
+    async fn get_evolution_drift_dashboard(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct AsOfRequest {
+            as_of_date: Option<String>,
+        }
+        let req =
+            Self::parse::<AsOfRequest>("get_evolution_drift_dashboard", "{asOfDate?}", input)?;
+        let d = crate::commands::stock_analysis::get_evolution_drift_dashboard_core(
+            &self.db,
+            req.as_of_date,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_evolution_drift_dashboard", &d)
+    }
+
+    /// 读 op：进化历史（`get_evolution_history`）。
+    async fn get_evolution_history(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct LimitRequest {
+            limit: Option<u32>,
+        }
+        let req = Self::parse::<LimitRequest>("get_evolution_history", "{limit?}", input)?;
+        let rows = crate::commands::stock_analysis::get_evolution_history_core(&self.db, req.limit)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_evolution_history", &rows)
+    }
+
+    /// 写 op：演化漂移重算（`stock_evolution_recalc`）。
+    async fn stock_evolution_recalc(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct AsOfRequest {
+            as_of_date: Option<String>,
+        }
+        let req = Self::parse::<AsOfRequest>("stock_evolution_recalc", "{asOfDate?}", input)?;
+        crate::commands::stock_analysis::stock_evolution_recalc_core(&self.db, req.as_of_date)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 读 op：回灌并入开关（`get_mover_reflow_merge`）。
+    async fn get_mover_reflow_merge(&self, _input: Value) -> Result<Value> {
+        let v = crate::commands::stock_analysis::get_mover_reflow_merge_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::String(v))
+    }
+
+    /// 写 op：回灌并入开关（`set_mover_reflow_merge`）。
+    async fn set_mover_reflow_merge(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct MergeRequest {
+            value: String,
+        }
+        let req = Self::parse::<MergeRequest>("set_mover_reflow_merge", "{value}", input)?;
+        let v = crate::commands::stock_analysis::set_mover_reflow_merge_core(&self.db, req.value)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::String(v))
+    }
+
+    /// 读 op：最新一轮荐股链 as-of 摘要（`get_mover_asof_summary`）。
+    async fn get_mover_asof_summary(&self, _input: Value) -> Result<Value> {
+        let v = crate::commands::stock_analysis::get_mover_asof_summary_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(v.unwrap_or(Value::Null))
+    }
+
+    /// 读 op：扫描板块范围（`get_reco_board_scope`）。
+    async fn get_reco_board_scope(&self, _input: Value) -> Result<Value> {
+        let v = crate::commands::stock_analysis::get_reco_board_scope_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::String(v))
+    }
+
+    /// 写 op：保存扫描板块范围（`set_reco_board_scope`）。
+    async fn set_reco_board_scope(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ScopeRequest {
+            scope: String,
+        }
+        let req = Self::parse::<ScopeRequest>("set_reco_board_scope", "{scope}", input)?;
+        crate::commands::stock_analysis::set_reco_board_scope_core(&self.db, req.scope)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：候选池批次留痕（`get_reco_pool_batch`）。
+    async fn get_reco_pool_batch(&self, _input: Value) -> Result<Value> {
+        let v = crate::commands::stock_analysis::get_reco_pool_batch_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(v.map(|b| serde_json::to_value(b).unwrap_or(Value::Null)).unwrap_or(Value::Null))
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

@@ -280,7 +280,7 @@ export function MoverRecallPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const v = await invoke<
+        const v = await invokePluginCommand<
           {
             runId: string;
             dateTo: string;
@@ -292,13 +292,13 @@ export function MoverRecallPanel() {
             } | null;
             weightChanges?: { style: string; period: string; old: number; new: number }[];
           } | null
-        >("get_mover_asof_summary", {});
+        >("stock_get_mover_asof_summary", {});
         if (!cancelled) { setAsofSummary(v ?? null); }
       } catch {
         if (!cancelled) { setAsofSummary(null); }
       }
       try {
-        const v = await invoke<string>("get_mover_reflow_merge", {});
+        const v = await invokePluginCommand<string>("stock_get_mover_reflow_merge", {});
         if (!cancelled) { setReflowMerge(v === "on" ? "on" : "off"); }
       } catch {
         if (!cancelled) { setReflowMerge("off"); }
@@ -556,7 +556,7 @@ export function MoverRecallPanel() {
             const next = checked ? "on" : "off";
             const prev = reflowMerge;
             setReflowMerge(next);
-            void invoke<string>("set_mover_reflow_merge", { value: next }).catch(() => {
+            void invokePluginCommand<string>("stock_set_mover_reflow_merge", { value: next }).catch(() => {
               // 写失败回滚：UI 不得显示一个没生效的开关状态
               setReflowMerge(prev);
             });

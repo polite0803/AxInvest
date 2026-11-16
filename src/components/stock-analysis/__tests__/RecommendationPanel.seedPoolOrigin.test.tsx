@@ -115,7 +115,7 @@ describe("RecommendationPanel — 候选池来源声明", () => {
   it("D. 扫描板块范围：读到持久化值就显示，切换后写回后端", async () => {
     invokeMock.mockReset();
     invokeMock.mockImplementation(async (cmd: string) => {
-      if (cmd === "get_reco_board_scope") { return "star"; }
+      if (cmd === "stock_get_reco_board_scope") { return "star"; }
       return null;
     });
     renderPanel();
@@ -125,7 +125,7 @@ describe("RecommendationPanel — 候选池来源声明", () => {
     fireEvent.mouseDown(screen.getByTestId("reco-board-scope"));
     fireEvent.click(await screen.findByTitle("创业板"));
     await waitFor(() => {
-      const call = invokeMock.mock.calls.find((c) => c[0] === "set_reco_board_scope");
+      const call = invokeMock.mock.calls.find((c) => c[0] === "stock_set_reco_board_scope");
       expect(call?.[1]).toEqual({ scope: "chinext" });
     });
   });

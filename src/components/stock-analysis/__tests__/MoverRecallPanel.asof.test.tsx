@@ -133,11 +133,11 @@ async function mountAndExpand(over: Overrides = {}) {
         return Promise.resolve([makeView()]);
       case "stock_get_mover_recall_event_review":
         return Promise.resolve(over.review ?? makeReview());
-      case "get_mover_asof_summary":
+      case "stock_get_mover_asof_summary":
         return Promise.resolve(over.asofSummary ?? null);
-      case "get_mover_reflow_merge":
+      case "stock_get_mover_reflow_merge":
         return Promise.resolve(over.reflowMerge ?? "off");
-      case "set_mover_reflow_merge":
+      case "stock_set_mover_reflow_merge":
         over.setCalls?.push(JSON.stringify(args));
         return Promise.resolve((args as { value?: string } | undefined)?.value ?? "off");
       default:
@@ -204,7 +204,7 @@ describe("MoverRecallPanel as-of 回放呈现", () => {
     // 先 render 后设 mock 会让首轮拿到 undefined（该做法曾让本用例找不到权重行）。
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "analyze_mover_recall") { return Promise.resolve([makeView()]); }
-      if (cmd === "get_mover_asof_summary") {
+      if (cmd === "stock_get_mover_asof_summary") {
         return Promise.resolve({
           runId: "run-1",
           dateTo: "2026-09-30",
@@ -304,8 +304,8 @@ describe("MoverRecallPanel as-of 回放呈现", () => {
   it("rolls the reflow merge switch back when the write fails", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "analyze_mover_recall") { return Promise.resolve([makeView()]); }
-      if (cmd === "get_mover_reflow_merge") { return Promise.resolve("off"); }
-      if (cmd === "set_mover_reflow_merge") { return Promise.reject(new Error("boom")); }
+      if (cmd === "stock_get_mover_reflow_merge") { return Promise.resolve("off"); }
+      if (cmd === "stock_set_mover_reflow_merge") { return Promise.reject(new Error("boom")); }
       return Promise.resolve(null);
     });
     renderWithProviders();

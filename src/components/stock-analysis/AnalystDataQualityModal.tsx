@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑判断字符串（节点类型/状态枚举键名），非 UI 展示文本
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   diagStatusToSeverity,
   dqAbbrOf,
@@ -211,14 +211,14 @@ export function AnalystDataQualityModal({
     setEvolutionStatus(null);
     setEvolutionSuggestions([]);
     try {
-      const status = await invoke<{
+      const status = await invokePluginCommand<{
         nodeType: string;
         nodeId: string;
         totalFeedbacks: number;
         issueRate: number;
         status: string;
         suggestions: string[];
-      }>("evolve_node_command", {
+      }>("stock_evolve_node_command", {
         request: {
           nodeType,
           nodeId: expertId,

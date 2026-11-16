@@ -17,8 +17,6 @@
 //! （该门长期红且不在 CI）—— 所以键名契约由文件末尾的 serde 往返测试逐键锁住，
 //! 而不是依赖目录式扫描脚本（同 `reflection_stats::hitrate_dto_serializes_camel_case_for_ipc`）。
 
-use crate::AppState;
-use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::blackboard::data_quality_report;
 use axagent_entities::analyst_feedback;
 use axagent_entities::analyst_feedback::Entity as AnalystFeedback;
@@ -29,7 +27,6 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use tauri::State;
 
 /// 通用节点质量反馈的请求 DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,20 +86,8 @@ pub struct GetNodeFeedbacksRequest {
     pub only_issues: Option<bool>,
 }
 
-/// 保存节点质量反馈（通用版）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存节点质量反馈数据，用于自我进化")]
-pub async fn save_node_feedback(
-    state: State<'_, AppState>,
-    request: SaveNodeFeedbackRequest,
-) -> Result<String, String> {
-    save_node_feedback_core(state.harness.db(), request).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
+// `save_node_feedback` 已迁插件（`stock_save_node_feedback`，#345）——
+// service 侧直调 `save_node_feedback_core`。
 
 /// `save_node_feedback` 的无 State 核心（IPC 命令与 `stock.analysis` 接缝
 /// `save_analyst_feedback` op 共用，#322）。命令退役后本函数是唯一权威。

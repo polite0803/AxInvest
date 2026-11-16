@@ -3,7 +3,7 @@
 // 流程：选择 CSV 文件 → 后端解析预览 → 确认导入 → 写入 trades 表 + 同步持仓。
 // 支持通达信/东方财富/通用 CSV 格式（后端自动识别列名）。
 
-import { invoke, isTauri } from "@/lib/invoke";
+import { isTauri } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { FileOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Space, Statistic, Table, Tag, Typography } from "antd";
@@ -61,7 +61,7 @@ export function TradeImportPanel() {
         return;
       }
       setFilePath(selected);
-      const rows = await invoke<ImportRow[]>("parse_trades_csv", { filePath: selected });
+      const rows = await invokePluginCommand<ImportRow[]>("stock_parse_trades_csv", { filePath: selected });
       setPreview(rows);
       setSummary(null);
       if (rows.length === 0) {

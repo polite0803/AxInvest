@@ -79,7 +79,7 @@ function wire(ledger: unknown, generatedAt = Date.now()) {
     if (cmd === "recommend_stocks_all_periods") { return resp; }
     // 挂载走的是「按档回读缓存」这条命令（单数），返回值是**单档**响应而不是整批
     if (cmd === "get_cached_recommendation") { return resp.byHorizon.short; }
-    if (cmd === "get_reco_pool_batch") { return ledger; }
+    if (cmd === "stock_get_reco_pool_batch") { return ledger; }
     return null;
   });
 }

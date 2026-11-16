@@ -341,6 +341,34 @@ const COMMAND_GET_MOVER_RECALL_EVENT_REVIEW: &str = "stock_get_mover_recall_even
 const COMMAND_LIST_PARAM_CHANGES: &str = "stock_list_param_changes";
 /// 参数变更到期评估（写评估结论）（宿主 `evaluate_param_changes`，#344）—— 写 op。
 const COMMAND_EVALUATE_PARAM_CHANGES: &str = "stock_evaluate_param_changes";
+/// `parse_trades_csv`（宿主同名，#345）—— 读 op。
+const COMMAND_PARSE_TRADES_CSV: &str = "stock_parse_trades_csv";
+/// `evolve_node_command`（宿主同名，#345）—— 写 op。
+const COMMAND_EVOLVE_NODE_COMMAND: &str = "stock_evolve_node_command";
+/// `save_node_feedback`（宿主同名，#345）—— 写 op。
+const COMMAND_SAVE_NODE_FEEDBACK: &str = "stock_save_node_feedback";
+/// `serenity_validation_summary`（宿主同名，#345）—— 读 op。
+const COMMAND_SERENITY_VALIDATION_SUMMARY: &str = "stock_serenity_validation_summary";
+/// `create_decision_backtest_cron`（宿主同名，#345）—— 写 op。
+const COMMAND_CREATE_DECISION_BACKTEST_CRON: &str = "stock_create_decision_backtest_cron";
+/// `get_evolution_drift_dashboard`（宿主同名，#345）—— 读 op。
+const COMMAND_GET_EVOLUTION_DRIFT_DASHBOARD: &str = "stock_get_evolution_drift_dashboard";
+/// `get_evolution_history`（宿主同名，#345）—— 读 op。
+const COMMAND_GET_EVOLUTION_HISTORY: &str = "stock_get_evolution_history";
+/// `stock_evolution_recalc`（宿主同名，#345）—— 写 op。
+const COMMAND_STOCK_EVOLUTION_RECALC: &str = "stock_stock_evolution_recalc";
+/// `get_mover_reflow_merge`（宿主同名，#345）—— 读 op。
+const COMMAND_GET_MOVER_REFLOW_MERGE: &str = "stock_get_mover_reflow_merge";
+/// `set_mover_reflow_merge`（宿主同名，#345）—— 写 op。
+const COMMAND_SET_MOVER_REFLOW_MERGE: &str = "stock_set_mover_reflow_merge";
+/// `get_mover_asof_summary`（宿主同名，#345）—— 读 op。
+const COMMAND_GET_MOVER_ASOF_SUMMARY: &str = "stock_get_mover_asof_summary";
+/// `get_reco_board_scope`（宿主同名，#345）—— 读 op。
+const COMMAND_GET_RECO_BOARD_SCOPE: &str = "stock_get_reco_board_scope";
+/// `set_reco_board_scope`（宿主同名，#345）—— 写 op。
+const COMMAND_SET_RECO_BOARD_SCOPE: &str = "stock_set_reco_board_scope";
+/// `get_reco_pool_batch`（宿主同名，#345）—— 读 op。
+const COMMAND_GET_RECO_POOL_BATCH: &str = "stock_get_reco_pool_batch";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -878,6 +906,174 @@ fn handle_command(
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // #345：parse_trades_csv
+        COMMAND_PARSE_TRADES_CSV => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "parse_trades_csv",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：evolve_node_command
+        COMMAND_EVOLVE_NODE_COMMAND => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "evolve_node_command",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：save_node_feedback
+        COMMAND_SAVE_NODE_FEEDBACK => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "save_node_feedback",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：serenity_validation_summary
+        COMMAND_SERENITY_VALIDATION_SUMMARY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "serenity_validation_summary",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：create_decision_backtest_cron
+        COMMAND_CREATE_DECISION_BACKTEST_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "create_decision_backtest_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：get_evolution_drift_dashboard
+        COMMAND_GET_EVOLUTION_DRIFT_DASHBOARD => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_evolution_drift_dashboard",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：get_evolution_history
+        COMMAND_GET_EVOLUTION_HISTORY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_evolution_history",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：stock_evolution_recalc
+        COMMAND_STOCK_EVOLUTION_RECALC => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "stock_evolution_recalc",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：get_mover_reflow_merge
+        COMMAND_GET_MOVER_REFLOW_MERGE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_mover_reflow_merge",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：set_mover_reflow_merge
+        COMMAND_SET_MOVER_REFLOW_MERGE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "set_mover_reflow_merge",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：get_mover_asof_summary
+        COMMAND_GET_MOVER_ASOF_SUMMARY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_mover_asof_summary",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：get_reco_board_scope
+        COMMAND_GET_RECO_BOARD_SCOPE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_reco_board_scope",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：set_reco_board_scope
+        COMMAND_SET_RECO_BOARD_SCOPE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "set_reco_board_scope",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #345：get_reco_pool_batch
+        COMMAND_GET_RECO_POOL_BATCH => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_reco_pool_batch",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // #344：get_asof_degradation_count
         COMMAND_GET_ASOF_DEGRADATION_COUNT => match call_analysis_seam(
@@ -4438,6 +4634,20 @@ mod tests {
             super::COMMAND_GET_MOVER_RECALL_EVENT_REVIEW,
             super::COMMAND_LIST_PARAM_CHANGES,
             super::COMMAND_EVALUATE_PARAM_CHANGES,
+            super::COMMAND_PARSE_TRADES_CSV,
+            super::COMMAND_EVOLVE_NODE_COMMAND,
+            super::COMMAND_SAVE_NODE_FEEDBACK,
+            super::COMMAND_SERENITY_VALIDATION_SUMMARY,
+            super::COMMAND_CREATE_DECISION_BACKTEST_CRON,
+            super::COMMAND_GET_EVOLUTION_DRIFT_DASHBOARD,
+            super::COMMAND_GET_EVOLUTION_HISTORY,
+            super::COMMAND_STOCK_EVOLUTION_RECALC,
+            super::COMMAND_GET_MOVER_REFLOW_MERGE,
+            super::COMMAND_SET_MOVER_REFLOW_MERGE,
+            super::COMMAND_GET_MOVER_ASOF_SUMMARY,
+            super::COMMAND_GET_RECO_BOARD_SCOPE,
+            super::COMMAND_SET_RECO_BOARD_SCOPE,
+            super::COMMAND_GET_RECO_POOL_BATCH,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

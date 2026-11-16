@@ -1227,7 +1227,7 @@ describe("分析师质量反馈计数 - 后端落库旁路的回传", () => {
   });
 
   const feedbackCalls = () =>
-    invokeMock.mock.calls.filter((c) => c[0] === "save_node_feedback").map((c) =>
+    invokeMock.mock.calls.filter((c) => c[0] === "stock_save_node_feedback").map((c) =>
       c[1].request as Record<string, unknown>
     );
 

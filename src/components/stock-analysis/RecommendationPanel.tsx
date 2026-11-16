@@ -206,7 +206,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   // 一行都没读过 ⇒ 「这一批到底扫了多少只」在界面上无处可查，用户只能问「为什么老是那几个票」。
   const fetchPoolBatch = useCallback(async () => {
     try {
-      const v = await invoke<RecoPoolBatchInfo | null>("get_reco_pool_batch");
+      const v = await invokePluginCommand<RecoPoolBatchInfo | null>("stock_get_reco_pool_batch");
       if (v === null || v === undefined) {
         setPoolBatch({ kind: "none" });
       } else {
@@ -412,7 +412,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   useEffect(() => {
     void (async () => {
       try {
-        const v = await invoke<string>("get_reco_board_scope");
+        const v = await invokePluginCommand<string>("stock_get_reco_board_scope");
         if (typeof v === "string" && (RECO_BOARD_SCOPES as readonly string[]).includes(v)) {
           setBoardScope(v);
         }
@@ -425,7 +425,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const changeBoardScope = useCallback(async (v: string) => {
     setBoardScope(v);
     try {
-      await invoke("set_reco_board_scope", { scope: v });
+      await invokePluginCommand("stock_set_reco_board_scope", { scope: v });
     } catch (e) {
       console.error("[RecommendationPanel] set_reco_board_scope failed:", e);
     }

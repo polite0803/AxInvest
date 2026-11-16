@@ -7550,6 +7550,33 @@ async function executeCommand<T>(
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
     // #342：watchlist 5 + cron 9。浏览器模式无真实库/调度器：列表回诚实空态，
     // 写类命令返回 undefined（消费端本就不取返回值）；watch/unwatch 改本地假集合。
+    // #345：报价/K线双声明收口 + 进化/荐股留痕族（浏览器模式诚实空态）。
+    case "stock_parse_trades_csv":
+    case "stock_get_evolution_history":
+      return [] as unknown as T;
+    case "stock_get_stock_quote":
+      return {} as unknown as T;
+    case "stock_get_stock_kline":
+      return [] as unknown as T;
+    case "stock_get_evolution_drift_dashboard":
+    case "stock_serenity_validation_summary":
+    case "stock_get_mover_asof_summary":
+    case "stock_get_reco_pool_batch":
+      return null as unknown as T;
+    case "stock_get_mover_reflow_merge":
+      return "off" as unknown as T;
+    case "stock_get_reco_board_scope":
+      return "auto" as unknown as T;
+    case "stock_evolve_node_command":
+      return null as unknown as T;
+    case "stock_save_node_feedback":
+      return "mock-feedback" as unknown as T;
+    case "stock_stock_evolution_recalc":
+      return { written: 0, currentWeights: [] } as unknown as T;
+    case "stock_create_decision_backtest_cron":
+    case "stock_set_mover_reflow_merge":
+    case "stock_set_reco_board_scope":
+      return undefined as unknown as T;
     // #344：分析读写 / 监控 / 数据源 / 台账 / mover 轮次（浏览器模式回诚实空态）。
     case "stock_list_stock_analyses":
     case "stock_list_reflections":

@@ -1078,7 +1078,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const state = useTimeAnchorStore.getState();
         return state.mode === "replay" || state.mode === "backtest_sweep" ? state.asOfDate : null;
       })();
-      const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
+      const quote = await invokePluginCommand<StockQuote>("stock_get_stock_quote", { stockCode: code, asOfDate });
       // #11 去重：若已有更新的请求(或已切到别的股票)，丢弃本次过期响应
       if (myReqId !== latestQuoteReqId || latestQuoteCode !== code) {
         return;
@@ -1128,7 +1128,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const state = useTimeAnchorStore.getState();
         return state.mode === "replay" || state.mode === "backtest_sweep" ? state.asOfDate : null;
       })();
-      const klineData = await invoke<KLine[]>("get_stock_kline", {
+      const klineData = await invokePluginCommand<KLine[]>("stock_get_stock_kline", {
         stockCode: code,
         period,
         limit,
@@ -1980,7 +1980,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   // R1 复盘→进化
   fetchEvolutionDashboard: async (asOfDate?: string | null) => {
     try {
-      const data = await invoke<EvolutionDriftDashboard>("get_evolution_drift_dashboard", {
+      const data = await invokePluginCommand<EvolutionDriftDashboard>("stock_get_evolution_drift_dashboard", {
         asOfDate: asOfDate ?? null,
       });
       set({ evolutionDashboard: data, evolutionLastError: null });
@@ -2050,7 +2050,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   fetchEvolutionHistory: async (limit = 50) => {
     set({ evolutionHistoryLoading: true });
     try {
-      const data = await invoke<EvolutionHistoryEntry[]>("get_evolution_history", { limit });
+      const data = await invokePluginCommand<EvolutionHistoryEntry[]>("stock_get_evolution_history", { limit });
       set({ evolutionHistory: data, evolutionHistoryLoading: false });
     } catch (e) {
       console.warn("[EvolutionHistory] 获取进化历史失败:", e);

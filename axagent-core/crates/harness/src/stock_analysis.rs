@@ -690,6 +690,90 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// `parse_trades_csv`（宿主命令迁 T2，#345）—— 读 op。
+    async fn parse_trades_csv(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("parse_trades_csv 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `evolve_node_command`（宿主命令迁 T2，#345）—— 写 op。
+    async fn evolve_node_command(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("evolve_node_command 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `save_node_feedback`（宿主命令迁 T2，#345）—— 写 op。
+    async fn save_node_feedback(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("save_node_feedback 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `serenity_validation_summary`（宿主命令迁 T2，#345）—— 读 op。
+    async fn serenity_validation_summary(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "serenity_validation_summary 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `create_decision_backtest_cron`（宿主命令迁 T2，#345）—— 写 op。
+    async fn create_decision_backtest_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "create_decision_backtest_cron 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `get_evolution_drift_dashboard`（宿主命令迁 T2，#345）—— 读 op。
+    async fn get_evolution_drift_dashboard(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_evolution_drift_dashboard 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `get_evolution_history`（宿主命令迁 T2，#345）—— 读 op。
+    async fn get_evolution_history(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_evolution_history 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `stock_evolution_recalc`（宿主命令迁 T2，#345）—— 写 op。
+    async fn stock_evolution_recalc(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "stock_evolution_recalc 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `get_mover_reflow_merge`（宿主命令迁 T2，#345）—— 读 op。
+    async fn get_mover_reflow_merge(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_mover_reflow_merge 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `set_mover_reflow_merge`（宿主命令迁 T2，#345）—— 写 op。
+    async fn set_mover_reflow_merge(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "set_mover_reflow_merge 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `get_mover_asof_summary`（宿主命令迁 T2，#345）—— 读 op。
+    async fn get_mover_asof_summary(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_mover_asof_summary 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// `get_reco_board_scope`（宿主命令迁 T2，#345）—— 读 op。
+    async fn get_reco_board_scope(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_reco_board_scope 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `set_reco_board_scope`（宿主命令迁 T2，#345）—— 写 op。
+    async fn set_reco_board_scope(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("set_reco_board_scope 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `get_reco_pool_batch`（宿主命令迁 T2，#345）—— 读 op。
+    async fn get_reco_pool_batch(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_reco_pool_batch 未实现（该提供者不支持此数据面）".into()))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -1275,6 +1359,59 @@ mod tests {
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
+            ),
+            ("parse_trades_csv", futures::executor::block_on(stub.parse_trades_csv(Value::Null))),
+            (
+                "evolve_node_command",
+                futures::executor::block_on(stub.evolve_node_command(Value::Null)),
+            ),
+            (
+                "save_node_feedback",
+                futures::executor::block_on(stub.save_node_feedback(Value::Null)),
+            ),
+            (
+                "serenity_validation_summary",
+                futures::executor::block_on(stub.serenity_validation_summary(Value::Null)),
+            ),
+            (
+                "create_decision_backtest_cron",
+                futures::executor::block_on(stub.create_decision_backtest_cron(Value::Null)),
+            ),
+            (
+                "get_evolution_drift_dashboard",
+                futures::executor::block_on(stub.get_evolution_drift_dashboard(Value::Null)),
+            ),
+            (
+                "get_evolution_history",
+                futures::executor::block_on(stub.get_evolution_history(Value::Null)),
+            ),
+            (
+                "stock_evolution_recalc",
+                futures::executor::block_on(stub.stock_evolution_recalc(Value::Null)),
+            ),
+            (
+                "get_mover_reflow_merge",
+                futures::executor::block_on(stub.get_mover_reflow_merge(Value::Null)),
+            ),
+            (
+                "set_mover_reflow_merge",
+                futures::executor::block_on(stub.set_mover_reflow_merge(Value::Null)),
+            ),
+            (
+                "get_mover_asof_summary",
+                futures::executor::block_on(stub.get_mover_asof_summary(Value::Null)),
+            ),
+            (
+                "get_reco_board_scope",
+                futures::executor::block_on(stub.get_reco_board_scope(Value::Null)),
+            ),
+            (
+                "set_reco_board_scope",
+                futures::executor::block_on(stub.set_reco_board_scope(Value::Null)),
+            ),
+            (
+                "get_reco_pool_batch",
+                futures::executor::block_on(stub.get_reco_pool_batch(Value::Null)),
             ),
             // #344 批 B18：29 条（默认实现必须显式报错）。
             (

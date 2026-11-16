@@ -80,7 +80,7 @@ const settle = async () => {
 /** 走完「选文件 → 确认导入」两步，最后一步由 importResult 决定 import_trades 的返回。 */
 async function runImport(container: HTMLElement, importResult: unknown) {
   invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "parse_trades_csv") { return Promise.resolve([row]); }
+    if (cmd === "stock_parse_trades_csv") { return Promise.resolve([row]); }
     if (cmd === "stock_import_trades") { return Promise.resolve(importResult); }
     return Promise.resolve(null);
   });

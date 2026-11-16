@@ -73,7 +73,7 @@ function installInvokeStub() {
         return Promise.resolve({ status: "closed" });
       // 批 2b：行情两条命令有宿主名与插件名两种调用面（CompareView / WatchlistPanel 已切
       // `stock_get_quote`），两面必须回同一形状 ⇒ 同名同形登记，不许让插件名静默落 default。
-      case "get_stock_quote":
+      case "stock_get_stock_quote":
       case "stock_get_quote": {
         const code = String(args?.stockCode ?? "");
         return Promise.resolve({
@@ -84,7 +84,7 @@ function installInvokeStub() {
           changePct: 0,
         });
       }
-      case "get_stock_kline":
+      case "stock_get_stock_kline":
       case "stock_get_kline":
       case "stock_get_vendor_health_all":
         return Promise.resolve([]);

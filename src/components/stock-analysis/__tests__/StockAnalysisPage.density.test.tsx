@@ -43,7 +43,7 @@ beforeEach(() => {
   invokeMock.mockImplementation((command: string) => {
     if (command === "stock_get_market_status") { return Promise.resolve({ status: "closed" }); }
     // 批 2b：行情两条各有宿主名 / 插件名两种调用面，同形回桩（不许让插件名落 default 的 null）。
-    if (command === "get_stock_quote" || command === "stock_get_quote") {
+    if (command === "stock_get_stock_quote" || command === "stock_get_quote") {
       return Promise.resolve({
         code: "600519",
         name: "贵州茅台",
@@ -56,7 +56,7 @@ beforeEach(() => {
         volume: 100000,
       });
     }
-    if (command === "get_stock_kline" || command === "stock_get_kline") {
+    if (command === "stock_get_stock_kline" || command === "stock_get_kline") {
       return Promise.resolve([]);
     }
     return Promise.resolve(null);

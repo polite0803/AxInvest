@@ -13,12 +13,9 @@
 //! `{ request: { nodeType, nodeId } }`（与 `analyst_feedback.rs` 2026-09-29
 //! 修过的 IPC 契约坑同源）。现按调用方真实载荷接回 crate 实现。
 
-use crate::AppState;
-use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::node_quality::NodeType;
-use axagent_analysis_engine::{NodeEvolutionStatus, evolve_node};
+
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 /// 通用节点进化请求 DTO（前端键名 camelCase）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,16 +41,8 @@ pub(crate) fn parse_node_type(type_str: &str) -> NodeType {
 
 // ── 通用节点进化命令 ──
 
-/// 触发节点自我进化（通用版）
-#[tauri::command]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "触发节点自我进化：基于历史反馈优化 Prompt/配置")]
-pub async fn evolve_node_command(
-    state: State<'_, AppState>,
-    request: NodeEvolveRequest,
-) -> Result<NodeEvolutionStatus, String> {
-    let node_type = parse_node_type(&request.node_type);
-    evolve_node(state.harness.db(), &node_type, &request.node_id).await
-}
+// `evolve_node_command` 已迁插件（`stock_evolve_node_command`，#345）——
+// service 侧调 `parse_node_type` + `axagent_analysis_engine::evolve_node`。
 
 // ── 分析师别名族三条（#35 / #322）：已迁出为插件命令 ──
 // `evolve_analyst_command` / `get_analyst_evolution_status_command`（别名，硬编码
@@ -67,6 +56,7 @@ pub async fn evolve_node_command(
 #[cfg(test)]
 mod analyst_evolution_ipc_tests {
     use super::*;
+    use axagent_analysis_engine::NodeEvolutionStatus;
 
     /// 逐字复刻调用方（`AnalystDataQualityModal.tsx` 的
     /// `invoke("evolve_node_command", { request: { nodeType, nodeId } })`）发送的载荷。

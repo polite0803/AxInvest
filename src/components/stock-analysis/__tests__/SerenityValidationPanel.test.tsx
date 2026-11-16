@@ -114,7 +114,7 @@ describe("SerenityValidationPanel 的缺席分列", () => {
     invokeMock.mockResolvedValue(summary({ generation: "2026-09-28" }));
     renderPanel();
     await waitFor(() => expect(screen.getByTestId("serenity-validation-generation")).toBeInTheDocument());
-    const call = invokeMock.mock.calls.find((c) => c[0] === "serenity_validation_summary");
+    const call = invokeMock.mock.calls.find((c) => c[0] === "stock_serenity_validation_summary");
     expect(call).toBeTruthy();
     expect(call?.[1]).toEqual({ generation: "2026-09-28" });
   });
@@ -123,7 +123,7 @@ describe("SerenityValidationPanel 的缺席分列", () => {
     invokeMock.mockResolvedValue(summary({}));
     renderPanel();
     await waitFor(() => expect(screen.getByTestId("serenity-validation-hit-rate")).toBeInTheDocument());
-    const call = invokeMock.mock.calls.find((c) => c[0] === "serenity_validation_summary");
+    const call = invokeMock.mock.calls.find((c) => c[0] === "stock_serenity_validation_summary");
     expect(call?.[1]).toEqual({ generation: null });
   });
 });

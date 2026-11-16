@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批/分析读写与台账/监控与数据源）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批/分析读写与台账/监控与数据源/进化与荐股留痕）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -887,6 +887,183 @@ function stockManifest({ version, binaryName, sha256 }) {
           },
           required: ["analysisId"],
         },
+      },
+      {
+        // #345：宿主 `parse_trades_csv` 的接缝面。
+        name: "stock_parse_trades_csv",
+        description: "解析 CSV 交易记录文件（只预览不写库）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_parse_trades_csv",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            filePath: { type: "string", description: "CSV 文件绝对路径" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `evolve_node_command` 的接缝面。
+        name: "stock_evolve_node_command",
+        description: "触发节点自我进化（通用版，基于历史反馈优化 Prompt/配置）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_evolve_node_command",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            nodeType: { type: "string" },
+            nodeId: { type: "string" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `save_node_feedback` 的接缝面。
+        name: "stock_save_node_feedback",
+        description: "保存节点质量反馈（用于自我进化）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_save_node_feedback",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            request: { type: "object", description: "SaveNodeFeedbackRequest（camelCase 全字段）" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `serenity_validation_summary` 的接缝面。
+        name: "stock_serenity_validation_summary",
+        description: "智选后验验证摘要（按代际筛样）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_serenity_validation_summary",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            generation: { type: "string", description: "代际截止日；省略 = 实盘代" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `create_decision_backtest_cron` 的接缝面。
+        name: "stock_create_decision_backtest_cron",
+        description: "创建决策回测定时任务（写 CronJobStore）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_create_decision_backtest_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            cronExpression: { type: "string" },
+            tPlusNList: { type: "array", items: { type: "integer" } },
+            maxPicks: { type: "integer" },
+            periodFilter: { type: "string" },
+            enabled: { type: "boolean" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `get_evolution_drift_dashboard` 的接缝面。
+        name: "stock_get_evolution_drift_dashboard",
+        description: "进化漂移仪表盘（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_evolution_drift_dashboard",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `get_evolution_history` 的接缝面。
+        name: "stock_get_evolution_history",
+        description: "进化闭环留痕历史（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_evolution_history",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "缺省 50" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `stock_evolution_recalc` 的接缝面。
+        name: "stock_stock_evolution_recalc",
+        description: "演化漂移重算并落库新权重（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_stock_evolution_recalc",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `get_mover_reflow_merge` 的接缝面。
+        name: "stock_get_mover_reflow_merge",
+        description: "回灌并入开关（on/off，缺省 off）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_mover_reflow_merge",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #345：宿主 `set_mover_reflow_merge` 的接缝面。
+        name: "stock_set_mover_reflow_merge",
+        description: "写回灌并入开关（只接受 on/off）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_set_mover_reflow_merge",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            value: { type: "string", description: "on | off" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `get_mover_asof_summary` 的接缝面。
+        name: "stock_get_mover_asof_summary",
+        description: "最新一轮荐股链 as-of 回放摘要（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_mover_asof_summary",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #345：宿主 `get_reco_board_scope` 的接缝面。
+        name: "stock_get_reco_board_scope",
+        description: "扫描板块范围（auto/sh_main/sz_main/chinext/star/all）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_reco_board_scope",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #345：宿主 `set_reco_board_scope` 的接缝面。
+        name: "stock_set_reco_board_scope",
+        description: "保存扫描板块范围（非法值回落 auto）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_set_reco_board_scope",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            scope: { type: "string" },
+          },
+        },
+      },
+      {
+        // #345：宿主 `get_reco_pool_batch` 的接缝面。
+        name: "stock_get_reco_pool_batch",
+        description: "最近一批实盘候选池留痕（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_reco_pool_batch",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
       },
       {
         // #344：宿主 `get_asof_degradation_count` 的接缝面 —— as-of 降级条目总数。

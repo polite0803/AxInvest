@@ -45,9 +45,7 @@ use chrono::Utc;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::State;
 
-use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::common;
 use crate::commands::error_code::stock_workflow as wf_err;
@@ -983,12 +981,10 @@ pub struct SerenityValidationSummary {
     call_mode = StateInput,
     description = "汇总智选后验样本"
 )]
-#[tauri::command]
-pub async fn serenity_validation_summary(
-    state: State<'_, AppState>,
+pub async fn serenity_validation_summary_core(
+    db: &sea_orm::DatabaseConnection,
     generation: Option<String>,
 ) -> Result<SerenityValidationSummary, String> {
-    let db = state.harness.db();
     let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
         .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
 
@@ -1411,9 +1407,8 @@ pub(crate) fn parse_decision_backtest_config(
 /// - `t_plus_n_list` / `max_picks` / `period_filter` / `exclude_synthetic`:
 ///   原样进配置；`dry_run` **不可配**（定时任务算完即弃是零产物，见下）
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建决策回测定时任务")]
-#[tauri::command]
-pub async fn create_decision_backtest_cron(
-    state: State<'_, AppState>,
+pub async fn create_decision_backtest_cron_core(
+    cron_job_store: &axagent_runtime_core::CronJobStore,
     cron_expression: Option<String>,
     t_plus_n_list: Option<Vec<i32>>,
     max_picks: Option<u32>,
@@ -1457,7 +1452,7 @@ pub async fn create_decision_backtest_cron(
     if !enabled.unwrap_or(true) {
         job.status = axagent_runtime_core::CronJobStatus::Paused;
     }
-    state.cron_job_store.add(job.clone()).await;
+    cron_job_store.add(job.clone()).await;
     Ok(crate::commands::stock_analysis::CronJobResponse::from(&job))
 }
 

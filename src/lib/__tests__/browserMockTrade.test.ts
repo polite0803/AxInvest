@@ -11,7 +11,7 @@ describe("browserMock 覆盖交易面板用到的命令", () => {
   });
 
   it("列表类命令返回数组而不是 undefined（调用方会读 .length）", async () => {
-    for (const cmd of ["list_trades", "get_trade_positions", "parse_trades_csv"]) {
+    for (const cmd of ["list_trades", "get_trade_positions", "stock_parse_trades_csv"]) {
       const value = await handleCommand(cmd, {});
       expect(Array.isArray(value), `${cmd} 应返回数组，实际 ${typeof value}`).toBe(true);
     }

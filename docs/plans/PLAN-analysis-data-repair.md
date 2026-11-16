@@ -149,7 +149,7 @@
 - **相关入口**（已存在，仅缺配置）：
   - `create_batch_reflection_cron`（`stock_analysis.rs:4945`）
   - `create_validate_decisions_cron`（`stock_analysis.rs:4856`）
-  - `run_reflection_now`（`stock_analysis.rs:5112`，已注册 `register_commands.rs:1286`）
+  - `run_reflection_now`（`stock_analysis.rs:5300`，已注册 `register_commands.rs:1038`）
 
 ### D5（P1）反思 → 规则提取链零产出
 

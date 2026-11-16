@@ -4644,7 +4644,7 @@ fn start_scheduler_recovery(app: &tauri::AppHandle, state: &AppState) {
 /// 为什么必须有它：`stock_analyses` 的 `running` 是 fire-and-forget 建行写的占位态，
 /// 四个终态写入（completed/failed/timeout/cancelled）**全在 spawn 出去的后台任务里**
 /// ⇒ 进程非优雅退出后，该行**永久**停在 `running`。而前端把「非 completed」一律当
-/// running（`src/stores/feature/stockAnalysisStore.ts:1451`），`running` 又同时锁死
+/// running（`src/stores/feature/stockAnalysisStore.ts:1352`），`running` 又同时锁死
 /// 「开始分析」按钮与其防重入检查 ⇒ 打开一条僵死记录就再也发不出新分析。
 /// 本钩子把这类行订正为 `interrupted`，让前后端都恢复可用。
 ///

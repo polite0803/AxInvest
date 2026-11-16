@@ -130,7 +130,7 @@ pub async fn restore_incomplete_tasks(
 /// select 分支被 poll 到），**没有任何分支有机会写终态**，该行就永久停在 `running`。
 ///
 /// 后果不止是历史列表难看：前端 `loadAnalysis` 把任何非 `completed` 的记录一律置为
-/// `running`（`src/stores/feature/stockAnalysisStore.ts:1451`），而 `running` 同时触发
+/// `running`（`src/stores/feature/stockAnalysisStore.ts:1352`），而 `running` 同时触发
 /// `StockSearchBar` 的按钮 `disabled` 与 `startAnalysis` 的防重入 `return`
 /// ⇒ **打开一条僵死记录就把「开始分析」永久锁死**（请求根本发不到后端）。
 ///

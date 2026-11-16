@@ -884,6 +884,36 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// `start_task`（宿主长任务迁 T2，#349）—— 写 op（发起后台任务）。
+    ///
+    /// 入参 `{ task, input }`；task 必须命中宿主白名单（见宿主 service 派发表）。
+    /// 返回 `{ taskId }`；执行体跑在宿主进程（spawn_tracked 台账）。
+    async fn start_task(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("start_task 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `poll_task`（宿主长任务迁 T2，#349）—— 读 op。
+    ///
+    /// 入参 `{ taskId }`；返回 `{ status, output, result?, finishedAt? }`。
+    async fn poll_task(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("poll_task 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `cancel_task`（宿主长任务迁 T2，#349）—— 写 op（协作式取消，与宿主 `stop_background_task` 同源）。
+    async fn cancel_task(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("cancel_task 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `generate_stock_report`（宿主命令迁 T2，#349）—— 写 op（读库 + 行情网络 + HTML 渲染落盘）。
+    async fn generate_stock_report(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("generate_stock_report 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// `get_time_travel_batch`（宿主命令迁 T2，#349）—— 读 op（历史表权威；`ensure_stale_reaped` 不跟随，同 #338/#347 判据）。
+    async fn get_time_travel_batch(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_time_travel_batch 未实现（该提供者不支持此数据面）".into()))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -1584,6 +1614,18 @@ mod tests {
             (
                 "list_time_travel_batches",
                 futures::executor::block_on(stub.list_time_travel_batches(Value::Null)),
+            ),
+            // #349 批：异步任务三 op + 同步面两条（默认实现必须显式报错）。
+            ("start_task", futures::executor::block_on(stub.start_task(Value::Null))),
+            ("poll_task", futures::executor::block_on(stub.poll_task(Value::Null))),
+            ("cancel_task", futures::executor::block_on(stub.cancel_task(Value::Null))),
+            (
+                "generate_stock_report",
+                futures::executor::block_on(stub.generate_stock_report(Value::Null)),
+            ),
+            (
+                "get_time_travel_batch",
+                futures::executor::block_on(stub.get_time_travel_batch(Value::Null)),
             ),
             // #344 批 B18：29 条（默认实现必须显式报错）。
             (

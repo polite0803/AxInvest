@@ -33,7 +33,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 
-use axagent_agent_macro::agent_command;
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self, AsOfContext, AsOfSource};
 use axagent_astock_data::calendar;
@@ -41,7 +40,6 @@ use axagent_harness::{DatabaseConnection, holding_period::Period};
 use axagent_search::vector_store::VectorStore;
 use axagent_trajectory::TrajectoryStorage;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use super::error::ErrorResponse;
@@ -51,7 +49,6 @@ use super::pool_scan::{
     run_analysis_for_candidates,
 };
 use super::stock_workflow::{ReflectionFilter, run_batch_reflection_inner};
-use crate::app_state::AppState;
 
 // ── 批次状态（进程内单例；MVP 不建批次表，重启即清空）─────────────────────────
 
@@ -725,45 +722,17 @@ pub async fn run_time_travel_batch_inner(
     Ok(batch_id_to_return)
 }
 
-/// 发起一次时间旅行批次复盘；立即返回 batch_id，执行在后台进行，
-/// 用 [`get_time_travel_batch`] 轮询进度与结果。
-#[agent_command(domain = time_travel, safety = Caution, call_mode = StateInput, description = "发起时间旅行批次复盘")]
-#[tauri::command]
-pub async fn run_time_travel_batch(
-    state: State<'_, AppState>,
-    request: TimeTravelBatchRequest,
-) -> Result<String, String> {
-    let master_key = state.harness.master_key_owned();
-    run_time_travel_batch_inner(
-        state.harness.db(),
-        &state.stock().astock_client,
-        &state.work_engine,
-        &state.vector_store,
-        &master_key,
-        &state.trajectory_storage,
-        &state.time_travel_batch_lock,
-        request,
-    )
-    .await
-}
-
-/// 查询批次运行状态：优先内存运行态；重启后内存已失则从历史表还原完整明细。
-/// 批次不存在返回 null。
-#[agent_command(domain = time_travel, safety = Safe, call_mode = StateInput, description = "查询时间旅行批次状态")]
-#[tauri::command]
-pub async fn get_time_travel_batch(
-    state: State<'_, AppState>,
-    batch_id: String,
+/// 宿主 `get_time_travel_batch` 的读侧 core（#349）：历史表权威。
+///
+/// ⚠ `ensure_stale_reaped` 不跟随进读 op（写库副作用留在 `run_` 入口与启动钩子，
+/// 与 #338 / #347 同判据）。运行态以**逐态 upsert** 落历史表（本文件 1400-1520 区段），
+/// 读库粒度 = 状态迁移粒度，不再有进程内快路径。
+pub async fn get_time_travel_batch_core(
+    db: &axagent_harness::DatabaseConnection,
+    batch_id: &str,
 ) -> Result<Option<BatchRunState>, String> {
-    let db = state.harness.db();
-    ensure_stale_reaped(db).await;
-
-    if let Some(s) = BATCH_RUNS.lock().await.get(&batch_id).cloned() {
-        return Ok(Some(s));
-    }
-
     let model =
-        axagent_dao::repo::time_travel_batch_runs::fetch_batch_by_id(db, &batch_id).await.map_err(
+        axagent_dao::repo::time_travel_batch_runs::fetch_batch_by_id(db, batch_id).await.map_err(
             |e| ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("查询批次历史失败: {e}")),
         )?;
     Ok(model.map(|m| state_from_model(m, false)))

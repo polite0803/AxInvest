@@ -18,6 +18,8 @@ import { poolBatchLineFor, RecommendationPanel } from "../RecommendationPanel";
  *     每条负控只让它对应的那一句变。
  */
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -75,10 +77,25 @@ function batchResponse(generatedAt: number) {
 /** 按命令名分发：留痕命令的返回值由每个用例自己给，其余命令给「什么都没有」。 */
 function wire(ledger: unknown, generatedAt = Date.now()) {
   const resp = batchResponse(generatedAt);
-  invokeMock.mockImplementation(async (cmd: string) => {
+  invokeMock.mockImplementation(async (cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+    // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+    if (cmd === "stock_start_task") {
+      const a = (args ?? {}) as { task?: string; input?: unknown };
+      pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+      return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+    }
+    if (cmd === "stock_poll_task") {
+      return pendingTaskResult.then((result: unknown) => ({
+        taskId: "",
+        status: "completed",
+        output: "",
+        result,
+      }));
+    }
+
     if (cmd === "recommend_stocks_all_periods") { return resp; }
     // 挂载走的是「按档回读缓存」这条命令（单数），返回值是**单档**响应而不是整批
-    if (cmd === "get_cached_recommendation") { return resp.byHorizon.short; }
+    if (cmd === "stock_get_cached_recommendation") { return resp.byHorizon.short; }
     if (cmd === "stock_get_reco_pool_batch") { return ledger; }
     return null;
   });

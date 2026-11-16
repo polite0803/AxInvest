@@ -11,15 +11,12 @@
 //! **不进交易日闸门**（清单扩充与今天开不开市无关），但**进 live 时间窗**（23:50–02:10 /
 //! 17:50–18:10 要留给实时流水线，段扫会抢行情通道）。
 
-use axagent_agent_macro::agent_command;
 use axagent_astock_data::AStockClient;
 use axagent_dao::DatabaseConnection;
-use tauri::State;
 
 use super::error::ErrorResponse;
 use super::error_code::mover_recall_analysis as ec;
 use super::time_travel_batch::in_live_window;
-use crate::app_state::AppState;
 
 /// 任务类型常量（与 `scheduled_task::BUILTIN_TASK_TYPES`、前端 `taskGrouping.ts` 两表逐字对齐）。
 pub use crate::commands::constants::UNIVERSE_SCAN_TASK_TYPE;
@@ -71,18 +68,12 @@ pub(crate) async fn run_universe_scan_inner(
     Ok(stats)
 }
 
-/// 手动发起一次编码段盲扫（`shard` 缺省按日轮转；`shards` 缺省 3）。
-#[agent_command(
-    domain = "finance",
-    safety = Caution,
-    call_mode = StateInput,
-    description = "编码段盲扫：只登记市场清单，不产事件"
-)]
-#[tauri::command]
-pub async fn run_universe_code_scan(
-    state: State<'_, AppState>,
+/// 宿主 `run_universe_code_scan` 的任务体（#349 异步任务 seam）：编码段盲扫，长任务。
+pub(crate) async fn run_universe_code_scan_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     shard: Option<u32>,
     shards: Option<u32>,
 ) -> Result<axagent_analysis_engine::universe_scan::ScanStats, String> {
-    run_universe_scan_inner(state.harness.db(), &state.stock().astock_client, shard, shards).await
+    run_universe_scan_inner(db, client, shard, shards).await
 }

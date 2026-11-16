@@ -10,6 +10,8 @@ import { MoverRecallPanel } from "../MoverRecallPanel";
 const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -168,7 +170,22 @@ function renderWithProviders() {
 
 /** 核查视图渲染后点开漏检行；review 为 null/对象/throw 三选一。 */
 async function expandRow(review: MoverRecallEventReview | null | Error) {
-  invokeMock.mockImplementation((cmd: string) => {
+  invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+    // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+    if (cmd === "stock_start_task") {
+      const a = (args ?? {}) as { task?: string; input?: unknown };
+      pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+      return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+    }
+    if (cmd === "stock_poll_task") {
+      return pendingTaskResult.then((result: unknown) => ({
+        taskId: "",
+        status: "completed",
+        output: "",
+        result,
+      }));
+    }
+
     if (cmd === "analyze_mover_recall") { return Promise.resolve([makeViewWithMiss()]); }
     if (cmd === "stock_get_mover_recall_event_review") {
       return review instanceof Error ? Promise.reject(review) : Promise.resolve(review);

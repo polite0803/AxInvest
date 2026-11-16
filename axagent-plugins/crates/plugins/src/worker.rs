@@ -528,6 +528,11 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("stock.analysis", "save_eastmoney_proxy" | "record_decision_trust") => {
             Some(PluginPermission::Write)
         },
+        // #349：start/cancel 是写语义（spawn 台账 / 置取消旗标），generate_stock_report
+        // 写报告文件 ⇒ Write；poll_task / get_time_travel_batch 纯读不登记。
+        ("stock.analysis", "start_task" | "cancel_task" | "generate_stock_report") => {
+            Some(PluginPermission::Write)
+        },
         // #345 批 B19：六条写 op ⇒ `Write`。
         (
             "stock.analysis",
@@ -3581,6 +3586,76 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.reflection_stats(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #349：start_task
+            "stock.analysis" if op == "start_task" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.start_task(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #349：poll_task
+            "stock.analysis" if op == "poll_task" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.poll_task(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #349：cancel_task
+            "stock.analysis" if op == "cancel_task" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.cancel_task(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #349：generate_stock_report
+            "stock.analysis" if op == "generate_stock_report" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.generate_stock_report(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #349：get_time_travel_batch
+            "stock.analysis" if op == "get_time_travel_batch" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_time_travel_batch(request)) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -15123,6 +15198,32 @@ mod tests {
         ];
         let verdict =
             with_watchdog(Duration::from_secs(2), "stock.analysis #347 权限表", || {
+                (
+                    WRITES
+                        .iter()
+                        .map(|op| required_permission_for("stock.analysis", op))
+                        .collect::<Vec<_>>(),
+                    READS
+                        .iter()
+                        .map(|op| required_permission_for("stock.analysis", op))
+                        .collect::<Vec<_>>(),
+                )
+            });
+        for op in verdict.0 {
+            assert_eq!(op, Some(PluginPermission::Write), "写 op 必须要求 write");
+        }
+        for op in verdict.1 {
+            assert_eq!(op, None, "读 op 不得设权限闸");
+        }
+    }
+
+    /// #349 批：异步任务三 op + 同步面两条分档 —— 三写必须 Write、两读必须 None。
+    #[test]
+    fn stock_analysis_349_permissions() {
+        const WRITES: &[&str] = &["start_task", "cancel_task", "generate_stock_report"];
+        const READS: &[&str] = &["poll_task", "get_time_travel_batch"];
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #349 权限表", || {
                 (
                     WRITES
                         .iter()

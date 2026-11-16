@@ -1,7 +1,7 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import { JobCard } from "@/components/common/JobCard";
-import { invoke } from "@/lib/invoke";
 import { buildAsOfDateRange, type WorkdayRange } from "@/lib/replay/workdays";
+import { invokeStockTask } from "@/lib/stockTask";
 import {
   Alert,
   Button,
@@ -128,7 +128,7 @@ export function ReplaySweep() {
       setBusy(true);
       try {
         // 后端一次性返回;UI 进度条只在等待期间显示"running"文案
-        const res = await invoke<ReplaySweepResult>("run_replay_backtest", {
+        const res = await invokeStockTask<ReplaySweepResult>("run_replay_backtest", {
           items,
           holdingDays: values.holdingDays,
         });

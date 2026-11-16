@@ -2,7 +2,6 @@ import { List } from "@/components/common/AntdList";
 import { ReplayBadge, ReplayWatermark } from "@/components/shared/ReplayBadge";
 import { useStockJump } from "@/hooks/useStockJump";
 import { useTrackedTask } from "@/hooks/useTrackedTask";
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   actionToDirection,
@@ -12,6 +11,7 @@ import {
   recoTagPreset,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { TaskAccepted } from "@/types";
@@ -199,7 +199,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const triggerBacktest = useCallback(async () => {
     if (backtestTriggeredRef.current) { return; }
     backtestTriggeredRef.current = true;
-    await startBacktestTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
+    await startBacktestTask(() =>
+      invokePluginCommand<TaskAccepted>("stock_start_task", { task: "backtest_reco_strategies" })
+    );
   }, [startBacktestTask]);
 
   // W4-3（2026-11-01）：候选池留痕的读路径。此前 `reco_pool_batches` 写了 307 行而荐股面板
@@ -263,7 +265,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     setEmptyKind(null);
     setErrorDetail(null);
     try {
-      const batchResp = await invoke<RecoBatchResponse>("recommend_stocks_all_periods", { asOfDate });
+      const batchResp = await invokeStockTask<RecoBatchResponse>("recommend_stocks_all_periods", { asOfDate });
       if (myToken !== reqTokenRef.current) { return; }
       setBatch(batchResp ?? null);
       // 扫描命令内部先落库再返回 ⇒ 这一刻读到的批次留痕就是这一批的（放在任何提前返回
@@ -1254,7 +1256,7 @@ function AutoCalibrateButton({ t }: { t: TFunction }) {
     if (loading) { return; }
     setLoading(true);
     try {
-      const result = await invoke<{
+      const result = await invokeStockTask<{
         totalStrategies: number;
         changed: number;
         weights: Array<{

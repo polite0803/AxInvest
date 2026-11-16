@@ -7,6 +7,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { isTauri } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { compareDebateRounds } from "@/lib/stock-analysis-utils";
 import type { DebateRound, StockDecision } from "@/types/stock-analysis";
 import type { TFunction } from "i18next";
@@ -406,7 +407,7 @@ export async function exportAnalysisReport(
   if (format === "html") {
     if (!data.analysisId) { return t("stockAnalysis.htmlNeedAnalysisId"); }
     if (!isTauri()) { return t("stockAnalysis.htmlDesktopOnly"); }
-    const savedPath = await invoke<string>("generate_stock_report", {
+    const savedPath = await invokePluginCommand<string>("stock_generate_stock_report", {
       analysisId: data.analysisId,
     });
     return t("stockAnalysis.exportSaved", { path: savedPath });

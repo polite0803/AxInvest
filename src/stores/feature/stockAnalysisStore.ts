@@ -33,6 +33,7 @@ import {
 } from "@/lib/stock-analysis/agentOutput";
 import { computeAgreementScore } from "@/lib/stock-analysis/decision-agreement";
 import { buildDecisionInputsReport, type DecisionInputsReport } from "@/lib/stock-analysis/decisionInputDiagnosis";
+import { invokeStockTask } from "@/lib/stockTask";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { EarningsEvent, KLine, StockQuote, StockSearchResult } from "@/types";
@@ -1241,7 +1242,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // P1 修复(2026-07-25): 加入 browser_eastmoney，让用户看到反爬 fallback 通道的状态
       const VENDORS = ["eastmoney", "browser_eastmoney", "sina", "tencent", "akshare"];
       for (const v of VENDORS) {
-        invoke("check_vendor_health", { vendor: v }).catch((e) => {
+        invokeStockTask("check_vendor_health", { vendor: v }).catch((e) => {
           const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
           console.warn(`[StockAnalysis] Vendor ${v} health check failed: ${msg}`);
         });
@@ -2064,7 +2065,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   triggerStockEvolution: async (reason = "用户主动触发") => {
     set({ evolutionTriggering: true });
     try {
-      await invoke("trigger_stock_evolution", { reason });
+      await invokeStockTask("trigger_stock_evolution", { reason });
     } finally {
       set({ evolutionTriggering: false });
     }

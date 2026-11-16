@@ -1,5 +1,6 @@
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
+import { invokeStockTask } from "@/lib/stockTask";
 import type { TaskAccepted } from "@/types";
 import type {
   CloseSweepReport,
@@ -76,7 +77,7 @@ export function UniverseSamplePanel() {
 
   const fullMarketScan = () =>
     runSampleAction("scan", async () => {
-      const r = await invoke<UniverseScanStats>("run_universe_code_scan", { shards: 1 });
+      const r = await invokeStockTask<UniverseScanStats>("run_universe_code_scan", { shards: 1 });
       assertReport(r, "run_universe_code_scan", "registered");
       return t("stockAnalysis.moverRecall.fullScanDone", {
         registered: r?.registered ?? 0,

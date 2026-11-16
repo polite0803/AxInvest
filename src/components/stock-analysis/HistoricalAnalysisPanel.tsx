@@ -15,6 +15,7 @@ import {
   readHorizonActions,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { SearchOutlined } from "@ant-design/icons";
 import { App, Button, Card, Checkbox, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -127,7 +128,9 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
   const runBacktest = async (record: AnalysisRecord) => {
     setBtLoading(true);
     try {
-      const r = await invoke<BacktestResult>("backtest_analysis", { analysisId: record.id });
+      // ⚠ 既存契约断裂（#349 原样迁移）：宿主 backtest_analysis 收 stockCode/analysisDate/…，
+      // 此处只传 analysisId ⇒ 旧宿主 IPC 层就拒收；保持原输入不静默改语义。
+      const r = await invokeStockTask<BacktestResult>("backtest_analysis", { analysisId: record.id });
       setBtResult(r);
     } catch {
       message.error(t("stockAnalysis.backtest.failed"));
@@ -138,7 +141,8 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
   const runBacktestAll = async () => {
     setBtLoading(true);
     try {
-      const r = await invoke<BacktestResult[]>("backtest_all_history");
+      // ⚠ 既存类型错位（#349 原样迁移）：命令实返 BacktestStats（非数组），下方 Array.isArray 守卫吞掉。
+      const r = await invokeStockTask<BacktestResult[]>("backtest_all_history");
       if (Array.isArray(r)) { setBtAllResults(r); }
     } catch {
       message.error(t("stockAnalysis.backtest.allFailed"));

@@ -2127,6 +2127,42 @@ function mockDbConfig(): Record<string, unknown> {
   };
 }
 
+// #349：浏览器模式长任务 mock 的 pending 表（taskId → task 种类）。
+const stockTaskMocks = new Map<string, string>();
+
+// 各长任务的诚实空态结果（形状与真机终态一致，组件解构不崩）。
+function stockTaskMockResult(task: string): unknown {
+  switch (task) {
+    case "backtest_all_history":
+      return { total: 0, correct: 0, wrong: 0, accuracy: null, avgReturn: null };
+    case "backtest_analysis":
+      return null;
+    case "run_replay_backtest":
+      return { total: 0, valid: 0, invalid: 0, results: [], invalid_details: [] };
+    case "analyze_mover_recall":
+      return [];
+    case "run_universe_code_scan":
+      return { scanned: 0, registered: 0, skipped: 0 };
+    case "recommend_stocks_all_periods":
+    case "recommend_stocks":
+      return null;
+    case "preview_adjust_reco_weights":
+      return { totalStrategies: 0, changed: 0, weights: [] };
+    case "quick_backtest":
+      return null;
+    case "screen_stocks":
+      return [];
+    case "generate_daily_review":
+      return null;
+    case "run_reflection_now":
+      return null;
+    case "run_time_travel_batch":
+      return "mock-time-travel-batch";
+    default:
+      return null;
+  }
+}
+
 export async function handleCommand<T>(
   cmd: string,
   args?: Record<string, unknown>,
@@ -7846,8 +7882,35 @@ async function executeCommand<T>(
     // 让批次卡轮询一轮即终态停止（否则 get_ 兜底 `{}` 被当成 running 批次，
     // 访问 batch.horizons.length 直接 TypeError 白屏）。
     // 列表仍由 `list_time_travel_batches` 显式返回 []（见下方调度任务段）。
+
     case "run_time_travel_batch":
       return "mock-time-travel-batch" as unknown as T;
+
+    // ── #349：异步任务三 op + 同步面两条 ──────────────────────────────
+    // 浏览器模式无真实宿主台账：start 记 pending、poll 立即 completed（结果按
+    // task 种类给诚实空态，来自旧命令各自的 mock，见上方与下方 case 的同款形状）。
+    case "stock_start_task": {
+      const req = (args ?? {}) as { task?: string };
+      const id = `mock-stock-task-${req.task ?? "task"}-${Date.now()}`;
+      stockTaskMocks.set(id, req.task ?? "");
+      return { taskId: id } as unknown as T;
+    }
+    case "stock_poll_task": {
+      const req = (args ?? {}) as { taskId?: string };
+      const task = stockTaskMocks.get(req.taskId ?? "") ?? "";
+      return {
+        taskId: req.taskId ?? "",
+        status: "completed",
+        output: "（浏览器模式：无真实任务台账，回诚实空态）",
+        result: stockTaskMockResult(task),
+      } as unknown as T;
+    }
+    case "stock_cancel_task":
+      return undefined as unknown as T;
+    case "stock_generate_stock_report":
+      return "" as unknown as T;
+    case "stock_get_time_travel_batch":
+      return null as unknown as T;
     case "get_time_travel_batch": {
       const now = Date.now();
       return {

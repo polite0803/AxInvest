@@ -7,8 +7,8 @@
  * Accept/Reset 按钮。
  */
 
-import { invoke } from "@/lib/invoke";
 import { parseAction, parseRiskLevel, StockRiskLevel } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { type ExperimentRecord, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Button, InputNumber, Select, Slider } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -178,7 +178,7 @@ export function ExperimentSidebar() {
     if (!stockCode || Object.keys(configOverrides).length === 0) { return; }
     setToolReplayLoading(true);
     try {
-      const res = await invoke("replay_tool_chain", {
+      const res = await invokeStockTask("replay_tool_chain", {
         params: { stockCode, configOverrides },
       });
       if ((res as Record<string, unknown>)?.totalScore != null) {

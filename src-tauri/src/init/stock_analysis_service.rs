@@ -152,6 +152,15 @@ pub struct HostStockAnalysis {
     stock_monitor: Arc<std::sync::OnceLock<Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>>,
     /// 与 `StockDomainState.stock_adaptive_engine` **同一个** `Arc`（#344：进化审批执行）。
     stock_adaptive_engine: Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>,
+    /// Tauri 句柄（#349）：`start_task` 经 `spawn_tracked_impl` 写台账并 emit 任务事件。
+    /// 离线 bin（`create_app_state`）无句柄 ⇒ `None`（台账照写、事件不发，见 #349）。
+    app_handle: Option<tauri::AppHandle>,
+    /// 与 `AppState.vector_store` **同一个**实例（#349：手动反思任务走 RAG）。
+    vector_store: Arc<axagent_search::vector_store::VectorStore>,
+    /// 与 `AppState.trajectory_storage` **同一个**实例（#349：手动反思持久化 trajectory）。
+    trajectory_storage: Arc<axagent_trajectory::TrajectoryStorage>,
+    /// 与 `AppState.harness.master_key()` 同源（#349：反思链 RAG 写入）。按值持有（Copy）。
+    master_key: [u8; 32],
 }
 
 impl HostStockAnalysis {
@@ -170,6 +179,10 @@ impl HostStockAnalysis {
         stock_adaptive_engine: Arc<
             axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine,
         >,
+        app_handle: Option<tauri::AppHandle>,
+        vector_store: Arc<axagent_search::vector_store::VectorStore>,
+        trajectory_storage: Arc<axagent_trajectory::TrajectoryStorage>,
+        master_key: [u8; 32],
     ) -> Self {
         Self {
             db,
@@ -181,6 +194,10 @@ impl HostStockAnalysis {
             trading_engine,
             stock_monitor,
             stock_adaptive_engine,
+            app_handle,
+            vector_store,
+            trajectory_storage,
+            master_key,
         }
     }
 
@@ -2059,6 +2076,672 @@ impl StockAnalysisProvider for HostStockAnalysis {
                 .await
                 .map_err(AxAgentError::Provider)?;
         Self::to_value("reflection_stats", &stats)
+    }
+
+    // ── #349 批：异步任务 seam（start/poll/cancel）+ 同步面两条 ──
+
+    /// 写 op：发起宿主长任务（#349）。入参 `{ task, input }`，task 必须命中白名单。
+    ///
+    /// 执行体跑在**宿主进程**（`spawn_tracked_impl` 台账：tokio::spawn + 任务中心可见 +
+    /// 协作式取消），插件侧立即拿 `{ taskId }`；经 `poll_task` 轮询终态、`cancel_task` 取消。
+    /// 执行体天然持有宿主全部单例 ⇒ LLM / 向量库 / 工作流引擎无需经接缝透传。
+    async fn start_task(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct StartRequest {
+            task: String,
+            #[serde(default)]
+            input: Value,
+        }
+        let req = Self::parse::<StartRequest>("start_task", "{task, input?}", input)?;
+        let inner = req.input;
+        let accepted = match req.task.as_str() {
+            "backtest_reco_strategies" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    as_of_date: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.backtest_reco_strategies",
+                    "{asOfDate?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                let app2 = app.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "荐股策略历史回测对比",
+                    "reco-strategy-backtest",
+                    "最近一次荐股的正负样本两组策略信号历史回溯对比",
+                    async move {
+                        crate::commands::stock_analysis::backtest_reco_strategies_task(
+                            app2,
+                            &db,
+                            &client,
+                            r.as_of_date,
+                        )
+                        .await
+                    },
+                    |_| "荐股策略回测对比完成".to_string(),
+                )
+                .await?
+            },
+            "replay_tool_chain" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    params: crate::commands::stock_analysis::ReplayToolChainRequest,
+                }
+                let r = Self::parse::<Req>("start_task.replay_tool_chain", "{params}", inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "工具链重放",
+                    "replay-tool-chain",
+                    "What-If 工具链重放（多源行情 + 评分推演）",
+                    async move {
+                        crate::commands::stock_analysis::replay_tool_chain_task(r.params).await
+                    },
+                    |_| "工具链重放完成".to_string(),
+                )
+                .await?
+            },
+            "quick_backtest" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    request: crate::commands::stock_analysis::QuickBacktestRequest,
+                }
+                let r = Self::parse::<Req>("start_task.quick_backtest", "{request}", inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "快速回测",
+                    "quick-backtest",
+                    "单票多采样点决策回测",
+                    async move {
+                        crate::commands::stock_analysis::quick_backtest_task(&client, r.request)
+                            .await
+                    },
+                    |_| "快速回测完成".to_string(),
+                )
+                .await?
+            },
+            "screen_stocks" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    criteria: axagent_analysis_engine::screener::ScreenCriteria,
+                }
+                let r = Self::parse::<Req>("start_task.screen_stocks", "{criteria}", inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "选股扫描",
+                    "screen-stocks",
+                    "按条件全市场选股扫描",
+                    async move {
+                        crate::commands::stock_analysis::screen_stocks_task(
+                            &db, &client, r.criteria,
+                        )
+                        .await
+                    },
+                    |_| "选股扫描完成".to_string(),
+                )
+                .await?
+            },
+            "analyze_mover_recall" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    to: Option<String>,
+                }
+                let r = Self::parse::<Req>("start_task.analyze_mover_recall", "{to?}", inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "妖股漏检核查",
+                    "mover-recall",
+                    "全 A 股窗口涨幅达标漏检逐票核查",
+                    async move {
+                        crate::commands::mover_recall::analyze_mover_recall_task(&db, r.to).await
+                    },
+                    |_| "妖股漏检核查完成".to_string(),
+                )
+                .await?
+            },
+            "run_universe_code_scan" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    shard: Option<u32>,
+                    shards: Option<u32>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.run_universe_code_scan",
+                    "{shard?, shards?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "编码段盲扫",
+                    "universe-scan",
+                    "只登记市场清单，不产事件",
+                    async move {
+                        crate::commands::universe_scan::run_universe_code_scan_task(
+                            &db, &client, r.shard, r.shards,
+                        )
+                        .await
+                    },
+                    |_| "编码段盲扫完成".to_string(),
+                )
+                .await?
+            },
+            "preview_adjust_reco_weights" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    as_of_date: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.preview_adjust_reco_weights",
+                    "{asOfDate?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "权重调整预览",
+                    "reco-weight-preview",
+                    "荐股权重调整的历史回测预览（长跑）",
+                    async move {
+                        crate::commands::stock_analysis::preview_adjust_reco_weights_task(
+                            &db,
+                            &client,
+                            r.as_of_date,
+                        )
+                        .await
+                    },
+                    |_| "权重调整预览完成".to_string(),
+                )
+                .await?
+            },
+            "check_vendor_health" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    vendor: String,
+                }
+                let r = Self::parse::<Req>("start_task.check_vendor_health", "{vendor}", inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "vendor 健康检查",
+                    "vendor-health",
+                    "数据源接口健康探测",
+                    async move {
+                        crate::commands::stock_analysis::check_vendor_health_task(
+                            &db, &client, r.vendor,
+                        )
+                        .await
+                    },
+                    |_| "vendor 健康检查完成".to_string(),
+                )
+                .await?
+            },
+            "batch_get_klines" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    codes: Vec<String>,
+                    period: String,
+                    limit: u32,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.batch_get_klines",
+                    "{codes, period, limit}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "批量 K 线获取",
+                    "batch-klines",
+                    "逐票批量 K 线拉取（批量网络）",
+                    async move {
+                        crate::commands::stock_analysis::batch_get_klines_task(
+                            &client, r.codes, r.period, r.limit,
+                        )
+                        .await
+                    },
+                    |_| "批量 K 线获取完成".to_string(),
+                )
+                .await?
+            },
+            "backtest_analysis" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    stock_code: String,
+                    analysis_date: String,
+                    decision_action: String,
+                    decision_confidence: f64,
+                    holding_days: u32,
+                    as_of_date: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.backtest_analysis",
+                    "{stockCode, analysisDate, decisionAction, decisionConfidence, holdingDays, asOfDate?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "决策回测",
+                    "backtest",
+                    "单票单决策后验回测",
+                    async move {
+                        crate::commands::stock_analysis::backtest_analysis_task(
+                            &db,
+                            &client,
+                            r.stock_code,
+                            r.analysis_date,
+                            r.decision_action,
+                            r.decision_confidence,
+                            r.holding_days,
+                            r.as_of_date,
+                        )
+                        .await
+                    },
+                    |_| "决策回测完成".to_string(),
+                )
+                .await?
+            },
+            "backtest_all_history" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    holding_days: u32,
+                    scope: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.backtest_all_history",
+                    "{holdingDays, scope?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "全历史回测统计",
+                    "backtest",
+                    "全部已完成分析的批量回测统计（长跑）",
+                    async move {
+                        crate::commands::stock_analysis::backtest_all_history_task(
+                            &db,
+                            &client,
+                            r.holding_days,
+                            r.scope,
+                        )
+                        .await
+                    },
+                    |_| "全历史回测统计完成".to_string(),
+                )
+                .await?
+            },
+            "run_replay_backtest" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    items: Vec<crate::commands::stock_analysis::ReplaySweepItem>,
+                    holding_days: u32,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.run_replay_backtest",
+                    "{items, holdingDays}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "逐样本回放回测",
+                    "backtest",
+                    "逐样本 as-of 回放回测（长跑）",
+                    async move {
+                        crate::commands::stock_analysis::run_replay_backtest_task(
+                            &client,
+                            r.items,
+                            r.holding_days,
+                        )
+                        .await
+                    },
+                    |_| "逐样本回放回测完成".to_string(),
+                )
+                .await?
+            },
+            "run_reflection_now" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    stock_code: String,
+                    stock_name: String,
+                    as_of_date: String,
+                    actual_outcome: Option<String>,
+                    reflection_depth: Option<String>,
+                    horizon: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.run_reflection_now",
+                    "{stockCode, stockName, asOfDate, actualOutcome?, reflectionDepth?, horizon?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                let engine = self.work_engine.clone();
+                let vs = self.vector_store.clone();
+                let ts = self.trajectory_storage.clone();
+                let mk = self.master_key;
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "手动复盘反思",
+                    "reflection",
+                    "单票行情快照手动反思（四档快照 + RAG）",
+                    async move {
+                        crate::commands::stock_analysis::run_reflection_now_task(
+                            &db,
+                            &client,
+                            &engine,
+                            &vs,
+                            &ts,
+                            &mk,
+                            r.stock_code,
+                            r.stock_name,
+                            r.as_of_date,
+                            r.actual_outcome,
+                            r.reflection_depth,
+                            r.horizon,
+                        )
+                        .await
+                    },
+                    |_| "手动反思完成".to_string(),
+                )
+                .await?
+            },
+            "trigger_stock_evolution" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    reason: Option<String>,
+                    template_id: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.trigger_stock_evolution",
+                    "{reason?, templateId?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let adaptive = self.stock_adaptive_engine.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "股票进化触发",
+                    "stock-evolution",
+                    "手动触发股票自适应进化（长跑）",
+                    async move {
+                        crate::commands::stock_analysis::trigger_stock_evolution_task(
+                            &adaptive,
+                            r.reason,
+                            r.template_id,
+                        )
+                        .await
+                    },
+                    |_| "股票进化触发完成".to_string(),
+                )
+                .await?
+            },
+            "recommend_stocks_all_periods" => {
+                #[derive(Deserialize, Default)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    as_of_date: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.recommend_stocks_all_periods",
+                    "{asOfDate?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "四档荐股",
+                    "reco",
+                    "全四档智能荐股（种子刷新 + 长链）",
+                    async move {
+                        crate::commands::stock_analysis::recommend_stocks_all_periods_task(
+                            &db,
+                            &client,
+                            r.as_of_date,
+                        )
+                        .await
+                    },
+                    |_| "四档荐股完成".to_string(),
+                )
+                .await?
+            },
+            "recommend_stocks" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    period: axagent_analysis_engine::recommender::Period,
+                    as_of_date: Option<String>,
+                }
+                let r = Self::parse::<Req>(
+                    "start_task.recommend_stocks",
+                    "{period, asOfDate?}",
+                    inner,
+                )?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "智能荐股",
+                    "reco",
+                    "单档智能荐股（种子刷新 + 长链）",
+                    async move {
+                        crate::commands::stock_analysis::recommend_stocks_task(
+                            &db,
+                            &client,
+                            r.period,
+                            r.as_of_date,
+                        )
+                        .await
+                    },
+                    |_| "荐股完成".to_string(),
+                )
+                .await?
+            },
+            "generate_daily_review" => {
+                Self::require_no_params("start_task.generate_daily_review", &inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "每日复盘生成",
+                    "daily-review",
+                    "自选股 + 当日告警逐票行情复盘生成",
+                    async move {
+                        crate::commands::stock_analysis::generate_daily_review_task(&db, &client)
+                            .await
+                    },
+                    |_| "每日复盘生成完成".to_string(),
+                )
+                .await?
+            },
+            "run_time_travel_batch" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Req {
+                    request: crate::commands::time_travel_batch::TimeTravelBatchRequest,
+                }
+                let r = Self::parse::<Req>("start_task.run_time_travel_batch", "{request}", inner)?;
+                let app = self.app_handle.clone();
+                let db = self.db.clone();
+                let dbh = db.clone();
+                let client = self.astock_client.clone();
+                let engine = self.work_engine.clone();
+                let vs = self.vector_store.clone();
+                let ts = self.trajectory_storage.clone();
+                let lock = self.time_travel_batch_lock.clone();
+                let mk = self.master_key;
+                crate::commands::background_tasks::spawn_tracked_impl(
+                    app,
+                    &dbh,
+                    "时间旅行批次复盘",
+                    "time-travel",
+                    "as-of 封闭世界双链回放 + 四档反思（长跑）",
+                    async move {
+                        crate::commands::time_travel_batch::run_time_travel_batch_inner(
+                            &db, &client, &engine, &vs, &mk, &ts, &lock, r.request,
+                        )
+                        .await
+                    },
+                    |_| "时间旅行批次完成".to_string(),
+                )
+                .await?
+            },
+            other => {
+                return Err(AxAgentError::Validation(format!(
+                    "start_task 未知任务种类 `{other}`（白名单见宿主 service 派发表）"
+                )));
+            },
+        };
+        Self::to_value("start_task", &accepted)
+    }
+
+    /// 读 op：轮询宿主长任务（#349）。入参 `{ taskId }`。
+    async fn poll_task(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req {
+            task_id: String,
+        }
+        let r = Self::parse::<Req>("poll_task", "{taskId}", input)?;
+        let snap = crate::commands::background_tasks::task_snapshot(&self.db, &r.task_id)
+            .await
+            .map_err(AxAgentError::Provider)?
+            .ok_or_else(|| AxAgentError::Provider(format!("任务 `{}` 不存在", r.task_id)))?;
+        Self::to_value("poll_task", &snap)
+    }
+
+    /// 写 op：协作式取消宿主长任务（#349）。入参 `{ taskId }`；与宿主
+    /// `stop_background_task` 同源（`cancel_task_core`）。
+    async fn cancel_task(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req {
+            task_id: String,
+        }
+        let r = Self::parse::<Req>("cancel_task", "{taskId}", input)?;
+        crate::commands::background_tasks::cancel_task_core(&self.db, &r.task_id)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：个股 HTML 报告渲染落盘（宿主 `generate_stock_report` 迁 T2，#349）。
+    async fn generate_stock_report(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req {
+            analysis_id: String,
+        }
+        let r = Self::parse::<Req>("generate_stock_report", "{analysisId}", input)?;
+        let out = crate::commands::stock_analysis::generate_stock_report_task(
+            &self.db,
+            &self.astock_client,
+            r.analysis_id,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("generate_stock_report", &out)
+    }
+
+    /// 读 op：时间旅行批次状态（宿主 `get_time_travel_batch` 迁 T2，#349）。
+    /// 历史表权威；`ensure_stale_reaped` 不跟随（同 #338/#347 判据）。
+    async fn get_time_travel_batch(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req {
+            batch_id: String,
+        }
+        let r = Self::parse::<Req>("get_time_travel_batch", "{batchId}", input)?;
+        let batch =
+            crate::commands::time_travel_batch::get_time_travel_batch_core(&self.db, &r.batch_id)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_time_travel_batch", &batch)
     }
 
     // ── #346 批 B20：11 条（权重/参数台账/估值/工具/What-If）──

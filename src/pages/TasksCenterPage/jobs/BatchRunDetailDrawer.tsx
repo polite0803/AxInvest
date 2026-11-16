@@ -3,7 +3,7 @@
 import { BatchStatusTag } from "@/components/time-travel/BatchStatusTag";
 import { useBatchAnalysisColumns, useBatchHorizonColumns } from "@/components/time-travel/batchTables";
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { TimeTravelBatchState } from "@/types";
 import { Alert, Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
@@ -38,7 +38,9 @@ export function BatchRunDetailDrawer({ batchId, onClose }: BatchRunDetailDrawerP
     setLoading(true);
     setError(null);
     setData(null);
-    invoke<TimeTravelBatchState | null>("get_time_travel_batch", { batchId })
+    invokePluginCommand<TimeTravelBatchState | null>("stock_get_time_travel_batch", {
+      batchId,
+    })
       .then((batch) => {
         if (cancelled) {
           return;

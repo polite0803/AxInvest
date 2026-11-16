@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RecommendationPanel } from "../RecommendationPanel";
 
 const invokeMock = vi.fn();
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -35,12 +36,27 @@ function findRefreshButton() {
 beforeEach(() => {
   invokeMock.mockReset();
   // 默认所有 invoke 都返回"无数据"响应,避免测试间相互污染
-  invokeMock.mockResolvedValue({
-    period: "short",
-    picks: {},
-    disabledStyles: [],
-    generatedAt: Date.now(),
-    rawSeedPoolSize: 0,
+  invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+    if (cmd === "stock_start_task") {
+      const a = (args ?? {}) as { task?: string; input?: unknown };
+      pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+      return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+    }
+    if (cmd === "stock_poll_task") {
+      return pendingTaskResult.then((result: unknown) => ({
+        taskId: "",
+        status: "completed",
+        output: "",
+        result,
+      }));
+    }
+    return Promise.resolve({
+      period: "short",
+      picks: {},
+      disabledStyles: [],
+      generatedAt: Date.now(),
+      rawSeedPoolSize: 0,
+    });
   });
   useTimeAnchorStore.setState({
     asOfDate: null,
@@ -71,6 +87,27 @@ afterEach(async () => {
 /**
  * 找到 invoke 第一次被以 `command` 名称调用的参数
  */
+// #349 shim：把「所有命令一律回 defaultResult」的 mock 升级为
+// start/poll 协议感知（start 委派旧名直调并回 {taskId}，poll 回终态结果）。
+function shimMockResult(defaultResult: unknown) {
+  invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+    if (cmd === "stock_start_task") {
+      const a = (args ?? {}) as { task?: string; input?: unknown };
+      pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+      return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+    }
+    if (cmd === "stock_poll_task") {
+      return pendingTaskResult.then((result: unknown) => ({
+        taskId: "",
+        status: "completed",
+        output: "",
+        result,
+      }));
+    }
+    return Promise.resolve(defaultResult);
+  });
+}
+
 function findCall(command: string): unknown[] | undefined {
   return invokeMock.mock.calls.find((c) => c[0] === command);
 }
@@ -139,8 +176,21 @@ describe("RecommendationPanel — as-of propagation", () => {
   it("replay 模式: 库内那一代有批次 ⇒ 直接展示，不再发扫描命令", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     invokeMock.mockReset();
-    invokeMock.mockImplementation((cmd: string) =>
-      Promise.resolve(
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+      return Promise.resolve(
         cmd === "stock_get_cached_recommendation"
           ? {
             period: "short",
@@ -171,8 +221,8 @@ describe("RecommendationPanel — as-of propagation", () => {
             mode: "cached",
           }
           : { period: "short", picks: {}, disabledStyles: [], generatedAt: Date.now(), rawSeedPoolSize: 0 },
-      )
-    );
+      );
+    });
     renderWithProviders();
     await waitFor(() => {
       expect(screen.getByText("平安银行")).toBeInTheDocument();
@@ -210,7 +260,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     // 给 get_cached_recommendation 返回有数据的响应
     const cachedTs = Date.now();
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue({
+    shimMockResult({
       period: "short",
       picks: {
         trend: [{
@@ -246,7 +296,7 @@ describe("RecommendationPanel — as-of propagation", () => {
   it("缓存为空时显示 emptyNoCache 文案", async () => {
     // get_cached_recommendation 返回 null → 无缓存
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue(null);
+    shimMockResult(null);
     renderWithProviders();
     // 缓存为空 → loadCache 设 emptyKind=noData → 显示 emptyNoCache
     await waitFor(() => {
@@ -258,7 +308,7 @@ describe("RecommendationPanel — as-of propagation", () => {
 
   it("live 模式下点击刷新按钮调用 recommend_stocks_all_periods", async () => {
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue(null);
+    shimMockResult(null);
     renderWithProviders();
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     // 等待 loading 结束（antd 中 "刷新" 按钮含空格,用 card-extra 范围避免匹配空文案）
@@ -267,7 +317,7 @@ describe("RecommendationPanel — as-of propagation", () => {
       expect(btn).not.toHaveClass("ant-btn-loading");
     });
     invokeMock.mockClear();
-    invokeMock.mockResolvedValue({ byHorizon: {}, failedHorizons: {} });
+    shimMockResult({ byHorizon: {}, failedHorizons: {} });
     fireEvent.click(findRefreshButton());
     await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
     // 批量命令不带 period：四档一次取（R-0）
@@ -277,7 +327,7 @@ describe("RecommendationPanel — as-of propagation", () => {
 
   it("切换 period 重新调用 get_cached_recommendation(newPeriod)", async () => {
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue(null);
+    shimMockResult(null);
     renderWithProviders();
     await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
     await waitFor(() => {
@@ -285,7 +335,7 @@ describe("RecommendationPanel — as-of propagation", () => {
       expect(btn).not.toHaveClass("ant-btn-loading");
     });
     invokeMock.mockClear();
-    invokeMock.mockResolvedValue(null);
+    shimMockResult(null);
     fireEvent.click(screen.getByText(i18n.t("stockAnalysis.timeHorizonMid")));
     await waitFor(() => expect(findCall("stock_get_cached_recommendation")).toBeDefined());
     expect(findCall("stock_get_cached_recommendation")?.[1]).toEqual({ period: "mid" });
@@ -294,7 +344,7 @@ describe("RecommendationPanel — as-of propagation", () => {
   it("replay 模式下点击刷新按钮调用 recommend_stocks_all_periods 带 asOfDate", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue({ byHorizon: {}, failedHorizons: {} });
+    shimMockResult({ byHorizon: {}, failedHorizons: {} });
     renderWithProviders();
     await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
     await waitFor(() => {
@@ -302,7 +352,7 @@ describe("RecommendationPanel — as-of propagation", () => {
       expect(btn).not.toHaveClass("ant-btn-loading");
     });
     invokeMock.mockClear();
-    invokeMock.mockResolvedValue({ byHorizon: {}, failedHorizons: {} });
+    shimMockResult({ byHorizon: {}, failedHorizons: {} });
     fireEvent.click(findRefreshButton());
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     expect(findCall("recommend_stocks_all_periods")?.[1]).toMatchObject({ asOfDate: "2026-06-01" });

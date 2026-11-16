@@ -1,6 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { useStockJump } from "@/hooks/useStockJump";
-import { invoke } from "@/lib/invoke";
+import { invokeStockTask } from "@/lib/stockTask";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, InputNumber, Spin, Tag } from "antd";
@@ -154,7 +154,7 @@ export function StockScreenerPanel() {
         else if (fd.key === "rsiOverbought") { criteria.rsiOverbought = true; }
         else if (f.value != null) { criteria[fd.key] = f.value; }
       }
-      const r = await invoke<ScreenResult[]>("screen_stocks", { criteria });
+      const r = await invokeStockTask<ScreenResult[]>("screen_stocks", { criteria });
       if (myToken !== screenTokenRef.current) { return; }
       if (Array.isArray(r)) {
         setResults(r);

@@ -22,6 +22,8 @@ import { RecoStrategyMatrix } from "../RecoStrategyMatrix";
  *   F6 缩略视图旧实现不过滤 synthetic，兜底票可进 Top3。
  */
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -221,7 +223,22 @@ describe("兜底合成候选（F6）", () => {
 
 describe("逐档 rank IC 观测面（R-E）", () => {
   it("有 IC 的格报数，够不到门槛的格必须分句报「样本不足」而不是留空", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve({
           styles: [{
@@ -258,7 +275,22 @@ describe("逐档 rank IC 观测面（R-E）", () => {
   });
 
   it("闭环硬停格在矩阵里单列一句，不显示成「闭环已校准」", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve({
           styles: [],
@@ -297,7 +329,22 @@ describe("逐档 rank IC 观测面（R-E）", () => {
   });
 
   it("完全没有已验证样本的格也要显式说明，不显示成空白", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "stock_reco_ic_stats") {
         return Promise.resolve({ styles: [], totalCells: 0, usableCells: 0, totalSamples: 0 });
       }
@@ -312,7 +359,22 @@ describe("逐档 rank IC 观测面（R-E）", () => {
 
 describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
   it("当前档 short=60% 时徽章是 60%，不是四档算术平均的 50%", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "stock_get_cached_recommendation" || cmd === "recommend_stocks") {
         return Promise.resolve(recoResponse({ trend: [makePick()] }));
       }
@@ -354,7 +416,22 @@ describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
 
 describe("缺席不冒充读数（F4）", () => {
   it("持有天数与证据强度缺失时渲染「—」，不渲染 0d / 强度 0", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "stock_get_cached_recommendation" || cmd === "recommend_stocks") {
         return Promise.resolve(recoResponse({
           trend: [makePick({ holdingDays: undefined, confidence: undefined })],
@@ -376,7 +453,22 @@ describe("缺席不冒充读数（F4）", () => {
 describe("降级归因消费（F5）", () => {
   it("replay 下渲染后端逐风格 degradedReasons 文本", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "recommend_stocks_all_periods") {
         return Promise.resolve({
           byHorizon: {
@@ -406,7 +498,22 @@ describe("口径标注透传与跨档同分（R-C / R-D / R-F）", () => {
   /** 批量响应带上 short + mid 两档同一只票（同分对照用），并让缓存路径也能出票 */
   function mockBatchShort(pick: Record<string, unknown>) {
     const tier = recoResponse({ trend: [pick] });
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "recommend_stocks_all_periods") {
         return Promise.resolve({
           byHorizon: { short: tier, mid: tier },
@@ -431,19 +538,20 @@ describe("口径标注透传与跨档同分（R-C / R-D / R-F）", () => {
   it("σ 不可得时把止损口径标成固定百分比，不冒充波动率推导", async () => {
     mockBatchShort(makePick({ stopSource: "fallback_pct" }));
     await mountAndRefresh();
-    expect(screen.getAllByText(/固定百分比/).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText(/固定百分比/).length).toBeGreaterThan(0));
   });
 
   it("无历史先验样本时声明「仅由评分得出」，不假装四档各有先验", async () => {
     mockBatchShort(makePick({ priorSource: "absent" }));
     await mountAndRefresh();
-    expect(screen.getAllByText(/仅由该风格评分得出/).length).toBeGreaterThan(0);
+    // #349：批量结果经 start/poll 两跳应用，findCall 触发时渲染可能未落 ⇒ 用 waitFor 收敛
+    await waitFor(() => expect(screen.getAllByText(/仅由该风格评分得出/).length).toBeGreaterThan(0));
   });
 
   it("分位与绝对置信并存：展示分位但**不覆写** confidence", async () => {
     mockBatchShort(makePick({ confidence: 62, confidencePercentile: 30 }));
     await mountAndRefresh();
-    expect(screen.getAllByText(/组内当日分位 30/).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText(/组内当日分位 30/).length).toBeGreaterThan(0));
     // 绝对强度仍是 62（旧实现会把 62 覆写成分位 30 ⇒ 概率与分位混成同一个数）
     expect(screen.getAllByText(/62/).length).toBeGreaterThan(0);
     // 负控必须跟着 v4 的标签名（写旧名会一条恒真断言冒充检查）
@@ -469,7 +577,22 @@ describe("一次拿四档（R-0）", () => {
   }
 
   it("刷新走批量命令；切到另一档不再发任何扫描/缓存请求", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "recommend_stocks_all_periods") { return Promise.resolve(batchFourTiers()); }
       if (cmd === "stock_get_cached_recommendation") { return Promise.resolve(null); }
       return Promise.resolve({});
@@ -482,8 +605,9 @@ describe("一次拿四档（R-0）", () => {
     const refresh = findRefreshButton();
     fireEvent.click(refresh);
     await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
+    // #349：start/poll 两跳 ⇒ 先等批量结果渲染落地再取调用数快照（否则 poll 尾巴会污染计数）
+    await waitFor(() => expect(screen.getByText("票-short")).toBeTruthy());
     const callsAfterRefresh = invokeMock.mock.calls.length;
-    expect(screen.getByText("票-short")).toBeTruthy();
 
     // 切档：整批已在手，不得再发请求（旧形态是每档各扫一遍 / 各读一次缓存）
     fireEvent.click(screen.getByText("超短线"));
@@ -492,7 +616,22 @@ describe("一次拿四档（R-0）", () => {
   });
 
   it("某一档失败时独立成句，不渲染成「该档没有推荐」", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "recommend_stocks_all_periods") {
         return Promise.resolve({
           byHorizon: { short: recoResponse({ trend: [makePick()] }) },

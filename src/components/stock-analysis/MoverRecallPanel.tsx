@@ -1,6 +1,6 @@
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import type {
   MoverRecallEventReview,
   MoverRecallReviewReflection,
@@ -319,7 +319,7 @@ export function MoverRecallPanel() {
       setFailed(null);
       try {
         if (selectedId === LIVE_SOURCE) {
-          const raw = await invoke<MoverRecallView[]>("analyze_mover_recall", {});
+          const raw = await invokeStockTask<MoverRecallView[]>("analyze_mover_recall", {});
           if (cancelled) { return; }
           // A-2：每链一份视图。数组本身就是契约的一部分 —— 拿到 undefined / {}（mock 兜底）
           // 或空数组都不许读成「核查过但没有漏检」，交给形状守卫点名缺什么。

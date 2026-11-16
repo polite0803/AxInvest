@@ -8,11 +8,7 @@
 //! 放命令层会导致后两处跨模块调命令（分层门禁规则 2 `commands-no-sibling-call`），
 //! 放 engine 后三处都只是调库函数，依赖方向保持 wiring → implementor。
 
-use tauri::State;
-
 use axagent_analysis_engine::reflection_stats::{HitrateStats, build_hitrate_stats};
-
-use crate::AppState;
 
 /// 命中率统计（只读命令）：取数与聚合的唯一实现见
 /// [`axagent_analysis_engine::reflection_stats::build_hitrate_stats`]。

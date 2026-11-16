@@ -1,5 +1,5 @@
-import { invoke } from "@/lib/invoke";
 import { getActionTKey } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { App, Button, Card, Col, InputNumber, Row, Spin, Statistic, Table, Tag } from "antd";
 import { BarChart3, Clock, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { useState } from "react";
@@ -52,7 +52,7 @@ export function QuickBacktestPanel() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await invoke<QuickBacktestResult>("quick_backtest", {
+      const res = await invokeStockTask<QuickBacktestResult>("quick_backtest", {
         request: {
           stockCode: stockCode.trim(),
           startDate,

@@ -1,7 +1,8 @@
 import { JobCard } from "@/components/common/JobCard";
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonLabelKey } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { TimeTravelBatchAnalysis, TimeTravelBatchState, TimeTravelPeriod } from "@/types";
 import {
@@ -103,9 +104,12 @@ export function TimeTravelBatchCard() {
     stopPolling();
     const tick = async () => {
       try {
-        const next = await invoke<TimeTravelBatchState | null>("get_time_travel_batch", {
-          batchId,
-        });
+        const next = await invokePluginCommand<TimeTravelBatchState | null>(
+          "stock_get_time_travel_batch",
+          {
+            batchId,
+          },
+        );
         if (next) {
           setBatch(next);
           if (TERMINAL.includes(next.status)) {
@@ -148,7 +152,7 @@ export function TimeTravelBatchCard() {
 
     setStarting(true);
     try {
-      const batchId = await invoke<string>("run_time_travel_batch", { request: payload });
+      const batchId = await invokeStockTask<string>("run_time_travel_batch", { request: payload });
       setBatch(null);
       startPolling(batchId);
     } catch (e) {

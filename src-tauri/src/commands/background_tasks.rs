@@ -285,7 +285,7 @@ where
 }
 
 /// 测试可调的核心实现：`app = None` 时不发事件（lib 测试没有 Tauri AppHandle）。
-async fn spawn_tracked_impl<T, S>(
+pub(crate) async fn spawn_tracked_impl<T, S>(
     app: Option<tauri::AppHandle>,
     db: &DatabaseConnection,
     title: &str,
@@ -745,8 +745,18 @@ pub async fn stop_background_task(
     state: State<'_, AppState>,
     task_id: String,
 ) -> Result<(), String> {
-    let task = background_tasks::Entity::find_by_id(&task_id)
-        .one(state.harness.db())
+    cancel_task_core(state.harness.db(), &task_id).await.map(|_| ())
+}
+
+/// 取消/停止任务的共享核心（#349）：宿主 `stop_background_task` 与接缝
+/// `stock.analysis::cancel_task` 同源。返回是否走了「协作式取消」
+/// （受管 spawn_tracked 任务有旗标，终态由 spawn 体写）。
+pub(crate) async fn cancel_task_core(
+    db: &DatabaseConnection,
+    task_id: &str,
+) -> Result<bool, String> {
+    let task = background_tasks::Entity::find_by_id(task_id)
+        .one(db)
         .await
         .map_err(|e| {
             String::from(crate::commands::error::ErrorResponse::from_error(
@@ -760,21 +770,52 @@ pub async fn stop_background_task(
         })?;
     // 受管慢任务（spawn_tracked）：置旗标即可，终态与部分报告由 spawn 体写 ——
     // 这里直接改库会和它的终态写相撞（状态迁移被拒 + 两处写终态）。
-    if request_cancel(&task_id).await {
-        return Ok(());
+    if request_cancel(task_id).await {
+        return Ok(true);
     }
     // 可停止态用枚举判定（原来是裸字符串比较，`"runing"` 之类拼写错误会静默
     // 变成「不可停止」而不是报错）。未知状态不假装可停止。
     let current = TaskStatus::from_db_str(&task.status);
     if matches!(current, TaskStatus::Running | TaskStatus::Pending) {
-        update_status(state.harness.db(), &task_id, TaskStatus::Stopped, None).await?;
+        update_status(db, task_id, TaskStatus::Stopped, None).await?;
     } else if current == TaskStatus::Unknown {
         warn!(
             task_id = %task_id, raw = %task.status,
-            "[stop_background_task] 任务状态未知，按「不可停止」处理（不猜）"
+            "[cancel_task_core] 任务状态未知，按「不可停止」处理（不猜）"
         );
     }
-    Ok(())
+    Ok(false)
+}
+
+/// 接缝轮询的读侧（#349）：台账单行投影，终态解析 `result_json`。
+/// 失败任务的 `output` 即错误文案（spawn 体把 `Err(err)` 原样写进 output）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSnapshot {
+    pub task_id: String,
+    pub status: String,
+    pub output: String,
+    pub result: Option<serde_json::Value>,
+    pub finished_at: Option<i64>,
+}
+
+pub(crate) async fn task_snapshot(
+    db: &DatabaseConnection,
+    task_id: &str,
+) -> Result<Option<TaskSnapshot>, String> {
+    let task = background_tasks::Entity::find_by_id(task_id).one(db).await.map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?;
+    Ok(task.map(|t| TaskSnapshot {
+        task_id: t.id,
+        status: t.status,
+        result: t.result_json.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+        output: t.output,
+        finished_at: t.finished_at,
+    }))
 }
 
 /// 单次查询最多返回的事件条数。

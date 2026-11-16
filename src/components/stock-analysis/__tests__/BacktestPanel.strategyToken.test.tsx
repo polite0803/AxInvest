@@ -17,6 +17,8 @@ vi.mock("@/stores/shared/timeAnchorStore", () => ({
 }));
 
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -69,7 +71,27 @@ describe("BacktestPanel — 异步任务归属：旧任务的报告不得覆盖�
     // 每次任务受理回执给一个新 taskId；报告经 get_background_task_output 由测试控制何时返回
     let strategyCallIndex = 0;
     const rowResolvers: Record<string, (row: unknown) => void> = {};
-    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (cmd === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        const delegated = await invokeMock(a.task ?? "", a.input);
+        pendingTaskResult = Promise.resolve(delegated);
+        // 本文件用例依赖「每次 start 回不同 taskId」控制报告时序：委派结果本身是
+        // TaskAccepted（含 taskId）就原样透传，否则给通用 mock id。
+        return delegated && typeof delegated === "object" && "taskId" in delegated
+          ? delegated
+          : { taskId: `mock-${a.task ?? "t"}` };
+      }
+      if (cmd === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (cmd === "backtest_reco_strategies") {
         strategyCallIndex += 1;
         return { taskId: `task-${strategyCallIndex}` };

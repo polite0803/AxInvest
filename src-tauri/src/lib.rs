@@ -508,7 +508,7 @@ pub fn run() {
             // 否则 `CARGO_MANIFEST_DIR/bundled` 在用户机器上不存在 ⇒ 内置插件恒为空。
             let resource_dir = app.path().resource_dir().ok();
             let state = match tauri::async_runtime::block_on(
-                init::state::create_app_state_with_resource_dir(db_result, resource_dir),
+                init::state::create_app_state_with_resource_dir(db_result, resource_dir, Some(app.app_handle().clone())),
             ) {
                 Ok(s) => s,
                 Err(e) => {

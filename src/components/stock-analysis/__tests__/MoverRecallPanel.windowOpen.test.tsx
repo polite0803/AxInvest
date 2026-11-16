@@ -6,6 +6,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MoverRecallPanel } from "../MoverRecallPanel";
 
 const invokeMock = vi.fn();
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
+// #349 shim：start/poll 协议翻译 —— start 委派旧名直调并回 {taskId}，poll 回终态结果。
+function shimMockResult(defaultResult: unknown) {
+  invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+    if (cmd === "stock_start_task") {
+      const a = (args ?? {}) as { task?: string; input?: unknown };
+      pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+      return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+    }
+    if (cmd === "stock_poll_task") {
+      return pendingTaskResult.then((result: unknown) => ({
+        taskId: "",
+        status: "completed",
+        output: "",
+        result,
+      }));
+    }
+    return Promise.resolve(defaultResult);
+  });
+}
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -69,7 +90,7 @@ beforeEach(() => {
  */
 describe("MoverRecallPanel 窗口未满语义", () => {
   it("全部档位窗口未满：逐档标注 + 尚不可判定（不得显示「本区间无达标事件」）", async () => {
-    invokeMock.mockResolvedValue([makeView(1)]);
+    shimMockResult([makeView(1)]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-recall-empty")).toBeTruthy());
     for (const p of ["ultra_short", "short", "mid", "long"]) {
@@ -81,7 +102,7 @@ describe("MoverRecallPanel 窗口未满语义", () => {
   });
 
   it("部分档位已满：仅未满档位标注，文案仍为尚不可判定", async () => {
-    invokeMock.mockResolvedValue([makeView(3)]);
+    shimMockResult([makeView(3)]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-recall-empty")).toBeTruthy());
     expect(screen.queryByTestId("mover-window-open-ultra_short")).toBeNull();
@@ -92,7 +113,7 @@ describe("MoverRecallPanel 窗口未满语义", () => {
   });
 
   it("全部档位窗口已满且 0 事件：才是「本区间无达标事件」结论", async () => {
-    invokeMock.mockResolvedValue([makeView(90)]);
+    shimMockResult([makeView(90)]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-recall-empty")).toBeTruthy());
     expect(screen.queryByTestId("mover-window-open-ultra_short")).toBeNull();
@@ -101,7 +122,7 @@ describe("MoverRecallPanel 窗口未满语义", () => {
   });
 
   it("已满档位逐档三态：有达标的给条数、0 达标的明说「本档无达标事件」", async () => {
-    invokeMock.mockResolvedValue([makeView(90, { ultra_short: 3 })]);
+    shimMockResult([makeView(90, { ultra_short: 3 })]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-tier-events-ultra_short")).toBeTruthy());
     expect(screen.getByTestId("mover-tier-events-ultra_short").textContent ?? "").toContain("3");
@@ -112,7 +133,7 @@ describe("MoverRecallPanel 窗口未满语义", () => {
   });
 
   it("旧轮次没记录逐档计数（null）⇒ 第三态，不得冒充「本档无达标事件」", async () => {
-    invokeMock.mockResolvedValue([makeView(90, null)]);
+    shimMockResult([makeView(90, null)]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-tier-count-missing-ultra_short")).toBeTruthy());
     for (const p of ["ultra_short", "short", "mid", "long"]) {
@@ -122,7 +143,7 @@ describe("MoverRecallPanel 窗口未满语义", () => {
   });
 
   it("部分档位已满 ⇒ 全局句点名未满档位（已满档的「无」才是结论）", async () => {
-    invokeMock.mockResolvedValue([makeView(3)]);
+    shimMockResult([makeView(3)]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-recall-empty")).toBeTruthy());
     const text = screen.getByTestId("mover-recall-empty").textContent ?? "";
@@ -139,7 +160,7 @@ describe("MoverRecallPanel 窗口未满语义", () => {
   it("载荷缺 collectedDays ⇒ 形状守卫点名（契约漂移不得半渲染）", async () => {
     const view: Record<string, unknown> = { ...makeView(1) };
     delete view.collectedDays;
-    invokeMock.mockResolvedValue([view]);
+    shimMockResult([view]);
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("mover-recall-failed")).toBeTruthy());
     expect(screen.getByTestId("mover-recall-failed").textContent ?? "").toContain("collectedDays");

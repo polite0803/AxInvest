@@ -4,6 +4,7 @@ import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke, listen } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonIcAbsenceKey, horizonLabelKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { useStockAnalysisStore } from "@/stores";
 import type { AiChatAction } from "@/types";
 import type {
@@ -440,7 +441,7 @@ export function ReflectionPanel() {
   // 重新拉取对比，而不是把旧结论再算一遍（后端会自动生成 outcome 描述）。
   const rerunReflection = async (r: ReflectionRow) => {
     try {
-      await invoke("run_reflection_now", {
+      await invokeStockTask("run_reflection_now", {
         stockCode: r.stockCode,
         stockName: r.stockName,
         asOfDate: r.asOfDate,
@@ -650,7 +651,7 @@ export function ReflectionPanel() {
     }
     setRunning(true);
     try {
-      await invoke("run_reflection_now", {
+      await invokeStockTask("run_reflection_now", {
         stockCode: manualCode.trim(),
         stockName: "",
         asOfDate: manualAsOf.format("YYYY-MM-DD"),

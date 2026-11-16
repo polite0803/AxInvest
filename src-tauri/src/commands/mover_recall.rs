@@ -22,7 +22,6 @@ use axagent_dao::repo::mover_recall_runs::{self, RunEventRecord, RunModel, RunSn
 use axagent_dao::repo::{stock_analysis_snapshot, stock_lesson_queries};
 use serde::{Deserialize, Serialize};
 
-use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::common as common_err;
 use crate::commands::error_code::stock_workflow as wf_err;
@@ -145,24 +144,12 @@ fn prior_cover_within(pick_date: &str, window_start: &str, window_days: u32) -> 
     pick < start && pick >= start - chrono::Duration::days(prior_cover_calendar_days(window_days))
 }
 
-/// 主入口：跑一次核查（手动面板用，**不落库**）。
-///
-/// A-2 起返回**每链一份**视图（荐股在前、智选在后）：同一条达标事件在两条链上各有
-/// 「当时为什么没选它」。混成一份就会让趋势智选的命中顶掉智能荐股的漏检（反之亦然），
-/// 两条链都没法各自被优化 —— 那正是本轮需求的前提。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "窗口涨幅达标漏检核查"
-)]
-#[tauri::command]
-pub async fn analyze_mover_recall(
-    state: tauri::State<'_, AppState>,
+/// 宿主 `analyze_mover_recall` 的任务体（#349 异步任务 seam）：面板每链只展示 top 200。
+pub(crate) async fn analyze_mover_recall_task(
+    db: &axagent_harness::DatabaseConnection,
     to: Option<String>,
 ) -> Result<Vec<MoverRecallView>, String> {
-    let mut views = analyze_mover_recall_inner(state.harness.db(), to).await?;
-    // 面板每链只展示 top 200（inner 保留全集供调度侧落 mover_recall_events）
+    let mut views = analyze_mover_recall_inner(db, to).await?;
     for v in views.iter_mut() {
         v.misses.truncate(200);
     }

@@ -1,8 +1,8 @@
 import { List } from "@/components/common/AntdList";
 import { useStockJump } from "@/hooks/useStockJump";
 import { investPath } from "@/lib/investRoutes";
-import { invoke } from "@/lib/invoke";
 import { getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { useStockAnalysisStore } from "@/stores";
 import { ArrowRightOutlined, HistoryOutlined } from "@ant-design/icons";
 import { Button, Card, Spin, Tag, Tooltip } from "antd";
@@ -106,7 +106,7 @@ export function DailyReviewPanel() {
     setLoading(true);
     setError(null);
     try {
-      const r = await invoke<DailyReview>("generate_daily_review");
+      const r = await invokeStockTask<DailyReview>("generate_daily_review");
       setReview(r);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -115,7 +115,7 @@ export function DailyReviewPanel() {
   }, []);
 
   useEffect(() => {
-    invoke<DailyReview>("generate_daily_review")
+    invokeStockTask<DailyReview>("generate_daily_review")
       .then((r) => {
         setReview(r);
         setError(null);

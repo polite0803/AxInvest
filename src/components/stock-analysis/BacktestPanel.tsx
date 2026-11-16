@@ -1,6 +1,7 @@
 import { ReplayBadge, ReplayWatermark } from "@/components/shared/ReplayBadge";
 import { useTrackedTask } from "@/hooks/useTrackedTask";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
+import { invokeStockTask } from "@/lib/stockTask";
 import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { TaskAccepted } from "@/types";
 import type { BacktestComparisonResponse, BacktestStats, GroupBacktestResult } from "@/types/stock-analysis";
@@ -49,7 +50,7 @@ export function BacktestPanel() {
     setLoading(true);
     setFetchError(false);
     try {
-      const result = await invoke<BacktestStats>("backtest_all_history", {
+      const result = await invokeStockTask<BacktestStats>("backtest_all_history", {
         holdingDays,
         scope,
       });
@@ -75,7 +76,9 @@ export function BacktestPanel() {
   const runStrategyBacktest = useCallback(async () => {
     setStrategyResult(null);
     setStrategyError(null);
-    await startStrategyTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
+    await startStrategyTask(() =>
+      invokePluginCommand<TaskAccepted>("stock_start_task", { task: "backtest_reco_strategies" })
+    );
   }, [startStrategyTask]);
 
   // 报告取回（或失败）后落到渲染用的本地 state

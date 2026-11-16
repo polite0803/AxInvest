@@ -24,6 +24,7 @@ use axagent_analysis_engine::position_limits::PositionLimits;
 use axagent_analysis_engine::recommender::{self, RecoPick, RecoResponse};
 use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
 use axagent_analysis_engine::screener::{ScreenCriteria, ScreenResult, StockScreener};
+use axagent_astock_data::AStockClient;
 use axagent_astock_data::StockQuote;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchResult, BatchRunner, MarketBatchQuery};
@@ -479,12 +480,8 @@ fn neutral_quote(code: &str) -> StockQuote {
     }
 }
 
-/// 重新运行工具链（t-scoring / t-valuation / t-risk）带上覆盖的配置参数。
-/// 工具本身是纯 Rust 函数（确定性），修改配置参数后会产生不同输出。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "重跑工具链回放配置参数")]
-#[tauri::command]
-pub async fn replay_tool_chain(
-    state: State<'_, AppState>,
+/// 宿主 `replay_tool_chain` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn replay_tool_chain_task(
     params: ReplayToolChainRequest,
 ) -> Result<ReplayToolChainResult, String> {
     use axagent_astock_data::{AStockClient, indicators};
@@ -733,9 +730,6 @@ pub async fn replay_tool_chain(
     };
     let decision = compute_what_if_core(what_if)?;
 
-    let _ = client;
-    let _ = state;
-
     Ok(ReplayToolChainResult {
         total_score,
         score_details,
@@ -779,11 +773,9 @@ pub fn clear_asof_degradation_log() {
 // stock_batch_get_quotes / stock_batch_get_financials，取数面走宿主 market.quote 接缝）；
 // batch_get_klines 仍留本壳（带 50 条闸的写敏感面，未在退役批次内）。
 
-/// 批量获取 K 线
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "批量获取K线")]
-#[tauri::command]
-pub async fn batch_get_klines(
-    state: State<'_, AppState>,
+/// 宿主 `batch_get_klines` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn batch_get_klines_task(
+    client: &std::sync::Arc<AStockClient>,
     codes: Vec<String>,
     period: String,
     limit: u32,
@@ -800,7 +792,7 @@ pub async fn batch_get_klines(
             ))
             .into());
     }
-    let client = state.stock().astock_client.clone();
+    let client = client.clone();
     let runner = BatchRunner::new(client);
     Ok(runner.get_klines_batch(codes, &period, limit).await)
 }
@@ -1478,11 +1470,10 @@ pub(crate) fn map_action_to_strategy_id(action: &str) -> &'static str {
     axagent_analysis_engine::evolution_drift::action_to_strategy_id(Some(action))
 }
 
-/// 回测单个分析决策
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "回测单个分析决策")]
-#[tauri::command]
-pub async fn backtest_analysis(
-    state: State<'_, AppState>,
+/// 宿主 `backtest_analysis` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn backtest_analysis_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     stock_code: String,
     analysis_date: String,
     decision_action: String,
@@ -1493,7 +1484,7 @@ pub async fn backtest_analysis(
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
     let result = axagent_astock_data::as_of::with_optional_asof(ctx, async {
         BacktestEngine::backtest_decision(
-            &*state.stock().astock_client,
+            &**client,
             &stock_code,
             &analysis_date,
             &decision_action,
@@ -1515,7 +1506,7 @@ pub async fn backtest_analysis(
         .unwrap_or(0);
     let period = result.time_horizon.as_deref().unwrap_or("short");
     let _ = axagent_analysis_engine::evolution_drift::record_performance(
-        state.harness.db(),
+        db,
         strategy_id,
         period,
         &stock_code,
@@ -1541,16 +1532,10 @@ pub async fn backtest_analysis(
     Ok(result)
 }
 
-/// 批量回测历史分析（已完成的分析）
-///
-/// `scope`:
-/// - `"all"` (默认): 所有 completed 分析(live + replay)
-/// - `"live"`: 仅 live 模式分析(实时分析的回测准确率)
-/// - `"replay"`: 仅 replay 模式分析(回放分析的真实回测)
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "批量回测历史分析")]
-#[tauri::command]
-pub async fn backtest_all_history(
-    state: State<'_, AppState>,
+/// 宿主 `backtest_all_history` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn backtest_all_history_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     holding_days: u32,
     scope: Option<String>,
 ) -> Result<BacktestStats, String> {
@@ -1571,7 +1556,7 @@ pub async fn backtest_all_history(
         // "all"、未识别值 = 不过滤（与旧 `_` 分支同语义）
         None => query,
     };
-    let analyses = query.all(state.harness.db()).await.map_err(|e| {
+    let analyses = query.all(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询历史分析失败: {e}"))
     })?;
 
@@ -1602,9 +1587,7 @@ pub async fn backtest_all_history(
         .collect();
 
     // 默认持有期参数保留向后兼容，backtest_history 内部会优先使用每条记录的个性化持有期
-    let results =
-        BacktestEngine::backtest_history(&*state.stock().astock_client, historical, holding_days)
-            .await?;
+    let results = BacktestEngine::backtest_history(&**client, historical, holding_days).await?;
     let stats = BacktestEngine::compute_stats(&results);
     Ok(stats)
 }
@@ -1643,18 +1626,9 @@ pub struct ReplaySweepResult {
     pub stats: BacktestStats,
 }
 
-/// 批量回放回测（Replay Sweep）
-///
-/// 对给定的 `(stock_code, as_of_date, decision)` 元组逐个调用
-/// `BacktestEngine::backtest_decision`，汇总 valid/invalid 统计与 BacktestStats。
-///
-/// 注意：
-/// - `as_of_date` 必须在过去；前端 `DatePicker` 已约束 `disabledDate={d => d > dayjs()}`。
-/// - 此命令不读写 DB，只做计算；与 `backtest_all_history` 互为补充。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "批量回放回测")]
-#[tauri::command]
-pub async fn run_replay_backtest(
-    state: State<'_, AppState>,
+/// 宿主 `run_replay_backtest` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn run_replay_backtest_task(
+    client: &std::sync::Arc<AStockClient>,
     items: Vec<ReplaySweepItem>,
     holding_days: u32,
 ) -> Result<ReplaySweepResult, String> {
@@ -1678,7 +1652,7 @@ pub async fn run_replay_backtest(
         let effective_holding = item.expected_holding_days.unwrap_or(holding_days as i64);
         let result = as_of::with_optional_asof(ctx, async {
             BacktestEngine::backtest_decision(
-                &*state.stock().astock_client,
+                &**client,
                 &item.stock_code,
                 &item.as_of_date,
                 &item.decision_action,
@@ -1847,15 +1821,14 @@ pub async fn monitor_status_core(
 // 真相源统一为 `agency_experts` 表，列表 / 启停走 `agency_expert.rs` 的既有命令
 // （`list_agency_experts` 按 `source_dir` 聚合）。
 
-/// 生成股票分析 HTML 报告
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "生成股票分析HTML报告")]
-#[tauri::command]
-pub async fn generate_stock_report(
-    state: State<'_, AppState>,
+/// 宿主 `generate_stock_report` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn generate_stock_report_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     analysis_id: String,
 ) -> Result<String, String> {
     let record = stock_analyses::Entity::find_by_id(&analysis_id)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询分析记录失败: {e}"))
@@ -1875,14 +1848,13 @@ pub async fn generate_stock_report(
     let filepath = reports_dir.join(&filename);
 
     // 获取行情和K线数据
-    let quote = state.stock().astock_client.get_quote(&record.stock_code).await.map_err(|e| {
+    let quote = client.get_quote(&record.stock_code).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取行情失败: {e}"))
     })?;
 
-    let klines =
-        state.stock().astock_client.get_klines(&record.stock_code, "daily", 120).await.map_err(
-            |e| ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取 K 线失败: {e}")),
-        )?;
+    let klines = client.get_klines(&record.stock_code, "daily", 120).await.map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取 K 线失败: {e}"))
+    })?;
 
     // 计算技术指标和客观评分
     let indicators =
@@ -1891,9 +1863,7 @@ pub async fn generate_stock_report(
         axagent_analysis_engine::scoring::ScoringEngine::score(&indicators, quote.price, None);
     let pe = quote.pe.unwrap_or(0.0);
     let pb = quote.pb.unwrap_or(0.0);
-    let roe = state
-        .stock()
-        .astock_client
+    let roe = client
         .get_financials(&record.stock_code)
         .await
         .ok()
@@ -2141,15 +2111,14 @@ pub async fn get_recent_analyses_core(
 
 // ── Screen Commands ──
 
-/// 从自选股中筛选(自选股为空或 DB 异常时回退到 FALLBACK_STOCKS 池)
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "筛选股票")]
-#[tauri::command]
-pub async fn screen_stocks(
-    state: State<'_, AppState>,
+/// 宿主 `screen_stocks` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn screen_stocks_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     criteria: ScreenCriteria,
 ) -> Result<Vec<ScreenResult>, String> {
     let watchlist: Vec<(String, String)> =
-        match axagent_entities::watchlist_items::Entity::find().all(state.harness.db()).await {
+        match axagent_entities::watchlist_items::Entity::find().all(db).await {
             Ok(rows) => rows.iter().map(|w| (w.stock_code.clone(), w.stock_name.clone())).collect(),
             Err(e) => {
                 tracing::warn!("screen_stocks: 读自选股失败,改用 FALLBACK 池: {}", e);
@@ -2157,7 +2126,7 @@ pub async fn screen_stocks(
             },
         };
 
-    StockScreener::screen_watchlist(&state.stock().astock_client, &watchlist, &criteria).await
+    StockScreener::screen_watchlist(&client, &watchlist, &criteria).await
 }
 
 // ── Calendar Commands ──
@@ -2179,12 +2148,13 @@ pub async fn get_market_status_core() -> Result<serde_json::Value, String> {
 
 // ── Review Commands ──
 
-/// 生成每日收盘复盘报告
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "生成每日复盘报告")]
-#[tauri::command]
-pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyReview, String> {
+/// 宿主 `generate_daily_review` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn generate_daily_review_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
+) -> Result<DailyReview, String> {
     let watchlist: Vec<(String, String)> = axagent_entities::watchlist_items::Entity::find()
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询自选股失败: {e}"))
@@ -2205,7 +2175,7 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
         .filter(price_alerts::Column::IsTriggered.eq(1_i32))
         .filter(price_alerts::Column::TriggeredAt.gte(day_start_ms))
         .filter(price_alerts::Column::TriggeredAt.lt(day_end_ms))
-        .all(state.harness.db())
+        .all(db)
         .await;
 
     let mut triggered_alerts: std::collections::HashMap<String, Vec<String>> =
@@ -2225,13 +2195,7 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
             let canonical = am::normalize_alert_type(raw_type);
             let label = am::alert_type_label_zh(canonical);
             let threshold = alert.threshold.unwrap_or(alert.target_price);
-            let price = state
-                .stock()
-                .astock_client
-                .get_quote(&alert.stock_code)
-                .await
-                .map(|q| q.price)
-                .unwrap_or(0.0);
+            let price = client.get_quote(&alert.stock_code).await.map(|q| q.price).unwrap_or(0.0);
             // 单位跟着 `condition_type` 分列：价格类说「现价」，涨跌幅/换手率类说「阈值 %」
             let below = am::is_below_alert(canonical);
             let dir_symbol = if below { "≤" } else { "≥" };
@@ -2246,13 +2210,7 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
         }
     }
 
-    PostCloseReview::generate(
-        &*state.stock().astock_client,
-        &watchlist,
-        &triggered_alerts,
-        state.harness.db(),
-    )
-    .await
+    PostCloseReview::generate(&**client, &watchlist, &triggered_alerts, db).await
 }
 
 // ── Scoring Weights Optimization ──
@@ -2265,26 +2223,21 @@ pub async fn optimize_scoring_weights_core(
     axagent_analysis_engine::backtest::optimize_weights(client, db).await
 }
 
-/// 荐股策略历史回测（两组对比）
-///
-/// 1. 从 reco_picks 表读取最近一次荐股的真实推荐记录（synthetic=0）作为正向样本
-/// 2. 从同次荐股的候选池快照中，减去正向样本，得到负向样本（漏推荐的股票）
-/// 3. 两组分别跑策略信号历史回溯
-/// 4. 输出对比结果
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "荐股策略历史回测")]
-#[tauri::command]
-pub async fn backtest_reco_strategies(
-    state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
+/// 宿主 `backtest_reco_strategies` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn backtest_reco_strategies_task(
+    app: Option<tauri::AppHandle>,
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     as_of_date: Option<String>,
 ) -> Result<crate::commands::background_tasks::TaskAccepted, String> {
     // as-of 解析留在命令入口：非法日期同步报错，不进任务台账
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
-    let db = state.harness.db().clone();
-    let client = state.stock().astock_client.clone();
-    crate::commands::background_tasks::spawn_tracked(
-        &app_handle,
-        state.harness.db(),
+    let db = db.clone();
+    let dbh = db.clone();
+    let client = client.clone();
+    crate::commands::background_tasks::spawn_tracked_impl(
+        app,
+        &dbh,
         "荐股策略历史回测对比",
         "reco-strategy-backtest",
         "最近一次荐股的正负样本两组策略信号历史回溯对比",
@@ -2414,21 +2367,15 @@ async fn backtest_reco_strategies_inner(
     Ok(bt_result)
 }
 
-/// 根据回测结果自动调整荐股策略权重
-/// 预览荐股策略权重调整（只读，不写入）
-///
-/// 返回新旧权重对比，供用户确认后再调 apply。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "预览荐股策略权重调整")]
-#[tauri::command]
-pub async fn preview_adjust_reco_weights(
-    state: State<'_, AppState>,
+/// 宿主 `preview_adjust_reco_weights` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn preview_adjust_reco_weights_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use axagent_analysis_engine::backtest_strategy::adjust_strategy_weights;
     use axagent_entities::workflow_template;
     use std::collections::BTreeMap;
-
-    let db = state.harness.db();
 
     // 1. 读取模板已有权重
     let tmpl = workflow_template::Entity::find_by_id("stock-analysis")
@@ -2470,7 +2417,7 @@ pub async fn preview_adjust_reco_weights(
     // 2. 跑回测
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
     let bt_result = axagent_astock_data::as_of::with_optional_asof(ctx, async {
-        backtest_reco_strategies_inner(state.harness.db(), &state.stock().astock_client).await
+        backtest_reco_strategies_inner(db, &client).await
     })
     .await?;
 
@@ -3154,15 +3101,17 @@ pub async fn delete_stock_cron(state: State<'_, AppState>, id: String) -> Result
     Ok(())
 }
 
-/// 检查指定数据源的连接可用性
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "检查数据源连接可用性")]
-#[tauri::command]
-pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
+/// 宿主 `check_vendor_health` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn check_vendor_health_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
+    vendor: String,
+) -> Result<(), String> {
     // 对需要 token/密钥的 vendor，先从数据库加载凭据到内存
     // eastmoney：加载代理配置（直连 push2his 被本机链路 RST 时的 remedy）
     if vendor == "xueqiu" || vendor == "iwencai" || vendor == "neodata" || vendor == "eastmoney" {
         let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
-            .one(state.harness.db())
+            .one(db)
             .await
             .map_err(|e| {
                 ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
@@ -3173,7 +3122,7 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
                 if name == "vendor_xueqiu_token" {
                     if let serde_json::Value::String(token) = value {
                         if !token.is_empty() {
-                            if let Some(ref xq) = state.stock().astock_client.xq_token {
+                            if let Some(ref xq) = client.xq_token {
                                 *xq.write().await = token.clone();
                             }
                         }
@@ -3182,14 +3131,14 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
                 if name == "vendor_iwencai_key" {
                     if let serde_json::Value::String(key) = value {
                         if !key.is_empty() {
-                            *state.stock().astock_client.iwencai_key.write().await = key.clone();
+                            *client.iwencai_key.write().await = key.clone();
                         }
                     }
                 }
                 if name == "vendor_neodata_token" {
                     if let serde_json::Value::String(token) = value {
                         if !token.is_empty() {
-                            if let Some(ref nd) = state.stock().astock_client.neodata_token {
+                            if let Some(ref nd) = client.neodata_token {
                                 *nd.write().await = token.clone();
                             }
                         }
@@ -3198,9 +3147,7 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
                 if name == "vendor_eastmoney_proxy" {
                     if let serde_json::Value::String(url) = value {
                         // 空 = 显式清除代理回退直连；非空 = 校验并启用
-                        state
-                            .stock()
-                            .astock_client
+                        client
                             .set_eastmoney_proxy(if url.is_empty() {
                                 None
                             } else {
@@ -3216,7 +3163,7 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
         }
     }
 
-    state.stock().astock_client.check_vendor_health(&vendor).await.map_err(|e| {
+    client.check_vendor_health(&vendor).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL)
             .with_detail(format!("检查数据源健康度失败: {e}"))
             .to_string()
@@ -3525,13 +3472,6 @@ pub(crate) async fn reco_horizon_prior(
     axagent_analysis_engine::horizon_prior::horizon_prior_from_vars_db(db, served_vars, None).await
 }
 
-async fn load_reco_served_vars(
-    state: &AppState,
-) -> Result<Vec<(String, serde_json::Value)>, String> {
-    axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(state.harness.db())
-        .await
-}
-
 /// 从 served_vars 取策略权重快照（用于回溯某次荐股时的权重配置）。
 /// 用 served_vars（已被演化权重覆盖）而非原始模板 vars，保证快照忠实反映评分链"实际用到的权重"。
 fn reco_strategy_weights_snapshot(served_vars: &[(String, serde_json::Value)]) -> Option<String> {
@@ -3549,8 +3489,9 @@ fn reco_strategy_weights_snapshot(served_vars: &[(String, serde_json::Value)]) -
 /// 返回落库行数。
 ///
 /// `generated_at` 由调用方给出，保证同一批（多档）各档可各自成一行历史。
+/// #349：宿主壳退役后改收 `db`（recommend_stocks 两个任务体的共享落库路径）。
 async fn persist_reco_response_picks(
-    state: &AppState,
+    db: &axagent_harness::DatabaseConnection,
     response: &RecoResponse,
     served_vars: &[(String, serde_json::Value)],
     generated_at: &str,
@@ -3580,7 +3521,7 @@ async fn persist_reco_response_picks(
     // 批次级池快照：即使 0 票也要留痕，供漏检归因判「池子空/没扫过」（0 票批次在 reco_picks 里没有行）。
     let pool_batch_json = seed_pool_json.clone();
     let written = crate::commands::_shared_reco_pool::persist_reco_picks(
-        state.harness.db(),
+        db,
         &flat,
         seed_pool_json,
         reco_strategy_weights_snapshot(served_vars),
@@ -3594,7 +3535,7 @@ async fn persist_reco_response_picks(
         response.period.as_str()
     );
     crate::commands::_shared_reco_pool::persist_reco_pool_batch(
-        state.harness.db(),
+        db,
         "reco",
         response.period.as_str(),
         pool_batch_json.as_deref(),
@@ -3606,7 +3547,7 @@ async fn persist_reco_response_picks(
     // L3 截断留痕：与同一批 picks 共 generated_at，便于按批对齐
     if !response.scan_audit.is_empty() {
         let audit = crate::commands::_shared_reco_pool::persist_reco_scan_audit(
-            state.harness.db(),
+            db,
             &response.scan_audit,
             response.period,
             generated_at,
@@ -3623,35 +3564,32 @@ async fn persist_reco_response_picks(
     written
 }
 
-/// 可选 `as_of_date` 触发时间旅行模式：as_of_date 之前的数据用于回测，
-/// 之后的数据被严格屏蔽。
-/// 响应见 [RecoResponse]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "智能荐股")]
-#[tauri::command]
-pub async fn recommend_stocks(
-    state: State<'_, AppState>,
+/// 宿主 `recommend_stocks` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn recommend_stocks_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     period: axagent_analysis_engine::recommender::Period,
     as_of_date: Option<String>,
 ) -> Result<RecoResponse, String> {
     // 解析 as_of_date；非法/未来 → 4xx-style 错误
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
 
-    let served_vars = load_reco_served_vars(&state).await?;
+    let served_vars =
+        axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
     let generation = as_of_ctx.as_ref().map(|c| c.as_of_date.format("%Y-%m-%d").to_string());
     let vars = served_vars.clone();
 
-    // state.stock().astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
-    let client: std::sync::Arc<_> = state.stock().astock_client.clone();
+    // client 已是 Arc<AStockClient>，直接 clone Arc 即可
+    let client: std::sync::Arc<_> = client.clone();
     // 单档入口也必须刷新同一套种子（含 W3 全市场快照）——否则它会读到上一次扫描
     // 留下的进程级 USER/MOVER/UNIVERSE，表现为「单档与四档看到的池子不同」。
-    let seed_counts =
-        refresh_all_reco_seeds_db(state.harness.db(), generation.as_deref(), client.as_ref()).await;
+    let seed_counts = refresh_all_reco_seeds_db(db, generation.as_deref(), client.as_ref()).await;
     tracing::info!(
         "[reco] 单档荐股：候选种子合计 {}（全市场快照 {}）",
         seed_counts.total(),
         seed_counts.universe
     );
-    let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
+    let prior = reco_horizon_prior(db, &served_vars).await;
     let response = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
@@ -3667,7 +3605,7 @@ pub async fn recommend_stocks(
     // 不再用「仅 live」跳过整批，改为写同一张表 + 打代际标记；只读实盘的下游
     // 一律显式加 `as_of_date IS NULL`（漏加由代际门拦）。
     let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-    persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
+    persist_reco_response_picks(db, &response, &served_vars, &generated_at).await;
 
     Ok(response)
 }
@@ -4204,30 +4142,18 @@ pub async fn get_mover_asof_summary_core(
     })))
 }
 
-/// 一次拿**四档**荐股结果（候选池只建一次）。
-///
-/// 为什么要有这条命令：四周期科学化要求四档是四个独立预测，而单档命令下
-/// 「看四档」= 四次全量扫描，且四次之间的建池/流动性过滤完全重复（`recommender` 侧
-/// 因此拆出 `PreparedScan`，见 `PLAN-reco-horizon-science-alignment.md` Phase R-0）。
-///
-/// 失败**逐档**报告：某档扫描失败不抹掉整批，也不静默少一档 —— `failedHorizons`
-/// 必须与 `byHorizon` 一起渲染，否则 UI 会把「这一档失败了」读成「这一档没内容」。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "智能荐股（四档一次取）"
-)]
-#[tauri::command]
-pub async fn recommend_stocks_all_periods(
-    state: State<'_, AppState>,
+/// 宿主 `recommend_stocks_all_periods` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn recommend_stocks_all_periods_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
     as_of_date: Option<String>,
 ) -> Result<RecoBatchResponse, String> {
     use axagent_analysis_engine::recommender::Period;
 
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
-    let served_vars = load_reco_served_vars(&state).await?;
-    let client: std::sync::Arc<_> = state.stock().astock_client.clone();
+    let served_vars =
+        axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
+    let client: std::sync::Arc<_> = client.clone();
 
     // 代际显式取自本轮 as-of 上下文（回放=截止日；实盘=None）——见 helper 的文档。
     let generation = as_of_ctx.as_ref().map(|c| c.as_of_date.format("%Y-%m-%d").to_string());
@@ -4239,13 +4165,12 @@ pub async fn recommend_stocks_all_periods(
     //   · 涨幅榜（第五来源，2026-10-20）：必须先于扫描，且用**本轮的代际**取快照
     //     （回放代没有该日快照时返回 0，不拿今日榜冒充历史）；
     //   · 回灌 / 漏检：见各自 helper 文档。
-    let seed_counts =
-        refresh_all_reco_seeds_db(state.harness.db(), generation.as_deref(), client.as_ref()).await;
+    let seed_counts = refresh_all_reco_seeds_db(db, generation.as_deref(), client.as_ref()).await;
     tracing::info!("[reco] 手动四档荐股：候选种子合计 {} 只", seed_counts.total());
 
     let vars = served_vars.clone();
 
-    let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
+    let prior = reco_horizon_prior(db, &served_vars).await;
     let results = if let Some(ctx) = as_of_ctx {
         // as-of 必须把**截止日**的全市场快照显式带进扫描：进程级全局随时可能被
         // 并发 live 扫描覆盖，读全局就是把今天的池带进历史回放（前视）。
@@ -4287,7 +4212,7 @@ pub async fn recommend_stocks_all_periods(
         match res {
             Ok(response) => {
                 // 逐档各落一行历史（实盘与回放都落，代际在 response.as_of_date 里）
-                persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
+                persist_reco_response_picks(db, &response, &served_vars, &generated_at).await;
                 by_horizon.insert(period, response);
             },
             Err(e) => {
@@ -5214,39 +5139,22 @@ pub async fn delete_reflection(
     Ok(())
 }
 
-/// 手动触发反思复盘工作流（在前端复盘 tab 点击"开始反思"时调用）
-///
-/// # 实际行情自动对比（2026-09-13 改造）
-///
-/// 原实现要求调用方传入 `actual_outcome`（前端表单让用户手填「如 30天跌8% → 失败」），
-/// 本质是让用户**代替行情接口编数据**；同时 `raw_return_pct` / `alpha_return_pct`
-/// 长期传 `None`，导致 `reflection-comparator.rhai` 里 `actual_direction` 恒为
-/// 「横盘」、`direction_match` 恒为 `false` —— 反思 agent 是在对着假数据写结论。
-///
-/// 现在改为：后端按「分析日 → 最新交易日」自动拉取前复权 K 线，确定性算出入场基准价、
-/// 最新价、涨跌幅、区间高低、最大回撤、相对沪深300 超额收益，构造 `MarketSnapshot`
-/// 注入工作流（供 comparator 与反思 agent 共同消费）。
-///
-/// `actual_outcome` 因此降级为**可选人工覆盖**：仅用于停牌、重组等行情无法反映的
-/// 特殊情形；留空 / 不传时完全由自动行情生成。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "手动触发反思复盘")]
-#[tauri::command]
-pub async fn run_reflection_now(
-    state: State<'_, AppState>,
+/// 宿主 `run_reflection_now` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。依赖经注入面传入（work_engine / vector_store / trajectory_storage / master_key）。
+pub(crate) async fn run_reflection_now_task(
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<AStockClient>,
+    engine: &std::sync::Arc<axagent_runtime::work_engine::WorkEngine>,
+    vs: &std::sync::Arc<axagent_search::vector_store::VectorStore>,
+    ts: &std::sync::Arc<axagent_trajectory::TrajectoryStorage>,
+    master_key: &[u8; 32],
     stock_code: String,
     stock_name: String,
     as_of_date: String,
-    // [实际行情] 可选人工覆盖；留空 ⇒ 后端自动拉取真实行情生成
     actual_outcome: Option<String>,
     reflection_depth: Option<String>,
-    // 〇-B v2 第 4 条：手动反思指定复盘哪一档（不传 = 用该分析的公式主档）。
     horizon: Option<String>,
 ) -> Result<String, String> {
-    let db = state.harness.db();
-    let client = &state.stock().astock_client;
-    let engine = &state.work_engine;
-    let vs = &state.vector_store;
-    let mk = state.harness.master_key();
+    let mk = master_key;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
 
@@ -5413,7 +5321,7 @@ pub async fn run_reflection_now(
         // [B2/B3 借鉴] 手动反思场景无 B1 阶段落盘的 pending row,传 None 走 INSERT 路径
         None,
         // [方向3] 手动反思也持久化 trajectory，为 ExperiencePipeline 提供数据源
-        Some(&state.trajectory_storage),
+        Some(ts),
         // [四周期行情] 批次 3
         &horizon_snapshots,
     )
@@ -6164,19 +6072,14 @@ pub async fn get_evolution_history_core(
     Ok(rows)
 }
 
-/// 手动触发一次股票业务进化（用户在前端主动请求）。
-/// 与自动触发共用同一执行链（含落库回看），返回进化详情（触发原因/改动/摘要）。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "手动触发股票进化")]
-#[tauri::command]
-pub async fn trigger_stock_evolution(
-    state: State<'_, AppState>,
+/// 宿主 `trigger_stock_evolution` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn trigger_stock_evolution_task(
+    adaptive: &std::sync::Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>,
     reason: Option<String>,
     template_id: Option<String>,
 ) -> Result<axagent_analysis_engine::stock_self_evolution::StockEvolutionResult, String> {
     let reason = reason.unwrap_or_else(|| "用户主动触发".to_string());
-    state
-        .stock()
-        .stock_adaptive_engine
+    adaptive
         .evolution_engine()
         .trigger_manual_evolution(&reason, template_id.as_deref())
         .await
@@ -6482,13 +6385,9 @@ pub struct QuickBacktestResult {
     pub error: Option<String>,
 }
 
-/// 快速回测：采样运行 + 持有期模拟
-///
-/// 使用 as-of 模式回放历史数据，在每个采样日运行分析，然后查看持有期后的价格表现。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "快速回测")]
-#[tauri::command]
-pub async fn quick_backtest(
-    state: State<'_, AppState>,
+/// 宿主 `quick_backtest` 的任务体（#349 异步任务 seam）：经 `stock.analysis::start_task` 在宿主进程 spawn_tracked 执行。
+pub(crate) async fn quick_backtest_task(
+    client: &std::sync::Arc<AStockClient>,
     request: QuickBacktestRequest,
 ) -> Result<QuickBacktestResult, String> {
     use axagent_astock_data::as_of;
@@ -6533,7 +6432,7 @@ pub async fn quick_backtest(
         // 获取采样日行情作为 entry price（使用请求级的 as-of 上下文）
         let entry_ctx = AsOfContext::parse_optional(request.as_of_date.as_deref())?;
         let entry_price = as_of::with_optional_asof(entry_ctx, async {
-            let client = &state.stock().astock_client;
+            let client = &client;
             let klines = client.get_klines(&stock_code, "daily", 1).await.map_err(|e| {
                 ErrorResponse::new(wf_err::INTERNAL)
                     .with_detail(format!("获取 K 线失败({analysis_date}): {e}"))
@@ -6559,7 +6458,7 @@ pub async fn quick_backtest(
         // 使用 as-of 模式获取退出日行情（fix D1: 以前使用同一个 as_of 上下文，无视 exit_date）
         let exit_ctx = AsOfContext::parse_optional(Some(&exit_date_str))?;
         let exit_price = as_of::with_optional_asof(exit_ctx, async {
-            let client = &state.stock().astock_client;
+            let client = &client;
             let klines = client.get_klines(&stock_code, "daily", 1).await.map_err(|e| {
                 ErrorResponse::new(wf_err::INTERNAL)
                     .with_detail(format!("获取退出日 K 线失败({exit_date_str}): {e}"))

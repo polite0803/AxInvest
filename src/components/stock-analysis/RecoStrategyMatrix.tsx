@@ -1,6 +1,6 @@
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { formatFixed } from "@/lib/format";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonIcAbsenceKey, horizonSuffix } from "@/lib/stock-analysis-utils";
 import { loadRecoIcStats } from "@/lib/stock-analysis/recoIcStats";
 import type { TaskAccepted } from "@/types";
@@ -118,7 +118,9 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     if (externalData) { return; }
     // 组别变化不进依赖：切组是本地重排，不是新任务（旧代码把被命令忽略的 `group`
     // 参数传进 invoke，等于每次切换都白跑一次回测）
-    void startMatrixTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
+    void startMatrixTask(() =>
+      invokePluginCommand<TaskAccepted>("stock_start_task", { task: "backtest_reco_strategies" })
+    );
   }, [externalData, startMatrixTask]);
 
   // IC 与回测同源不同表：单独取，失败静默（面板退化成「只有胜率」而不报错）

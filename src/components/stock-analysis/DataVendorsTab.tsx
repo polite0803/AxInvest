@@ -4,6 +4,7 @@
 import { invalidate } from "@/lib/cacheInvalidation";
 import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
+import { invokeStockTask } from "@/lib/stockTask";
 import { toDbVariable } from "@/lib/workflowVariables";
 import type { Variable } from "@/types";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
@@ -458,7 +459,7 @@ export function DataVendorsTab() {
   const checkOne = useCallback(async (vendorName: string) => {
     setHealth((prev) => ({ ...prev, [vendorName]: "pending" }));
     try {
-      await invoke("check_vendor_health", { vendor: vendorName });
+      await invokeStockTask("check_vendor_health", { vendor: vendorName });
       setHealth((prev) => ({ ...prev, [vendorName]: "ok" }));
     } catch {
       setHealth((prev) => ({ ...prev, [vendorName]: "fail" }));

@@ -12,10 +12,10 @@
  * 前提：portfolio-mgr 已从 Agent 改为 CodeNode（Rhai 确定性公式）
  */
 
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { getDefaultVariables } from "@/lib/stock-analysis-defaults";
 import { parseRiskLevel, StockRiskLevel } from "@/lib/stock-analysis-utils";
+import { invokeStockTask } from "@/lib/stockTask";
 import { Button, Card, Collapse, Empty, InputNumber, Select, SelectProps, Slider, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -675,7 +675,7 @@ export function WhatIfBacktest() {
                             setToolReplayLoading(false);
                             return;
                           }
-                          const raw = await invoke("replay_tool_chain", {
+                          const raw = await invokeStockTask("replay_tool_chain", {
                             params: { stockCode: _stockCode, configOverrides },
                           }) as Record<string, unknown> | null;
                           const decision = (raw?.decision ?? {}) as Record<string, unknown>;

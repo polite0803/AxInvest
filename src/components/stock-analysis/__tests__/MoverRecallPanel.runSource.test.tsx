@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MoverRecallPanel } from "../MoverRecallPanel";
 
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -91,7 +93,22 @@ beforeEach(() => {
  */
 describe("MoverRecallPanel 轮次来源", () => {
   it("A. 已有落库轮次：默认读那一轮，不发出现场重算命令", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       return null;
@@ -106,7 +123,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("B. 库里一轮都没有：退回现场重算并单独成句（不得说成「本轮没有达标事件」）", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [makeView()]; }
       return null;
@@ -119,7 +151,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("C. 深链指定的轮次不在库内：点名该轮并退回现场重算", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun("mrr-aaa")]; }
       if (name === "analyze_mover_recall") { return [makeView()]; }
       return null;
@@ -132,7 +179,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("G. 回灌清单三态：样本不足只说 shadow，达下限才说可转正", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_reflow_candidates") {
@@ -149,7 +211,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("H. 回灌清单：达样本下限才出现 ready 态；无候选则是另一种缺席", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_reflow_candidates") {
@@ -163,7 +240,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("E. 补分析批次从未发起：单独成句（0 批不得说成「没有待补」）", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_recall_analysis_batches") { return []; }
@@ -175,7 +267,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("F. 有批次 ⇒ 显示最近一批状态；读不到 ⇒ 第三态（不冒充从未发起）", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_recall_analysis_batches") {
@@ -192,7 +299,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("E-4. 批次带选样计数 ⇒ 逐跳过原因成句（四数都要出现在界面上）", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_recall_analysis_batches") {
@@ -220,7 +342,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("D. 轮次载荷缺字段：走 failed 支，不把半份载荷当视图（既不崩也不静默空白）", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return {}; }
       return null;
@@ -232,7 +369,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("F. 命令回来说该轮不在库内：走「轮次不在库内」句并退回现场重算，不占用失败支", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return null; }
       if (name === "analyze_mover_recall") { return [makeView()]; }
@@ -246,7 +398,22 @@ describe("MoverRecallPanel 轮次来源", () => {
   });
 
   it("E. 下拉切到「现场重算」：必须真的发出重算命令", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
       if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "analyze_mover_recall") { return [makeView()]; }

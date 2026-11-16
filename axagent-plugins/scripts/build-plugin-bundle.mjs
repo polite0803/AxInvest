@@ -994,6 +994,66 @@ function stockManifest({ version, binaryName, sha256 }) {
         inputSchema: { type: "object", properties: {} },
       },
       {
+        // #349：异步任务 seam（发起宿主长任务，回 { taskId }，经 stock_poll_task 轮询）。
+        name: "stock_start_task",
+        description: "发起股票域长任务（回测/扫描/荐股/反思/批次复盘等，宿主 spawn_tracked 台账）",
+        command: "worker://stock_start_task",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          required: ["task"],
+          properties: { task: { type: "string" }, input: { type: "object" } },
+        },
+      },
+      {
+        // #349：异步任务 seam（轮询）。
+        name: "stock_poll_task",
+        description: "轮询宿主长任务状态（completed/failed/stopped 终态回 result）",
+        command: "worker://stock_poll_task",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          required: ["taskId"],
+          properties: { taskId: { type: "string" } },
+        },
+      },
+      {
+        // #349：异步任务 seam（协作式取消，与宿主 stop_background_task 同源）。
+        name: "stock_cancel_task",
+        description: "取消宿主长任务（置协作取消旗标，终态由任务体写）",
+        command: "worker://stock_cancel_task",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          required: ["taskId"],
+          properties: { taskId: { type: "string" } },
+        },
+      },
+      {
+        // #349：宿主 `generate_stock_report` 的接缝面（写：HTML 渲染落盘）。
+        name: "stock_generate_stock_report",
+        description: "生成个股 HTML 报告并落盘（读库 + 行情网络 + 渲染）",
+        command: "worker://stock_generate_stock_report",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          required: ["analysisId"],
+          properties: { analysisId: { type: "string" } },
+        },
+      },
+      {
+        // #349：宿主 `get_time_travel_batch` 的接缝面（历史表权威；reap 不跟随）。
+        name: "stock_get_time_travel_batch",
+        description: "查询时间旅行批次状态（含回放明细；重启后从历史表还原）",
+        command: "worker://stock_get_time_travel_batch",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          required: ["batchId"],
+          properties: { batchId: { type: "string" } },
+        },
+      },
+      {
         // #346：宿主 `get_reco_strategy_weights` 的接缝面。
         name: "stock_get_reco_strategy_weights",
         description: "荐股策略权重（投影评分链实际消费的 served_vars）（经宿主 stock.analysis 接缝）",

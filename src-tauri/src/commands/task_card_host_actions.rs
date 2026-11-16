@@ -132,7 +132,8 @@ mod tests {
             assert!(!action.command.contains(':'));
         }
         let commands: Vec<&str> = card.actions.iter().map(|a| a.command.as_str()).collect();
-        assert_eq!(commands, vec!["approve_evolution_plan", "reject_evolution_plan"]);
+        // #343 已把动作命令迁插件命名（stock_*）；本期望随裁定同步（测试侧漏更，#349 收口补上）。
+        assert_eq!(commands, vec!["stock_approve_evolution_plan", "stock_reject_evolution_plan"]);
     }
 
     /// 禁区 13 钉桩：投影序列化必须是 camelCase（前端 `PluginTaskCardsInfoDto` 消费面）。

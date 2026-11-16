@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MoverRecallPanel } from "../MoverRecallPanel";
 
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -66,7 +68,22 @@ beforeEach(() => {
  */
 describe("MoverRecallPanel 链维度", () => {
   it("A. 两链各一份：默认落在第一份（荐股链），并出现链选择器", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [makeView("reco"), makeView("serenity")]; }
       return null;
@@ -82,7 +99,22 @@ describe("MoverRecallPanel 链维度", () => {
   });
 
   it("B. 切链只换内存那一份：不得为换链重发核查命令", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [makeView("reco"), makeView("serenity")]; }
       return null;
@@ -98,7 +130,22 @@ describe("MoverRecallPanel 链维度", () => {
   });
 
   it("C. 载荷不是数组（契约漂移）：走失败支并点名缺的字段，不静默按单份渲染", async () => {
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return makeView("reco"); }
       return null;
@@ -127,7 +174,22 @@ describe("MoverRecallPanel 链维度", () => {
       triggerSource: "scheduler",
       createdAtMs: 1792199083889,
     };
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return [oldRun]; }
       if (name === "stock_get_mover_recall_run_view") { return { ...makeView("unlabeled"), run: oldRun }; }
       return null;
@@ -153,7 +215,22 @@ describe("MoverRecallPanel 事件域呈现", () => {
       judgeableCodesByTier: { ultra_short: 680 },
       gateVersion: "mover-layers-v2",
     };
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [view]; }
       return null;
@@ -180,7 +257,22 @@ describe("MoverRecallPanel 事件域呈现", () => {
         judgeableEvents: 0,
       },
     };
-    invokeMock.mockImplementation(async (name: string) => {
+    invokeMock.mockImplementation(async (name: string, args?: unknown) => { // #349 shim：异步任务协议翻译 —— start 委派旧名直调（既有断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果；start 恒回 { taskId }（invokeStockTask 协议）。
+      if (name === "stock_start_task") {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      if (name === "stock_poll_task") {
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
+      }
+
       if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [view]; }
       return null;

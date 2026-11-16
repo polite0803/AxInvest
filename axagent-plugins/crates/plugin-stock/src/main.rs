@@ -390,6 +390,17 @@ const COMMAND_RECORD_DECISION_TRUST: &str = "stock_record_decision_trust";
 /// `reflection_stats`（宿主同名，#348）—— 读 op。
 const COMMAND_REFLECTION_STATS: &str = "stock_reflection_stats";
 
+/// `start_task`（#349 异步任务 seam）—— 写 op：发起宿主长任务，回 `{ taskId }`。
+const COMMAND_START_TASK: &str = "stock_start_task";
+/// `poll_task`（#349）—— 读 op：轮询任务台账。
+const COMMAND_POLL_TASK: &str = "stock_poll_task";
+/// `cancel_task`（#349）—— 写 op：协作式取消。
+const COMMAND_CANCEL_TASK: &str = "stock_cancel_task";
+/// `generate_stock_report`（宿主同名，#349）—— 写 op：HTML 报告渲染落盘。
+const COMMAND_GENERATE_STOCK_REPORT: &str = "stock_generate_stock_report";
+/// `get_time_travel_batch`（宿主同名，#349）—— 读 op：批次状态（历史表权威）。
+const COMMAND_GET_TIME_TRAVEL_BATCH: &str = "stock_get_time_travel_batch";
+
 /// `manual_recalc_strategy_weights`（宿主同名，#346）—— 写 op。
 const COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS: &str = "stock_manual_recalc_strategy_weights";
 /// `recalc_reco_loop_weights`（宿主同名，#346）—— 写 op。
@@ -1049,6 +1060,66 @@ fn handle_command(
             peer,
             &request.call_chain,
             "reflection_stats",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #349：start_task（异步任务 seam）
+        COMMAND_START_TASK => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "start_task",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #349：poll_task
+        COMMAND_POLL_TASK => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "poll_task",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #349：cancel_task
+        COMMAND_CANCEL_TASK => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "cancel_task",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #349：generate_stock_report
+        COMMAND_GENERATE_STOCK_REPORT => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "generate_stock_report",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #349：get_time_travel_batch
+        COMMAND_GET_TIME_TRAVEL_BATCH => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_time_travel_batch",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -4938,6 +5009,11 @@ mod tests {
             super::COMMAND_GET_RECO_DETAIL,
             super::COMMAND_RECORD_DECISION_TRUST,
             super::COMMAND_REFLECTION_STATS,
+            super::COMMAND_START_TASK,
+            super::COMMAND_POLL_TASK,
+            super::COMMAND_CANCEL_TASK,
+            super::COMMAND_GENERATE_STOCK_REPORT,
+            super::COMMAND_GET_TIME_TRAVEL_BATCH,
             super::COMMAND_LIST_TIME_TRAVEL_BATCHES,
             super::COMMAND_MANUAL_RECALC_STRATEGY_WEIGHTS,
             super::COMMAND_RECALC_RECO_LOOP_WEIGHTS,

@@ -10,6 +10,8 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn();
+// #349 shim：start 暂存的旧名直调结果，poll 取走（模块级：跨 start/poll 两次调用共享）。
+let pendingTaskResult: Promise<unknown> = Promise.resolve(null);
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -58,6 +60,20 @@ function makeReco(): RecoResponse {
 function installInvokeStub() {
   invokeMock.mockImplementation((command: string, args?: Record<string, unknown>) => {
     switch (command) {
+      // #349 测试侧 shim：异步任务协议翻译 —— start 委派旧名直调（既有调用断言仍见旧名+同参记录），
+      // poll 立即回终态并携带该结果。start 恒回 { taskId }（invokeStockTask 协议）。
+      case "stock_start_task": {
+        const a = (args ?? {}) as { task?: string; input?: unknown };
+        pendingTaskResult = Promise.resolve(invokeMock(a.task ?? "", a.input));
+        return Promise.resolve({ taskId: `mock-${a.task ?? "t"}` });
+      }
+      case "stock_poll_task":
+        return pendingTaskResult.then((result: unknown) => ({
+          taskId: "",
+          status: "completed",
+          output: "",
+          result,
+        }));
       case "stock_get_cached_recommendation":
       case "recommend_stocks":
         return Promise.resolve(makeReco());

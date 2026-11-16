@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 /// 失败时返回结构化错误，由调用方决定如何处理（错误展示 / 重试 / 退出）。
 /// 不再 `process::exit(1)`——harness 架构要求启动错误可被前端感知。
 pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, String> {
-    create_app_state_with_resource_dir(db_result, None).await
+    create_app_state_with_resource_dir(db_result, None, None).await
 }
 
 /// 同 [`create_app_state`]，但允许传入**应用资源目录**（发布版用它定位内置插件）。
@@ -42,6 +42,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
 pub async fn create_app_state_with_resource_dir(
     db_result: DatabaseInitResult,
     resource_dir: Option<PathBuf>,
+    app: Option<tauri::AppHandle>,
 ) -> Result<AppState, String> {
     let t_start = std::time::Instant::now();
     tracing::info!("[startup] create_app_state begin");
@@ -1888,6 +1889,10 @@ pub async fn create_app_state_with_resource_dir(
                 stock_domain_state.trading_engine.clone(),
                 stock_domain_state.stock_monitor.clone(),
                 stock_domain_state.stock_adaptive_engine.clone(),
+                app.clone(),
+                vector_store_arc.clone(),
+                shared_trajectory_storage.clone(),
+                master_key,
             ));
         match axagent_harness::get_capability_registry().register_stock_analysis(provider) {
             Ok(_) => tracing::info!("stock.analysis 接缝已注册 (BuiltIn)"),

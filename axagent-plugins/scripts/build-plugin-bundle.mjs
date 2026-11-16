@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控/组合持仓与交易/进化审批/分析读写与台账/监控与数据源）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -887,6 +887,371 @@ function stockManifest({ version, binaryName, sha256 }) {
           },
           required: ["analysisId"],
         },
+      },
+      {
+        // #344：宿主 `get_asof_degradation_count` 的接缝面 —— as-of 降级条目总数。
+        name: "stock_get_asof_degradation_count",
+        description: "as-of 降级条目总数（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_asof_degradation_count",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `get_asof_degradation_log` 的接缝面 —— as-of 降级日志快照。
+        name: "stock_get_asof_degradation_log",
+        description: "as-of 降级日志快照（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_asof_degradation_log",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `get_market_status` 的接缝面 —— 市场状态文案。
+        name: "stock_get_market_status",
+        description: "市场状态文案（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_market_status",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `get_vendor_health_all` 的接缝面 —— 所有数据源健康状态。
+        name: "stock_get_vendor_health_all",
+        description: "所有数据源健康状态（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_vendor_health_all",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `get_vendor_fallback_log` 的接缝面 —— vendor fallback 日志。
+        name: "stock_get_vendor_fallback_log",
+        description: "vendor fallback 日志（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_vendor_fallback_log",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `get_interface_health_history` 的接缝面 —— 核心接口日级健康记录。
+        name: "stock_get_interface_health_history",
+        description: "核心接口日级健康记录（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_interface_health_history",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            days: { type: "integer", description: "最近 N 个交易日（缺省 7，夹 1..30）" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `get_valuation_params` 的接缝面 —— 估值参数。
+        name: "stock_get_valuation_params",
+        description: "估值参数（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_valuation_params",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `save_valuation_params` 的接缝面 —— 保存估值参数。
+        name: "stock_save_valuation_params",
+        description: "保存估值参数（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_save_valuation_params",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            params: { type: "object", description: "ValuationParams（camelCase 全字段）" },
+          },
+          required: ["params"],
+        },
+      },
+      {
+        // #344：宿主 `get_stock_template_version_status` 的接缝面 —— 模板代际对照（代码版本 vs 库内播种）。
+        name: "stock_get_stock_template_version_status",
+        description: "模板代际对照（代码版本 vs 库内播种）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_stock_template_version_status",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `list_stock_analyses` 的接缝面 —— 历史分析列表。
+        name: "stock_list_stock_analyses",
+        description: "历史分析列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_stock_analyses",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "缺省上限 1000（超出自动截断）" },
+            offset: { type: "integer" },
+          },
+          required: ["limit", "offset"],
+        },
+      },
+      {
+        // #344：宿主 `get_recent_analyses` 的接缝面 —— 最近分析摘要。
+        name: "stock_get_recent_analyses",
+        description: "最近分析摘要（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_recent_analyses",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "缺省 5" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `list_reflections` 的接缝面 —— 反思记录列表。
+        name: "stock_list_reflections",
+        description: "反思记录列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_reflections",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            limit: { type: "integer" },
+            originalAnalysisId: { type: "string" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `get_stock_analysis` 的接缝面 —— 单条分析详情。
+        name: "stock_get_stock_analysis",
+        description: "单条分析详情（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_stock_analysis",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analysisId: { type: "string" },
+          },
+          required: ["analysisId"],
+        },
+      },
+      {
+        // #344：宿主 `audit_decision_evidence` 的接缝面 —— 决策证据对账审计。
+        name: "stock_audit_decision_evidence",
+        description: "决策证据对账审计（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_audit_decision_evidence",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analysisId: { type: "string" },
+          },
+          required: ["analysisId"],
+        },
+      },
+      {
+        // #344：宿主 `rename_stock_analysis` 的接缝面 —— 重命名分析记录。
+        name: "stock_rename_stock_analysis",
+        description: "重命名分析记录（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_rename_stock_analysis",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            analysisId: { type: "string" },
+            newName: { type: "string" },
+          },
+          required: ["analysisId", "newName"],
+        },
+      },
+      {
+        // #344：宿主 `list_price_alerts` 的接缝面 —— 价格告警列表。
+        name: "stock_list_price_alerts",
+        description: "价格告警列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_price_alerts",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `create_price_alert` 的接缝面 —— 创建价格告警（落库并进监控引擎）。
+        name: "stock_create_price_alert",
+        description: "创建价格告警（落库并进监控引擎）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_create_price_alert",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            stockName: { type: "string" },
+            condition: { type: "string", description: "告警条件（如 price_above / price_below）" },
+            targetPrice: { type: "number" },
+          },
+          required: ["stockCode", "stockName", "condition", "targetPrice"],
+        },
+      },
+      {
+        // #344：宿主 `monitor_status` 的接缝面 —— 实时监控运行读数。
+        name: "stock_monitor_status",
+        description: "实时监控运行读数（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_monitor_status",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `get_t0_config` 的接缝面 —— T+0 配置。
+        name: "stock_get_t0_config",
+        description: "T+0 配置（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_t0_config",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #344：宿主 `set_t0_config` 的接缝面 —— 更新 T+0 配置。
+        name: "stock_set_t0_config",
+        description: "更新 T+0 配置（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_set_t0_config",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            config: { type: "object", description: "TZeroConfig（camelCase 全字段）" },
+          },
+          required: ["config"],
+        },
+      },
+      {
+        // #344：宿主 `get_portfolio_dashboard` 的接缝面 —— 组合监控仪表盘。
+        name: "stock_get_portfolio_dashboard",
+        description: "组合监控仪表盘（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_portfolio_dashboard",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string", description: "时间旅行截止日；省略 = live 叠加实时持仓" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `refresh_portfolio_metrics` 的接缝面 —— 刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）。
+        name: "stock_refresh_portfolio_metrics",
+        description:
+          "刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_refresh_portfolio_metrics",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            asOfDate: { type: "string", description: "快照归属日；省略 = 今日" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `check_position_limits` 的接缝面 —— 开仓限制校验。
+        name: "stock_check_position_limits",
+        description: "开仓限制校验（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_check_position_limits",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            proposedShares: { type: "integer" },
+            proposedPrice: { type: "number" },
+          },
+          required: ["stockCode", "proposedShares", "proposedPrice"],
+        },
+      },
+      {
+        // #344：宿主 `approve_evolution_plan` 的接缝面 —— 接受待审批进化计划（执行进化并回写）。
+        name: "stock_approve_evolution_plan",
+        description: "接受待审批进化计划（执行进化并回写）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_approve_evolution_plan",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            historyId: { type: "string" },
+            reviewer: { type: "string" },
+          },
+          required: ["historyId"],
+        },
+      },
+      {
+        // #344：宿主 `list_mover_recall_runs` 的接缝面 —— mover 核查轮次列表。
+        name: "stock_list_mover_recall_runs",
+        description: "mover 核查轮次列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_mover_recall_runs",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `get_mover_recall_run_view` 的接缝面 —— 按轮次读回核查结果。
+        name: "stock_get_mover_recall_run_view",
+        description: "按轮次读回核查结果（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_mover_recall_run_view",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            runId: { type: "string" },
+          },
+          required: ["runId"],
+        },
+      },
+      {
+        // #344：宿主 `get_mover_recall_event_review` 的接缝面 —— 漏检事件补分析报告与逐档反思。
+        name: "stock_get_mover_recall_event_review",
+        description: "漏检事件补分析报告与逐档反思（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_get_mover_recall_event_review",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string" },
+            anchorDate: { type: "string" },
+            period: { type: "string" },
+            chain: { type: "string", description: "reco | serenity；旧轮次省略" },
+          },
+          required: ["stockCode", "anchorDate", "period"],
+        },
+      },
+      {
+        // #344：宿主 `list_param_changes` 的接缝面 —— 参数变更台账。
+        name: "stock_list_param_changes",
+        description: "参数变更台账（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_param_changes",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "缺省 50，上限 200" },
+          },
+        },
+      },
+      {
+        // #344：宿主 `evaluate_param_changes` 的接缝面 —— 参数变更到期评估（写评估结论）。
+        name: "stock_evaluate_param_changes",
+        description: "参数变更到期评估（写评估结论）（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_evaluate_param_changes",
+        requiredPermission: "workspace-write",
+        inputSchema: { type: "object", properties: {} },
       },
       {
         // #343：宿主 `list_portfolio` 的接缝面 —— 持仓列表。

@@ -753,20 +753,15 @@ use sea_orm::{
 };
 use tauri::State;
 
-/// 获取当前全局 as-of 降级条目总数(进程级,跨 live/replay)。
-/// 缺陷 E 修复:前端 poll 用,实时显示降级数量。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取降级条目总数")]
-#[tauri::command]
-pub fn get_asof_degradation_count() -> u64 {
+/// 当前全局 as-of 降级条目总数 —— 宿主 `get_asof_degradation_count` 的 core（#344）。
+pub fn get_asof_degradation_count_core() -> u64 {
     // Q10 之后缓冲含 live 条目 ⇒ 只数回放档
     as_of::global_asof_degradation_count() as u64
 }
 
-/// 拉取最近 256 条全局降级日志(快照,不清空)。
-/// 供前端做"降级详情面板"展示。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取降级日志")]
-#[tauri::command]
-pub fn get_asof_degradation_log() -> Vec<as_of::DegradationEntry> {
+/// 拉取最近 256 条全局降级日志(快照,不清空) —— 宿主 `get_asof_degradation_log`
+/// 的 core（#344）。
+pub fn get_asof_degradation_log_core() -> Vec<as_of::DegradationEntry> {
     as_of::global_degradations_for_mode(axagent_astock_data::as_of::DEGRADATION_MODE_ASOF)
 }
 
@@ -1044,10 +1039,8 @@ pub(crate) async fn query_stock_analysis_items(
 }
 
 /// 历史分析列表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取历史分析列表")]
-#[tauri::command]
-pub async fn list_stock_analyses(
-    state: State<'_, AppState>,
+pub async fn list_stock_analyses_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: u32,
     offset: u32,
 ) -> Result<Vec<StockAnalysisListItem>, String> {
@@ -1059,7 +1052,7 @@ pub async fn list_stock_analyses(
     } else {
         limit
     };
-    query_stock_analysis_items(state.harness.db(), limit, offset).await
+    query_stock_analysis_items(db, limit, offset).await
 }
 
 /// 股票分析图的**代际对照**：代码里的权威版本 vs 库里已播种的版本。
@@ -1085,17 +1078,10 @@ pub struct StockTemplateVersionStatus {
 }
 
 /// 图版本代际对照
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateOnly,
-    description = "获取股票分析图的代码版本与库内已播种版本对照"
-)]
-#[tauri::command]
-pub async fn get_stock_template_version_status(
-    state: State<'_, AppState>,
+pub async fn get_stock_template_version_status_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<StockTemplateVersionStatus, String> {
-    let db_version = query_db_template_version(state.harness.db())
+    let db_version = query_db_template_version(db)
         .await
         .map_err(|e| ErrorResponse::new(wf_err::INTERNAL).with_detail(e).to_string())?;
     Ok(StockTemplateVersionStatus { code_version: TEMPLATE_VERSION, db_version })
@@ -1120,14 +1106,12 @@ pub(crate) async fn query_db_template_version(
 /// 返回 stock_analyses 行（camelCase 扁平结构）+ 附加 `dashboardReport`/`dashboardMd`
 /// 字段：DashboardReport 不持久化，此处从 blackboard_snapshot + decision_json 现场重建，
 /// 使重开历史分析时仪表盘 Tab 有数据（与 rerun_decision / workflow-completed 同源同构）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取单个分析详情")]
-#[tauri::command]
-pub async fn get_stock_analysis(
-    state: State<'_, AppState>,
+pub async fn get_stock_analysis_core(
+    db: &axagent_harness::DatabaseConnection,
     analysis_id: String,
 ) -> Result<serde_json::Value, String> {
     let model = stock_analyses::Entity::find_by_id(&analysis_id)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询分析详情失败: {e}"))
@@ -1155,11 +1139,8 @@ pub async fn get_stock_analysis(
     }
     // 执行层反思（工作流质量）：与市场结果反思分栏，不参与任何决策换算。
     // 查不到就不写键（前端按「未记录」渲染），不伪造 0 分。
-    if let Ok(Some(exec)) = axagent_dao::repo::stock_execution_reflections::latest_by_analysis(
-        state.harness.db(),
-        &analysis_id,
-    )
-    .await
+    if let Ok(Some(exec)) =
+        axagent_dao::repo::stock_execution_reflections::latest_by_analysis(db, &analysis_id).await
     {
         if let (Some(obj), Ok(exec_val)) = (value.as_object_mut(), serde_json::to_value(&exec)) {
             obj.insert("executionReflection".to_string(), exec_val);
@@ -1224,17 +1205,15 @@ pub async fn batch_delete_stock_analyses(
 }
 
 /// 重命名历史分析记录
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "重命名历史分析记录")]
-#[tauri::command]
-pub async fn rename_stock_analysis(
-    state: State<'_, AppState>,
+pub async fn rename_stock_analysis_core(
+    db: &axagent_harness::DatabaseConnection,
     analysis_id: String,
     new_name: String,
 ) -> Result<(), String> {
     use sea_orm::ActiveModelTrait;
     use sea_orm::Set;
     let mut record: stock_analyses::ActiveModel = stock_analyses::Entity::find_by_id(&analysis_id)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询分析记录失败: {e}"))
@@ -1245,7 +1224,7 @@ pub async fn rename_stock_analysis(
         })?
         .into();
     record.stock_name = Set(new_name);
-    record.update(state.harness.db()).await.map_err(|e| {
+    record.update(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("更新分析记录失败: {e}"))
     })?;
     Ok(())
@@ -1375,16 +1354,14 @@ pub(crate) async fn list_watchlist_core(
 ///
 /// 判据与动机见 `PLAN-evidence-factor-audit.md`；实现见
 /// `axagent_analysis_engine::evidence_audit::audit_decision_evidence`。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "决策证据对账审计")]
-#[tauri::command]
-pub async fn audit_decision_evidence(
-    state: State<'_, AppState>,
+pub async fn audit_decision_evidence_core(
+    db: &axagent_harness::DatabaseConnection,
     analysis_id: String,
 ) -> Result<axagent_analysis_engine::evidence_audit::EvidenceAuditReport, String> {
     use axagent_analysis_engine::evidence_audit::audit_decision_evidence as audit;
 
     let analysis = axagent_entities::stock_analyses::Entity::find_by_id(&analysis_id)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL)
@@ -1831,10 +1808,9 @@ pub async fn run_replay_backtest(
 /// - 新增 `alert_type` + `condition_type` + `threshold` 三列同步写入，新代码读新列
 ///
 /// 裁定 10：同股同类型的**未触发**行会被复用并改阈值，不再每建一次多一行。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建价格告警")]
-#[tauri::command]
-pub async fn create_price_alert(
-    state: State<'_, AppState>,
+pub async fn create_price_alert_core(
+    db: &axagent_harness::DatabaseConnection,
+    monitor: Option<&std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
     stock_code: String,
     stock_name: String,
     condition: String,
@@ -1846,8 +1822,8 @@ pub async fn create_price_alert(
     // 复用未触发行时 `id` 不变 ⇒ `add_config` 按 `alert_id` 覆盖旧阈值，不会两行盯同一语义。
     let (inserted, _reused, wired) =
         crate::commands::price_alert_upsert::upsert_price_alert_and_wire(
-            state.harness.db(),
-            state.stock().stock_monitor.get(),
+            db,
+            monitor,
             &stock_code,
             &stock_name,
             &condition,
@@ -1867,14 +1843,12 @@ pub async fn create_price_alert(
 }
 
 /// 查询价格告警列表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询价格告警列表")]
-#[tauri::command]
-pub async fn list_price_alerts(
-    state: State<'_, AppState>,
+pub async fn list_price_alerts_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<Vec<price_alerts::Model>, String> {
     price_alerts::Entity::find()
         .order_by_desc(price_alerts::Column::CreatedAt)
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL)
@@ -1910,11 +1884,11 @@ pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Resul
     Ok(())
 }
 
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询实时监控运行读数")]
-#[tauri::command]
-pub async fn monitor_status(state: State<'_, AppState>) -> Result<MonitorStatusDto, String> {
+pub async fn monitor_status_core(
+    monitor: Option<&std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
+) -> Result<MonitorStatusDto, String> {
     let session = axagent_astock_data::calendar::current_trading_session();
-    let Some(monitor) = state.stock().stock_monitor.get() else {
+    let Some(monitor) = monitor else {
         // 未装配本身是一种缺席：计数全部留 0，由 `assembled` 告诉前端「这些 0 没有含义」
         return Ok(MonitorStatusDto {
             assembled: false,
@@ -2218,10 +2192,8 @@ pub(crate) async fn toggle_trading_enabled_core(
 
 /// 获取最近分析记录（用于 Dashboard）
 /// 接线：register_commands.rs 注册 IPC handler + agent_command 宏注册 agent 工具索引
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取最近分析记录")]
-#[tauri::command]
-pub async fn get_recent_analyses(
-    state: State<'_, AppState>,
+pub async fn get_recent_analyses_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: Option<u32>,
 ) -> Result<Vec<serde_json::Value>, String> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -2229,7 +2201,7 @@ pub async fn get_recent_analyses(
         .filter(stock_analyses::Column::Status.eq("completed"))
         .order_by_desc(stock_analyses::Column::CreatedAt)
         .limit(limit.unwrap_or(5) as u64)
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询最近分析记录失败: {e}"))
@@ -2282,9 +2254,7 @@ pub async fn screen_stocks(
 /// （Rust / TS / rhai / 测试四面都查过）⇒ 按计划撤掉这两个键，不再让同一件事有 bool 与文案
 /// 两套表达。时段判定要结构化读数的地方走 `monitor_status` 的会话档位码
 /// （`TradingSession::code()`，11 语言各自翻译），不在这里再开一个中文口径。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取市场状态")]
-#[tauri::command]
-pub async fn get_market_status() -> Result<serde_json::Value, String> {
+pub async fn get_market_status_core() -> Result<serde_json::Value, String> {
     // 文案里的「下一个交易时点」必须按北京日推。旧写法把 UTC 的 `now()` 格式化成字符串再
     // 解析回来，北京 00:00–07:59 这段时间里拿到的是「昨天」⇒ 开市日的凌晨会报「非交易日」。
     Ok(serde_json::json!({
@@ -2805,20 +2775,20 @@ pub async fn get_reco_signal_history(
 // ── R2 组合监控 ──
 
 /// 拉取最近一次组合监控快照（按 as_of_date 时间旅行）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "获取组合监控仪表盘")]
-#[tauri::command]
-pub async fn get_portfolio_dashboard(
-    state: State<'_, AppState>,
+pub async fn get_portfolio_dashboard_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    engine: &tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>,
     as_of_date: Option<String>,
 ) -> Result<PortfolioDashboard, String> {
     let as_of = as_of_date.as_deref();
-    let mut dashboard = portfolio_monitor::get_dashboard(state.harness.db(), as_of).await?;
+    let mut dashboard = portfolio_monitor::get_dashboard(db, as_of).await?;
     // 当天实时数据叠加：当前持仓/总市值（历史快照保留）
     if as_of.is_none() {
         // 作用域收紧：下文的 `estimate_betas` 会发 N+1 次网络取数，**绝不能握着
         // `trading_engine` 的读锁做**（读锁跨 await 虽非 UB，但会把写入方阻塞数秒）。
         let positions = {
-            let engine = state.stock().trading_engine.read().await;
+            let engine = engine.read().await;
             engine.get_positions().await?
         };
         let (top, _sector, max_sec) = portfolio_monitor::compute_concentration(&positions);
@@ -2844,7 +2814,7 @@ pub async fn get_portfolio_dashboard(
         // 不可得时回退中性 1.0 并在 `betaProvenance` 里记账 —— 不再按 `sector_name`
         // 查固定 beta 表（那张表实测口径落空、基本没生效，见 analysis-engine 内注释）。
         let betas = portfolio_monitor::estimate_betas(
-            &*state.stock().astock_client,
+            client,
             &positions,
             portfolio_monitor::BETA_LOOKBACK_DAYS,
         )
@@ -2876,26 +2846,21 @@ pub async fn refresh_portfolio_for_scheduler(
 }
 
 /// 立即刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "刷新组合监控快照")]
-#[tauri::command]
-pub async fn refresh_portfolio_metrics(
-    state: State<'_, AppState>,
+pub async fn refresh_portfolio_metrics_core(
+    db: &axagent_harness::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    engine: &tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let engine = state.stock().trading_engine.read().await;
+    let engine = engine.read().await;
     let positions = engine.get_positions().await?;
     drop(engine);
 
     // G-7：β → 指标落库 → 相关性落库这三步已抽到引擎层 `portfolio_monitor::refresh_snapshot`。
     // 原先它们只写在下面这段命令体里，定时任务无从复用 ⇒ 收盘日更任务只能再拼一遍，
     // 两个生产者各拼一遍就是两套口径（面板与 cron 落库从此不同源）。
-    let summary = portfolio_monitor::refresh_snapshot(
-        state.harness.db(),
-        &*state.stock().astock_client,
-        &positions,
-        as_of_date.as_deref(),
-    )
-    .await?;
+    let summary =
+        portfolio_monitor::refresh_snapshot(db, client, &positions, as_of_date.as_deref()).await?;
 
     serde_json::to_value(&summary).map_err(|e| format!("serialize refresh summary: {e}"))
 }
@@ -2917,16 +2882,14 @@ pub(crate) async fn get_portfolio_correlations_core(
 // 整体在 provider 里重放，与本文件的 `get_portfolio_dashboard` 共用权威实现。
 
 /// 校验能否新开仓（position_limits）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "校验新开仓限制")]
-#[tauri::command]
-pub async fn check_position_limits(
-    state: State<'_, AppState>,
+pub async fn check_position_limits_core(
+    engine: &tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>,
     stock_code: String,
     proposed_shares: i32,
     proposed_price: f64,
 ) -> Result<serde_json::Value, String> {
     let _ = stock_code; // sector lookup not used yet; keep on signature for forward-compat
-    let engine = state.stock().trading_engine.read().await;
+    let engine = engine.read().await;
     let positions = engine.get_positions().await?;
     let total_mv: f64 = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
     let (top, sector_exposures, _max_sec) = portfolio_monitor::compute_concentration(&positions);
@@ -3178,14 +3141,13 @@ pub(crate) async fn backfill_financial_snapshots(
 /// 最近 N 个交易日的核心接口健康检查记录（倒序，缺失日不出现）。
 ///
 /// `storeEnabled=false` 是「归档没启用、结果没留存」，与「检查过且全好」必须分开显示。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取核心接口日级健康记录")]
-#[tauri::command]
-pub async fn get_interface_health_history(
-    state: State<'_, AppState>,
+/// 接口健康度历史 —— 宿主 `get_interface_health_history` 的 core（#344）。
+pub async fn get_interface_health_history_core(
+    client: &axagent_astock_data::AStockClient,
     days: Option<u32>,
 ) -> Result<axagent_astock_data::health_check::InterfaceHealthHistory, String> {
     let days = days.unwrap_or(7).clamp(1, 30) as usize;
-    Ok(state.stock().astock_client.interface_health_history(days).await)
+    Ok(client.interface_health_history(days).await)
 }
 
 // ── CronJob 定时任务（基于上游 CronJobStore + 持久化）──
@@ -3370,21 +3332,19 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
 }
 
 /// 获取所有数据源的实时健康状态
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取所有数据源健康状态")]
-#[tauri::command]
-pub async fn get_vendor_health_all(
-    state: State<'_, AppState>,
+/// 所有数据源实时健康状态 —— 宿主 `get_vendor_health_all` 的 core（#344）。
+pub async fn get_vendor_health_all_core(
+    client: &axagent_astock_data::AStockClient,
 ) -> Result<Vec<axagent_astock_data::vendor_health::VendorHealth>, String> {
-    Ok(state.stock().astock_client.health_tracker.get_all_health().await)
+    Ok(client.health_tracker.get_all_health().await)
 }
 
 /// P3-B5(F): 获取 vendor fallback 日志，用于前端调试"为什么 X 数据用了 Y vendor"
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取数据源Fallback日志")]
-#[tauri::command]
-pub async fn get_vendor_fallback_log(
-    state: State<'_, AppState>,
+/// vendor fallback 日志 —— 宿主 `get_vendor_fallback_log` 的 core（#344）。
+pub async fn get_vendor_fallback_log_core(
+    client: &axagent_astock_data::AStockClient,
 ) -> Result<Vec<axagent_astock_data::vendor_health::FallbackRecord>, String> {
-    Ok(state.stock().astock_client.health_tracker.get_fallback_log().await)
+    Ok(client.health_tracker.get_fallback_log().await)
 }
 
 // `set_vendor_status` 已迁 `stock.analysis` 接缝写 op（#337）：health_tracker
@@ -5351,20 +5311,16 @@ pub(crate) async fn create_batch_reflection_cron_core(
 }
 
 /// 查询反思复盘记录列表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询反思复盘记录列表")]
-#[tauri::command]
-pub async fn list_reflections(
-    state: State<'_, AppState>,
+pub async fn list_reflections_core(
+    db: &axagent_harness::DatabaseConnection,
     stock_code: Option<String>,
     limit: Option<u32>,
-    // P3：妖股漏检回放面板按补分析行 id 拉逐档反思（不传则保持原全量/按票口径）。
     original_analysis_id: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     use axagent_dao::repo::stock_lesson_queries;
     use axagent_entities::stock_reflections;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-    let db = state.harness.db();
     let mut query = stock_reflections::Entity::find()
         .order_by(stock_reflections::Column::CreatedAt, sea_orm::Order::Desc);
     if let Some(ref code) = stock_code {
@@ -5936,19 +5892,19 @@ pub async fn apply_param_suggestions(
 }
 
 /// 参数变更台账（最近 N 条，含状态与到期评估读数）。
-#[tauri::command]
-pub async fn list_param_changes(
-    state: State<'_, AppState>,
+pub async fn list_param_changes_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: Option<u64>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let rows = axagent_dao::repo::workflow_param_changes::list_recent(
-        state.harness.db(),
-        limit.unwrap_or(50).min(200),
-    )
-    .await
-    .map_err(|e| {
-        ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("查询参数变更台账失败: {e}"))
-    })?;
+    let rows =
+        axagent_dao::repo::workflow_param_changes::list_recent(db, limit.unwrap_or(50).min(200))
+            .await
+            .map_err(|e| {
+                ErrorResponse::err_with_detail(
+                    wf_err::INTERNAL,
+                    format!("查询参数变更台账失败: {e}"),
+                )
+            })?;
     Ok(rows.into_iter().filter_map(|m| serde_json::to_value(m).ok()).collect())
 }
 
@@ -6001,11 +5957,9 @@ fn decide_param_change_status(before: (i32, i32), after: (i32, i32)) -> (&'stati
     }
 }
 
-#[tauri::command]
-pub async fn evaluate_param_changes(
-    state: State<'_, AppState>,
+pub async fn evaluate_param_changes_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
     let now = chrono::Utc::now().timestamp_millis();
     let due =
         axagent_dao::repo::workflow_param_changes::list_due(db, now, 50).await.map_err(|e| {
@@ -6478,25 +6432,21 @@ pub async fn get_reco_strategy_weights(
 // ─── P2-6: RealtimeMonitor T+0 自动重跑配置 ───
 
 /// 查询 T+0 配置
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "查询T+0配置")]
-#[tauri::command]
-pub async fn get_t0_config(
-    state: State<'_, AppState>,
+pub async fn get_t0_config_core(
+    monitor: Option<&std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
 ) -> Result<axagent_analysis_engine::monitor::TZeroConfig, String> {
-    let monitor = state.stock().stock_monitor.get().ok_or_else(|| {
+    let monitor = monitor.ok_or_else(|| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail("RealtimeMonitor 未初始化")
     })?;
     Ok(monitor.t0_config().await)
 }
 
 /// 更新 T+0 配置
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "更新T+0配置")]
-#[tauri::command]
-pub async fn set_t0_config(
-    state: State<'_, AppState>,
+pub async fn set_t0_config_core(
+    monitor: Option<&std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
     config: axagent_analysis_engine::monitor::TZeroConfig,
 ) -> Result<(), String> {
-    let monitor = state.stock().stock_monitor.get().ok_or_else(|| {
+    let monitor = monitor.ok_or_else(|| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail("RealtimeMonitor 未初始化")
     })?;
     monitor.set_t0_config(config).await;
@@ -6962,25 +6912,16 @@ pub async fn load_valuation_params(db: &sea_orm::DatabaseConnection) -> Valuatio
     }
 }
 
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取估值参数配置")]
-#[tauri::command]
-pub async fn get_valuation_params(state: State<'_, AppState>) -> Result<ValuationParams, String> {
-    let params = get_valuation_params_inner(&state).await;
-    Ok(params)
+pub async fn get_valuation_params_core(
+    db: &axagent_harness::DatabaseConnection,
+) -> Result<ValuationParams, String> {
+    Ok(load_valuation_params(db).await)
 }
 
-/// 内部函数：从数据库加载估值参数，失败时返回默认值（复用 load_valuation_params）
-async fn get_valuation_params_inner(state: &State<'_, AppState>) -> ValuationParams {
-    load_valuation_params(state.harness.db()).await
-}
-
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "保存估值参数配置")]
-#[tauri::command]
-pub async fn save_valuation_params(
-    state: State<'_, AppState>,
+pub async fn save_valuation_params_core(
+    db: &axagent_harness::DatabaseConnection,
     params: ValuationParams,
 ) -> Result<(), String> {
-    let db = state.harness.db();
     let json_str =
         serde_json::to_string(&params).map_err(|e| format!("序列化估值参数失败: {}", e))?;
     axagent_dao::repo::settings::set_setting(db, VALUATION_PARAMS_KEY, &json_str)

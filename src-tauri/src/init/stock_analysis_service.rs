@@ -144,9 +144,18 @@ pub struct HostStockAnalysis {
     time_travel_batch_lock: Arc<tokio::sync::Mutex<()>>,
     /// 与 `AppState.work_engine` **同一个**实例 —— 漏检补分析批次的执行链走工作流引擎。
     work_engine: Arc<axagent_runtime::work_engine::WorkEngine>,
+    /// 与 `StockDomainState.trading_engine` **同一个** `Arc`（#344：组合仪表盘 /
+    /// 快照刷新 / 开仓校验三个 op 读它取持仓）。
+    trading_engine: Arc<tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>>,
+    /// 与 `StockDomainState.stock_monitor` **同一个** `Arc<OnceLock>`（#344：监控读数 /
+    /// T+0 配置 / 价格告警入引擎；引擎惰性装配 ⇒ 用共享 OnceLock 而非当前值快照）。
+    stock_monitor: Arc<std::sync::OnceLock<Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>>,
+    /// 与 `StockDomainState.stock_adaptive_engine` **同一个** `Arc`（#344：进化审批执行）。
+    stock_adaptive_engine: Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>,
 }
 
 impl HostStockAnalysis {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: DatabaseConnection,
         cron_job_store: Arc<CronJobStore>,
@@ -154,6 +163,13 @@ impl HostStockAnalysis {
         agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
         time_travel_batch_lock: Arc<tokio::sync::Mutex<()>>,
         work_engine: Arc<axagent_runtime::work_engine::WorkEngine>,
+        trading_engine: Arc<tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>>,
+        stock_monitor: Arc<
+            std::sync::OnceLock<Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
+        >,
+        stock_adaptive_engine: Arc<
+            axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine,
+        >,
     ) -> Self {
         Self {
             db,
@@ -162,6 +178,9 @@ impl HostStockAnalysis {
             agent_cancel_tokens,
             time_travel_batch_lock,
             work_engine,
+            trading_engine,
+            stock_monitor,
+            stock_adaptive_engine,
         }
     }
 
@@ -1230,6 +1249,431 @@ impl StockAnalysisProvider for HostStockAnalysis {
         .await
         .map_err(AxAgentError::Provider)?;
         Self::to_value("rollback_evolution", &row)
+    }
+
+    // ── #344 批 B18：29 条（统计/数据源/分析读写/监控/T+0/价格告警/组合引擎/进化审批/mover/参数台账）──
+
+    /// 读 op：as-of 降级条目总数（`get_asof_degradation_count`）。
+    async fn get_asof_degradation_count(&self, _input: Value) -> Result<Value> {
+        Self::to_value(
+            "get_asof_degradation_count",
+            &crate::commands::stock_analysis::get_asof_degradation_count_core(),
+        )
+    }
+
+    /// 读 op：as-of 降级日志快照（`get_asof_degradation_log`）。
+    async fn get_asof_degradation_log(&self, _input: Value) -> Result<Value> {
+        Self::to_value(
+            "get_asof_degradation_log",
+            &crate::commands::stock_analysis::get_asof_degradation_log_core(),
+        )
+    }
+
+    /// 读 op：市场状态文案（`get_market_status`）。
+    async fn get_market_status(&self, _input: Value) -> Result<Value> {
+        crate::commands::stock_analysis::get_market_status_core()
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 读 op：所有数据源健康状态（`get_vendor_health_all`）。
+    async fn get_vendor_health_all(&self, _input: Value) -> Result<Value> {
+        let rows = crate::commands::stock_analysis::get_vendor_health_all_core(&self.astock_client)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_vendor_health_all", &rows)
+    }
+
+    /// 读 op：vendor fallback 日志（`get_vendor_fallback_log`）。
+    async fn get_vendor_fallback_log(&self, _input: Value) -> Result<Value> {
+        let rows =
+            crate::commands::stock_analysis::get_vendor_fallback_log_core(&self.astock_client)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_vendor_fallback_log", &rows)
+    }
+
+    /// 读 op：接口健康度历史（`get_interface_health_history`）。
+    async fn get_interface_health_history(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct DaysRequest {
+            days: Option<u32>,
+        }
+        let req = Self::parse::<DaysRequest>("get_interface_health_history", "{days?}", input)?;
+        let history = crate::commands::stock_analysis::get_interface_health_history_core(
+            &self.astock_client,
+            req.days,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_interface_health_history", &history)
+    }
+
+    /// 读 op：估值参数（`get_valuation_params`）。
+    async fn get_valuation_params(&self, _input: Value) -> Result<Value> {
+        let params = crate::commands::stock_analysis::get_valuation_params_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_valuation_params", &params)
+    }
+
+    /// 写 op：保存估值参数（`save_valuation_params`）。
+    async fn save_valuation_params(&self, input: Value) -> Result<Value> {
+        let params = Self::parse::<crate::commands::stock_analysis::ValuationParams>(
+            "save_valuation_params",
+            "ValuationParams（camelCase）",
+            input,
+        )?;
+        crate::commands::stock_analysis::save_valuation_params_core(&self.db, params)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：模板代际对照（`get_stock_template_version_status`）。
+    async fn get_stock_template_version_status(&self, _input: Value) -> Result<Value> {
+        let status =
+            crate::commands::stock_analysis::get_stock_template_version_status_core(&self.db)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_stock_template_version_status", &status)
+    }
+
+    /// 读 op：历史分析列表（`list_stock_analyses`）。
+    async fn list_stock_analyses(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ListAnalysesRequest {
+            limit: u32,
+            offset: u32,
+        }
+        let req =
+            Self::parse::<ListAnalysesRequest>("list_stock_analyses", "{limit, offset}", input)?;
+        let rows = crate::commands::stock_analysis::list_stock_analyses_core(
+            &self.db, req.limit, req.offset,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_stock_analyses", &rows)
+    }
+
+    /// 读 op：最近分析摘要（`get_recent_analyses`）。
+    async fn get_recent_analyses(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct RecentRequest {
+            limit: Option<u32>,
+        }
+        let req = Self::parse::<RecentRequest>("get_recent_analyses", "{limit?}", input)?;
+        let rows = crate::commands::stock_analysis::get_recent_analyses_core(&self.db, req.limit)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_recent_analyses", &rows)
+    }
+
+    /// 读 op：反思记录列表（`list_reflections`）。
+    async fn list_reflections(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ReflectionsRequest {
+            stock_code: Option<String>,
+            limit: Option<u32>,
+            original_analysis_id: Option<String>,
+        }
+        let req = Self::parse::<ReflectionsRequest>(
+            "list_reflections",
+            "{stockCode?, limit?, originalAnalysisId?}",
+            input,
+        )?;
+        let rows = crate::commands::stock_analysis::list_reflections_core(
+            &self.db,
+            req.stock_code,
+            req.limit,
+            req.original_analysis_id,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_reflections", &rows)
+    }
+
+    /// 读 op：单条分析详情（`get_stock_analysis`）。
+    async fn get_stock_analysis(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct OneAnalysisRequest {
+            analysis_id: String,
+        }
+        let req = Self::parse::<OneAnalysisRequest>("get_stock_analysis", "{analysisId}", input)?;
+        crate::commands::stock_analysis::get_stock_analysis_core(&self.db, req.analysis_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// 读 op：决策证据对账审计（`audit_decision_evidence`）。
+    async fn audit_decision_evidence(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AuditRequest {
+            analysis_id: String,
+        }
+        let req = Self::parse::<AuditRequest>("audit_decision_evidence", "{analysisId}", input)?;
+        let report = crate::commands::stock_analysis::audit_decision_evidence_core(
+            &self.db,
+            req.analysis_id,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("audit_decision_evidence", &report)
+    }
+
+    /// 写 op：重命名分析记录（`rename_stock_analysis`）。
+    async fn rename_stock_analysis(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RenameRequest {
+            analysis_id: String,
+            new_name: String,
+        }
+        let req =
+            Self::parse::<RenameRequest>("rename_stock_analysis", "{analysisId, newName}", input)?;
+        crate::commands::stock_analysis::rename_stock_analysis_core(
+            &self.db,
+            req.analysis_id,
+            req.new_name,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：价格告警列表（`list_price_alerts`）。
+    async fn list_price_alerts(&self, _input: Value) -> Result<Value> {
+        let rows = crate::commands::stock_analysis::list_price_alerts_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_price_alerts", &rows)
+    }
+
+    /// 写 op：创建价格告警（`create_price_alert`，落库 + 进监控引擎同源）。
+    async fn create_price_alert(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateAlertRequest {
+            stock_code: String,
+            stock_name: String,
+            condition: String,
+            target_price: f64,
+        }
+        let req = Self::parse::<CreateAlertRequest>(
+            "create_price_alert",
+            "{stockCode, stockName, condition, targetPrice}",
+            input,
+        )?;
+        // OnceLock::get 返回 Option<&Arc<..>>；upsert 助手签名正是该形态。
+        let monitor = self.stock_monitor.get();
+        let model = crate::commands::stock_analysis::create_price_alert_core(
+            &self.db,
+            monitor,
+            req.stock_code,
+            req.stock_name,
+            req.condition,
+            req.target_price,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("create_price_alert", &model)
+    }
+
+    /// 读 op：实时监控运行读数（`monitor_status`）。
+    async fn monitor_status(&self, _input: Value) -> Result<Value> {
+        let status = crate::commands::stock_analysis::monitor_status_core(self.stock_monitor.get())
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("monitor_status", &status)
+    }
+
+    /// 读 op：T+0 配置（`get_t0_config`）。
+    async fn get_t0_config(&self, _input: Value) -> Result<Value> {
+        let cfg = crate::commands::stock_analysis::get_t0_config_core(self.stock_monitor.get())
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_t0_config", &cfg)
+    }
+
+    /// 写 op：T+0 配置（`set_t0_config`）。
+    async fn set_t0_config(&self, input: Value) -> Result<Value> {
+        let cfg = Self::parse::<axagent_analysis_engine::monitor::TZeroConfig>(
+            "set_t0_config",
+            "TZeroConfig（camelCase）",
+            input,
+        )?;
+        crate::commands::stock_analysis::set_t0_config_core(self.stock_monitor.get(), cfg)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：组合监控仪表盘（`get_portfolio_dashboard`）。
+    async fn get_portfolio_dashboard(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct DashboardRequest {
+            as_of_date: Option<String>,
+        }
+        let req = Self::parse::<DashboardRequest>("get_portfolio_dashboard", "{asOfDate?}", input)?;
+        let dashboard = crate::commands::stock_analysis::get_portfolio_dashboard_core(
+            &self.db,
+            &self.astock_client,
+            &self.trading_engine,
+            req.as_of_date,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("get_portfolio_dashboard", &dashboard)
+    }
+
+    /// 写 op：刷新组合监控快照（`refresh_portfolio_metrics`）。
+    async fn refresh_portfolio_metrics(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct RefreshRequest {
+            as_of_date: Option<String>,
+        }
+        let req = Self::parse::<RefreshRequest>("refresh_portfolio_metrics", "{asOfDate?}", input)?;
+        crate::commands::stock_analysis::refresh_portfolio_metrics_core(
+            &self.db,
+            &self.astock_client,
+            &self.trading_engine,
+            req.as_of_date,
+        )
+        .await
+        .map_err(AxAgentError::Provider)
+    }
+
+    /// 读 op：开仓限制校验（`check_position_limits`）。
+    async fn check_position_limits(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct LimitsRequest {
+            stock_code: String,
+            proposed_shares: i32,
+            proposed_price: f64,
+        }
+        let req = Self::parse::<LimitsRequest>(
+            "check_position_limits",
+            "{stockCode, proposedShares, proposedPrice}",
+            input,
+        )?;
+        crate::commands::stock_analysis::check_position_limits_core(
+            &self.trading_engine,
+            req.stock_code,
+            req.proposed_shares,
+            req.proposed_price,
+        )
+        .await
+        .map_err(AxAgentError::Provider)
+    }
+
+    /// 写 op：接受进化计划（`approve_evolution_plan`，执行进化并回写）。
+    async fn approve_evolution_plan(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ApproveRequest {
+            history_id: String,
+            reviewer: Option<String>,
+        }
+        let req = Self::parse::<ApproveRequest>(
+            "approve_evolution_plan",
+            "{historyId, reviewer?}",
+            input,
+        )?;
+        let row = crate::commands::stock_evolution_approval::approve_evolution_plan_core(
+            &self.db,
+            &self.stock_adaptive_engine,
+            req.history_id,
+            req.reviewer,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("approve_evolution_plan", &row)
+    }
+
+    /// 读 op：mover 核查轮次列表（`list_mover_recall_runs`）。
+    async fn list_mover_recall_runs(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct RunsRequest {
+            limit: Option<u32>,
+        }
+        let req = Self::parse::<RunsRequest>("list_mover_recall_runs", "{limit?}", input)?;
+        let rows = crate::commands::mover_recall::list_mover_recall_runs_core(&self.db, req.limit)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_mover_recall_runs", &rows)
+    }
+
+    /// 读 op：按轮次读回核查结果（`get_mover_recall_run_view`）。
+    async fn get_mover_recall_run_view(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RunViewRequest {
+            run_id: String,
+        }
+        let req = Self::parse::<RunViewRequest>("get_mover_recall_run_view", "{runId}", input)?;
+        let view =
+            crate::commands::mover_recall::get_mover_recall_run_view_core(&self.db, req.run_id)
+                .await
+                .map_err(AxAgentError::Provider)?;
+        Ok(view.map(|v| serde_json::to_value(v).unwrap_or(Value::Null)).unwrap_or(Value::Null))
+    }
+
+    /// 读 op：漏检事件补分析报告与逐档反思（`get_mover_recall_event_review`）。
+    async fn get_mover_recall_event_review(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ReviewRequest {
+            stock_code: String,
+            anchor_date: String,
+            period: String,
+            chain: Option<String>,
+        }
+        let req = Self::parse::<ReviewRequest>(
+            "get_mover_recall_event_review",
+            "{stockCode, anchorDate, period, chain?}",
+            input,
+        )?;
+        let review = crate::commands::mover_recall::get_mover_recall_event_review_core(
+            &self.db,
+            req.stock_code,
+            req.anchor_date,
+            req.period,
+            req.chain,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(review.map(|v| serde_json::to_value(v).unwrap_or(Value::Null)).unwrap_or(Value::Null))
+    }
+
+    /// 读 op：参数变更台账（`list_param_changes`）。
+    async fn list_param_changes(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ParamChangesRequest {
+            limit: Option<u64>,
+        }
+        let req = Self::parse::<ParamChangesRequest>("list_param_changes", "{limit?}", input)?;
+        let rows = crate::commands::stock_analysis::list_param_changes_core(&self.db, req.limit)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_param_changes", &rows)
+    }
+
+    /// 写 op：参数变更到期评估（`evaluate_param_changes`，落评估结论）。
+    async fn evaluate_param_changes(&self, _input: Value) -> Result<Value> {
+        crate::commands::stock_analysis::evaluate_param_changes_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)
     }
 
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。

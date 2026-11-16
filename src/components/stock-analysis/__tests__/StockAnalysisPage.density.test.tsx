@@ -41,7 +41,7 @@ beforeAll(async () => {
 beforeEach(() => {
   invokeMock.mockReset();
   invokeMock.mockImplementation((command: string) => {
-    if (command === "get_market_status") { return Promise.resolve({ status: "closed" }); }
+    if (command === "stock_get_market_status") { return Promise.resolve({ status: "closed" }); }
     // 批 2b：行情两条各有宿主名 / 插件名两种调用面，同形回桩（不许让插件名落 default 的 null）。
     if (command === "get_stock_quote" || command === "stock_get_quote") {
       return Promise.resolve({

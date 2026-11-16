@@ -519,6 +519,11 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "set_vendor_status" | "cancel_stock_analysis",
         ) => Some(PluginPermission::Write),
+        // #344 批 B18：七条写 op ⇒ `Write`；其余 22 读不登记。
+        (
+            "stock.analysis",
+            "save_valuation_params" | "rename_stock_analysis" | "create_price_alert" | "set_t0_config" | "refresh_portfolio_metrics" | "approve_evolution_plan" | "evaluate_param_changes",
+        ) => Some(PluginPermission::Write),
         // #343 批 B17：组合/交易与进化审批写 op ⇒ `Write`；两条读（持仓列表 /
         // 相关性快照）不登记。
         (
@@ -3391,6 +3396,419 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.cancel_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_asof_degradation_count
+            "stock.analysis" if op == "get_asof_degradation_count" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_asof_degradation_count(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_asof_degradation_log
+            "stock.analysis" if op == "get_asof_degradation_log" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_asof_degradation_log(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_market_status
+            "stock.analysis" if op == "get_market_status" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_market_status(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_vendor_health_all
+            "stock.analysis" if op == "get_vendor_health_all" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_vendor_health_all(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_vendor_fallback_log
+            "stock.analysis" if op == "get_vendor_fallback_log" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_vendor_fallback_log(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_interface_health_history
+            "stock.analysis" if op == "get_interface_health_history" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_interface_health_history(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_valuation_params
+            "stock.analysis" if op == "get_valuation_params" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_valuation_params(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：save_valuation_params
+            "stock.analysis" if op == "save_valuation_params" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.save_valuation_params(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_stock_template_version_status
+            "stock.analysis" if op == "get_stock_template_version_status" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.get_stock_template_version_status(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：list_stock_analyses
+            "stock.analysis" if op == "list_stock_analyses" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_stock_analyses(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_recent_analyses
+            "stock.analysis" if op == "get_recent_analyses" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_recent_analyses(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：list_reflections
+            "stock.analysis" if op == "list_reflections" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_reflections(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_stock_analysis
+            "stock.analysis" if op == "get_stock_analysis" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：audit_decision_evidence
+            "stock.analysis" if op == "audit_decision_evidence" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.audit_decision_evidence(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：rename_stock_analysis
+            "stock.analysis" if op == "rename_stock_analysis" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.rename_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：list_price_alerts
+            "stock.analysis" if op == "list_price_alerts" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_price_alerts(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：create_price_alert
+            "stock.analysis" if op == "create_price_alert" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_price_alert(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：monitor_status
+            "stock.analysis" if op == "monitor_status" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.monitor_status(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_t0_config
+            "stock.analysis" if op == "get_t0_config" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_t0_config(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：set_t0_config
+            "stock.analysis" if op == "set_t0_config" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.set_t0_config(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_portfolio_dashboard
+            "stock.analysis" if op == "get_portfolio_dashboard" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_portfolio_dashboard(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：refresh_portfolio_metrics
+            "stock.analysis" if op == "refresh_portfolio_metrics" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.refresh_portfolio_metrics(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：check_position_limits
+            "stock.analysis" if op == "check_position_limits" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.check_position_limits(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：approve_evolution_plan
+            "stock.analysis" if op == "approve_evolution_plan" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.approve_evolution_plan(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：list_mover_recall_runs
+            "stock.analysis" if op == "list_mover_recall_runs" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_mover_recall_runs(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_mover_recall_run_view
+            "stock.analysis" if op == "get_mover_recall_run_view" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_mover_recall_run_view(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：get_mover_recall_event_review
+            "stock.analysis" if op == "get_mover_recall_event_review" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.get_mover_recall_event_review(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：list_param_changes
+            "stock.analysis" if op == "list_param_changes" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_param_changes(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #344：evaluate_param_changes
+            "stock.analysis" if op == "evaluate_param_changes" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.evaluate_param_changes(request)) else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -14195,6 +14613,58 @@ mod tests {
     }
 
     /// #342 批 A15：watchlist 5 + cron 9 的读写分档 —— 十写必须 Write、四读必须 None。
+    #[test]
+    fn stock_analysis_344_b18_permissions() {
+        const WRITES: &[&str] = &[
+            "save_valuation_params",
+            "rename_stock_analysis",
+            "create_price_alert",
+            "set_t0_config",
+            "refresh_portfolio_metrics",
+            "approve_evolution_plan",
+            "evaluate_param_changes",
+        ];
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #344 权限表", || WRITES);
+        for op in verdict {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                Some(PluginPermission::Write),
+                "写 op `{op}` 必须要求 write"
+            );
+        }
+        for op in [
+            "get_asof_degradation_count",
+            "get_asof_degradation_log",
+            "get_market_status",
+            "get_vendor_health_all",
+            "get_vendor_fallback_log",
+            "get_interface_health_history",
+            "get_valuation_params",
+            "get_stock_template_version_status",
+            "list_stock_analyses",
+            "get_recent_analyses",
+            "list_reflections",
+            "get_stock_analysis",
+            "audit_decision_evidence",
+            "list_price_alerts",
+            "monitor_status",
+            "get_t0_config",
+            "get_portfolio_dashboard",
+            "check_position_limits",
+            "list_mover_recall_runs",
+            "get_mover_recall_run_view",
+            "get_mover_recall_event_review",
+            "list_param_changes",
+        ] {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                None,
+                "读 op `{op}` 不得设权限闸"
+            );
+        }
+    }
+
     #[test]
     fn stock_analysis_343_portfolio_and_approval_permissions() {
         const WRITES: &[&str] = &[

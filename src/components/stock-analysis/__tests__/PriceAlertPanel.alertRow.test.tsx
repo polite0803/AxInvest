@@ -21,6 +21,10 @@ vi.mock("react-i18next", () => ({
 
 const invokeMock = vi.fn();
 
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (name: string, input?: unknown) => invokeMock(name, input ?? {}),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: () => Promise.resolve(() => {}),
@@ -78,9 +82,9 @@ const TRIGGERED_ROW = {
 function wireBackend(rows: unknown[], overrides: { createFails?: boolean } = {}) {
   invokeMock.mockImplementation((cmd: string) => {
     switch (cmd) {
-      case "list_price_alerts":
+      case "stock_list_price_alerts":
         return Promise.resolve(rows);
-      case "monitor_status":
+      case "stock_monitor_status":
         return Promise.resolve({
           assembled: true,
           session: "morning",
@@ -92,14 +96,14 @@ function wireBackend(rows: unknown[], overrides: { createFails?: boolean } = {})
           consecutiveAllFailedRounds: 0,
           roundFinishedAtMs: 1_760_000_000_000,
         });
-      case "get_t0_config":
+      case "stock_get_t0_config":
         return Promise.resolve({
           enabled: false,
           changePctThreshold: 3,
           turnoverRateThreshold: 8,
           minIntervalMinutes: 30,
         });
-      case "create_price_alert":
+      case "stock_create_price_alert":
         return overrides.createFails
           ? Promise.reject({ code: "STOCK_ALERT_CREATE_FAILED", detail: "写库失败：disk full" })
           : Promise.resolve({});
@@ -116,7 +120,7 @@ async function mount() {
     </App>,
   );
   await waitFor(() => {
-    expect(invokeMock.mock.calls.some((c) => c[0] === "list_price_alerts")).toBe(true);
+    expect(invokeMock.mock.calls.some((c) => c[0] === "stock_list_price_alerts")).toBe(true);
   });
   await act(async () => {
     await Promise.resolve();

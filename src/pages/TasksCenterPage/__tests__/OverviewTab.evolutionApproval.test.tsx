@@ -1,7 +1,7 @@
 import i18n from "@/i18n";
 import { __resetCardRegistryForTests } from "@/lib/dynamicUI/pluginCardRegistry";
 import type { PluginTaskCardsInfoDto } from "@/types";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "antd";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,7 +47,7 @@ const HOST_CARDS: PluginTaskCardsInfoDto[] = [
           {
             id: "approve",
             title: "stockAnalysis.evolutionApproval.approve",
-            command: "approve_evolution_plan",
+            command: "stock_approve_evolution_plan",
             mutating: true,
           },
           {
@@ -88,13 +88,23 @@ beforeEach(() => {
   __resetCardRegistryForTests();
   invokeMock.mockReset();
   pluginInvokeMock.fn.mockReset();
-  pluginInvokeMock.fn.mockImplementation((...args: unknown[]) => invokeMock(...args));
+  pluginInvokeMock.fn.mockImplementation((name: string, input?: unknown) => invokeMock(name, input ?? {}));
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "task_card_host_cards") {
       return Promise.resolve(HOST_CARDS);
     }
     if (cmd === "plugin_list_task_cards") {
       return Promise.resolve([]);
+    }
+    if (cmd === "plugin_list") {
+      // 插件解析路由：声明 stock 插件提供该行集命令
+      return Promise.resolve([
+        {
+          id: "stock",
+          enabled: true,
+          commands: [{ name: "stock_list_pending_evolution_plans" }],
+        },
+      ]);
     }
     if (cmd === "stock_list_pending_evolution_plans") {
       return Promise.resolve(PENDING_ROWS);
@@ -129,7 +139,13 @@ describe("OverviewTab 待审批进化卡（宿主投影驱动）", () => {
     expect(screen.getAllByText("接受并执行").length).toBe(2);
     expect(screen.getAllByText("拒绝").length).toBe(2);
     // 走的是投影 summaryCommand，而非旧 store 通道
-    expect(invokeMock).toHaveBeenCalledWith("stock_list_pending_evolution_plans");
+    // 插件解析多一跳（plugin_list → 行集），断言放到 waitFor 里
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "stock_list_pending_evolution_plans",
+        expect.anything(),
+      )
+    );
   });
 
   it("审批动作带行 id：确认后 invoke approve_evolution_plan 并刷新行集", async () => {
@@ -148,7 +164,7 @@ describe("OverviewTab 待审批进化卡（宿主投影驱动）", () => {
       clickConfirmPrimary();
       await flushPromises();
     });
-    expect(invokeMock).toHaveBeenCalledWith("approve_evolution_plan", {
+    expect(invokeMock).toHaveBeenCalledWith("stock_approve_evolution_plan", {
       historyId: "evo-overview-1",
       reviewer: null,
     });

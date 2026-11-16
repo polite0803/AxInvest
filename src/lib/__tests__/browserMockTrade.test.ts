@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 describe("browserMock 覆盖交易面板用到的命令", () => {
   // 关键判据：必须是 null，不能是 {} —— 面板用「非 null 且是 object」判有没有数据
   it("get_portfolio_dashboard 返回 null 而不是 {}", async () => {
-    await expect(handleCommand("get_portfolio_dashboard", {})).resolves.toBeNull();
+    await expect(handleCommand("stock_get_portfolio_dashboard", {})).resolves.toBeNull();
   });
 
   it("列表类命令返回数组而不是 undefined（调用方会读 .length）", async () => {

@@ -12,7 +12,7 @@ import { AnalysisHistoryButton } from "../AnalysisHistoryButton";
  * 历史分析弹窗「全量加载 + 筛选」的接线层。
  *
  * 背景（2026-10-22，用户报「对之前的记录存在截断」）：弹窗原先固定
- * `invoke("list_stock_analyses", { limit: 30 })`，而库里实测 360 条 / 103 只 ⇒ 只看得到 8%。
+ * `invoke("stock_list_stock_analyses", { limit: 30 })`，而库里实测 360 条 / 103 只 ⇒ 只看得到 8%。
  * 本轮改成「打开即按 offset 连续翻页取全 + 关键词/状态/档位三维筛选」。
  *
  * 每条断言各守一格（破坏哪格就只红哪条）：
@@ -71,10 +71,10 @@ function scriptPages(pages: Row[][]) {
   const offsets: number[] = [];
   let cursor = 0;
   invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-    if (cmd === "get_stock_template_version_status") {
+    if (cmd === "stock_get_stock_template_version_status") {
       return Promise.resolve({ codeVersion: 160, dbVersion: 160 });
     }
-    if (cmd === "list_stock_analyses") {
+    if (cmd === "stock_list_stock_analyses") {
       offsets.push(Number(args?.offset));
       const page = pages[cursor++] ?? [];
       return Promise.resolve(page);
@@ -314,7 +314,7 @@ describe("AnalysisHistoryButton · 三种缺席各占一句", () => {
 
   it("取数失败 ⇒ 说「记录加载失败」并给重试，不得显示成空库或齐备态", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_stock_template_version_status") {
+      if (cmd === "stock_get_stock_template_version_status") {
         return Promise.resolve({ codeVersion: 160, dbVersion: 160 });
       }
       return Promise.reject(new Error("boom"));
@@ -342,7 +342,7 @@ describe("AnalysisHistoryButton · 三种缺席各占一句", () => {
   it("还在翻页时先说「已加载 N 条…」，不把中间态报成最终条数", async () => {
     let resolveFirst: (v: Row[]) => void = () => {};
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "get_stock_template_version_status") {
+      if (cmd === "stock_get_stock_template_version_status") {
         return Promise.resolve({ codeVersion: 160, dbVersion: 160 });
       }
       if (Number(args?.offset) === 0) {

@@ -18,8 +18,8 @@ vi.mock("@/lib/invoke", () => ({
 
 beforeEach(() => {
   invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "get_asof_degradation_log") { return Promise.resolve([]); }
-    if (cmd === "get_asof_degradation_count") { return Promise.resolve(0); }
+    if (cmd === "stock_get_asof_degradation_log") { return Promise.resolve([]); }
+    if (cmd === "stock_get_asof_degradation_count") { return Promise.resolve(0); }
     return Promise.resolve(undefined);
   });
   // 静默 console.warn，避免 vitest RPC teardown 时序竞争

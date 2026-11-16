@@ -67,7 +67,7 @@ beforeEach(() => {
 describe("MoverRecallPanel 链维度", () => {
   it("A. 两链各一份：默认落在第一份（荐股链），并出现链选择器", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [makeView("reco"), makeView("serenity")]; }
       return null;
     });
@@ -83,7 +83,7 @@ describe("MoverRecallPanel 链维度", () => {
 
   it("B. 切链只换内存那一份：不得为换链重发核查命令", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [makeView("reco"), makeView("serenity")]; }
       return null;
     });
@@ -99,7 +99,7 @@ describe("MoverRecallPanel 链维度", () => {
 
   it("C. 载荷不是数组（契约漂移）：走失败支并点名缺的字段，不静默按单份渲染", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return makeView("reco"); }
       return null;
     });
@@ -128,8 +128,8 @@ describe("MoverRecallPanel 链维度", () => {
       createdAtMs: 1792199083889,
     };
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [oldRun]; }
-      if (name === "get_mover_recall_run_view") { return { ...makeView("unlabeled"), run: oldRun }; }
+      if (name === "stock_list_mover_recall_runs") { return [oldRun]; }
+      if (name === "stock_get_mover_recall_run_view") { return { ...makeView("unlabeled"), run: oldRun }; }
       return null;
     });
     renderPanel();
@@ -154,7 +154,7 @@ describe("MoverRecallPanel 事件域呈现", () => {
       gateVersion: "mover-layers-v2",
     };
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [view]; }
       return null;
     });
@@ -181,7 +181,7 @@ describe("MoverRecallPanel 事件域呈现", () => {
       },
     };
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [view]; }
       return null;
     });

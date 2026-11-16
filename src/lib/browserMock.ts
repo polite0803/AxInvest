@@ -7550,6 +7550,58 @@ async function executeCommand<T>(
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
     // #342：watchlist 5 + cron 9。浏览器模式无真实库/调度器：列表回诚实空态，
     // 写类命令返回 undefined（消费端本就不取返回值）；watch/unwatch 改本地假集合。
+    // #344：分析读写 / 监控 / 数据源 / 台账 / mover 轮次（浏览器模式回诚实空态）。
+    case "stock_list_stock_analyses":
+    case "stock_list_reflections":
+    case "stock_list_price_alerts":
+    case "stock_list_mover_recall_runs":
+    case "stock_list_param_changes":
+    case "stock_get_asof_degradation_log":
+    case "stock_get_vendor_health_all":
+    case "stock_get_vendor_fallback_log":
+      return [] as unknown as T;
+    case "stock_get_asof_degradation_count":
+      return 0 as unknown as T;
+    case "stock_get_recent_analyses":
+      return [] as unknown as T;
+    case "stock_get_market_status":
+      return { status: "browser-mock" } as unknown as T;
+    case "stock_get_stock_analysis":
+    case "stock_get_portfolio_dashboard":
+    case "stock_get_mover_recall_run_view":
+    case "stock_get_mover_recall_event_review":
+    case "stock_get_valuation_params":
+      return null as unknown as T;
+    case "stock_get_interface_health_history":
+      return { days: [], storeEnabled: false } as unknown as T;
+    case "stock_get_stock_template_version_status":
+      return null as unknown as T;
+    case "stock_monitor_status":
+      return {
+        assembled: false,
+        session: "closed",
+        tradingNow: false,
+        pollIntervalSecs: 0,
+        configsActive: 0,
+        roundCodesTotal: 0,
+        roundCodesFailed: 0,
+        consecutiveAllFailedRounds: 0,
+        roundFinishedAtMs: 0,
+      } as unknown as T;
+    case "stock_get_t0_config":
+      return null as unknown as T;
+    case "stock_check_position_limits":
+      return { ok: true } as unknown as T;
+    case "stock_audit_decision_evidence":
+      return null as unknown as T;
+    case "stock_rename_stock_analysis":
+    case "stock_save_valuation_params":
+    case "stock_create_price_alert":
+    case "stock_set_t0_config":
+    case "stock_refresh_portfolio_metrics":
+    case "stock_approve_evolution_plan":
+    case "stock_evaluate_param_changes":
+      return undefined as unknown as T;
     // #343：组合/交易 + 进化审批。浏览器模式无真实引擎：读类回诚实空态，写类 no-op。
     case "stock_get_trade_positions":
     case "stock_list_trades":

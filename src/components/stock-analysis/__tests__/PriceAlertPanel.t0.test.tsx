@@ -21,6 +21,10 @@ vi.mock("react-i18next", () => ({
 
 const invokeMock = vi.fn();
 
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (name: string, input?: unknown) => invokeMock(name, input ?? {}),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: () => Promise.resolve(() => {}),
@@ -42,11 +46,11 @@ function wireBackend(overrides: { setFails?: boolean; t0?: Partial<typeof DEFAUL
   const t0 = { ...DEFAULT_T0, ...overrides.t0 };
   invokeMock.mockImplementation((cmd: string, args?: unknown) => {
     switch (cmd) {
-      case "get_t0_config":
+      case "stock_get_t0_config":
         return Promise.resolve({ ...t0 });
-      case "list_price_alerts":
+      case "stock_list_price_alerts":
         return Promise.resolve([]);
-      case "monitor_status":
+      case "stock_monitor_status":
         return Promise.resolve({
           assembled: true,
           session: "morning",
@@ -58,7 +62,7 @@ function wireBackend(overrides: { setFails?: boolean; t0?: Partial<typeof DEFAUL
           consecutiveAllFailedRounds: 0,
           roundFinishedAtMs: 0,
         });
-      case "set_t0_config":
+      case "stock_set_t0_config":
         return overrides.setFails
           ? Promise.reject(new Error("RealtimeMonitor 未初始化"))
           : Promise.resolve(undefined);
@@ -71,7 +75,7 @@ function wireBackend(overrides: { setFails?: boolean; t0?: Partial<typeof DEFAUL
 
 /** 取 `set_t0_config` 最后一次调用带的配置（载荷断言只走这一个来源）。 */
 function lastT0Payload(): Record<string, unknown> | undefined {
-  const calls = invokeMock.mock.calls.filter((c) => c[0] === "set_t0_config");
+  const calls = invokeMock.mock.calls.filter((c) => c[0] === "stock_set_t0_config");
   return calls.length === 0 ? undefined : (calls[calls.length - 1][1] as { config: Record<string, unknown> }).config;
 }
 
@@ -83,7 +87,7 @@ async function mount() {
   );
   // 等 `get_t0_config` 落地（默认关也要先读到后端态）
   await waitFor(() => {
-    expect(invokeMock.mock.calls.some((c) => c[0] === "get_t0_config")).toBe(true);
+    expect(invokeMock.mock.calls.some((c) => c[0] === "stock_get_t0_config")).toBe(true);
   });
   await act(async () => {
     await Promise.resolve();

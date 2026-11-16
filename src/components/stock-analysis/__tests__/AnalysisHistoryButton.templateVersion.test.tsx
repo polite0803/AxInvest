@@ -52,7 +52,7 @@ describe("AnalysisHistoryButton 的图代呈现", () => {
 
   it("组件里三处接线都在：取数命令、状态文案、逐行标签", () => {
     const src = readFileSync(path.join(ROOT, COMPONENT), "utf8");
-    expect(src).toContain("get_stock_template_version_status");
+    expect(src).toContain("stock_get_stock_template_version_status");
     expect(src).toContain("versionStatusKey(versionStatus)");
     // 逐行标签的缺席分支必须显式判 null（不得 `||` 把 0 也吞成「未知」）
     expect(src).toContain("r.templateVersion == null");

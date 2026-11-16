@@ -53,7 +53,7 @@ pub struct StockDomainState {
     /// A 股数据客户端（行情 / K 线 / 财报 / 自选）。
     pub astock_client: Arc<axagent_astock_data::AStockClient>,
     /// 实时行情监视器（OnceLock 惰性初始化；未初始化时相关命令返回友好错误）。
-    pub stock_monitor: OnceLock<Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
+    pub stock_monitor: Arc<OnceLock<Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>>,
     /// 实时行情流监视器（`quote.watcher` 接缝宿主 provider 与轮询循环共用同一个集合）。
     pub quote_watcher: OnceLock<Arc<axagent_astock_data::RealTimeQuoteWatcher>>,
     /// 模拟交易引擎（依赖 DB + astock_client，启动时构造）。
@@ -90,7 +90,7 @@ impl StockDomainState {
         );
         Self {
             astock_client,
-            stock_monitor: OnceLock::new(),
+            stock_monitor: Arc::new(OnceLock::new()),
             quote_watcher: OnceLock::new(),
             trading_engine,
             cross_stock_aggregator: OnceLock::new(),

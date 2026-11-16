@@ -23,7 +23,7 @@ function quoteFor(code: string, name: string) {
 function installInvokeStub() {
   invokeMock.mockImplementation((command: string, args?: Record<string, unknown>) => {
     switch (command) {
-      case "get_market_status":
+      case "stock_get_market_status":
         return Promise.resolve({ status: "closed" });
       // 批 2b：`stock_get_quote` / `stock_get_kline` 是插件命名面，与宿主名同形回桩
       // （`quoteCalls()` 只统计宿主名，它钉的是 store 那条拉取路径，不受本条影响）。
@@ -35,7 +35,7 @@ function installInvokeStub() {
       case "get_stock_kline":
       case "stock_get_kline":
         return Promise.resolve([]);
-      case "get_vendor_health_all":
+      case "stock_get_vendor_health_all":
         return Promise.resolve([]);
       default:
         return Promise.resolve(null);
@@ -116,7 +116,7 @@ describe("StockAnalysisPage — URL 股票预填", () => {
   it("无股票参数时不预填、不拉行情（反向断言）", async () => {
     renderAt("/invest?tab=workspace&view=analysis");
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("get_market_status");
+      expect(invokeMock).toHaveBeenCalledWith("stock_get_market_status", expect.anything());
     });
     expect(useStockAnalysisStore.getState().searchKeyword).toBe("");
     expect(quoteCalls()).toHaveLength(0);

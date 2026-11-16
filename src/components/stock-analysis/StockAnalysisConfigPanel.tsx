@@ -1,6 +1,7 @@
 import { SettingsGroup } from "@/components/common/SettingsGroup";
 import { VariableControl } from "@/components/common/VariableControls";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { getDefaultVariables } from "@/lib/stock-analysis-defaults";
 import { toDbVariable } from "@/lib/workflowVariables";
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/types";
@@ -71,7 +72,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
     // 并行加载 workflow 模板和估值参数
     Promise.all([
       invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID }),
-      invoke<ValuationParamsConfig>("get_valuation_params").catch(() => DEFAULT_VALUATION_PARAMS),
+      invokePluginCommand<ValuationParamsConfig>("stock_get_valuation_params").catch(() => DEFAULT_VALUATION_PARAMS),
     ])
       .then(async ([rsp, valuation]) => {
         if (cancelled) { return; }
@@ -649,7 +650,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       const results = await Promise.allSettled([
         invoke<boolean>("update_workflow_template", { id: TEMPLATE_ID, input }),
         valuationDirty
-          ? invoke<boolean>("save_valuation_params", { params: valuationParams })
+          ? invokePluginCommand<boolean>("stock_save_valuation_params", { params: valuationParams })
           : Promise.resolve(true),
       ]);
       const [templateResult, valuationResult] = results;

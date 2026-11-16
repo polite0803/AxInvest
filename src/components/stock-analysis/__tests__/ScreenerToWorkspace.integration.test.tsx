@@ -69,7 +69,7 @@ function installInvokeStub() {
       case "stock_get_latest_analyses_for_stocks":
       case "get_reco_strategy_weights":
         return Promise.resolve({});
-      case "get_market_status":
+      case "stock_get_market_status":
         return Promise.resolve({ status: "closed" });
       // 批 2b：行情两条命令有宿主名与插件名两种调用面（CompareView / WatchlistPanel 已切
       // `stock_get_quote`），两面必须回同一形状 ⇒ 同名同形登记，不许让插件名静默落 default。
@@ -86,7 +86,7 @@ function installInvokeStub() {
       }
       case "get_stock_kline":
       case "stock_get_kline":
-      case "get_vendor_health_all":
+      case "stock_get_vendor_health_all":
         return Promise.resolve([]);
       default:
         return Promise.resolve(null);

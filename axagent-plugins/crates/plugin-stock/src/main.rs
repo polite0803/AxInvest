@@ -283,6 +283,64 @@ const COMMAND_GET_TRADE_POSITIONS: &str = "stock_get_trade_positions";
 const COMMAND_VALIDATE_TRADE: &str = "stock_validate_trade";
 /// get_trading_enabled（宿主同名命令迁 T2，#343）—— 读，零新 op：走既有 trading.engine 接缝。
 const COMMAND_GET_TRADING_ENABLED: &str = "stock_get_trading_enabled";
+/// as-of 降级条目总数（宿主 `get_asof_degradation_count`，#344）—— 读 op。
+const COMMAND_GET_ASOF_DEGRADATION_COUNT: &str = "stock_get_asof_degradation_count";
+/// as-of 降级日志快照（宿主 `get_asof_degradation_log`，#344）—— 读 op。
+const COMMAND_GET_ASOF_DEGRADATION_LOG: &str = "stock_get_asof_degradation_log";
+/// 市场状态文案（宿主 `get_market_status`，#344）—— 读 op。
+const COMMAND_GET_MARKET_STATUS: &str = "stock_get_market_status";
+/// 所有数据源健康状态（宿主 `get_vendor_health_all`，#344）—— 读 op。
+const COMMAND_GET_VENDOR_HEALTH_ALL: &str = "stock_get_vendor_health_all";
+/// vendor fallback 日志（宿主 `get_vendor_fallback_log`，#344）—— 读 op。
+const COMMAND_GET_VENDOR_FALLBACK_LOG: &str = "stock_get_vendor_fallback_log";
+/// 核心接口日级健康记录（宿主 `get_interface_health_history`，#344）—— 读 op。
+const COMMAND_GET_INTERFACE_HEALTH_HISTORY: &str = "stock_get_interface_health_history";
+/// 估值参数（宿主 `get_valuation_params`，#344）—— 读 op。
+const COMMAND_GET_VALUATION_PARAMS: &str = "stock_get_valuation_params";
+/// 保存估值参数（宿主 `save_valuation_params`，#344）—— 写 op。
+const COMMAND_SAVE_VALUATION_PARAMS: &str = "stock_save_valuation_params";
+/// 模板代际对照（代码版本 vs 库内播种）（宿主 `get_stock_template_version_status`，#344）—— 读 op。
+const COMMAND_GET_STOCK_TEMPLATE_VERSION_STATUS: &str = "stock_get_stock_template_version_status";
+/// 历史分析列表（宿主 `list_stock_analyses`，#344）—— 读 op。
+const COMMAND_LIST_STOCK_ANALYSES: &str = "stock_list_stock_analyses";
+/// 最近分析摘要（宿主 `get_recent_analyses`，#344）—— 读 op。
+const COMMAND_GET_RECENT_ANALYSES: &str = "stock_get_recent_analyses";
+/// 反思记录列表（宿主 `list_reflections`，#344）—— 读 op。
+const COMMAND_LIST_REFLECTIONS: &str = "stock_list_reflections";
+/// 单条分析详情（宿主 `get_stock_analysis`，#344）—— 读 op。
+const COMMAND_GET_STOCK_ANALYSIS: &str = "stock_get_stock_analysis";
+/// 决策证据对账审计（宿主 `audit_decision_evidence`，#344）—— 读 op。
+const COMMAND_AUDIT_DECISION_EVIDENCE: &str = "stock_audit_decision_evidence";
+/// 重命名分析记录（宿主 `rename_stock_analysis`，#344）—— 写 op。
+const COMMAND_RENAME_STOCK_ANALYSIS: &str = "stock_rename_stock_analysis";
+/// 价格告警列表（宿主 `list_price_alerts`，#344）—— 读 op。
+const COMMAND_LIST_PRICE_ALERTS: &str = "stock_list_price_alerts";
+/// 创建价格告警（落库并进监控引擎）（宿主 `create_price_alert`，#344）—— 写 op。
+const COMMAND_CREATE_PRICE_ALERT: &str = "stock_create_price_alert";
+/// 实时监控运行读数（宿主 `monitor_status`，#344）—— 读 op。
+const COMMAND_MONITOR_STATUS: &str = "stock_monitor_status";
+/// T+0 配置（宿主 `get_t0_config`，#344）—— 读 op。
+const COMMAND_GET_T0_CONFIG: &str = "stock_get_t0_config";
+/// 更新 T+0 配置（宿主 `set_t0_config`，#344）—— 写 op。
+const COMMAND_SET_T0_CONFIG: &str = "stock_set_t0_config";
+/// 组合监控仪表盘（宿主 `get_portfolio_dashboard`，#344）—— 读 op。
+const COMMAND_GET_PORTFOLIO_DASHBOARD: &str = "stock_get_portfolio_dashboard";
+/// 刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）（宿主 `refresh_portfolio_metrics`，#344）—— 写 op。
+const COMMAND_REFRESH_PORTFOLIO_METRICS: &str = "stock_refresh_portfolio_metrics";
+/// 开仓限制校验（宿主 `check_position_limits`，#344）—— 读 op。
+const COMMAND_CHECK_POSITION_LIMITS: &str = "stock_check_position_limits";
+/// 接受待审批进化计划（执行进化并回写）（宿主 `approve_evolution_plan`，#344）—— 写 op。
+const COMMAND_APPROVE_EVOLUTION_PLAN: &str = "stock_approve_evolution_plan";
+/// mover 核查轮次列表（宿主 `list_mover_recall_runs`，#344）—— 读 op。
+const COMMAND_LIST_MOVER_RECALL_RUNS: &str = "stock_list_mover_recall_runs";
+/// 按轮次读回核查结果（宿主 `get_mover_recall_run_view`，#344）—— 读 op。
+const COMMAND_GET_MOVER_RECALL_RUN_VIEW: &str = "stock_get_mover_recall_run_view";
+/// 漏检事件补分析报告与逐档反思（宿主 `get_mover_recall_event_review`，#344）—— 读 op。
+const COMMAND_GET_MOVER_RECALL_EVENT_REVIEW: &str = "stock_get_mover_recall_event_review";
+/// 参数变更台账（宿主 `list_param_changes`，#344）—— 读 op。
+const COMMAND_LIST_PARAM_CHANGES: &str = "stock_list_param_changes";
+/// 参数变更到期评估（写评估结论）（宿主 `evaluate_param_changes`，#344）—— 写 op。
+const COMMAND_EVALUATE_PARAM_CHANGES: &str = "stock_evaluate_param_changes";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -820,6 +878,354 @@ fn handle_command(
                     CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
                 },
             }
+        },
+        // #344：get_asof_degradation_count
+        COMMAND_GET_ASOF_DEGRADATION_COUNT => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_asof_degradation_count",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_asof_degradation_log
+        COMMAND_GET_ASOF_DEGRADATION_LOG => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_asof_degradation_log",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_market_status
+        COMMAND_GET_MARKET_STATUS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_market_status",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_vendor_health_all
+        COMMAND_GET_VENDOR_HEALTH_ALL => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_vendor_health_all",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_vendor_fallback_log
+        COMMAND_GET_VENDOR_FALLBACK_LOG => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_vendor_fallback_log",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_interface_health_history
+        COMMAND_GET_INTERFACE_HEALTH_HISTORY => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_interface_health_history",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_valuation_params
+        COMMAND_GET_VALUATION_PARAMS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_valuation_params",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：save_valuation_params
+        COMMAND_SAVE_VALUATION_PARAMS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "save_valuation_params",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_stock_template_version_status
+        COMMAND_GET_STOCK_TEMPLATE_VERSION_STATUS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_stock_template_version_status",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：list_stock_analyses
+        COMMAND_LIST_STOCK_ANALYSES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_stock_analyses",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_recent_analyses
+        COMMAND_GET_RECENT_ANALYSES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_recent_analyses",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：list_reflections
+        COMMAND_LIST_REFLECTIONS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_reflections",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_stock_analysis
+        COMMAND_GET_STOCK_ANALYSIS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_stock_analysis",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：audit_decision_evidence
+        COMMAND_AUDIT_DECISION_EVIDENCE => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "audit_decision_evidence",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：rename_stock_analysis
+        COMMAND_RENAME_STOCK_ANALYSIS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "rename_stock_analysis",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：list_price_alerts
+        COMMAND_LIST_PRICE_ALERTS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_price_alerts",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：create_price_alert
+        COMMAND_CREATE_PRICE_ALERT => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "create_price_alert",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：monitor_status
+        COMMAND_MONITOR_STATUS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "monitor_status",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_t0_config
+        COMMAND_GET_T0_CONFIG => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_t0_config",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：set_t0_config
+        COMMAND_SET_T0_CONFIG => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "set_t0_config",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_portfolio_dashboard
+        COMMAND_GET_PORTFOLIO_DASHBOARD => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_portfolio_dashboard",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：refresh_portfolio_metrics
+        COMMAND_REFRESH_PORTFOLIO_METRICS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "refresh_portfolio_metrics",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：check_position_limits
+        COMMAND_CHECK_POSITION_LIMITS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "check_position_limits",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：approve_evolution_plan
+        COMMAND_APPROVE_EVOLUTION_PLAN => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "approve_evolution_plan",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：list_mover_recall_runs
+        COMMAND_LIST_MOVER_RECALL_RUNS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_mover_recall_runs",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_mover_recall_run_view
+        COMMAND_GET_MOVER_RECALL_RUN_VIEW => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_mover_recall_run_view",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：get_mover_recall_event_review
+        COMMAND_GET_MOVER_RECALL_EVENT_REVIEW => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "get_mover_recall_event_review",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：list_param_changes
+        COMMAND_LIST_PARAM_CHANGES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_param_changes",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #344：evaluate_param_changes
+        COMMAND_EVALUATE_PARAM_CHANGES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "evaluate_param_changes",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
         },
         // #343：list_portfolio
         COMMAND_LIST_PORTFOLIO => match call_analysis_seam(
@@ -4003,6 +4409,35 @@ mod tests {
             super::COMMAND_GET_TRADE_POSITIONS,
             super::COMMAND_VALIDATE_TRADE,
             super::COMMAND_GET_TRADING_ENABLED,
+            super::COMMAND_GET_ASOF_DEGRADATION_COUNT,
+            super::COMMAND_GET_ASOF_DEGRADATION_LOG,
+            super::COMMAND_GET_MARKET_STATUS,
+            super::COMMAND_GET_VENDOR_HEALTH_ALL,
+            super::COMMAND_GET_VENDOR_FALLBACK_LOG,
+            super::COMMAND_GET_INTERFACE_HEALTH_HISTORY,
+            super::COMMAND_GET_VALUATION_PARAMS,
+            super::COMMAND_SAVE_VALUATION_PARAMS,
+            super::COMMAND_GET_STOCK_TEMPLATE_VERSION_STATUS,
+            super::COMMAND_LIST_STOCK_ANALYSES,
+            super::COMMAND_GET_RECENT_ANALYSES,
+            super::COMMAND_LIST_REFLECTIONS,
+            super::COMMAND_GET_STOCK_ANALYSIS,
+            super::COMMAND_AUDIT_DECISION_EVIDENCE,
+            super::COMMAND_RENAME_STOCK_ANALYSIS,
+            super::COMMAND_LIST_PRICE_ALERTS,
+            super::COMMAND_CREATE_PRICE_ALERT,
+            super::COMMAND_MONITOR_STATUS,
+            super::COMMAND_GET_T0_CONFIG,
+            super::COMMAND_SET_T0_CONFIG,
+            super::COMMAND_GET_PORTFOLIO_DASHBOARD,
+            super::COMMAND_REFRESH_PORTFOLIO_METRICS,
+            super::COMMAND_CHECK_POSITION_LIMITS,
+            super::COMMAND_APPROVE_EVOLUTION_PLAN,
+            super::COMMAND_LIST_MOVER_RECALL_RUNS,
+            super::COMMAND_GET_MOVER_RECALL_RUN_VIEW,
+            super::COMMAND_GET_MOVER_RECALL_EVENT_REVIEW,
+            super::COMMAND_LIST_PARAM_CHANGES,
+            super::COMMAND_EVALUATE_PARAM_CHANGES,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

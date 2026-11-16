@@ -1,6 +1,7 @@
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import type { ConditionTriggerPayload, MonitorAlertPayload, MonitorStatus } from "@/types/stock-analysis";
 import { BellOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
@@ -189,7 +190,7 @@ export function PriceAlertPanel() {
   /** 取数读数单独一条路：命令报错是「读不到」，不等于「引擎未装配」。 */
   const loadMonitorStatus = async () => {
     try {
-      const s = await invoke<MonitorStatus>("monitor_status");
+      const s = await invokePluginCommand<MonitorStatus>("stock_monitor_status");
       if (s && typeof s.assembled === "boolean") {
         setMonitorState({ kind: "ok", value: s });
       } else {
@@ -208,7 +209,7 @@ export function PriceAlertPanel() {
 
   const loadAlerts = async () => {
     try {
-      const list = await invoke<PriceAlert[]>("list_price_alerts");
+      const list = await invokePluginCommand<PriceAlert[]>("stock_list_price_alerts");
       if (Array.isArray(list)) {
         setAlerts(list.filter((a) => !a.isTriggered));
         setHistory(list.filter((a) => a.isTriggered));
@@ -288,7 +289,7 @@ export function PriceAlertPanel() {
 
   const addAlert = async (values: Record<string, unknown>) => {
     try {
-      await invoke("create_price_alert", {
+      await invokePluginCommand("stock_create_price_alert", {
         stockCode: values.stockCode,
         stockName: values.stockName,
         condition: values.condition,

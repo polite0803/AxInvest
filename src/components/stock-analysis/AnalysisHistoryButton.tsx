@@ -1,5 +1,6 @@
 import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   actionSourceLabelKey,
   confidenceSourceLabelKey,
@@ -251,7 +252,7 @@ export function AnalysisHistoryButton() {
     for (let page = 0; page < MAX_PAGES_PER_ROUND; page++) {
       let rows: AnalysisRecord[];
       try {
-        rows = await invoke<AnalysisRecord[]>("list_stock_analyses", {
+        rows = await invokePluginCommand<AnalysisRecord[]>("stock_list_stock_analyses", {
           limit: PAGE_SIZE,
           offset: offsetRef.current,
         });
@@ -286,7 +287,7 @@ export function AnalysisHistoryButton() {
     if (!open) { return; }
     let cancelled = false;
     void loadPages(true);
-    invoke<TemplateVersionStatus>("get_stock_template_version_status")
+    invokePluginCommand<TemplateVersionStatus>("stock_get_stock_template_version_status")
       .then((v) => {
         if (!cancelled) { setVersionStatus(v); }
       })
@@ -327,7 +328,7 @@ export function AnalysisHistoryButton() {
     e.stopPropagation?.();
     const newName = editValue.trim();
     if (!newName) { return; }
-    void invoke("rename_stock_analysis", { analysisId: id, newName })
+    void invokePluginCommand("stock_rename_stock_analysis", { analysisId: id, newName })
       .then(() => {
         setRecords((prev) => prev.map((r) => r.id === id ? { ...r, stockName: newName } : r));
         setEditingId(null);

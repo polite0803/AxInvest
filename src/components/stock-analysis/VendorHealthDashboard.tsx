@@ -10,7 +10,7 @@
  * 改为合并已知 vendor 列表（VENDOR_LABELS 全集），未调用的标"未探测"。
  */
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Card, Spin, Tag, Tooltip } from "antd";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -163,7 +163,7 @@ export function VendorHealthDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<VendorHealthItem[]>("get_vendor_health_all");
+      const result = await invokePluginCommand<VendorHealthItem[]>("stock_get_vendor_health_all");
       // 后端可能返回 JSON null（无健康记录时序列化 Option::None），而 TS 类型断言不会拦下它
       // —— 直接 setData(null) 会让下面的 data.filter 抛 TypeError 并把整个分析页推入
       // PageErrorBoundary。用 Array.isArray 而非 `?? []`：后者只挡 null/undefined，

@@ -3,7 +3,7 @@ import { PageTimeAnchor } from "@/components/shared/PageTimeAnchor";
 import { useShowAdvancedPanels } from "@/components/stock-analysis/_workspace/_shared/useSimpleMode";
 import { StockAnalysisSettings } from "@/components/stock-analysis/StockAnalysisSettings";
 import { investPath } from "@/lib/investRoutes";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { extractLlmField } from "@/lib/stock-analysis/agentOutput";
 import { parseDataQualityReport } from "@/lib/stock-analysis/dataQualityDiagnosis";
@@ -210,7 +210,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
 
   useEffect(() => {
     let cancelled = false;
-    invoke<{ status: string }>("get_market_status").then((r) => {
+    invokePluginCommand<{ status: string }>("stock_get_market_status").then((r) => {
       if (!cancelled) { setMarketStatus(r.status); }
     }).catch((e) => {
       if (!cancelled) { console.warn("[StockAnalysis] get_market_status failed:", e); }

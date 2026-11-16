@@ -68,7 +68,7 @@ export function InvestDashboard() {
     try {
       const [pos, anl, regime] = await Promise.all([
         invokePluginCommand<PositionSummary[]>("stock_get_trade_positions").catch(() => []),
-        invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
+        invokePluginCommand<RecentAnalysis[]>("stock_get_recent_analyses", { limit: 5 }).catch(() => []),
         loadMarketRegime(),
       ]);
       if (Array.isArray(pos)) { setPositions(pos); }
@@ -81,7 +81,7 @@ export function InvestDashboard() {
   useEffect(() => {
     Promise.all([
       invokePluginCommand<PositionSummary[]>("stock_get_trade_positions").catch(() => []),
-      invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
+      invokePluginCommand<RecentAnalysis[]>("stock_get_recent_analyses", { limit: 5 }).catch(() => []),
       loadMarketRegime().catch(() => null),
     ]).then(([pos, anl, regime]) => {
       if (Array.isArray(pos)) { setPositions(pos); }

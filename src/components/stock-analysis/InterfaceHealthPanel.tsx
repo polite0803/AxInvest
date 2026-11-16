@@ -7,7 +7,7 @@
  *
  * 三态缺席各占一句：归档未启用（没留存）/ 尚未跑过（没检查）/ 有记录。
  */
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { DataStatus } from "@/types/stock-analysis";
 import { Card, Spin, Table, Tag, Tooltip } from "antd";
 import { useEffect, useState } from "react";
@@ -57,7 +57,7 @@ export function InterfaceHealthPanel() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    invoke<unknown>("get_interface_health_history", { days: 7 })
+    invokePluginCommand<unknown>("stock_get_interface_health_history", { days: 7 })
       .then((raw) => {
         if (cancelled) { return; }
         // 形状不认识 = 本环境不提供该命令（浏览器 mock 回 `{}`），不是「没有记录」。

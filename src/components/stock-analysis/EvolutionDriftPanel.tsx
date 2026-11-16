@@ -26,6 +26,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { agreementColor } from "@/lib/stock-analysis-utils";
 import {
   type EvolutionHistoryEntry,
@@ -875,7 +876,7 @@ function ParamChangeLedger() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await invoke<ParamChangeRow[]>("list_param_changes", { limit: 30 });
+      const r = await invokePluginCommand<ParamChangeRow[]>("stock_list_param_changes", { limit: 30 });
       setRows(Array.isArray(r) ? r : []);
     } catch {
       setRows([]);
@@ -891,7 +892,7 @@ function ParamChangeLedger() {
   const evaluate = useCallback(async () => {
     setEvaluating(true);
     try {
-      const r = await invoke<{ evaluated: number }>("evaluate_param_changes");
+      const r = await invokePluginCommand<{ evaluated: number }>("stock_evaluate_param_changes");
       message.success(
         t("stockAnalysis.evolutionDrift.paramChangesEvaluated", { count: r.evaluated }),
       );

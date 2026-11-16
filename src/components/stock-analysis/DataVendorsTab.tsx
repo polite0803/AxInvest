@@ -3,6 +3,7 @@
  */
 import { invalidate } from "@/lib/cacheInvalidation";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { toDbVariable } from "@/lib/workflowVariables";
 import type { Variable } from "@/types";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
@@ -298,7 +299,7 @@ export function DataVendorsTab() {
   // reason 列故意不展示 —— 后端目前恒写 `primary_failed` 字面量，摆出来会让人以为它在说明失败原因。
   const loadFallbackLog = useCallback(async () => {
     try {
-      const r = await invoke<FallbackRecordItem[]>("get_vendor_fallback_log");
+      const r = await invokePluginCommand<FallbackRecordItem[]>("stock_get_vendor_fallback_log");
       // 浏览器/mock 模式对未注册的 get_ 命令回的是 `{}` ⇒ 那是「本环境不提供该数据」，不是「没有换源」。
       if (!Array.isArray(r)) {
         setFallbackLog([]);

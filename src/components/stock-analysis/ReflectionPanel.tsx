@@ -323,7 +323,7 @@ export function ReflectionPanel() {
     setLoading(true); // P1-5 修复
     try {
       const [r, c, h] = await Promise.all([
-        invoke<ReflectionRow[]>("list_reflections", {}),
+        invokePluginCommand<ReflectionRow[]>("stock_list_reflections", {}),
         invokePluginCommand<CronJobResponse[]>("stock_list_validate_decisions_crons", {}),
         invoke<HitrateStats>("reflection_stats", {}),
       ]);

@@ -119,7 +119,7 @@ export function MoverRecallPanel() {
     setReviews((prev) => ({ ...prev, [key]: { loading: true, error: null, data: null } }));
     try {
       // 局部变量别再叫 data：它会遮住同名状态，初始化里引用自己即 TDZ 报错
-      const review = await invoke<MoverRecallEventReview | null>("get_mover_recall_event_review", {
+      const review = await invokePluginCommand<MoverRecallEventReview | null>("stock_get_mover_recall_event_review", {
         stockCode,
         anchorDate,
         period,
@@ -156,7 +156,7 @@ export function MoverRecallPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const listed = await invoke<MoverRecallRunMeta[]>("list_mover_recall_runs", {
+        const listed = await invokePluginCommand<MoverRecallRunMeta[]>("stock_list_mover_recall_runs", {
           limit: RUN_LIST_LIMIT,
         });
         if (cancelled) { return; }
@@ -339,7 +339,7 @@ export function MoverRecallPanel() {
           applyPayload(keep, null);
           return;
         } else {
-          const r = await invoke<MoverRecallRunView | null>("get_mover_recall_run_view", {
+          const r = await invokePluginCommand<MoverRecallRunView | null>("stock_get_mover_recall_run_view", {
             runId: selectedId,
           });
           if (cancelled) { return; }

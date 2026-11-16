@@ -170,7 +170,7 @@ function renderWithProviders() {
 async function expandRow(review: MoverRecallEventReview | null | Error) {
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "analyze_mover_recall") { return Promise.resolve([makeViewWithMiss()]); }
-    if (cmd === "get_mover_recall_event_review") {
+    if (cmd === "stock_get_mover_recall_event_review") {
       return review instanceof Error ? Promise.reject(review) : Promise.resolve(review);
     }
     return Promise.resolve(null);
@@ -272,7 +272,7 @@ describe("MoverRecallPanel 漏检行展开复盘（P3）", () => {
   it("再次点击收起：详情卸载，且不重复请求（缓存命中）", async () => {
     await expandRow(makeReview());
     await screen.findByTestId("mover-review-detail");
-    const callsAfterOpen = invokeMock.mock.calls.filter((c) => c[0] === "get_mover_recall_event_review").length;
+    const callsAfterOpen = invokeMock.mock.calls.filter((c) => c[0] === "stock_get_mover_recall_event_review").length;
     expect(callsAfterOpen).toBe(1);
 
     await act(async () => {
@@ -287,7 +287,7 @@ describe("MoverRecallPanel 漏检行展开复盘（P3）", () => {
       await flushPromises();
     });
     expect(screen.getByTestId("mover-review-detail")).toBeTruthy();
-    const callsFinal = invokeMock.mock.calls.filter((c) => c[0] === "get_mover_recall_event_review").length;
+    const callsFinal = invokeMock.mock.calls.filter((c) => c[0] === "stock_get_mover_recall_event_review").length;
     expect(callsFinal).toBe(1);
   });
 });

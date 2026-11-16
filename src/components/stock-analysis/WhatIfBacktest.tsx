@@ -13,6 +13,7 @@
  */
 
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { getDefaultVariables } from "@/lib/stock-analysis-defaults";
 import { parseRiskLevel, StockRiskLevel } from "@/lib/stock-analysis-utils";
 import { Button, Card, Collapse, Empty, InputNumber, Select, SelectProps, Slider, Tag } from "antd";
@@ -421,7 +422,7 @@ export function WhatIfBacktest() {
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<AnalysisRecord[]>("list_stock_analyses", { limit: 50, offset: 0 });
+      return invokePluginCommand<AnalysisRecord[]>("stock_list_stock_analyses", { limit: 50, offset: 0 });
     })
       .then((list) => {
         if (!cancelled) {
@@ -447,7 +448,7 @@ export function WhatIfBacktest() {
   useEffect(() => {
     if (!selectedId) { return; }
     let cancelled = false;
-    invoke<AnalysisRecord>("get_stock_analysis", { analysisId: selectedId })
+    invokePluginCommand<AnalysisRecord>("stock_get_stock_analysis", { analysisId: selectedId })
       .then((record) => {
         if (cancelled || !record) { return; }
         // 解析 blackboard_snapshot

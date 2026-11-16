@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { AsOfDegradationEntry, AsOfDegradationKind } from "@/types/asOf";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -155,8 +156,8 @@ export const useTimeAnchorStore = create<TimeAnchorState>()(
       refreshDegradation: async () => {
         try {
           const [count, log] = await Promise.all([
-            invoke<number>("get_asof_degradation_count"),
-            invoke<AsOfDegradationEntry[]>("get_asof_degradation_log"),
+            invokePluginCommand<number>("stock_get_asof_degradation_count"),
+            invokePluginCommand<AsOfDegradationEntry[]>("stock_get_asof_degradation_log"),
           ]);
           set({ degradationCount: count, degradationLog: log });
         } catch (e) {

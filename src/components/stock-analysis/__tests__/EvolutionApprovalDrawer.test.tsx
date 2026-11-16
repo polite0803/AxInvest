@@ -11,6 +11,10 @@ import { EvolutionApprovalDrawer } from "../EvolutionApprovalDrawer";
 const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const invokeMock = vi.fn();
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (name: string, input?: unknown) => invokeMock(name, input ?? {}),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -107,7 +111,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
 
   it("接受：Popconfirm 确认后以 camelCase 载荷调 approve_evolution_plan", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "approve_evolution_plan") {
+      if (cmd === "stock_approve_evolution_plan") {
         return Promise.resolve({ ...makePending(), status: "accepted" });
       }
       return Promise.resolve([makePending()]);
@@ -127,7 +131,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
     });
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("approve_evolution_plan", {
+      expect(invokeMock).toHaveBeenCalledWith("stock_approve_evolution_plan", {
         historyId: "evo-1",
         reviewer: null,
       })
@@ -136,7 +140,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
 
   it("拒绝：原因为空不发命令；填写后确认才调 reject_evolution_plan", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "reject_evolution_plan") {
+      if (cmd === "stock_reject_evolution_plan") {
         return Promise.resolve({ ...makePending(), status: "rejected" });
       }
       return Promise.resolve([makePending()]);
@@ -153,7 +157,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
       await flushPromises();
     });
     expect(invokeMock).not.toHaveBeenCalledWith(
-      "reject_evolution_plan",
+      "stock_reject_evolution_plan",
       expect.anything(),
     );
 
@@ -164,7 +168,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
       await flushPromises();
     });
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("reject_evolution_plan", {
+      expect(invokeMock).toHaveBeenCalledWith("stock_reject_evolution_plan", {
         historyId: "evo-1",
         reason: "样本不足，暂不调整",
         reviewer: null,
@@ -174,7 +178,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
 
   it("accepted 行：展示 default → best 参数 diff，可回滚到 rollbackRef", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "rollback_evolution") {
+      if (cmd === "stock_rollback_evolution") {
         return Promise.resolve({ ...ACCEPTED, id: "evo-rollback-9" });
       }
       return Promise.resolve([makePending()]);
@@ -204,7 +208,7 @@ describe("EvolutionApprovalDrawer P4 计划-审批", () => {
       await flushPromises();
     });
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("rollback_evolution", {
+      expect(invokeMock).toHaveBeenCalledWith("stock_rollback_evolution", {
         historyId: "evo-acc",
         reviewer: null,
       })

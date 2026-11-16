@@ -10,7 +10,7 @@
  * - 主档因子腿：σ 可回算 / 不可回算 / 无基准 + 全局闭合
  */
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { Alert, Button, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -269,7 +269,7 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<EvidenceAuditReport>("audit_decision_evidence", {
+      const result = await invokePluginCommand<EvidenceAuditReport>("stock_audit_decision_evidence", {
         analysisId,
       });
       setReport(result);

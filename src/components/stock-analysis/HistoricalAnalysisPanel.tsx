@@ -1,6 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   actionSourceLabelKey,
   confidenceSourceLabelKey,
@@ -94,7 +95,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke("list_stock_analyses", { limit: 30 }) as Promise<AnalysisRecord[]>;
+      return invokePluginCommand("stock_list_stock_analyses", { limit: 30 }) as Promise<AnalysisRecord[]>;
     })
       .then((list) => {
         if (cancelled || !list) { return; }
@@ -112,7 +113,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
   useEffect(() => {
     if (!analysisId) { return; }
     let cancelled = false;
-    invoke<{ blackboardSnapshot: string | null }>("get_stock_analysis", { analysisId })
+    invokePluginCommand<{ blackboardSnapshot: string | null }>("stock_get_stock_analysis", { analysisId })
       .then((r) => {
         if (cancelled) { return; }
         if (r.blackboardSnapshot) { setSnapshot(JSON.parse(r.blackboardSnapshot)); }

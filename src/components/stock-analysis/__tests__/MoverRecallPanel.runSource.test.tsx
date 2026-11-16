@@ -92,13 +92,13 @@ beforeEach(() => {
 describe("MoverRecallPanel 轮次来源", () => {
   it("A. 已有落库轮次：默认读那一轮，不发出现场重算命令", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       return null;
     });
     renderAt();
     await waitFor(() => expect(screen.getByTestId("mover-recall-source")).toBeTruthy());
-    const call = cmd("get_mover_recall_run_view")[0];
+    const call = cmd("stock_get_mover_recall_run_view")[0];
     expect(call?.[1]).toEqual({ runId: "mrr-aaa" });
     expect(cmd("analyze_mover_recall").length).toBe(0);
     expect(screen.getByTestId("mover-recall-source").textContent).toContain("已落库核查轮次");
@@ -107,7 +107,7 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("B. 库里一轮都没有：退回现场重算并单独成句（不得说成「本轮没有达标事件」）", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "stock_list_mover_recall_runs") { return []; }
       if (name === "analyze_mover_recall") { return [makeView()]; }
       return null;
     });
@@ -115,12 +115,12 @@ describe("MoverRecallPanel 轮次来源", () => {
     await waitFor(() => expect(screen.getByTestId("mover-recall-source")).toBeTruthy());
     expect(screen.getByTestId("mover-recall-runs-empty")).toBeTruthy();
     expect(cmd("analyze_mover_recall").length).toBe(1);
-    expect(cmd("get_mover_recall_run_view").length).toBe(0);
+    expect(cmd("stock_get_mover_recall_run_view").length).toBe(0);
   });
 
   it("C. 深链指定的轮次不在库内：点名该轮并退回现场重算", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun("mrr-aaa")]; }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun("mrr-aaa")]; }
       if (name === "analyze_mover_recall") { return [makeView()]; }
       return null;
     });
@@ -128,13 +128,13 @@ describe("MoverRecallPanel 轮次来源", () => {
     await waitFor(() => expect(screen.getByTestId("mover-recall-run-gone")).toBeTruthy());
     expect(screen.getByTestId("mover-recall-run-gone").textContent).toContain("mrr-gone");
     expect(cmd("analyze_mover_recall").length).toBe(1);
-    expect(cmd("get_mover_recall_run_view").length).toBe(0);
+    expect(cmd("stock_get_mover_recall_run_view").length).toBe(0);
   });
 
   it("G. 回灌清单三态：样本不足只说 shadow，达下限才说可转正", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_reflow_candidates") {
         return { items: [{ stockCode: "002696" }], settled: 3, required: 30, ready: false };
       }
@@ -150,8 +150,8 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("H. 回灌清单：达样本下限才出现 ready 态；无候选则是另一种缺席", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_reflow_candidates") {
         return { items: [{ stockCode: "600519" }], settled: 30, required: 30, ready: true };
       }
@@ -164,8 +164,8 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("E. 补分析批次从未发起：单独成句（0 批不得说成「没有待补」）", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_recall_analysis_batches") { return []; }
       return null;
     });
@@ -176,8 +176,8 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("F. 有批次 ⇒ 显示最近一批状态；读不到 ⇒ 第三态（不冒充从未发起）", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_recall_analysis_batches") {
         return [{ batchId: "mrb-1", status: "success", message: null }];
       }
@@ -193,8 +193,8 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("E-4. 批次带选样计数 ⇒ 逐跳过原因成句（四数都要出现在界面上）", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "stock_list_mover_recall_analysis_batches") {
         return [
           {
@@ -221,8 +221,8 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("D. 轮次载荷缺字段：走 failed 支，不把半份载荷当视图（既不崩也不静默空白）", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return {}; }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return {}; }
       return null;
     });
     renderAt();
@@ -233,8 +233,8 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("F. 命令回来说该轮不在库内：走「轮次不在库内」句并退回现场重算，不占用失败支", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return null; }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return null; }
       if (name === "analyze_mover_recall") { return [makeView()]; }
       return null;
     });
@@ -247,13 +247,13 @@ describe("MoverRecallPanel 轮次来源", () => {
 
   it("E. 下拉切到「现场重算」：必须真的发出重算命令", async () => {
     invokeMock.mockImplementation(async (name: string) => {
-      if (name === "list_mover_recall_runs") { return [makeRun()]; }
-      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "stock_list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "stock_get_mover_recall_run_view") { return makeRunView(); }
       if (name === "analyze_mover_recall") { return [makeView()]; }
       return null;
     });
     renderAt();
-    await waitFor(() => expect(cmd("get_mover_recall_run_view").length).toBe(1));
+    await waitFor(() => expect(cmd("stock_get_mover_recall_run_view").length).toBe(1));
     fireEvent.mouseDown(screen.getByTestId("mover-recall-run-select"));
     fireEvent.click(await screen.findByTitle("现场重算（不落库）"));
     await waitFor(() => expect(cmd("analyze_mover_recall").length).toBe(1));

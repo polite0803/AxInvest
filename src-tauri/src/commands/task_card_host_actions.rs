@@ -37,7 +37,8 @@ fn task_card_host_actions() -> [PluginTaskCardAction; 2] {
         PluginTaskCardAction {
             id: "approve".to_string(),
             title: "stockAnalysis.evolutionApproval.approve".to_string(),
-            command: "approve_evolution_plan".to_string(),
+            // #344：接受命令已迁插件命名命令（走插件解析路由）。
+            command: "stock_approve_evolution_plan".to_string(),
             mutating: true,
         },
         PluginTaskCardAction {

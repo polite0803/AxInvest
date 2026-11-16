@@ -14,16 +14,13 @@
 //! 刻意**不复用** `AppState.evolution_consent_senders`：那是对话内实时 oneshot 同意通道
 //! （内存态、进程重启即失），审批是跨天离线待办，状态以 `stock_evolution_history` 表为准。
 
-use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::stock_self_evolution::{
     EvolutionPlan, EvolutionTrigger, EvolutionType,
 };
 use axagent_dao::repo::stock_evolution_history::{
     self as evo_hist, AcceptedHistoryRecord, EvolutionHistoryModel,
 };
-use tauri::State;
 
-use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
 
@@ -69,14 +66,12 @@ fn rebuild_plan(row: &EvolutionHistoryModel) -> Result<EvolutionPlan, String> {
 ///
 /// 条件 UPDATE 带 `status=pending_approval` 过滤做幂等闸门：已被审批过的行
 /// rows_affected=0，报「已处理」错，避免重复接受。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "接受进化计划")]
-#[tauri::command]
-pub async fn approve_evolution_plan(
-    state: State<'_, AppState>,
+pub(crate) async fn approve_evolution_plan_core(
+    db: &axagent_harness::DatabaseConnection,
+    adaptive: &axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine,
     history_id: String,
     reviewer: Option<String>,
 ) -> Result<EvolutionHistoryModel, String> {
-    let db = state.harness.db();
     let reviewer = reviewer
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -104,9 +99,7 @@ pub async fn approve_evolution_plan(
     let plan = rebuild_plan(&row)?;
 
     // 执行进化（审批专用路径：不 insert 新 history 行，结果回写本行）。
-    let result = state
-        .stock()
-        .stock_adaptive_engine
+    let result = adaptive
         .evolution_engine()
         .execute_pending_plan(&plan)
         .await

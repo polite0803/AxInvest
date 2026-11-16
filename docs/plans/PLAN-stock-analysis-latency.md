@@ -1118,7 +1118,7 @@ positionPct / confidence / 档位确实全取自所选档行（`portfolio-mgr.rh
 | `DecisionTrustNotice.tsx:90 / 115-117` | `weightsCollapsed` / `dataGaps` / `dqiFuseState` | 三者全空 ⇒ 整块组件 `return null` ⇒ 「本次观望为数据不足导致的被动降级，非看空判断」这句话永不再现 —— 这正是该组件的立论理由（`:9-18` 记录的黑盒观望体感） | 高 |
 | `DecisionBanner.tsx:714-722` | `decisionConfidence` | null ⇒ 「决策置信度」数字块整体不渲染 | 中 |
 | `F7ReferenceComparison.tsx:44-68` | `f7Source` / `weightsCollapsed` / `posterior` / `f7WeightPct` | 整块降级为「本记录未产出 f7 口径对照」一句 | 中 |
-| `EvidenceCitationPanel.tsx:272,438,471-494` | 后端 `audit_decision_evidence`（读 `evidence.factors.fN.{sigma,weight}`） | A 面「主档因子闭合对账」整块不渲染 | 高 |
+| `EvidenceCitationPanel.tsx:4,438,471-494` | 后端 `audit_decision_evidence`（读 `evidence.factors.fN.{sigma,weight}`） | A 面「主档因子闭合对账」整块不渲染 | 高 |
 | `WhatIfBacktest.tsx:300-381` | 原始 JSON 的 `decision_trail` / `technical_veto` / `simulation_gate`（**绕过白名单直读**） | 「决策追溯链」整块不渲染 | 中 |
 | `scripts/lib/stock-analysis-data.mjs:106,114,116` | `f7_source` / `f7Source` | 基准/质量报表「生产侧 f7 口径」为空 ⇒ 对照匹配率退化 | 中 |
 

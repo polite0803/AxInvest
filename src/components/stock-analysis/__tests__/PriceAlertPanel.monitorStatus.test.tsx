@@ -24,6 +24,10 @@ vi.mock("react-i18next", () => ({
 
 const invokeMock = vi.fn();
 
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (name: string, input?: unknown) => invokeMock(name, input ?? {}),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
   listen: () => Promise.resolve(() => {}),
@@ -134,7 +138,7 @@ describe("monitorAbsenceSentences —— 缺席分句（纯函数层）", () => 
 
 async function renderWith(monitorStatus: unknown) {
   invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "monitor_status") {
+    if (cmd === "stock_monitor_status") {
       return monitorStatus instanceof Error
         ? Promise.reject(monitorStatus)
         : Promise.resolve(monitorStatus);
@@ -146,7 +150,7 @@ async function renderWith(monitorStatus: unknown) {
       <PriceAlertPanel />
     </App>,
   );
-  await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("monitor_status"));
+  await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("stock_monitor_status", expect.anything()));
   await act(async () => {
     await Promise.resolve();
   });

@@ -519,6 +519,177 @@ pub trait StockAnalysisProvider: Send + Sync {
         Err(AxAgentError::Provider("rollback_evolution 未实现（该提供者不支持此数据面）".into()))
     }
 
+    /// as-of 降级条目总数（`get_asof_degradation_count` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_asof_degradation_count(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_asof_degradation_count 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// as-of 降级日志快照（`get_asof_degradation_log` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_asof_degradation_log(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_asof_degradation_log 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 市场状态文案（`get_market_status` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_market_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_market_status 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 所有数据源健康状态（`get_vendor_health_all` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_vendor_health_all(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_vendor_health_all 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// vendor fallback 日志（`get_vendor_fallback_log` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_vendor_fallback_log(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_vendor_fallback_log 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 核心接口日级健康记录（`get_interface_health_history` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_interface_health_history(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_interface_health_history 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 估值参数（`get_valuation_params` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_valuation_params(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_valuation_params 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 保存估值参数（`save_valuation_params` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn save_valuation_params(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("save_valuation_params 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 模板代际对照（代码版本 vs 库内播种）（`get_stock_template_version_status` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_stock_template_version_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_stock_template_version_status 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 历史分析列表（`list_stock_analyses` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn list_stock_analyses(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_stock_analyses 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 最近分析摘要（`get_recent_analyses` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_recent_analyses(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_recent_analyses 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 反思记录列表（`list_reflections` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn list_reflections(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_reflections 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 单条分析详情（`get_stock_analysis` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_stock_analysis(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_stock_analysis 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 决策证据对账审计（`audit_decision_evidence` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn audit_decision_evidence(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "audit_decision_evidence 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 重命名分析记录（`rename_stock_analysis` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn rename_stock_analysis(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("rename_stock_analysis 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 价格告警列表（`list_price_alerts` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn list_price_alerts(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_price_alerts 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 创建价格告警（落库并进监控引擎）（`create_price_alert` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn create_price_alert(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("create_price_alert 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 实时监控运行读数（`monitor_status` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn monitor_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("monitor_status 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// T+0 配置（`get_t0_config` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_t0_config(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("get_t0_config 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 更新 T+0 配置（`set_t0_config` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn set_t0_config(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("set_t0_config 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 组合监控仪表盘（`get_portfolio_dashboard` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_portfolio_dashboard(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_portfolio_dashboard 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）（`refresh_portfolio_metrics` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn refresh_portfolio_metrics(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "refresh_portfolio_metrics 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 开仓限制校验（`check_position_limits` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn check_position_limits(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("check_position_limits 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 接受待审批进化计划（执行进化并回写）（`approve_evolution_plan` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn approve_evolution_plan(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "approve_evolution_plan 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// mover 核查轮次列表（`list_mover_recall_runs` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn list_mover_recall_runs(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "list_mover_recall_runs 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 按轮次读回核查结果（`get_mover_recall_run_view` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_mover_recall_run_view(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_mover_recall_run_view 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 漏检事件补分析报告与逐档反思（`get_mover_recall_event_review` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn get_mover_recall_event_review(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "get_mover_recall_event_review 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 参数变更台账（`list_param_changes` op）—— 读 op（宿主原命令迁 T2，#344）。
+    async fn list_param_changes(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_param_changes 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 参数变更到期评估（写评估结论）（`evaluate_param_changes` op）—— 写 op（宿主原命令迁 T2，#344）。
+    async fn evaluate_param_changes(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "evaluate_param_changes 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -1104,6 +1275,105 @@ mod tests {
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
+            ),
+            // #344 批 B18：29 条（默认实现必须显式报错）。
+            (
+                "get_asof_degradation_count",
+                futures::executor::block_on(stub.get_asof_degradation_count(Value::Null)),
+            ),
+            (
+                "get_asof_degradation_log",
+                futures::executor::block_on(stub.get_asof_degradation_log(Value::Null)),
+            ),
+            ("get_market_status", futures::executor::block_on(stub.get_market_status(Value::Null))),
+            (
+                "get_vendor_health_all",
+                futures::executor::block_on(stub.get_vendor_health_all(Value::Null)),
+            ),
+            (
+                "get_vendor_fallback_log",
+                futures::executor::block_on(stub.get_vendor_fallback_log(Value::Null)),
+            ),
+            (
+                "get_interface_health_history",
+                futures::executor::block_on(stub.get_interface_health_history(Value::Null)),
+            ),
+            (
+                "get_valuation_params",
+                futures::executor::block_on(stub.get_valuation_params(Value::Null)),
+            ),
+            (
+                "save_valuation_params",
+                futures::executor::block_on(stub.save_valuation_params(Value::Null)),
+            ),
+            (
+                "get_stock_template_version_status",
+                futures::executor::block_on(stub.get_stock_template_version_status(Value::Null)),
+            ),
+            (
+                "list_stock_analyses",
+                futures::executor::block_on(stub.list_stock_analyses(Value::Null)),
+            ),
+            (
+                "get_recent_analyses",
+                futures::executor::block_on(stub.get_recent_analyses(Value::Null)),
+            ),
+            ("list_reflections", futures::executor::block_on(stub.list_reflections(Value::Null))),
+            (
+                "get_stock_analysis",
+                futures::executor::block_on(stub.get_stock_analysis(Value::Null)),
+            ),
+            (
+                "audit_decision_evidence",
+                futures::executor::block_on(stub.audit_decision_evidence(Value::Null)),
+            ),
+            (
+                "rename_stock_analysis",
+                futures::executor::block_on(stub.rename_stock_analysis(Value::Null)),
+            ),
+            ("list_price_alerts", futures::executor::block_on(stub.list_price_alerts(Value::Null))),
+            (
+                "create_price_alert",
+                futures::executor::block_on(stub.create_price_alert(Value::Null)),
+            ),
+            ("monitor_status", futures::executor::block_on(stub.monitor_status(Value::Null))),
+            ("get_t0_config", futures::executor::block_on(stub.get_t0_config(Value::Null))),
+            ("set_t0_config", futures::executor::block_on(stub.set_t0_config(Value::Null))),
+            (
+                "get_portfolio_dashboard",
+                futures::executor::block_on(stub.get_portfolio_dashboard(Value::Null)),
+            ),
+            (
+                "refresh_portfolio_metrics",
+                futures::executor::block_on(stub.refresh_portfolio_metrics(Value::Null)),
+            ),
+            (
+                "check_position_limits",
+                futures::executor::block_on(stub.check_position_limits(Value::Null)),
+            ),
+            (
+                "approve_evolution_plan",
+                futures::executor::block_on(stub.approve_evolution_plan(Value::Null)),
+            ),
+            (
+                "list_mover_recall_runs",
+                futures::executor::block_on(stub.list_mover_recall_runs(Value::Null)),
+            ),
+            (
+                "get_mover_recall_run_view",
+                futures::executor::block_on(stub.get_mover_recall_run_view(Value::Null)),
+            ),
+            (
+                "get_mover_recall_event_review",
+                futures::executor::block_on(stub.get_mover_recall_event_review(Value::Null)),
+            ),
+            (
+                "list_param_changes",
+                futures::executor::block_on(stub.list_param_changes(Value::Null)),
+            ),
+            (
+                "evaluate_param_changes",
+                futures::executor::block_on(stub.evaluate_param_changes(Value::Null)),
             ),
             // #343 批 B17：组合/交易 6 + 进化审批 2，默认实现必须显式报错。
             ("list_portfolio", futures::executor::block_on(stub.list_portfolio(Value::Null))),

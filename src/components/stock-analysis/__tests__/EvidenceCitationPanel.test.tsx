@@ -13,6 +13,10 @@ vi.mock("react-i18next", () => ({
 }));
 
 const invokeMock = vi.fn();
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (name: string, input?: unknown) => invokeMock(name, input ?? {}),
+}));
+
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
@@ -152,7 +156,7 @@ describe("EvidenceCitationPanel 判据换新后的三态", () => {
     await waitFor(() => expect(screen.queryByText("stockAnalysis.evidenceCitation.loading")).toBeNull());
     await new Promise((r) => setTimeout(r, 120));
     expect(invokeMock).toHaveBeenCalledTimes(1);
-    expect(invokeMock).toHaveBeenCalledWith("audit_decision_evidence", { analysisId: "a-3" });
+    expect(invokeMock).toHaveBeenCalledWith("stock_audit_decision_evidence", { analysisId: "a-3" });
   });
 
   it("三种缺席各占一句，互不合并", async () => {

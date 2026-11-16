@@ -698,17 +698,13 @@ pub struct MoverRecallEventReview {
     call_mode = StateInput,
     description = "查询妖股漏检事件的补分析报告与逐档反思结论"
 )]
-#[tauri::command]
-pub async fn get_mover_recall_event_review(
-    state: tauri::State<'_, AppState>,
+pub(crate) async fn get_mover_recall_event_review_core(
+    db: &axagent_harness::DatabaseConnection,
     stock_code: String,
     anchor_date: String,
     period: String,
-    // 面板当前视图所属链（`reco` | `serenity`）；旧轮次的 `unlabeled` 传 None。
-    // 形参上不能挂 ///（Rust 只允许内置属性），故留在函数体内说明见 find_latest_by_key 的文档。
     chain: Option<String>,
 ) -> Result<Option<MoverRecallEventReview>, String> {
-    let db = state.harness.db();
     let anchor = date_of(&anchor_date);
 
     // 同三键可能被多轮核查重复落（每轮全量替换各自 run 的行）⇒ dao 取最新一轮。
@@ -957,19 +953,12 @@ fn run_payload_of(run: &RunModel) -> Result<MoverRecallView, String> {
 
 /// 列出已落库的核查轮次（最新在前）。空数组 = 库里一轮都没有 ⇒ 面板必须显式说
 /// 「还没有已落库轮次」，不得让它看起来像「核查过但没有漏检」。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "列出已落库的窗口涨幅达标核查轮次"
-)]
-#[tauri::command]
-pub async fn list_mover_recall_runs(
-    state: tauri::State<'_, AppState>,
+pub(crate) async fn list_mover_recall_runs_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: Option<u32>,
 ) -> Result<Vec<MoverRecallRunMeta>, String> {
     let n = limit.unwrap_or(RUN_LIST_DEFAULT_LIMIT).max(1) as u64;
-    let rows = mover_recall_runs::list_recent_runs(state.harness.db(), n)
+    let rows = mover_recall_runs::list_recent_runs(db, n)
         .await
         .map_err(|e| run_read_err(format!("读 mover_recall_runs 失败: {e}")))?;
     Ok(rows.iter().map(run_meta_of).collect())
@@ -979,18 +968,10 @@ pub async fn list_mover_recall_runs(
 ///
 /// `runId` 必填：「不传就取最新」是一个会随时间换答案的隐藏缺省，面板的轮次选择器
 /// 本来就先列后选，不需要这个自由度。查无该轮 ⇒ `Ok(None)`（缺席由面板成句声明）。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "按轮次读回窗口涨幅达标核查结果"
-)]
-#[tauri::command]
-pub async fn get_mover_recall_run_view(
-    state: tauri::State<'_, AppState>,
+pub(crate) async fn get_mover_recall_run_view_core(
+    db: &axagent_harness::DatabaseConnection,
     run_id: String,
 ) -> Result<Option<MoverRecallRunView>, String> {
-    let db = state.harness.db();
     let found = mover_recall_runs::fetch_run(db, &run_id)
         .await
         .map_err(|e| run_read_err(format!("读 mover_recall_runs 失败: {e}")))?;

@@ -1257,7 +1257,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       let asOfDate: string | null | undefined; // undefined = 未确定，需回退 timeAnchor
       if (options?.parentAnalysisId) {
         try {
-          const parent = await invoke<{ asOfDate: string | null }>("get_stock_analysis", {
+          const parent = await invokePluginCommand<{ asOfDate: string | null }>("stock_get_stock_analysis", {
             analysisId: options.parentAnalysisId,
           });
           asOfDate = parent.asOfDate ?? null;
@@ -1405,7 +1405,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   fetchHistory: async (limit = 20, offset = 0) => {
-    const history = await invoke<AnalysisSummary[]>("list_stock_analyses", { limit, offset });
+    const history = await invokePluginCommand<AnalysisSummary[]>("stock_list_stock_analyses", { limit, offset });
     set({ history });
   },
 
@@ -1447,7 +1447,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       analystFeedback: null,
     });
 
-    const record = await invoke<
+    const record = await invokePluginCommand<
       AnalysisSummary & {
         decisionJson: string | null;
         llmDecisionJson: string | null;
@@ -1456,7 +1456,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         dashboardReport?: DashboardReport | null;
         dashboardMd?: string | null;
       }
-    >("get_stock_analysis", { analysisId });
+    >("stock_get_stock_analysis", { analysisId });
 
     // 历史数据兼容：旧版在 as-of 模式写入 stock_analyses 时,stock_name 取自
     // quote.name,但 K线合成 quote 时 name 退化为 stock_code(见
@@ -2084,7 +2084,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   approveEvolutionPlan: async (historyId: string, reviewer?: string) => {
-    const row = await invoke<EvolutionHistoryEntry>("approve_evolution_plan", {
+    const row = await invokePluginCommand<EvolutionHistoryEntry>("stock_approve_evolution_plan", {
       historyId,
       reviewer: reviewer ?? null,
     });
@@ -2117,7 +2117,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   // R2 组合监控
   fetchPortfolioDashboard: async (asOfDate?: string | null) => {
     try {
-      const data = await invoke<PortfolioDashboard>("get_portfolio_dashboard", {
+      const data = await invokePluginCommand<PortfolioDashboard>("stock_get_portfolio_dashboard", {
         asOfDate: asOfDate ?? null,
       });
       set({ portfolioDashboard: data, portfolioLastError: null });
@@ -2130,12 +2130,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   refreshPortfolioMetrics: async (asOfDate?: string | null) => {
     set({ portfolioRefreshing: true, portfolioLastError: null });
     try {
-      await invoke<{
+      await invokePluginCommand<{
         metricsId: string;
         positionsSnapshotted: number;
         correlationPairsWritten: number;
         asOfDate: string | null;
-      }>("refresh_portfolio_metrics", { asOfDate: asOfDate ?? null });
+      }>("stock_refresh_portfolio_metrics", { asOfDate: asOfDate ?? null });
       await Promise.all([
         get().fetchPortfolioDashboard(asOfDate ?? null),
         get().fetchPortfolioCorrelations(asOfDate ?? null),
@@ -2168,7 +2168,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     proposedPrice: number,
   ) => {
     try {
-      return await invoke<PositionLimitsCheck>("check_position_limits", {
+      return await invokePluginCommand<PositionLimitsCheck>("stock_check_position_limits", {
         stockCode,
         proposedShares,
         proposedPrice,
@@ -2319,12 +2319,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
    */
   fetchT0Config: async () => {
     try {
-      const cfg = await invoke<{
+      const cfg = await invokePluginCommand<{
         enabled: boolean;
         changePctThreshold: number | null;
         turnoverRateThreshold: number | null;
         minIntervalMinutes: number;
-      }>("get_t0_config");
+      }>("stock_get_t0_config");
       set({
         t0Config: {
           enabled: !!cfg.enabled,
@@ -2349,7 +2349,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const next = { ...cur, ...patch };
     set({ t0Config: next, t0Loading: true });
     try {
-      await invoke("set_t0_config", { config: next });
+      await invokePluginCommand("stock_set_t0_config", { config: next });
     } catch (e) {
       set({ t0Config: cur });
       console.error("[StockAnalysis] Failed to set t0 config:", e);
@@ -2985,9 +2985,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (get().analysisId) {
           (async () => {
             try {
-              const persisted = await invoke<{
+              const persisted = await invokePluginCommand<{
                 decisionJson: string | null;
-              }>("get_stock_analysis", { analysisId: get().analysisId });
+              }>("stock_get_stock_analysis", { analysisId: get().analysisId });
               if (persisted?.decisionJson) {
                 const dbRaw = parseJsonLoose(persisted.decisionJson);
                 if (dbRaw) {

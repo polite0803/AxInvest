@@ -1823,31 +1823,6 @@ pub async fn create_app_state_with_resource_dir(
         }
     }
 
-    // ── stock.analysis 接缝：把三个域权威函数（行业成分股 / 主线批量写 / 1 月涨幅）暴露给插件 ──
-    // 三工具的 DTO 权威在 `analysis-engine`（implementor），而 harness 是 foundation，按依赖铁律
-    // 不得依赖 implementor ⇒ 接缝载荷用 `Value` 整块透传，转换点只有本 provider 一处。
-    // 失败只 warn，不阻断启动（与 market.quote / jobs.store / analysis.record / opc.store 同策略）。
-    // `time_travel_batch_lock` 与 `AppState` 持的是**同一把**锁 —— #338 的漏检补分析批次
-    // （插件写 op 发起）与时间旅行批次共用全局 as-of 互斥；在块外先落变量供两处 clone。
-    let time_travel_batch_lock = Arc::new(tokio::sync::Mutex::new(()));
-    {
-        // `cron_job_store` 与 `AppState` 持的是**同一个** `Arc`（下面按值移入）——
-        // 批 1a 的九个 cron 写 op 必须改到调度器看到的那份任务表。
-        let provider: Arc<dyn axagent_harness::StockAnalysisProvider> =
-            Arc::new(crate::init::stock_analysis_service::HostStockAnalysis::new(
-                sea_db.clone(),
-                cron_job_store.clone(),
-                astock_client.clone(),
-                agent_cancel_tokens.clone(),
-                time_travel_batch_lock.clone(),
-                work_engine.clone(),
-            ));
-        match axagent_harness::get_capability_registry().register_stock_analysis(provider) {
-            Ok(_) => tracing::info!("stock.analysis 接缝已注册 (BuiltIn)"),
-            Err(e) => tracing::warn!("stock.analysis 注册失败: {e}"),
-        }
-    }
-
     // ── workflow.run 接缝：把宿主**独持**的 WorkEngine 以「异步 job」形态暴露给插件 ──
     // 契约已冻结（`axagent-core/crates/harness/src/workflow_run.rs`）：`start` 只受理并
     // 立即返回 `execution_id`（接缝预算 15s，绝不能 await DAG）；执行体在 provider 内
@@ -1891,6 +1866,35 @@ pub async fn create_app_state_with_resource_dir(
         astock_client.clone(),
         sea_db.clone(),
     );
+
+    // `time_travel_batch_lock` 与 `AppState` 持的是**同一把**锁 —— #338 的漏检补分析批次
+    // （插件写 op 发起）与时间旅行批次共用全局 as-of 互斥；在块外先落变量供两处 clone。
+    let time_travel_batch_lock = Arc::new(tokio::sync::Mutex::new(()));
+
+    // ── stock.analysis 接缝（#344 起在 StockDomainState 之后注册：provider 需要 trading_engine /
+    // 共享 stock_monitor OnceLock / stock_adaptive_engine 三个域引擎句柄）──
+    // 三工具的 DTO 权威在 `analysis-engine`（implementor），而 harness 是 foundation，按依赖铁律
+    // 不得依赖 implementor ⇒ 接缝载荷用 `Value` 整块透传，转换点只有本 provider 一处。
+    // 失败只 warn，不阻断启动（与 market.quote / jobs.store / analysis.record / opc.store 同策略）。
+    {
+        let provider: Arc<dyn axagent_harness::StockAnalysisProvider> =
+            Arc::new(crate::init::stock_analysis_service::HostStockAnalysis::new(
+                sea_db.clone(),
+                cron_job_store.clone(),
+                astock_client.clone(),
+                agent_cancel_tokens.clone(),
+                time_travel_batch_lock.clone(),
+                work_engine.clone(),
+                stock_domain_state.trading_engine.clone(),
+                stock_domain_state.stock_monitor.clone(),
+                stock_domain_state.stock_adaptive_engine.clone(),
+            ));
+        match axagent_harness::get_capability_registry().register_stock_analysis(provider) {
+            Ok(_) => tracing::info!("stock.analysis 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("stock.analysis 注册失败: {e}"),
+        }
+    }
+
     {
         let trading_engine = stock_domain_state.trading_engine.clone();
         let provider: Arc<dyn axagent_harness::TradingEngineProvider> = Arc::new(

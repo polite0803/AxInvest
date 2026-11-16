@@ -131,7 +131,7 @@ async function mountAndExpand(over: Overrides = {}) {
     switch (cmd) {
       case "analyze_mover_recall":
         return Promise.resolve([makeView()]);
-      case "get_mover_recall_event_review":
+      case "stock_get_mover_recall_event_review":
         return Promise.resolve(over.review ?? makeReview());
       case "get_mover_asof_summary":
         return Promise.resolve(over.asofSummary ?? null);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { MoverRecallBatchState, MoverRecallEventItem } from "@/types/stock-analysis";
 import { Alert, Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -47,8 +47,8 @@ export function MoverRecallBatchDrawer(
         setData(null);
       }
       try {
-        const batch = await invoke<MoverRecallBatchState | null>(
-          "get_mover_recall_analysis_batch",
+        const batch = await invokePluginCommand<MoverRecallBatchState | null>(
+          "stock_get_mover_recall_analysis_batch",
           { batchId },
         );
         if (cancelled) {

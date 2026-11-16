@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import i18n from "@/i18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { MoverRecallBatchState } from "@/types/stock-analysis";
 import { createElement } from "react";
 import { MoverRecallBatchDrawer } from "../jobs/MoverRecallBatchDrawer";
@@ -19,8 +19,8 @@ export const moverRecallAnalysisAdapter: TaskSourceAdapter = {
   color: "volcano",
 
   async list(): Promise<UnifiedRun[]> {
-    const rows = await invoke<MoverRecallBatchState[]>(
-      "list_mover_recall_analysis_batches",
+    const rows = await invokePluginCommand<MoverRecallBatchState[]>(
+      "stock_list_mover_recall_analysis_batches",
       { limit: 50 },
     );
     if (!Array.isArray(rows)) {

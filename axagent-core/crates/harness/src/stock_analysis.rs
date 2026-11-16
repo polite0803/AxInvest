@@ -324,6 +324,43 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 查询漏检补分析批次状态（`mover_recall_analysis_batch` op）—— 读 op（宿主原档
+    /// Safe；写库副作用 `ensure_stale_reaped` 已上收启动钩子，#338）。
+    ///
+    /// 入参 `{batchId: string}`；出参 = `MoverBatchState` 的 camelCase JSON（找不到回
+    /// `null`；运行态以宿主进程内 `BATCH_RUNS` 为轮询权威）。
+    async fn mover_recall_analysis_batch(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::mover_recall_analysis_batch 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 查询漏检补分析批次历史（`mover_recall_analysis_batches` op）—— 读 op（宿主原档
+    /// Safe，摘要不含 items，#338）。
+    ///
+    /// 入参 `{limit?: number, statusFilter?: string}`；出参 = `MoverBatchState` 数组的
+    /// camelCase JSON。
+    async fn mover_recall_analysis_batches(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::mover_recall_analysis_batches 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 发起漏检补分析批次（`run_mover_recall_analysis` op）—— 写 op（宿主原档
+    /// Caution：落批次起点 + 后台跑分析，op 级要求包有 write，#338）。
+    ///
+    /// 入参 = `RunMoverRecallAnalysisRequest` 的 camelCase JSON（`batchLimit` /
+    /// `maxUnexplainedShare` / `runId?`）；出参 = batchId 字符串。fire-and-forget：
+    /// 返回只表示已发起，进度用 `mover_recall_analysis_batch` 轮询。
+    async fn run_mover_recall_analysis(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::run_mover_recall_analysis 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -909,6 +946,20 @@ mod tests {
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
+            ),
+            // #338 三条（mover_recall_analysis：两读一写）：默认实现同样必须显式报错
+            // （空对象入参不能被读成「批次不存在 / 历史为空 / 已发起」）。
+            (
+                "mover_recall_analysis_batch",
+                futures::executor::block_on(stub.mover_recall_analysis_batch(Value::Null)),
+            ),
+            (
+                "mover_recall_analysis_batches",
+                futures::executor::block_on(stub.mover_recall_analysis_batches(Value::Null)),
+            ),
+            (
+                "run_mover_recall_analysis",
+                futures::executor::block_on(stub.run_mover_recall_analysis(Value::Null)),
             ),
             // #329 三条：默认实现同样必须显式报错（discover 的宿主 provider 不实现——
             // 编排在插件侧；后两条是写 op，空对象入参不能被读成「缓存已失效 / 循环完成」）。

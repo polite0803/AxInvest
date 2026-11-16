@@ -8177,17 +8177,18 @@ async function executeCommand<T>(
         error: null,
         cancelled: false,
       }) as unknown as T;
-    case "list_mover_recall_analysis_batches":
+    // #338：mover_recall_analysis 三条迁插件命名命令（批次状态 / 批次历史 / 发起批次）。
+    case "stock_list_mover_recall_analysis_batches":
       // 新批次排前面（与后端 ORDER BY created_at DESC 同序）
       return mockMoverRecallBatches()
         .sort((a, b) => (b.createdAtMs as number) - (a.createdAtMs as number)) as unknown as T;
-    case "get_mover_recall_analysis_batch": {
+    case "stock_get_mover_recall_analysis_batch": {
       // 入参经 snake_case 转换：前端传 batchId → batch_id
       const { batch_id: batchId } = (args as { batch_id?: string }) ?? {};
       mockMoverRecallBatches();
       return (MOCK_MOVER_RECALL_BATCHES.get(batchId ?? "") ?? null) as unknown as T;
     }
-    case "run_mover_recall_analysis": {
+    case "stock_run_mover_recall_analysis": {
       // fire-and-forget：登记一条 running 批次立即返回 batchId，抽屉轮询可看到 3 票「分析中」
       mockMoverRecallBatches();
       const batchId = `mra-mock-${Date.now()}`;

@@ -218,6 +218,12 @@ const COMMAND_QUANT_STRATEGY_REGISTER_RHAI: &str = "stock_quant_strategy_registe
 const COMMAND_SET_VENDOR_STATUS: &str = "stock_set_vendor_status";
 /// 取消进行中的分析任务（宿主 `cancel_stock_analysis`，#337）—— 写语义 op。
 const COMMAND_CANCEL_STOCK_ANALYSIS: &str = "stock_cancel_stock_analysis";
+/// 漏检补分析批次状态（宿主 `get_mover_recall_analysis_batch`，#338）—— 读 op。
+const COMMAND_MOVER_RECALL_BATCH: &str = "stock_get_mover_recall_analysis_batch";
+/// 漏检补分析批次历史（宿主 `list_mover_recall_analysis_batches`，#338）—— 读 op。
+const COMMAND_MOVER_RECALL_BATCHES: &str = "stock_list_mover_recall_analysis_batches";
+/// 发起漏检补分析批次（宿主 `run_mover_recall_analysis`，#338）—— 写 op。
+const COMMAND_RUN_MOVER_RECALL_ANALYSIS: &str = "stock_run_mover_recall_analysis";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -732,6 +738,40 @@ fn handle_command(
             peer,
             &request.call_chain,
             "cancel_stock_analysis",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #338：mover_recall_analysis 三条（两读一写，整块透传 camelCase 平铺 JSON）。
+        COMMAND_MOVER_RECALL_BATCH => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "mover_recall_analysis_batch",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_MOVER_RECALL_BATCHES => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "mover_recall_analysis_batches",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_RUN_MOVER_RECALL_ANALYSIS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "run_mover_recall_analysis",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -3417,6 +3457,10 @@ mod tests {
             // #337 两条：vendor 状态 / 取消令牌（写语义，均走 stock.analysis）。
             super::COMMAND_SET_VENDOR_STATUS,
             super::COMMAND_CANCEL_STOCK_ANALYSIS,
+            // #338 三条：mover_recall_analysis 两读一写（均走 stock.analysis）。
+            super::COMMAND_MOVER_RECALL_BATCH,
+            super::COMMAND_MOVER_RECALL_BATCHES,
+            super::COMMAND_RUN_MOVER_RECALL_ANALYSIS,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

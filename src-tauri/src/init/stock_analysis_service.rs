@@ -138,6 +138,12 @@ pub struct HostStockAnalysis {
     /// 与 `AppState.agent_cancel_tokens` **同一个**实例（`Arc` 共享）—— `cancel_stock_analysis`
     /// 翻转的就是运行中分析任务在看的那个令牌，必须是同一份，否则插件取消的令牌没人读。
     agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
+    /// 与 `AppState.time_travel_batch_lock` **同一把**锁（`Arc` 共享）—— `#338` 的
+    /// `run_mover_recall_analysis` 与时间旅行批次共用全局 as-of 批次互斥；插件发起必须
+    /// 与宿主其他入口抢同一把，否则两批 as-of 回放会并跑。
+    time_travel_batch_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 与 `AppState.work_engine` **同一个**实例 —— 漏检补分析批次的执行链走工作流引擎。
+    work_engine: Arc<axagent_runtime::work_engine::WorkEngine>,
 }
 
 impl HostStockAnalysis {
@@ -146,8 +152,17 @@ impl HostStockAnalysis {
         cron_job_store: Arc<CronJobStore>,
         astock_client: Arc<AStockClient>,
         agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
+        time_travel_batch_lock: Arc<tokio::sync::Mutex<()>>,
+        work_engine: Arc<axagent_runtime::work_engine::WorkEngine>,
     ) -> Self {
-        Self { db, cron_job_store, astock_client, agent_cancel_tokens }
+        Self {
+            db,
+            cron_job_store,
+            astock_client,
+            agent_cancel_tokens,
+            time_travel_batch_lock,
+            work_engine,
+        }
     }
 
     /// 无参 op 的入参闸：只收 `null` / `{}`。
@@ -729,6 +744,86 @@ impl StockAnalysisProvider for HostStockAnalysis {
                 request.analysis_id
             )))
         }
+    }
+
+    /// 读 op：漏检补分析批次状态（宿主 `get_mover_recall_analysis_batch` 的接缝面；#338）。
+    ///
+    /// 纯读（reap 已上收启动钩子）；入参 `{batchId: string}`，找不到回 `null`。
+    async fn mover_recall_analysis_batch(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BatchQuery {
+            batch_id: String,
+        }
+        let request = serde_json::from_value::<BatchQuery>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::mover_recall_analysis_batch 参数解析失败: {e}。期望 {{batchId}}"
+            ))
+        })?;
+        let state = crate::commands::mover_recall_analysis::mover_recall_analysis_batch_core(
+            &self.db,
+            &request.batch_id,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(state.map(|s| serde_json::to_value(s).unwrap_or(Value::Null)).unwrap_or(Value::Null))
+    }
+
+    /// 读 op：漏检补分析批次历史（宿主 `list_mover_recall_analysis_batches` 的接缝面；#338）。
+    ///
+    /// 纯读；入参 `{limit?, statusFilter?}`；出参 = 摘要数组。
+    async fn mover_recall_analysis_batches(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct BatchesQuery {
+            limit: Option<u64>,
+            status_filter: Option<String>,
+        }
+        let request = serde_json::from_value::<BatchesQuery>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::mover_recall_analysis_batches 参数解析失败: {e}。期望 \
+                 {{limit?, statusFilter?}}"
+            ))
+        })?;
+        let rows = crate::commands::mover_recall_analysis::mover_recall_analysis_batches_core(
+            &self.db,
+            request.limit,
+            request.status_filter.as_deref(),
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        serde_json::to_value(rows).map_err(|e| {
+            AxAgentError::Provider(format!(
+                "stock.analysis::mover_recall_analysis_batches 序列化失败: {e}"
+            ))
+        })
+    }
+
+    /// 写 op：发起漏检补分析批次（宿主 `run_mover_recall_analysis` 的接缝面；#338）。
+    ///
+    /// fire-and-forget：与调度器入口共用 `launch`（同一把 as-of 批次锁、同一份
+    /// 进程内 `BATCH_RUNS`），返回 batchId 只表示已发起。
+    async fn run_mover_recall_analysis(&self, input: Value) -> Result<Value> {
+        let request = serde_json::from_value::<
+            crate::commands::mover_recall_analysis::RunMoverRecallAnalysisRequest,
+        >(input)
+        .map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::run_mover_recall_analysis 参数解析失败: {e}。期望 \
+                 {{batchLimit, maxUnexplainedShare, runId?}}"
+            ))
+        })?;
+        let batch_id = crate::commands::mover_recall_analysis::launch(
+            &self.time_travel_batch_lock,
+            self.db.clone(),
+            self.astock_client.clone(),
+            self.work_engine.clone(),
+            request,
+            "manual",
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(Value::String(batch_id))
     }
 
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。

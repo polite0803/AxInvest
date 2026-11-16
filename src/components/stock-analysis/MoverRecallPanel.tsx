@@ -202,7 +202,10 @@ export function MoverRecallPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await invoke<unknown[]>("list_mover_recall_analysis_batches", { limit: 1 });
+        const rows = await invokePluginCommand<unknown[]>(
+          "stock_list_mover_recall_analysis_batches",
+          { limit: 1 },
+        );
         if (cancelled) { return; }
         const ok = Array.isArray(rows)
           && rows.every((r) => typeof (r as { batchId?: unknown } | null)?.batchId === "string");

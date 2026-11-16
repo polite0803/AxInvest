@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { MoverRecallAnalysisRequest } from "@/types/stock-analysis";
 import { Alert, Button, Form, Input, InputNumber, message, Modal, Space } from "antd";
 import { useState } from "react";
@@ -32,13 +32,15 @@ export function StartMoverRecallBatchModal(
     setSubmitting(true);
     setErrorText(null);
     try {
-      const batchId = await invoke<string>("run_mover_recall_analysis", {
-        request: {
+      // #338：插件命令入参平铺（去掉旧的 request 包裹），与清单 inputSchema 对齐。
+      const batchId = await invokePluginCommand<string>(
+        "stock_run_mover_recall_analysis",
+        {
           batchLimit: values.batchLimit,
           maxUnexplainedShare: values.maxUnexplainedShare,
           runId: values.runId?.trim() ? values.runId.trim() : null,
         } satisfies MoverRecallAnalysisRequest,
-      });
+      );
       message.success(t("tasksCenter.moverRecall.started", { id: batchId }));
       form.resetFields();
       onStarted();

@@ -29,7 +29,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 
-use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::horizon_prior;
 use axagent_analysis_engine::mover_recall as mover_core;
 use axagent_analysis_engine::recommender::{self, RecoPick, SeedItem, SeedOverrides};
@@ -40,7 +39,6 @@ use axagent_dao::repo::mover_recall_events::{self, CHAIN_ROWS_PER_EVENT, EventMo
 use axagent_dao::repo::reco_seed;
 use axagent_harness::holding_period::Period;
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use super::error::ErrorResponse;
@@ -48,7 +46,6 @@ use super::error_code::common as common_err;
 use super::error_code::mover_recall_analysis as ec;
 use super::pool_scan::{PoolCandidate, run_analysis_for_candidates};
 use super::time_travel_batch::in_live_window;
-use crate::app_state::AppState;
 
 /// 任务类型常量。
 ///
@@ -284,7 +281,12 @@ static STALE_REAP_DONE: AtomicBool = AtomicBool::new(false);
 
 /// 首次访问收敛：遗留 running 批次 → interrupted；其名下仍 running 的事件 → pending
 /// （as_of 栈进程级，不支持跨进程续跑，事件必须释放给后续批次）。
-async fn ensure_stale_reaped(db: &axagent_harness::DatabaseConnection) {
+///
+/// ⚠ #338：调用点只剩**写路径**两处 —— 批次发起 `launch`（同进程幂等，`STALE_REAP_DONE`
+/// 一次性）与启动钩子 `init/services.rs::start_mover_recall_batch_reclaim`。两条读命令
+/// （批次状态 / 批次历史）**不得再调**：读路径携带写库副作用会被 `stock.analysis`
+/// 读 op 带进插件通道，破坏「读 op 无写语义」的接缝契约。
+pub(crate) async fn ensure_stale_reaped(db: &axagent_harness::DatabaseConnection) {
     if STALE_REAP_DONE.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -351,30 +353,6 @@ fn state_from_model(m: BatchRunModel, items: Vec<EventItem>) -> MoverBatchState 
 
 // ── Tauri 命令 ────────────────────────────────────────────────────────────────
 
-/// 发起一次漏检补分析批次；立即返回 batch_id，后台执行，用
-/// [`get_mover_recall_analysis_batch`] 轮询。
-#[agent_command(
-    domain = "finance",
-    safety = Caution,
-    call_mode = StateInput,
-    description = "发起妖股漏检 as-of 历史补分析批次"
-)]
-#[tauri::command]
-pub async fn run_mover_recall_analysis(
-    state: State<'_, AppState>,
-    request: RunMoverRecallAnalysisRequest,
-) -> Result<String, String> {
-    launch(
-        &state.time_travel_batch_lock,
-        state.harness.db().clone(),
-        state.stock().astock_client.clone(),
-        state.work_engine.clone(),
-        request,
-        "manual",
-    )
-    .await
-}
-
 /// 供调度器分支发起一轮补分析：cron 拿不到 `tauri::State`，只能拿调度器已持有的零件
 /// （同 `analyze_mover_recall_inner` 的既有理由）。校验与抢锁判据与手动命令**共用** [`launch`]。
 ///
@@ -392,7 +370,11 @@ pub(crate) async fn start_for_scheduler(
 }
 
 /// 校验 → live 时间窗拒绝 → 抢全局 as-of 批次锁 → 落批次起点 → 后台发起。
-async fn launch(
+///
+/// 宿主 `run_mover_recall_analysis` 的命令体已退役（#338），入口拆两处：
+/// `launch(..., "manual")` 由 `stock.analysis` 接缝写 op 调用（插件命名命令
+/// `stock_run_mover_recall_analysis` 接管）；`start_for_scheduler` 由调度器分支调用。
+pub(crate) async fn launch(
     asof_lock: &Arc<Mutex<()>>,
     db: axagent_harness::DatabaseConnection,
     client: Arc<AStockClient>,
@@ -449,63 +431,49 @@ async fn launch(
 }
 
 /// 查询批次状态（含逐票明细）；不存在返回 null。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "查询漏检补分析批次状态"
-)]
-#[tauri::command]
-pub async fn get_mover_recall_analysis_batch(
-    state: State<'_, AppState>,
-    batch_id: String,
+/// 查询漏检补分析批次状态 —— 宿主 `get_mover_recall_analysis_batch` 的 core（#338）。
+///
+/// ⚠ 纯读：`ensure_stale_reaped` 已从读路径移出（写库副作用上收启动钩子
+/// `init/services.rs::start_mover_recall_batch_reclaim` 与批次发起 `launch`）——
+/// 读命令不得再携带写语义（#338 判据）。运行态以进程内 `BATCH_RUNS` 为轮询权威。
+pub(crate) async fn mover_recall_analysis_batch_core(
+    db: &axagent_harness::DatabaseConnection,
+    batch_id: &str,
 ) -> Result<Option<MoverBatchState>, String> {
-    let db = state.harness.db();
-    ensure_stale_reaped(db).await;
-
-    if let Some(mut s) = BATCH_RUNS.lock().await.get(&batch_id).cloned() {
+    if let Some(mut s) = BATCH_RUNS.lock().await.get(batch_id).cloned() {
         // 运行态的 items 已在内存；保险起见不查库（内存是轮询权威）
         if !s.items.is_empty() || s.status == STATUS_RUNNING {
             return Ok(Some(s));
         }
         // 极端情况下内存态 items 为空（如未来代码路径），落到库反查补齐
-        s.items = load_items(db, &batch_id).await?;
+        s.items = load_items(db, batch_id).await?;
         return Ok(Some(s));
     }
 
     let model =
-        mover_recall_analysis_batches::fetch_batch_by_id(db, &batch_id).await.map_err(|e| {
+        mover_recall_analysis_batches::fetch_batch_by_id(db, batch_id).await.map_err(|e| {
             ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("查询批次历史失败: {e}"))
         })?;
     match model {
         None => Ok(None),
         Some(m) => {
-            let items = load_items(db, &batch_id).await?;
+            let items = load_items(db, batch_id).await?;
             Ok(Some(state_from_model(m, items)))
         },
     }
 }
 
-/// 批次历史（任务中心列表，摘要不含 items）。
-#[agent_command(
-    domain = "finance",
-    safety = Safe,
-    call_mode = StateInput,
-    description = "查询漏检补分析批次历史"
-)]
-#[tauri::command]
-pub async fn list_mover_recall_analysis_batches(
-    state: State<'_, AppState>,
+/// 批次历史（任务中心列表，摘要不含 items）—— 宿主 `list_mover_recall_analysis_batches`
+/// 的 core（#338）。纯读（reap 已移出读路径，见 `mover_recall_analysis_batch_core` 注释）。
+pub(crate) async fn mover_recall_analysis_batches_core(
+    db: &axagent_harness::DatabaseConnection,
     limit: Option<u64>,
-    status_filter: Option<String>,
+    status_filter: Option<&str>,
 ) -> Result<Vec<MoverBatchState>, String> {
-    let db = state.harness.db();
-    ensure_stale_reaped(db).await;
-
     let rows = mover_recall_analysis_batches::list_recent_batch_runs(
         db,
         limit.unwrap_or(50).min(200),
-        status_filter.as_deref(),
+        status_filter,
     )
     .await
     .map_err(|e| {

@@ -166,7 +166,7 @@ describe("MoverRecallPanel 轮次来源", () => {
     invokeMock.mockImplementation(async (name: string) => {
       if (name === "list_mover_recall_runs") { return [makeRun()]; }
       if (name === "get_mover_recall_run_view") { return makeRunView(); }
-      if (name === "list_mover_recall_analysis_batches") { return []; }
+      if (name === "stock_list_mover_recall_analysis_batches") { return []; }
       return null;
     });
     renderAt();
@@ -178,7 +178,7 @@ describe("MoverRecallPanel 轮次来源", () => {
     invokeMock.mockImplementation(async (name: string) => {
       if (name === "list_mover_recall_runs") { return [makeRun()]; }
       if (name === "get_mover_recall_run_view") { return makeRunView(); }
-      if (name === "list_mover_recall_analysis_batches") {
+      if (name === "stock_list_mover_recall_analysis_batches") {
         return [{ batchId: "mrb-1", status: "success", message: null }];
       }
       return null;
@@ -195,7 +195,7 @@ describe("MoverRecallPanel 轮次来源", () => {
     invokeMock.mockImplementation(async (name: string) => {
       if (name === "list_mover_recall_runs") { return [makeRun()]; }
       if (name === "get_mover_recall_run_view") { return makeRunView(); }
-      if (name === "list_mover_recall_analysis_batches") {
+      if (name === "stock_list_mover_recall_analysis_batches") {
         return [
           {
             batchId: "mrb-2",

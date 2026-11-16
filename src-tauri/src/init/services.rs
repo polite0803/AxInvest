@@ -85,6 +85,7 @@ pub async fn start_background_services(
     start_trigger_recovery(state);
     start_scheduler_recovery(app, state);
     start_stale_analysis_reclaim(state);
+    start_mover_recall_batch_reclaim(state);
     start_interrupted_analysis_rerun(app);
     start_approval_event_bridge(app, state);
     start_platform_adapters(state);
@@ -4694,6 +4695,23 @@ fn start_stale_analysis_reclaim(state: &AppState) {
             ),
             Err(e) => tracing::error!("[start_stale_analysis_reclaim] 执行表回收失败: {}", e),
         }
+    });
+}
+
+/// 漏检补分析批次「僵死 running」启动回收钩子（#338 随 read 命令迁 T2 上收）。
+///
+/// 为什么必须有它：`mover_recall_analysis_batches` 的 `running` 由 fire-and-forget 批次写入，
+/// 进程非优雅退出后该行永久停在 `running`；原实现把收敛挂在两条**读命令**的首次访问上
+/// （`ensure_stale_reaped`），读命令迁插件后若跟随进接缝读 op，就把写库副作用带进了
+/// 「读 op 无写语义」的契约 ⇒ 本次把收敛上收为启动钩子（与 `start_stale_analysis_reclaim`
+/// 同形态、同延迟原因），读路径彻底无写。
+fn start_mover_recall_batch_reclaim(state: &AppState) {
+    let db = state.harness.db().clone();
+    tauri::async_runtime::spawn(async move {
+        // 延迟与 `start_scheduler_recovery` 同因：避开启动期 DB 初始化竞争。
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        crate::commands::mover_recall_analysis::ensure_stale_reaped(&db).await;
+        tracing::info!("[start_mover_recall_batch_reclaim] 漏检补分析批次收敛完成");
     });
 }
 

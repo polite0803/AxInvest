@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 104 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -886,6 +886,55 @@ function stockManifest({ version, binaryName, sha256 }) {
             analysisId: { type: "string", description: "分析任务 ID" },
           },
           required: ["analysisId"],
+        },
+      },
+      {
+        // #338：宿主 `get_mover_recall_analysis_batch` 的接缝面 —— 批次状态（只读）。
+        name: "stock_get_mover_recall_analysis_batch",
+        description: "查询漏检补分析批次状态（经宿主 stock.analysis 接缝，只读；找不到回 null）",
+        command: "worker://stock_get_mover_recall_analysis_batch",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            batchId: { type: "string", description: "批次 ID" },
+          },
+          required: ["batchId"],
+        },
+      },
+      {
+        // #338：宿主 `list_mover_recall_analysis_batches` 的接缝面 —— 批次历史（只读）。
+        name: "stock_list_mover_recall_analysis_batches",
+        description: "查询漏检补分析批次历史（摘要不含逐票明细；经宿主 stock.analysis 接缝，只读）",
+        command: "worker://stock_list_mover_recall_analysis_batches",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", description: "最多返回条数（缺省 50，上限 200）" },
+            statusFilter: { type: "string", description: "按状态过滤（running/completed/partial/failed/interrupted）" },
+          },
+        },
+      },
+      {
+        // #338：宿主 `run_mover_recall_analysis` 的接缝面 —— 发起批次（写 op，
+        // 宿主原档 Caution ⇒ 等阶 workspace-write）。fire-and-forget：返回 batchId。
+        name: "stock_run_mover_recall_analysis",
+        description:
+          "发起一次妖股漏检 as-of 历史补分析批次（立即返回 batchId，后台执行，经宿主 stock.analysis 接缝，写库）",
+        command: "worker://stock_run_mover_recall_analysis",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            batchLimit: { type: "integer", description: "单批最多补分析事件数（1-100）" },
+            maxUnexplainedShare: { type: "number", description: "核查轮次 unexplained 占比阈值（0-1）" },
+            runId: { type: "string", description: "仅处理指定核查轮次；省略 = 跨全部轮次" },
+          },
+          required: ["batchLimit", "maxUnexplainedShare"],
         },
       },
       {

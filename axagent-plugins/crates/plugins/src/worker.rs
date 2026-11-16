@@ -519,6 +519,10 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "set_vendor_status" | "cancel_stock_analysis",
         ) => Some(PluginPermission::Write),
+        // #338：`run_mover_recall_analysis` 落批次起点 + 后台跑 as-of 补分析 ⇒ `Write`。
+        // 同批两条读（`mover_recall_analysis_batch` / `mover_recall_analysis_batches`）
+        // 纯读 —— reap 写副作用已上收启动钩子 ⇒ **必须仍是 `None`**（不登记）。
+        ("stock.analysis", "run_mover_recall_analysis") => Some(PluginPermission::Write),
         // F2 组合与风控（#35，#322）：`update_portfolio_holding` 改持仓行 /
         // `import_portfolio_from_vlm` 批量落库（可选清空旧持仓）⇒ `Write`。
         // `get_position_limits` / `run_stress_test` 是读/纯计算面 ⇒ 不登记。
@@ -3374,6 +3378,50 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.cancel_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #338 三条（mover_recall_analysis）：两条读（批次状态 / 批次历史，纯读）
+            // + 一条写（发起批次，fire-and-forget 返回 batchId；执行体留宿主 `launch`）。
+            "stock.analysis" if op == "mover_recall_analysis_batch" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.mover_recall_analysis_batch(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "mover_recall_analysis_batches" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.mover_recall_analysis_batches(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "run_mover_recall_analysis" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.run_mover_recall_analysis(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -13798,6 +13846,24 @@ mod tests {
             });
         assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.1, Some(PluginPermission::Write), "写 op 必须要求 write");
+    }
+
+    /// #338 mover_recall_analysis 三条：`run_mover_recall_analysis` 落批次起点并后台
+    /// 跑分析 ⇒ `Write`；两条读（批次状态 / 批次历史）在 reap 上收启动钩子后**必须
+    /// 仍是 `None`** —— 读 op 一登记写闸，只读插件会被无端拒掉。
+    #[test]
+    fn stock_analysis_338_mover_recall_analysis_permissions() {
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #338 权限表", || {
+                (
+                    required_permission_for("stock.analysis", "run_mover_recall_analysis"),
+                    required_permission_for("stock.analysis", "mover_recall_analysis_batch"),
+                    required_permission_for("stock.analysis", "mover_recall_analysis_batches"),
+                )
+            });
+        assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
+        assert_eq!(verdict.1, None, "读 op `mover_recall_analysis_batch` 不得设权限闸");
+        assert_eq!(verdict.2, None, "读 op `mover_recall_analysis_batches` 不得设权限闸");
     }
 
     /// 批 1a（#35）十二 cron op 的权限档：3 create + 3 toggle + 3 delete = `Write`，

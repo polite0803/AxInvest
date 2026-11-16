@@ -1254,11 +1254,9 @@ pub async fn rename_stock_analysis(
 
 // ── Watchlist ──
 
-/// 添加自选股
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "添加自选股")]
-#[tauri::command]
-pub async fn add_to_watchlist(
-    state: State<'_, AppState>,
+/// 添加自选股 —— 宿主 `add_to_watchlist` 的 core（#342）。
+pub(crate) async fn add_to_watchlist_core(
+    db: &axagent_harness::DatabaseConnection,
     stock_code: String,
     stock_name: String,
     notes: Option<String>,
@@ -1273,7 +1271,7 @@ pub async fn add_to_watchlist(
         created_at: Set(now),
         updated_at: Set(now),
     };
-    model.insert(state.harness.db()).await.map_err(|e| {
+    model.insert(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("添加自选股失败: {e}")).to_string()
     })
 }
@@ -1288,16 +1286,14 @@ pub async fn remove_from_watchlist(state: State<'_, AppState>, id: String) -> Re
     Ok(())
 }
 
-/// 更新自选股的分组归属
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "更新自选股分组")]
-#[tauri::command]
-pub async fn watchlist_update_group(
-    state: State<'_, AppState>,
+/// 更新自选股的分组归属 —— 宿主 `watchlist_update_group` 的 core（#342）。
+pub(crate) async fn watchlist_update_group_core(
+    db: &axagent_harness::DatabaseConnection,
     id: String,
     group_name: String,
 ) -> Result<(), String> {
     let item = watchlist_items::Entity::find_by_id(&id)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| format!("查询自选股失败: {e}"))?
         .ok_or_else(|| format!("自选股 {id} 不存在"))?;
@@ -1315,17 +1311,17 @@ pub async fn watchlist_update_group(
     let mut active: watchlist_items::ActiveModel = item.into();
     active.notes = Set(Some(notes_json.to_string()));
     active.updated_at = Set(chrono::Utc::now().timestamp_millis());
-    active.update(state.harness.db()).await.map_err(|e| format!("更新自选股分组失败: {e}"))?;
+    active.update(db).await.map_err(|e| format!("更新自选股分组失败: {e}"))?;
     Ok(())
 }
 
-/// 获取所有分组列表（从 settings 表读取）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取分组列表")]
-#[tauri::command]
-pub async fn watchlist_list_groups(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+/// 获取所有分组列表（从 settings 表读取）—— 宿主 `watchlist_list_groups` 的 core（#342）。
+pub(crate) async fn watchlist_list_groups_core(
+    db: &axagent_harness::DatabaseConnection,
+) -> Result<Vec<String>, String> {
     use axagent_entities::settings;
     let setting = settings::Entity::find_by_id("watchlist_groups")
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| format!("查询分组设置失败: {e}"))?;
 
@@ -1335,11 +1331,9 @@ pub async fn watchlist_list_groups(state: State<'_, AppState>) -> Result<Vec<Str
     }
 }
 
-/// 保存分组列表（写入 settings 表）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存分组列表")]
-#[tauri::command]
-pub async fn watchlist_save_groups(
-    state: State<'_, AppState>,
+/// 保存分组列表（写入 settings 表）—— 宿主 `watchlist_save_groups` 的 core（#342）。
+pub(crate) async fn watchlist_save_groups_core(
+    db: &axagent_harness::DatabaseConnection,
     groups: Vec<String>,
 ) -> Result<(), String> {
     use axagent_entities::settings;
@@ -1347,31 +1341,29 @@ pub async fn watchlist_save_groups(
 
     // upsert
     let existing = settings::Entity::find_by_id("watchlist_groups")
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| format!("查询设置失败: {e}"))?;
 
     if let Some(s) = existing {
         let mut active: settings::ActiveModel = s.into();
         active.value = Set(value);
-        active.update(state.harness.db()).await.map_err(|e| format!("更新分组设置失败: {e}"))?;
+        active.update(db).await.map_err(|e| format!("更新分组设置失败: {e}"))?;
     } else {
         let active =
             settings::ActiveModel { key: Set("watchlist_groups".into()), value: Set(value) };
-        active.insert(state.harness.db()).await.map_err(|e| format!("创建分组设置失败: {e}"))?;
+        active.insert(db).await.map_err(|e| format!("创建分组设置失败: {e}"))?;
     }
     Ok(())
 }
 
-/// 自选股列表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取自选股列表")]
-#[tauri::command]
-pub async fn list_watchlist(
-    state: State<'_, AppState>,
+/// 自选股列表 —— 宿主 `list_watchlist` 的 core（#342）。
+pub(crate) async fn list_watchlist_core(
+    db: &axagent_harness::DatabaseConnection,
 ) -> Result<Vec<watchlist_items::Model>, String> {
     watchlist_items::Entity::find()
         .order_by_desc(watchlist_items::Column::CreatedAt)
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL)
@@ -1957,65 +1949,10 @@ pub async fn monitor_status(state: State<'_, AppState>) -> Result<MonitorStatusD
     })
 }
 
-/// P1-2: 加入实时行情监控（前端订阅 stock-quote-update 事件接收推送）。
-///
-/// @param stock_codes 要监控的股票代码列表
-/// @param priority "active"（2s 轮询，用户当前查看）或 "background"（10s 轮询，仅监控）
-/// @param replace 是否替换当前监控列表（true=替换，false=追加）
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "加入行情监控")]
-#[tauri::command]
-pub async fn watch_stock_quotes(
-    state: State<'_, AppState>,
-    stock_codes: Vec<String>,
-    priority: Option<String>,
-    replace: Option<bool>,
-) -> Result<(), String> {
-    use axagent_astock_data::realtime_quote::WatchPriority;
-
-    let watcher =
-        state.stock().quote_watcher.get().ok_or_else(|| "实时行情监视器未初始化".to_string())?;
-
-    let pri = match priority.as_deref().unwrap_or("active") {
-        "background" | "bg" => WatchPriority::Background,
-        _ => WatchPriority::Active,
-    };
-
-    if replace.unwrap_or(false) {
-        // 替换模式：先清空当前监控列表
-        let current = watcher.watched_stocks().await;
-        for code in &current {
-            watcher.unwatch(code).await;
-        }
-    }
-
-    let codes: Vec<&str> = stock_codes.iter().map(|s| s.as_str()).collect();
-    watcher.watch_many(&codes, pri).await;
-
-    tracing::info!(
-        "[watch_stock_quotes] 已加入 {} 只股票监控 (priority={:?})",
-        stock_codes.len(),
-        pri
-    );
-    Ok(())
-}
-
-/// P1-2: 移除实时行情监控
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "移除行情监控")]
-#[tauri::command]
-pub async fn unwatch_stock_quotes(
-    state: State<'_, AppState>,
-    stock_codes: Vec<String>,
-) -> Result<(), String> {
-    let watcher =
-        state.stock().quote_watcher.get().ok_or_else(|| "实时行情监视器未初始化".to_string())?;
-
-    for code in &stock_codes {
-        watcher.unwatch(code).await;
-    }
-
-    tracing::info!("[unwatch_stock_quotes] 已移除 {} 只股票监控", stock_codes.len());
-    Ok(())
-}
+// `watch_stock_quotes` / `unwatch_stock_quotes` 已迁插件（`stock_watch_stock_quotes` /
+// `stock_unwatch_stock_quotes`，#342）：两条走既有 `quote.watcher::watch` / `unwatch`
+// 接缝（零新 op；`watch` 的 `{codes, priority, replace}` 三参与宿主原命令逐字同形，
+// 截断语义照宿主 plan_watch_batch 不报错）。
 
 // ── 自定义分析师插件 ──
 
@@ -3103,22 +3040,8 @@ pub async fn check_position_limits(
     }
 }
 
-/// 财报披露日历(R3-B):
-///
-/// 复用 `get_announcements` vendor 链路(优先 cninfo),按标题归类成
-/// preliminary / express / formal / shareholders_meeting,过滤其它类。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取财报披露日历")]
-#[tauri::command]
-pub async fn get_earnings_calendar(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<Vec<axagent_astock_data::EarningsEvent>, String> {
-    state.stock().astock_client.get_earnings_calendar(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取财报日历失败: {e}"))
-            .to_string()
-    })
-}
+// `get_earnings_calendar` 已迁插件（`stock_get_earnings_calendar`，走
+// `market.quote::get_earnings_calendar` 接缝，#341）：宿主命令体退役。
 
 /// 估值带(R3-C):
 ///
@@ -3345,7 +3268,7 @@ pub async fn get_interface_health_history(
 
 // ── CronJob 定时任务（基于上游 CronJobStore + 持久化）──
 
-use axagent_runtime_core::{CronJob, CronJobStatus};
+use axagent_runtime_core::{CronJob, CronJobStatus, CronJobStore};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -3391,11 +3314,9 @@ impl From<&CronJob> for CronJobResponse {
     }
 }
 
-/// 创建股票定时分析任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建股票定时分析任务")]
-#[tauri::command]
-pub async fn create_stock_cron(
-    state: State<'_, AppState>,
+/// 创建股票定时分析任务 —— 宿主 `create_stock_cron` 的 core（#342）。
+pub(crate) async fn create_stock_cron_core(
+    cron_job_store: &CronJobStore,
     stock_code: String,
     stock_name: String,
     cron_expression: String,
@@ -3414,15 +3335,15 @@ pub async fn create_stock_cron(
         .with_id(id.clone())
         .with_workflow_id("stock-analysis".to_string())
         .with_task_type("stock-analysis");
-    state.cron_job_store.add(job.clone()).await;
+    cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
 }
 
-/// 列出所有股票定时分析任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出股票定时分析任务")]
-#[tauri::command]
-pub async fn list_stock_crons(state: State<'_, AppState>) -> Result<Vec<CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
+/// 列出所有股票定时分析任务 —— 宿主 `list_stock_crons` 的 core（#342）。
+pub(crate) async fn list_stock_crons_core(
+    cron_job_store: &CronJobStore,
+) -> Result<Vec<CronJobResponse>, String> {
+    let jobs = cron_job_store.list().await;
     Ok(jobs
         .iter()
         .filter(|j| j.task_type.as_deref() == Some("stock-analysis"))
@@ -3430,16 +3351,13 @@ pub async fn list_stock_crons(state: State<'_, AppState>) -> Result<Vec<CronJobR
         .collect())
 }
 
-/// 启停定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关股票定时任务")]
-#[tauri::command]
-pub async fn toggle_stock_cron(
-    state: State<'_, AppState>,
+/// 启停定时任务 —— 宿主 `toggle_stock_cron` 的 core（#342）。
+pub(crate) async fn toggle_stock_cron_core(
+    cron_job_store: &CronJobStore,
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .cron_job_store
+    cron_job_store
         .set_status(
             &id,
             if enabled {
@@ -5191,10 +5109,8 @@ pub(crate) async fn get_latest_analyses_for_stocks_core(
 ///
 /// 到点时遍历用户自选股列表，对每只股票执行 `run_single_stock_analysis`。
 /// 后端 CronExecutor 通过 `task_type = "watchlist-scan"` 路由。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建自选股扫描定时任务")]
-#[tauri::command]
-pub async fn create_watchlist_scan_cron(
-    state: State<'_, AppState>,
+pub(crate) async fn create_watchlist_scan_cron_core(
+    cron_job_store: &CronJobStore,
     cron_expression: String,
     enabled: Option<bool>,
 ) -> Result<CronJobResponse, String> {
@@ -5211,7 +5127,7 @@ pub async fn create_watchlist_scan_cron(
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
-    state.cron_job_store.add(job.clone()).await;
+    cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
 }
 
@@ -5255,10 +5171,8 @@ fn validate_decisions_name(threshold: i32, depth: &str) -> String {
     format!("反思复盘（{conf}，{depth_label}）")
 }
 
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建决策校验定时任务")]
-#[tauri::command]
-pub async fn create_validate_decisions_cron(
-    state: State<'_, AppState>,
+pub(crate) async fn create_validate_decisions_cron_core(
+    cron_job_store: &CronJobStore,
     cron_expression: Option<String>,
     min_confidence_threshold: Option<i32>,
     reflection_depth: Option<String>,
@@ -5308,7 +5222,7 @@ pub async fn create_validate_decisions_cron(
     // 内置任务是 `period/dueOnly`），把内置行的 prompt 改写成前者会让执行侧
     // 按 `batch-reflection` 解析失败 ⇒ 只能拒绝，不能替它改配置。
     // 独立绑定一次性快照：避免把临时 Vec 的生命周期押在 `if let` 的临时延长规则上。
-    let existing_jobs = state.cron_job_store.list().await;
+    let existing_jobs = cron_job_store.list().await;
     let conflict = existing_jobs.iter().find(|j| {
         j.id != id
             && j.is_active()
@@ -5351,21 +5265,19 @@ pub async fn create_validate_decisions_cron(
     // 幂等（R-3g 顺带修）：先移除同 id 的旧行 ⇒ 覆盖而非并存。
     // `remove` 返回是否命中旧行（bool），DB 删除失败已在其内部 `error!` 记录 ⇒
     // 这里只消费返回值，不因「没删到旧行」阻断后续 add。
-    let replaced = state.cron_job_store.remove(&id).await;
+    let replaced = cron_job_store.remove(&id).await;
     if replaced {
         tracing::debug!("[validate-decisions] 覆盖同 id 的旧任务: {id}");
     }
-    state.cron_job_store.add(job.clone()).await;
+    cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
 }
 
 /// 列出所有决策校验定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出决策校验定时任务")]
-#[tauri::command]
-pub async fn list_validate_decisions_crons(
-    state: State<'_, AppState>,
+pub(crate) async fn list_validate_decisions_crons_core(
+    cron_job_store: &CronJobStore,
 ) -> Result<Vec<CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
+    let jobs = cron_job_store.list().await;
     Ok(jobs
         .iter()
         .filter(|j| j.task_type.as_deref() == Some("validate-decisions"))
@@ -5374,15 +5286,12 @@ pub async fn list_validate_decisions_crons(
 }
 
 /// 启停决策校验定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关决策校验定时任务")]
-#[tauri::command]
-pub async fn toggle_validate_decisions_cron(
-    state: State<'_, AppState>,
+pub(crate) async fn toggle_validate_decisions_cron_core(
+    cron_job_store: &CronJobStore,
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .cron_job_store
+    cron_job_store
         .set_status(
             &id,
             if enabled {
@@ -5406,10 +5315,8 @@ pub async fn toggle_validate_decisions_cron(
 /// 三项都必须给全（面板一次提交三项）⇒ 不存在「留空表示不改」的第二种语义。
 /// 任务不存在 ⇒ `TARGET_NOT_FOUND`；参数越界 ⇒ `VALIDATION_FAILED`；**不得静默成功**
 /// （`CronJobStore::update` 返回 bool，旧形态 `let _ =` 会把「没找到该任务」报成保存成功）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "更新决策校验定时任务配置")]
-#[tauri::command]
-pub async fn update_validate_decisions_cron(
-    state: State<'_, AppState>,
+pub(crate) async fn update_validate_decisions_cron_core(
+    cron_job_store: &CronJobStore,
     id: String,
     cron_expression: String,
     min_confidence_threshold: i32,
@@ -5439,8 +5346,7 @@ pub async fn update_validate_decisions_cron(
     let prompt = config.to_json()?;
     let desc = validate_decisions_desc(min_confidence_threshold, &reflection_depth);
 
-    let found = state
-        .cron_job_store
+    let found = cron_job_store
         .update(&id, |j| {
             j.schedule = expr;
             j.prompt = prompt;
@@ -5453,7 +5359,7 @@ pub async fn update_validate_decisions_cron(
             .to_string());
     }
     // 回读更新后的任务：前端据此立即显示库里真正生效的值，而不是显示刚提交的草稿
-    let jobs = state.cron_job_store.list().await;
+    let jobs = cron_job_store.list().await;
     jobs.iter().find(|j| j.id == id).map(CronJobResponse::from).ok_or_else(|| {
         ErrorResponse::new(wf_err::INVALID_STATE)
             .with_detail(format!("任务 {id} 更新成功但回读不到（存储状态不一致）"))
@@ -5482,10 +5388,8 @@ pub async fn delete_validate_decisions_cron(
 /// - `cron_expression`: 默认 "0 18 * * *"（收市后）
 /// - `period`: `ultra_short` | `short` | `mid` | `long`；None = 不限档位（处理全部）
 /// - `due_only`: true 时只在计划评估时点（hindsight_date）已到时反思
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建批量反思定时任务")]
-#[tauri::command]
-pub async fn create_batch_reflection_cron(
-    state: State<'_, AppState>,
+pub(crate) async fn create_batch_reflection_cron_core(
+    cron_job_store: &CronJobStore,
     cron_expression: Option<String>,
     period: Option<axagent_analysis_engine::recommender::Period>,
     due_only: Option<bool>,
@@ -5520,7 +5424,7 @@ pub async fn create_batch_reflection_cron(
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
-    state.cron_job_store.add(job.clone()).await;
+    cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
 }
 

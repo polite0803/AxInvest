@@ -826,6 +826,269 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Ok(Value::String(batch_id))
     }
 
+    // ── #342 批 A15：watchlist 5 + cron 9（宿主命令体逐字下沉 commands 层 core）──
+
+    /// 读 op：自选股列表（`list_watchlist`）。
+    async fn list_watchlist(&self, _input: Value) -> Result<Value> {
+        let rows = crate::commands::stock_analysis::list_watchlist_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_watchlist", &rows)
+    }
+
+    /// 写 op：添加自选股（`add_to_watchlist`）。
+    async fn add_to_watchlist(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AddRequest {
+            stock_code: String,
+            stock_name: String,
+            notes: Option<String>,
+        }
+        let req =
+            Self::parse::<AddRequest>("add_to_watchlist", "{stockCode, stockName, notes?}", input)?;
+        let model = crate::commands::stock_analysis::add_to_watchlist_core(
+            &self.db,
+            req.stock_code,
+            req.stock_name,
+            req.notes,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("add_to_watchlist", &model)
+    }
+
+    /// 写 op：更新自选股分组（`watchlist_update_group`）。
+    async fn watchlist_update_group(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct UpdateGroupRequest {
+            id: String,
+            group_name: String,
+        }
+        let req =
+            Self::parse::<UpdateGroupRequest>("watchlist_update_group", "{id, groupName}", input)?;
+        crate::commands::stock_analysis::watchlist_update_group_core(
+            &self.db,
+            req.id,
+            req.group_name,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 读 op：自选股分组列表（`watchlist_list_groups`）。
+    async fn watchlist_list_groups(&self, _input: Value) -> Result<Value> {
+        let rows = crate::commands::stock_analysis::watchlist_list_groups_core(&self.db)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("watchlist_list_groups", &rows)
+    }
+
+    /// 写 op：保存自选股分组（`watchlist_save_groups`）。
+    async fn watchlist_save_groups(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SaveGroupsRequest {
+            groups: Vec<String>,
+        }
+        let req =
+            Self::parse::<SaveGroupsRequest>("watchlist_save_groups", "{groups: [string]}", input)?;
+        crate::commands::stock_analysis::watchlist_save_groups_core(&self.db, req.groups)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：创建股票定时分析任务（`create_stock_cron`）。
+    async fn create_stock_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateStockCronRequest {
+            stock_code: String,
+            stock_name: String,
+            cron_expression: String,
+        }
+        let req = Self::parse::<CreateStockCronRequest>(
+            "create_stock_cron",
+            "{stockCode, stockName, cronExpression}",
+            input,
+        )?;
+        let job = crate::commands::stock_analysis::create_stock_cron_core(
+            &self.cron_job_store,
+            req.stock_code,
+            req.stock_name,
+            req.cron_expression,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("create_stock_cron", &job)
+    }
+
+    /// 读 op：股票定时任务列表（`list_stock_crons`）。
+    async fn list_stock_crons(&self, _input: Value) -> Result<Value> {
+        let jobs = crate::commands::stock_analysis::list_stock_crons_core(&self.cron_job_store)
+            .await
+            .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_stock_crons", &jobs)
+    }
+
+    /// 写 op：开关股票定时任务（`toggle_stock_cron`）。
+    async fn toggle_stock_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ToggleRequest {
+            id: String,
+            enabled: bool,
+        }
+        let req = Self::parse::<ToggleRequest>("toggle_stock_cron", "{id, enabled}", input)?;
+        crate::commands::stock_analysis::toggle_stock_cron_core(
+            &self.cron_job_store,
+            req.id,
+            req.enabled,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：创建决策校验定时任务（`create_validate_decisions_cron`）。
+    async fn create_validate_decisions_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateValidateCronRequest {
+            cron_expression: Option<String>,
+            min_confidence_threshold: Option<i32>,
+            reflection_depth: Option<String>,
+            enabled: Option<bool>,
+        }
+        let req = Self::parse::<CreateValidateCronRequest>(
+            "create_validate_decisions_cron",
+            "{cronExpression?, minConfidenceThreshold?, reflectionDepth?, enabled?}",
+            input,
+        )?;
+        let job = crate::commands::stock_analysis::create_validate_decisions_cron_core(
+            &self.cron_job_store,
+            req.cron_expression,
+            req.min_confidence_threshold,
+            req.reflection_depth,
+            req.enabled,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("create_validate_decisions_cron", &job)
+    }
+
+    /// 读 op：决策校验定时任务列表（`list_validate_decisions_crons`）。
+    async fn list_validate_decisions_crons(&self, _input: Value) -> Result<Value> {
+        let jobs = crate::commands::stock_analysis::list_validate_decisions_crons_core(
+            &self.cron_job_store,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("list_validate_decisions_crons", &jobs)
+    }
+
+    /// 写 op：开关决策校验定时任务（`toggle_validate_decisions_cron`）。
+    async fn toggle_validate_decisions_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ToggleRequest {
+            id: String,
+            enabled: bool,
+        }
+        let req =
+            Self::parse::<ToggleRequest>("toggle_validate_decisions_cron", "{id, enabled}", input)?;
+        crate::commands::stock_analysis::toggle_validate_decisions_cron_core(
+            &self.cron_job_store,
+            req.id,
+            req.enabled,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Ok(Value::Null)
+    }
+
+    /// 写 op：更新决策校验定时任务配置（`update_validate_decisions_cron`）。
+    async fn update_validate_decisions_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct UpdateValidateCronRequest {
+            id: String,
+            cron_expression: String,
+            min_confidence_threshold: i32,
+            reflection_depth: String,
+        }
+        let req = Self::parse::<UpdateValidateCronRequest>(
+            "update_validate_decisions_cron",
+            "{id, cronExpression, minConfidenceThreshold, reflectionDepth}",
+            input,
+        )?;
+        let job = crate::commands::stock_analysis::update_validate_decisions_cron_core(
+            &self.cron_job_store,
+            req.id,
+            req.cron_expression,
+            req.min_confidence_threshold,
+            req.reflection_depth,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("update_validate_decisions_cron", &job)
+    }
+
+    /// 写 op：创建批量反思定时任务（`create_batch_reflection_cron`）。
+    async fn create_batch_reflection_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateBatchReflectionCronRequest {
+            cron_expression: Option<String>,
+            period: Option<axagent_analysis_engine::recommender::Period>,
+            due_only: Option<bool>,
+            max_count: Option<u32>,
+            enabled: Option<bool>,
+        }
+        let req = Self::parse::<CreateBatchReflectionCronRequest>(
+            "create_batch_reflection_cron",
+            "{cronExpression?, period?, dueOnly?, maxCount?, enabled?}",
+            input,
+        )?;
+        let job = crate::commands::stock_analysis::create_batch_reflection_cron_core(
+            &self.cron_job_store,
+            req.cron_expression,
+            req.period,
+            req.due_only,
+            req.max_count,
+            req.enabled,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("create_batch_reflection_cron", &job)
+    }
+
+    /// 写 op：创建自选股扫描定时任务（`create_watchlist_scan_cron`）。
+    async fn create_watchlist_scan_cron(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateWatchlistScanCronRequest {
+            cron_expression: String,
+            enabled: Option<bool>,
+        }
+        let req = Self::parse::<CreateWatchlistScanCronRequest>(
+            "create_watchlist_scan_cron",
+            "{cronExpression, enabled?}",
+            input,
+        )?;
+        let job = crate::commands::stock_analysis::create_watchlist_scan_cron_core(
+            &self.cron_job_store,
+            req.cron_expression,
+            req.enabled,
+        )
+        .await
+        .map_err(AxAgentError::Provider)?;
+        Self::to_value("create_watchlist_scan_cron", &job)
+    }
+
     /// 读 op：参数调整建议列表（宿主 `list_param_suggestions` 的接缝面）。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组（形状权威在 commands 层 core 函数）。

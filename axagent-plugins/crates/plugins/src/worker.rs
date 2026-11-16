@@ -519,6 +519,13 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "set_vendor_status" | "cancel_stock_analysis",
         ) => Some(PluginPermission::Write),
+        // #342 批 A15（watchlist 5 + cron 9）：自选股/定时任务的增删改 ⇒ `Write`；
+        // 四处列表读（`list_watchlist` / `watchlist_list_groups` / `list_stock_crons` /
+        // `list_validate_decisions_crons`）纯读 ⇒ **不登记**（读缝不加闸）。
+        (
+            "stock.analysis",
+            "add_to_watchlist" | "watchlist_update_group" | "watchlist_save_groups" | "create_stock_cron" | "toggle_stock_cron" | "create_validate_decisions_cron" | "toggle_validate_decisions_cron" | "update_validate_decisions_cron" | "create_batch_reflection_cron" | "create_watchlist_scan_cron",
+        ) => Some(PluginPermission::Write),
         // #338：`run_mover_recall_analysis` 落批次起点 + 后台跑 as-of 补分析 ⇒ `Write`。
         // 同批两条读（`mover_recall_analysis_batch` / `mover_recall_analysis_batches`）
         // 纯读 —— reap 写副作用已上收启动钩子 ⇒ **必须仍是 `None`**（不登记）。
@@ -3378,6 +3385,208 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.cancel_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：list_watchlist
+            "stock.analysis" if op == "list_watchlist" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_watchlist(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：add_to_watchlist
+            "stock.analysis" if op == "add_to_watchlist" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.add_to_watchlist(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：watchlist_update_group
+            "stock.analysis" if op == "watchlist_update_group" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.watchlist_update_group(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：watchlist_list_groups
+            "stock.analysis" if op == "watchlist_list_groups" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.watchlist_list_groups(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：watchlist_save_groups
+            "stock.analysis" if op == "watchlist_save_groups" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.watchlist_save_groups(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：create_stock_cron
+            "stock.analysis" if op == "create_stock_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_stock_cron(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：list_stock_crons
+            "stock.analysis" if op == "list_stock_crons" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_stock_crons(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：toggle_stock_cron
+            "stock.analysis" if op == "toggle_stock_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.toggle_stock_cron(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：create_validate_decisions_cron
+            "stock.analysis" if op == "create_validate_decisions_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_validate_decisions_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：list_validate_decisions_crons
+            "stock.analysis" if op == "list_validate_decisions_crons" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.list_validate_decisions_crons(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：toggle_validate_decisions_cron
+            "stock.analysis" if op == "toggle_validate_decisions_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.toggle_validate_decisions_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：update_validate_decisions_cron
+            "stock.analysis" if op == "update_validate_decisions_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.update_validate_decisions_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：create_batch_reflection_cron
+            "stock.analysis" if op == "create_batch_reflection_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_batch_reflection_cron(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // #342：create_watchlist_scan_cron
+            "stock.analysis" if op == "create_watchlist_scan_cron" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.create_watchlist_scan_cron(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -13864,6 +14073,47 @@ mod tests {
         assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.1, None, "读 op `mover_recall_analysis_batch` 不得设权限闸");
         assert_eq!(verdict.2, None, "读 op `mover_recall_analysis_batches` 不得设权限闸");
+    }
+
+    /// #342 批 A15：watchlist 5 + cron 9 的读写分档 —— 十写必须 Write、四读必须 None。
+    #[test]
+    fn stock_analysis_342_watchlist_and_cron_permissions() {
+        const WRITES: &[&str] = &[
+            "add_to_watchlist",
+            "watchlist_update_group",
+            "watchlist_save_groups",
+            "create_stock_cron",
+            "toggle_stock_cron",
+            "create_validate_decisions_cron",
+            "toggle_validate_decisions_cron",
+            "update_validate_decisions_cron",
+            "create_batch_reflection_cron",
+            "create_watchlist_scan_cron",
+        ];
+        const READS: &[&str] = &[
+            "list_watchlist",
+            "watchlist_list_groups",
+            "list_stock_crons",
+            "list_validate_decisions_crons",
+        ];
+        let verdict =
+            with_watchdog(Duration::from_secs(2), "stock.analysis #342 权限表", || {
+                (WRITES, READS)
+            });
+        for op in verdict.0 {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                Some(PluginPermission::Write),
+                "写 op `{op}` 必须要求 write"
+            );
+        }
+        for op in verdict.1 {
+            assert_eq!(
+                required_permission_for("stock.analysis", op),
+                None,
+                "读 op `{op}` 不得设权限闸"
+            );
+        }
     }
 
     /// 批 1a（#35）十二 cron op 的权限档：3 create + 3 toggle + 3 delete = `Write`，

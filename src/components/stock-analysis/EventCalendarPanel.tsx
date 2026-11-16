@@ -1,5 +1,4 @@
 import { List } from "@/components/common/AntdList";
-import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Segmented, Spin, Tag } from "antd";
@@ -154,7 +153,10 @@ export function EventCalendarPanel() {
     }
     // 补充：自选股列表
     try {
-      const wl: Record<string, unknown>[] = await invoke("list_watchlist") as Record<string, unknown>[];
+      const wl: Record<string, unknown>[] = await invokePluginCommand("stock_list_watchlist") as Record<
+        string,
+        unknown
+      >[];
       if (Array.isArray(wl)) {
         for (const w of wl.slice(0, 8)) {
           if (stockCode && (w.stockCode as string) === stockCode) { continue; }
@@ -256,7 +258,10 @@ export function EventCalendarPanel() {
         }
         // 补充：自选股列表
         try {
-          const wl: Record<string, unknown>[] = await invoke("list_watchlist") as Record<string, unknown>[];
+          const wl: Record<string, unknown>[] = await invokePluginCommand("stock_list_watchlist") as Record<
+            string,
+            unknown
+          >[];
           if (Array.isArray(wl)) {
             for (const w of wl.slice(0, 8)) {
               if (cancelled) { return; }

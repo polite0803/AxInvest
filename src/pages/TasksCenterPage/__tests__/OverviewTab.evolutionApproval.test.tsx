@@ -33,7 +33,7 @@ const HOST_CARDS: PluginTaskCardsInfoDto[] = [
         id: "evolution-approval",
         title: "tasksCenter.health.pendingEvolution",
         surface: "task_card",
-        summaryCommand: "list_pending_evolution_plans",
+        summaryCommand: "stock_list_pending_evolution_plans",
         detailSchema: null,
         tone: "gold",
         order: 0,
@@ -88,7 +88,7 @@ beforeEach(() => {
     if (cmd === "plugin_list_task_cards") {
       return Promise.resolve([]);
     }
-    if (cmd === "list_pending_evolution_plans") {
+    if (cmd === "stock_list_pending_evolution_plans") {
       return Promise.resolve(PENDING_ROWS);
     }
     return Promise.resolve([]);
@@ -121,7 +121,7 @@ describe("OverviewTab 待审批进化卡（宿主投影驱动）", () => {
     expect(screen.getAllByText("接受并执行").length).toBe(2);
     expect(screen.getAllByText("拒绝").length).toBe(2);
     // 走的是投影 summaryCommand，而非旧 store 通道
-    expect(invokeMock).toHaveBeenCalledWith("list_pending_evolution_plans");
+    expect(invokeMock).toHaveBeenCalledWith("stock_list_pending_evolution_plans");
   });
 
   it("审批动作带行 id：确认后 invoke approve_evolution_plan 并刷新行集", async () => {
@@ -144,8 +144,8 @@ describe("OverviewTab 待审批进化卡（宿主投影驱动）", () => {
       historyId: "evo-overview-1",
       reviewer: null,
     });
-    // 成功后按同源刷新（第二次 list_pending_evolution_plans）
-    const rowCalls = invokeMock.mock.calls.filter((c) => c[0] === "list_pending_evolution_plans");
+    // 成功后按同源刷新（第二次 stock_list_pending_evolution_plans）
+    const rowCalls = invokeMock.mock.calls.filter((c) => c[0] === "stock_list_pending_evolution_plans");
     expect(rowCalls.length).toBe(2);
   });
 

@@ -17,18 +17,13 @@ describe("browserMock 覆盖股票插件命名命令（T2 试点批）", () => {
     ).resolves.toBeNull();
   });
 
-  it("stock_list_pending_evolution_plans 返回演示行集，与宿主命令 list_pending_evolution_plans 同源同形", async () => {
+  it("stock_list_pending_evolution_plans 返回演示行集（宿主命令已退役，#341）", async () => {
     const rows = await handleCommand<Record<string, unknown>[]>(
       "stock_list_pending_evolution_plans",
       {},
     );
     expect(Array.isArray(rows)).toBe(true);
     expect(rows!.length).toBeGreaterThan(0);
-    const hostRows = await handleCommand<Record<string, unknown>[]>(
-      "list_pending_evolution_plans",
-      {},
-    );
-    expect(rows).toEqual(hostRows);
   });
 
   it("stock_wf_des_integration 返回 null（浏览器模式无 WalkForward/DES 仿真引擎，诚实空态）", async () => {

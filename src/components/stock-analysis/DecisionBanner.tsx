@@ -1,5 +1,6 @@
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { exportAnalysisReport } from "@/lib/stock-analysis-export";
 import { type ExportData, type ExportFormat } from "@/lib/stock-analysis-export";
 import {
@@ -197,7 +198,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     let cancelled = false;
     (async () => {
       try {
-        const list = await invoke<{ stockCode: string }[]>("list_watchlist");
+        const list = await invokePluginCommand<{ stockCode: string }[]>("stock_list_watchlist");
         if (!cancelled) {
           setWatchlisted(list.some((w) => w.stockCode === stockCode));
         }
@@ -214,7 +215,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     if (!stockCode || !stockName) { return; }
     setAdding(true);
     try {
-      await invoke("add_to_watchlist", { stockCode, stockName });
+      await invokePluginCommand("stock_add_to_watchlist", { stockCode, stockName });
       setWatchlisted(true);
       bumpWatchlistVersion();
       message.success(t("stockAnalysis.addedToWatchlist"));

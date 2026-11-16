@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import {
   Button,
   Card,
@@ -61,7 +62,7 @@ export function ScheduledAnalysisPanel() {
   const loadJobs = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await invoke<CronJobRow[]>("list_stock_crons");
+      const list = await invokePluginCommand<CronJobRow[]>("stock_list_stock_crons");
       if (Array.isArray(list)) { setJobs(list); }
     } catch { /* backend not available */ }
     setLoading(false);
@@ -81,7 +82,7 @@ export function ScheduledAnalysisPanel() {
     }
     setSubmitting(true);
     try {
-      await invoke("create_stock_cron", {
+      await invokePluginCommand("stock_create_stock_cron", {
         stockCode: newStockCode.trim(),
         stockName: newStockName.trim() || newStockCode.trim(),
         cronExpression: newCron,
@@ -99,7 +100,7 @@ export function ScheduledAnalysisPanel() {
 
   const handleToggle = useCallback(async (id: string, enabled: boolean) => {
     try {
-      await invoke("toggle_stock_cron", { id, enabled });
+      await invokePluginCommand("stock_toggle_stock_cron", { id, enabled });
       loadJobs();
     } catch { /* silent */ }
   }, [loadJobs]);
@@ -120,7 +121,7 @@ export function ScheduledAnalysisPanel() {
         message.info(t("stockAnalysis.scheduledAnalysis.noPortfolioData"));
         return;
       }
-      const existing = await invoke<CronJobRow[]>("list_stock_crons");
+      const existing = await invokePluginCommand<CronJobRow[]>("stock_list_stock_crons");
       const existingCodes = new Set(
         Array.isArray(existing) ? existing.map((j) => j.name) : [],
       );
@@ -128,7 +129,7 @@ export function ScheduledAnalysisPanel() {
       for (const h of holdings) {
         if (!existingCodes.has(h.stockCode)) {
           try {
-            await invoke("create_stock_cron", {
+            await invokePluginCommand("stock_create_stock_cron", {
               stockCode: h.stockCode,
               stockName: h.stockName || h.stockCode,
               cronExpression: newCron,

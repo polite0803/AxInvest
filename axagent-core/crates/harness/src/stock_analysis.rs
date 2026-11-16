@@ -361,6 +361,118 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 自选股列表（`list_watchlist` op）—— 读 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参恒 `{}`；出参形状与被退役的宿主命令逐字一致。
+    async fn list_watchlist(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_watchlist 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 添加自选股（`add_to_watchlist` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{stockCode, stockName, notes?}`；出参形状与被退役的宿主命令逐字一致。
+    async fn add_to_watchlist(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("add_to_watchlist 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 更新自选股分组（`watchlist_update_group` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{id, groupName}`；出参形状与被退役的宿主命令逐字一致。
+    async fn watchlist_update_group(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "watchlist_update_group 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 自选股分组列表（`watchlist_list_groups` op）—— 读 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参恒 `{}`；出参形状与被退役的宿主命令逐字一致。
+    async fn watchlist_list_groups(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("watchlist_list_groups 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 保存自选股分组（`watchlist_save_groups` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{groups: string[]}`；出参形状与被退役的宿主命令逐字一致。
+    async fn watchlist_save_groups(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("watchlist_save_groups 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 创建股票定时分析任务（`create_stock_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{stockCode, stockName, cronExpression}`；出参形状与被退役的宿主命令逐字一致。
+    async fn create_stock_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("create_stock_cron 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 股票定时任务列表（`list_stock_crons` op）—— 读 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参恒 `{}`；出参形状与被退役的宿主命令逐字一致。
+    async fn list_stock_crons(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("list_stock_crons 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 开关股票定时任务（`toggle_stock_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{id, enabled}`；出参形状与被退役的宿主命令逐字一致。
+    async fn toggle_stock_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider("toggle_stock_cron 未实现（该提供者不支持此数据面）".into()))
+    }
+
+    /// 创建决策校验定时任务（`create_validate_decisions_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{cronExpression?, minConfidenceThreshold?, reflectionDepth?, enabled?}`；出参形状与被退役的宿主命令逐字一致。
+    async fn create_validate_decisions_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "create_validate_decisions_cron 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 决策校验定时任务列表（`list_validate_decisions_crons` op）—— 读 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参恒 `{}`；出参形状与被退役的宿主命令逐字一致。
+    async fn list_validate_decisions_crons(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "list_validate_decisions_crons 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 开关决策校验定时任务（`toggle_validate_decisions_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{id, enabled}`；出参形状与被退役的宿主命令逐字一致。
+    async fn toggle_validate_decisions_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "toggle_validate_decisions_cron 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新决策校验定时任务配置（`update_validate_decisions_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{id, cronExpression, minConfidenceThreshold, reflectionDepth}`；出参形状与被退役的宿主命令逐字一致。
+    async fn update_validate_decisions_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "update_validate_decisions_cron 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 创建批量反思定时任务（`create_batch_reflection_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{cronExpression?, period?, dueOnly?, maxCount?, enabled?}`；出参形状与被退役的宿主命令逐字一致。
+    async fn create_batch_reflection_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "create_batch_reflection_cron 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 创建自选股扫描定时任务（`create_watchlist_scan_cron` op）—— 写 op（宿主原命令迁 T2，#342）。
+    ///
+    /// 入参`{cronExpression, enabled?}`；出参形状与被退役的宿主命令逐字一致。
+    async fn create_watchlist_scan_cron(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "create_watchlist_scan_cron 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 参数调整建议列表（`list_param_suggestions` op）—— 读 op，无权限闸。
     ///
     /// 入参 `{stockCode?: string}`；出参 = 建议行数组。
@@ -946,6 +1058,49 @@ mod tests {
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
+            ),
+            // #342 批 A15：watchlist 5 + cron 9（四处读十写），默认实现同样必须显式报错
+            // （空入参不能被读成「列表为空 / 已创建」）。
+            ("list_watchlist", futures::executor::block_on(stub.list_watchlist(Value::Null))),
+            ("add_to_watchlist", futures::executor::block_on(stub.add_to_watchlist(Value::Null))),
+            (
+                "watchlist_update_group",
+                futures::executor::block_on(stub.watchlist_update_group(Value::Null)),
+            ),
+            (
+                "watchlist_list_groups",
+                futures::executor::block_on(stub.watchlist_list_groups(Value::Null)),
+            ),
+            (
+                "watchlist_save_groups",
+                futures::executor::block_on(stub.watchlist_save_groups(Value::Null)),
+            ),
+            ("create_stock_cron", futures::executor::block_on(stub.create_stock_cron(Value::Null))),
+            ("list_stock_crons", futures::executor::block_on(stub.list_stock_crons(Value::Null))),
+            ("toggle_stock_cron", futures::executor::block_on(stub.toggle_stock_cron(Value::Null))),
+            (
+                "create_validate_decisions_cron",
+                futures::executor::block_on(stub.create_validate_decisions_cron(Value::Null)),
+            ),
+            (
+                "list_validate_decisions_crons",
+                futures::executor::block_on(stub.list_validate_decisions_crons(Value::Null)),
+            ),
+            (
+                "toggle_validate_decisions_cron",
+                futures::executor::block_on(stub.toggle_validate_decisions_cron(Value::Null)),
+            ),
+            (
+                "update_validate_decisions_cron",
+                futures::executor::block_on(stub.update_validate_decisions_cron(Value::Null)),
+            ),
+            (
+                "create_batch_reflection_cron",
+                futures::executor::block_on(stub.create_batch_reflection_cron(Value::Null)),
+            ),
+            (
+                "create_watchlist_scan_cron",
+                futures::executor::block_on(stub.create_watchlist_scan_cron(Value::Null)),
             ),
             // #338 三条（mover_recall_analysis：两读一写）：默认实现同样必须显式报错
             // （空对象入参不能被读成「批次不存在 / 历史为空 / 已发起」）。

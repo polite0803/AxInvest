@@ -8,6 +8,8 @@ import {
 } from "@/lib/dynamicUI/pluginCardRegistry";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { useTaskCenterStore } from "@/stores";
 import { Button, Card, Empty, Input, List, message, Modal, Progress, Space, Statistic, Tag, Typography } from "antd";
 import { AlertTriangle, CheckCircle2, Clock4, ListChecks, Loader2, ShieldCheck } from "lucide-react";
@@ -65,9 +67,19 @@ export function OverviewTab({
   const [rejectRowId, setRejectRowId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
+  // #341：`summaryCommand` 可能是宿主命令或插件命名命令（如宿主审批卡指向
+  // `stock_list_pending_evolution_plans`）—— 按插件注册表解析路由，解析不到才走宿主 invoke。
+  const runSummaryCommand = useCallback(async (name: string): Promise<unknown[]> => {
+    const pluginId = await resolvePluginForCommand(name);
+    if (pluginId) {
+      return invokePluginCommand<unknown[]>(name);
+    }
+    return invoke<unknown[]>(name);
+  }, []);
+
   const fetchCardRows = useCallback((cards: readonly PluginCardContribution[]) => {
     for (const card of cards) {
-      void invoke<unknown[]>(card.summaryCommand)
+      void runSummaryCommand(card.summaryCommand)
         .then((rows) => {
           setCardRows((prev) => ({ ...prev, [card.key]: rows.filter(isCardRow) }));
         })
@@ -77,7 +89,7 @@ export function OverviewTab({
           setCardRows((prev) => ({ ...prev, [card.key]: [] }));
         });
     }
-  }, []);
+  }, [runSummaryCommand]);
 
   useEffect(() => {
     void ensureCardContributionsLoaded();

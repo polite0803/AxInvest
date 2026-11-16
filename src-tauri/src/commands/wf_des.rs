@@ -16,7 +16,6 @@
 //!   2. QuantStrategyAgent 已就绪
 //!   3. WalkForward 基线评分已建立 (MaCross 5/20: 9 folds, Sharpe=-7.14, MaxDD=10.16%)
 
-use axagent_agent_macro::agent_command;
 use serde::{Deserialize, Serialize};
 
 use axagent_market_sim::{
@@ -289,9 +288,8 @@ fn run_des_simulation(
 
 // ── Tauri 命令 ────────────────────────────────────────────────────────────────
 
-/// 运行 Walk-Forward + DES 对比
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description =  "运行Walk-Forward与DES对比")]
-#[tauri::command]
+/// 运行 Walk-Forward + DES 对比 —— 宿主命令已迁插件（`stock_wf_des_integration`，
+/// 前端 #248 已切），本函数保留供 `stock.analysis::des_integration` 接缝逐字复用（#341）。
 pub fn wf_des_integration(request: WfDesRequest) -> Result<WfDesReport, String> {
     if request.klines.is_empty() {
         return Err("K 线数据为空".to_string());

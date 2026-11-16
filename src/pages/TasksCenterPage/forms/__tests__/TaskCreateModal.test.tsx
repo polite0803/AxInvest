@@ -105,7 +105,7 @@ describe("TaskCreateModal TR-7.1 三条新建路径", () => {
     });
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("create_stock_cron", {
+      expect(invokeMock).toHaveBeenCalledWith("stock_create_stock_cron", {
         stockCode: "000001",
         stockName: "平安银行",
         // 种类默认 cron（每日 09:00）

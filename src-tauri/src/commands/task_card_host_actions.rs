@@ -71,7 +71,8 @@ fn evolution_approval_card() -> PluginTaskCard {
         id: EVOLUTION_APPROVAL_CARD_ID.to_string(),
         title: "tasksCenter.health.pendingEvolution".to_string(),
         surface: PluginCardSurface::TaskCard,
-        summary_command: "list_pending_evolution_plans".to_string(),
+        // #341：宿主命令已迁插件命名命令；前端 `OverviewTab` 按插件解析路由执行。
+        summary_command: "stock_list_pending_evolution_plans".to_string(),
         detail_schema: None,
         tone: Some("gold".to_string()),
         order: 0,
@@ -116,7 +117,7 @@ mod tests {
         // 键可无损拆回两段：卡 id 不允许出现分隔符（前端 `cardKey` 拼键契约）。
         assert!(!card.id.contains(':'));
         assert_eq!(card.surface, PluginCardSurface::TaskCard);
-        assert_eq!(card.summary_command, "list_pending_evolution_plans");
+        assert_eq!(card.summary_command, "stock_list_pending_evolution_plans");
         assert_eq!(card.detail_schema, None);
         assert_eq!(card.order, 0);
 

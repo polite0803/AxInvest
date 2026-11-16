@@ -2072,7 +2072,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   fetchPendingEvolutionPlans: async () => {
     set({ pendingEvolutionLoading: true });
     try {
-      const data = await invoke<EvolutionHistoryEntry[]>("list_pending_evolution_plans");
+      // #341：已迁插件命名命令。
+      const data = await invokePluginCommand<EvolutionHistoryEntry[]>(
+        "stock_list_pending_evolution_plans",
+      );
       set({ pendingEvolutionPlans: data, pendingEvolutionLoading: false });
     } catch (e) {
       console.warn("[EvolutionApproval] 获取待审批进化计划失败:", e);
@@ -2299,7 +2302,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     // 切换股票:清旧数据再拉新数据,避免上一只股票的事件短暂闪烁在 UI 上
     set({ earningsLoading: true });
     try {
-      const events = await invoke<EarningsEvent[]>("get_earnings_calendar", { stockCode });
+      // #341：已迁插件命名命令（market.quote 接缝）。
+      const events = await invokePluginCommand<EarningsEvent[]>("stock_get_earnings_calendar", {
+        stockCode,
+      });
       set({ earningsEvents: Array.isArray(events) ? events : [], earningsLoading: false, earningsError: null });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -87,7 +87,7 @@ export function WatchlistPanel() {
   // 从 DB 加载分组
   const loadGroups = useCallback(async () => {
     try {
-      const g = await invoke<string[]>("watchlist_list_groups");
+      const g = await invokePluginCommand<string[]>("stock_watchlist_list_groups");
       // 防御：后端可能返回 null（测试 mock 或异常路径），确保始终为数组
       groupsRef.current = Array.isArray(g) ? g : [];
       setGroupsVersion((v) => v + 1);
@@ -106,7 +106,7 @@ export function WatchlistPanel() {
   const removeGroupAndReassign = async (g: string) => {
     try {
       const next = groupsRef.current.filter((x) => x !== g);
-      await invoke("watchlist_save_groups", { groups: next });
+      await invokePluginCommand("stock_watchlist_save_groups", { groups: next });
       groupsRef.current = next;
       setGroupsVersion((v) => v + 1);
       setActiveGroup(DEFAULT_GROUP);
@@ -115,7 +115,7 @@ export function WatchlistPanel() {
       const moving = items.filter((i) => i.group === g);
       for (const item of moving) {
         try {
-          await invoke("watchlist_update_group", { id: item.id, groupName: DEFAULT_GROUP });
+          await invokePluginCommand("stock_watchlist_update_group", { id: item.id, groupName: DEFAULT_GROUP });
         } catch { /* 继续 */ }
       }
       setItems((prev) => prev.map((i) => (i.group === g ? { ...i, group: DEFAULT_GROUP } : i)));
@@ -127,7 +127,7 @@ export function WatchlistPanel() {
   const loadWatchlist = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await invoke<WatchlistItem[]>("list_watchlist");
+      const list = await invokePluginCommand<WatchlistItem[]>("stock_list_watchlist");
       if (Array.isArray(list)) {
         // 从 notes JSON 恢复 group 信息
         const parsed = list.map((w: WatchlistItem & { group?: string }) => {
@@ -148,7 +148,7 @@ export function WatchlistPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<WatchlistItem[]>("list_watchlist")
+    invokePluginCommand<WatchlistItem[]>("stock_list_watchlist")
       .then((list) => {
         if (cancelled) { return; }
         if (Array.isArray(list)) {
@@ -218,7 +218,7 @@ export function WatchlistPanel() {
 
     // 2) 加入后端监控（Active 优先级 2s 轮询，replace=true 替换旧列表）
     const codes = groupItems.map((i) => i.stockCode);
-    invoke("watch_stock_quotes", {
+    invokePluginCommand("stock_watch_stock_quotes", {
       stockCodes: codes,
       priority: "active",
       replace: true,
@@ -252,7 +252,7 @@ export function WatchlistPanel() {
       cancelled = true;
       unlisten?.();
       // 组件卸载 / groupItems 变化时，从后端监控列表移除
-      invoke("unwatch_stock_quotes", { stockCodes: codes }).catch((e) =>
+      invokePluginCommand("stock_unwatch_stock_quotes", { stockCodes: codes }).catch((e) =>
         console.warn("[WatchlistPanel] unwatch_stock_quotes 失败:", e)
       );
     };
@@ -280,7 +280,7 @@ export function WatchlistPanel() {
     if (!stockCode || !stockName) { return; }
     try {
       const notes = JSON.stringify({ group: activeGroup !== DEFAULT_GROUP ? activeGroup : DEFAULT_GROUP });
-      await invoke("add_to_watchlist", { stockCode, stockName, notes });
+      await invokePluginCommand("stock_add_to_watchlist", { stockCode, stockName, notes });
       loadWatchlist();
     } catch { /* 静默 */ }
   };
@@ -294,7 +294,7 @@ export function WatchlistPanel() {
 
   const moveToGroup = async (item: WatchlistItem, targetGroup: string) => {
     try {
-      await invoke("watchlist_update_group", { id: item.id, groupName: targetGroup });
+      await invokePluginCommand("stock_watchlist_update_group", { id: item.id, groupName: targetGroup });
       setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, group: targetGroup } : i)));
     } catch { /* 静默 */ }
   };
@@ -322,7 +322,7 @@ export function WatchlistPanel() {
     if (!name || groups.includes(name)) { return; }
     const updated = [...groups, name];
     try {
-      await invoke("watchlist_save_groups", { groups: updated });
+      await invokePluginCommand("stock_watchlist_save_groups", { groups: updated });
       groupsRef.current = updated;
       setGroupsVersion((v) => v + 1);
       setNewGroup("");
@@ -371,13 +371,16 @@ export function WatchlistPanel() {
                   if (newName && newName !== g) {
                     const updated = groupsRef.current.map((x) => (x === g ? newName : x));
                     try {
-                      await invoke("watchlist_save_groups", { groups: updated });
+                      await invokePluginCommand("stock_watchlist_save_groups", { groups: updated });
                       groupsRef.current = updated;
                       setGroupsVersion((v) => v + 1);
                       // 同时更新该分组下自选股的 group 名
                       for (const item of items.filter((i) => i.group === g)) {
                         try {
-                          await invoke("watchlist_update_group", { id: item.id, groupName: newName });
+                          await invokePluginCommand("stock_watchlist_update_group", {
+                            id: item.id,
+                            groupName: newName,
+                          });
                         } catch { /* continue */ }
                       }
                       setItems((prev) => prev.map((i) => (i.group === g ? { ...i, group: newName } : i)));

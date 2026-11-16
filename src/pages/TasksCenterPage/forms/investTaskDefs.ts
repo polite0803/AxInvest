@@ -66,7 +66,8 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       stockName: "",
       cronExpression: "0 9 * * *",
     },
-    command: "create_stock_cron",
+    command: "stock_create_stock_cron",
+    pluginCommand: true,
     buildArgs: (v) => ({
       stockCode: v.stockCode,
       stockName: v.stockName,
@@ -81,7 +82,8 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       // 工作日 21:00：晚于收盘、数据落定后
       cronExpression: "0 21 * * 1-5",
     },
-    command: "create_watchlist_scan_cron",
+    command: "stock_create_watchlist_scan_cron",
+    pluginCommand: true,
     buildArgs: (v) => ({
       cronExpression: v.cronExpression,
       enabled: true,
@@ -131,7 +133,8 @@ export const INVEST_KIND_DEFS: InvestKindDef[] = [
       period: "short",
       cronExpression: "0 18 * * *",
     },
-    command: "create_batch_reflection_cron",
+    command: "stock_create_batch_reflection_cron",
+    pluginCommand: true,
     buildArgs: (v) => ({
       cronExpression: v.cronExpression,
       period: v.period,

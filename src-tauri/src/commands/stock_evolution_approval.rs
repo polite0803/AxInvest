@@ -61,17 +61,9 @@ fn rebuild_plan(row: &EvolutionHistoryModel) -> Result<EvolutionPlan, String> {
     })
 }
 
-/// 查待审批进化计划（按创建时间升序，先到先审）。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询待审批进化计划")]
-#[tauri::command]
-pub async fn list_pending_evolution_plans(
-    state: State<'_, AppState>,
-) -> Result<Vec<EvolutionHistoryModel>, String> {
-    let db = state.harness.db();
-    evo_hist::list_pending_asc(db)
-        .await
-        .map_err(|e| internal_err(format!("查询待审批进化计划失败: {e}")))
-}
+// `list_pending_evolution_plans` 已迁插件（`stock_list_pending_evolution_plans`，
+// `stock.analysis::pending_evolution_plans` 读 op，#341）：宿主命令体退役，任务中心
+// 概览卡的 summaryCommand 同批改指插件名（`OverviewTab` 按插件解析路由执行）。
 
 /// 接受一条待审批进化计划：执行进化并把结果 UPDATE 回原行（status=accepted）。
 ///

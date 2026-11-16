@@ -202,7 +202,7 @@
 | ⑤ | 反思**判定/统计分周期，经验不分周期**：`reflection_lessons` 无周期列（已复核：该文件 grep `horizon\|period` 零命中），去重键与消费入口均无 horizon | `crates/entities/src/reflection_lessons.rs:8-36`、`stock_workflow/reflection.rs:1264-1273,1298-1311`、`stock_workflow/core.rs:2211-2244,2311-2359` |
 | ⑥ | 反思 LLM 文本**四周期共享同一份**，只看主周期快照 | `stock_workflow/reflection.rs:1720-1765,2861-2871,2938-2948` |
 | ⑦ | serenity 链无周期入口，落库**硬编码 `mid` / 20 天 / 止损 ×0.80** | `stock_workflow/serenity.rs:1350-1355,1361,1368,1384`、`commands/recommendation_cron.rs:247-279` |
-| ⑧ | 策略包 YAML 为**死数据**：`StrategyPackRegistry/template_vars_for/load_packs_from_dir` 零调用者（已复核），无「应用策略包」命令 | `crates/analysis-engine/src/strategy_pack.rs:195-239`、`commands/strategy_pack.rs:34-191`、`src-tauri/src/register_commands.rs:1348-1354` |
+| ⑧ | 策略包 YAML 为**死数据**：`StrategyPackRegistry/template_vars_for/load_packs_from_dir` 零调用者（已复核），无「应用策略包」命令 | `crates/analysis-engine/src/strategy_pack.rs:195-239`、`commands/strategy_pack.rs:34-191`、`src-tauri/src/register_commands.rs`（当时的策略包注册区；相关命令其后已退役） |
 | ⑨ | 天数表/周期枚举**多份副本** | `recommender/types.rs:101-108`、`analysis-engine/reflection_stats.rs:96-104`、`portfolio-mgr.rhai:2517`、各策略 `period_defaults`；第二套枚举 `crates/harness/src/strategy_pack.rs:84-108`（`rename_all="lowercase"` 会产出 `ultrashort`） |
 | ⑩ | ultra_short 是**退化档**：复用日线单后验、置信下限 0.35、无独立评分源 | `portfolio-mgr.rhai:2601-2626,2630-2634` |
 | ⑪ | 风控 SKILL 只有两档（-5% 短线 / -8% 中长线），与四档表不一致且实际链路不消费 | `agency_experts/skills/risk-management/SKILL.md:50-63` |

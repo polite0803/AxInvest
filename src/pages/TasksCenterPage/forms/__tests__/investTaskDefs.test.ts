@@ -17,7 +17,7 @@ describe("investTaskDefs 载荷构造", () => {
 
   it("stock-analysis：个股代码/名称/cron 三参数", () => {
     const def = getInvestKindDef("stock-analysis");
-    expect(def.command).toBe("create_stock_cron");
+    expect(def.command).toBe("stock_create_stock_cron");
     expect(
       def.buildArgs({
         stockCode: "600519",

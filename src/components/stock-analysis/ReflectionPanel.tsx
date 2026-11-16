@@ -2,6 +2,7 @@
 import { backendErrorText } from "@/lib/errorI18n";
 import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke, listen } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonIcAbsenceKey, horizonLabelKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import type { AiChatAction } from "@/types";
@@ -323,7 +324,7 @@ export function ReflectionPanel() {
     try {
       const [r, c, h] = await Promise.all([
         invoke<ReflectionRow[]>("list_reflections", {}),
-        invoke<CronJobResponse[]>("list_validate_decisions_crons", {}),
+        invokePluginCommand<CronJobResponse[]>("stock_list_validate_decisions_crons", {}),
         invoke<HitrateStats>("reflection_stats", {}),
       ]);
       if (myToken !== loadTokenRef.current) { return; }
@@ -383,7 +384,7 @@ export function ReflectionPanel() {
     try {
       if (enable && !activeCron) {
         // 新建时未选的值传 undefined ⇒ 由后端 create 命令的出厂默认决定，前端不另抄一份数
-        await invoke("create_validate_decisions_cron", {
+        await invokePluginCommand("stock_create_validate_decisions_cron", {
           cronExpression: cronExpr ?? undefined,
           minConfidenceThreshold: threshold ?? undefined,
           reflectionDepth: depth ?? undefined,
@@ -392,7 +393,7 @@ export function ReflectionPanel() {
         configDirtyRef.current = false;
       } else if (activeCron) {
         // 开关只改状态；配置改动必须走「保存配置」（旧形态是改完值再开关 ⇒ 编辑值零落库）
-        await invoke("toggle_validate_decisions_cron", { id: activeCron.id, enabled: enable });
+        await invokePluginCommand("stock_toggle_validate_decisions_cron", { id: activeCron.id, enabled: enable });
       }
       await load();
     } catch (e) {
@@ -406,7 +407,7 @@ export function ReflectionPanel() {
     if (!activeCron || cronExpr === null || threshold === null || depth === null) { return; }
     setSavingConfig(true);
     try {
-      await invoke("update_validate_decisions_cron", {
+      await invokePluginCommand("stock_update_validate_decisions_cron", {
         id: activeCron.id,
         cronExpression: cronExpr,
         minConfidenceThreshold: threshold,

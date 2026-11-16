@@ -224,6 +224,39 @@ const COMMAND_MOVER_RECALL_BATCH: &str = "stock_get_mover_recall_analysis_batch"
 const COMMAND_MOVER_RECALL_BATCHES: &str = "stock_list_mover_recall_analysis_batches";
 /// 发起漏检补分析批次（宿主 `run_mover_recall_analysis`，#338）—— 写 op。
 const COMMAND_RUN_MOVER_RECALL_ANALYSIS: &str = "stock_run_mover_recall_analysis";
+/// 自选股列表（宿主 `list_watchlist`，#342）—— 读 op。
+const COMMAND_LIST_WATCHLIST: &str = "stock_list_watchlist";
+/// 添加自选股（宿主 `add_to_watchlist`，#342）—— 写 op。
+const COMMAND_ADD_TO_WATCHLIST: &str = "stock_add_to_watchlist";
+/// 更新自选股分组（宿主 `watchlist_update_group`，#342）—— 写 op。
+const COMMAND_WATCHLIST_UPDATE_GROUP: &str = "stock_watchlist_update_group";
+/// 自选股分组列表（宿主 `watchlist_list_groups`，#342）—— 读 op。
+const COMMAND_WATCHLIST_LIST_GROUPS: &str = "stock_watchlist_list_groups";
+/// 保存自选股分组（宿主 `watchlist_save_groups`，#342）—— 写 op。
+const COMMAND_WATCHLIST_SAVE_GROUPS: &str = "stock_watchlist_save_groups";
+/// 创建股票定时分析任务（宿主 `create_stock_cron`，#342）—— 写 op。
+const COMMAND_CREATE_STOCK_CRON: &str = "stock_create_stock_cron";
+/// 股票定时任务列表（宿主 `list_stock_crons`，#342）—— 读 op。
+const COMMAND_LIST_STOCK_CRONS: &str = "stock_list_stock_crons";
+/// 开关股票定时任务（宿主 `toggle_stock_cron`，#342）—— 写 op。
+const COMMAND_TOGGLE_STOCK_CRON: &str = "stock_toggle_stock_cron";
+/// 创建决策校验定时任务（宿主 `create_validate_decisions_cron`，#342）—— 写 op。
+const COMMAND_CREATE_VALIDATE_DECISIONS_CRON: &str = "stock_create_validate_decisions_cron";
+/// 决策校验定时任务列表（宿主 `list_validate_decisions_crons`，#342）—— 读 op。
+const COMMAND_LIST_VALIDATE_DECISIONS_CRONS: &str = "stock_list_validate_decisions_crons";
+/// 开关决策校验定时任务（宿主 `toggle_validate_decisions_cron`，#342）—— 写 op。
+const COMMAND_TOGGLE_VALIDATE_DECISIONS_CRON: &str = "stock_toggle_validate_decisions_cron";
+/// 更新决策校验定时任务配置（宿主 `update_validate_decisions_cron`，#342）—— 写 op。
+const COMMAND_UPDATE_VALIDATE_DECISIONS_CRON: &str = "stock_update_validate_decisions_cron";
+/// 创建批量反思定时任务（宿主 `create_batch_reflection_cron`，#342）—— 写 op。
+const COMMAND_CREATE_BATCH_REFLECTION_CRON: &str = "stock_create_batch_reflection_cron";
+/// 创建自选股扫描定时任务（宿主 `create_watchlist_scan_cron`，#342）—— 写 op。
+const COMMAND_CREATE_WATCHLIST_SCAN_CRON: &str = "stock_create_watchlist_scan_cron";
+/// 加入实时行情监控（宿主 `watch_stock_quotes`，#342）—— 写语义（改监视集合）。
+/// 零新 op：走既有 `quote.watcher::watch`（`{codes, priority, replace}` 三参同形）。
+const COMMAND_WATCH_STOCK_QUOTES: &str = "stock_watch_stock_quotes";
+/// 移除实时行情监控（宿主 `unwatch_stock_quotes`，#342）—— 写语义。
+const COMMAND_UNWATCH_STOCK_QUOTES: &str = "stock_unwatch_stock_quotes";
 /// 待审批进化计划列表（宿主 `list_pending_evolution_plans`）。
 const COMMAND_PENDING_EVOLUTION_PLANS: &str = "stock_list_pending_evolution_plans";
 /// Walk-Forward + DES 对比仿真（宿主 `wf_des_integration`，前端 `WfDesTab.tsx:187`）。
@@ -738,6 +771,191 @@ fn handle_command(
             peer,
             &request.call_chain,
             "cancel_stock_analysis",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：watch/unwatch（零新 op，走 quote.watcher 既有接缝）
+        COMMAND_WATCH_STOCK_QUOTES => {
+            match watch_stock_quotes_fn(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        COMMAND_UNWATCH_STOCK_QUOTES => {
+            match unwatch_stock_quotes_fn(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
+        // #342：list_watchlist
+        COMMAND_LIST_WATCHLIST => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_watchlist",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：add_to_watchlist
+        COMMAND_ADD_TO_WATCHLIST => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "add_to_watchlist",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：watchlist_update_group
+        COMMAND_WATCHLIST_UPDATE_GROUP => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "watchlist_update_group",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：watchlist_list_groups
+        COMMAND_WATCHLIST_LIST_GROUPS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "watchlist_list_groups",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：watchlist_save_groups
+        COMMAND_WATCHLIST_SAVE_GROUPS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "watchlist_save_groups",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：create_stock_cron
+        COMMAND_CREATE_STOCK_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "create_stock_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：list_stock_crons
+        COMMAND_LIST_STOCK_CRONS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_stock_crons",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：toggle_stock_cron
+        COMMAND_TOGGLE_STOCK_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "toggle_stock_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：create_validate_decisions_cron
+        COMMAND_CREATE_VALIDATE_DECISIONS_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "create_validate_decisions_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：list_validate_decisions_crons
+        COMMAND_LIST_VALIDATE_DECISIONS_CRONS => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "list_validate_decisions_crons",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：toggle_validate_decisions_cron
+        COMMAND_TOGGLE_VALIDATE_DECISIONS_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "toggle_validate_decisions_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：update_validate_decisions_cron
+        COMMAND_UPDATE_VALIDATE_DECISIONS_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "update_validate_decisions_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：create_batch_reflection_cron
+        COMMAND_CREATE_BATCH_REFLECTION_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "create_batch_reflection_cron",
+            stock_analysis_request(&frame.input),
+        ) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // #342：create_watchlist_scan_cron
+        COMMAND_CREATE_WATCHLIST_SCAN_CRON => match call_analysis_seam(
+            peer,
+            &request.call_chain,
+            "create_watchlist_scan_cron",
             stock_analysis_request(&frame.input),
         ) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -2221,6 +2439,82 @@ fn watch_priority_arg(priority: &str) -> &'static str {
 /// 超限**截断不报错**），而 `set_priority` 是无条件 insert ⇒ 集合已满且该码未在监控时，
 /// 原命令会加进去、接缝会静默不加。这里 fail-closed：`applied == 0` 即报错，不假装成功。
 /// 出参保持宿主原命令的 `()`（JSON `null`），不透出 `WatchOutcome`。
+/// #342：加入行情监控 —— 宿主原命令语义逐字保留：`priority` 缺省 `active`、
+/// `bg` 别名 → `Background`、未知串回落 `Active`；数量闸**截断不报错**（宿主
+/// `watch_many` 同口径），出参恒 `null`（不透出 `WatchOutcome`）。
+fn watch_stock_quotes_fn(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let raw = input.get("stockCodes").cloned().unwrap_or(Value::Null);
+    let codes: Vec<String> = serde_json::from_value(raw).map_err(|e| {
+        (
+            error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
+            format!("stockCodes 必须是字符串数组：{e}"),
+        )
+    })?;
+    if codes.is_empty() {
+        return Err((
+            error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
+            "stockCodes 不能为空".to_string(),
+        ));
+    }
+    let priority =
+        input.get("priority").and_then(Value::as_str).map(watch_priority_arg).unwrap_or("active");
+    let replace = input.get("replace").and_then(Value::as_bool).unwrap_or(false);
+    let reply = peer
+        .call_seam(
+            QUOTE_WATCHER_SEAM,
+            "watch",
+            json!({ "codes": codes, "priority": priority, "replace": replace }),
+            call_chain.to_vec(),
+        )
+        .map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("自选监视接缝（watch）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => Ok(Value::Null),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "自选监视接缝（watch）返回错误但未说明".to_string()),
+        )),
+    }
+}
+
+/// #342：移除行情监控 —— 出参恒 `null`（宿主原命令同形）。
+fn unwatch_stock_quotes_fn(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    let raw = input.get("stockCodes").cloned().unwrap_or(Value::Null);
+    let codes: Vec<String> = serde_json::from_value(raw).map_err(|e| {
+        (
+            error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
+            format!("stockCodes 必须是字符串数组：{e}"),
+        )
+    })?;
+    let reply = peer
+        .call_seam(QUOTE_WATCHER_SEAM, "unwatch", json!({ "codes": codes }), call_chain.to_vec())
+        .map_err(|e| {
+            (
+                error_codes::PLUGIN_CALL_FAILED.to_string(),
+                format!("自选监视接缝（unwatch）调用失败：{e}"),
+            )
+        })?;
+    match reply.kind {
+        ResponseKind::Success => Ok(Value::Null),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "自选监视接缝（unwatch）返回错误但未说明".to_string()),
+        )),
+    }
+}
+
 fn set_quote_watch_priority(
     input: &Value,
     call_chain: &[String],
@@ -3461,6 +3755,23 @@ mod tests {
             super::COMMAND_MOVER_RECALL_BATCH,
             super::COMMAND_MOVER_RECALL_BATCHES,
             super::COMMAND_RUN_MOVER_RECALL_ANALYSIS,
+            // #342 批 A15：watchlist 5 + cron 9（均走 stock.analysis）。
+            super::COMMAND_LIST_WATCHLIST,
+            super::COMMAND_ADD_TO_WATCHLIST,
+            super::COMMAND_WATCHLIST_UPDATE_GROUP,
+            super::COMMAND_WATCHLIST_LIST_GROUPS,
+            super::COMMAND_WATCHLIST_SAVE_GROUPS,
+            super::COMMAND_CREATE_STOCK_CRON,
+            super::COMMAND_LIST_STOCK_CRONS,
+            super::COMMAND_TOGGLE_STOCK_CRON,
+            super::COMMAND_CREATE_VALIDATE_DECISIONS_CRON,
+            super::COMMAND_LIST_VALIDATE_DECISIONS_CRONS,
+            super::COMMAND_TOGGLE_VALIDATE_DECISIONS_CRON,
+            super::COMMAND_UPDATE_VALIDATE_DECISIONS_CRON,
+            super::COMMAND_CREATE_BATCH_REFLECTION_CRON,
+            super::COMMAND_CREATE_WATCHLIST_SCAN_CRON,
+            super::COMMAND_WATCH_STOCK_QUOTES,
+            super::COMMAND_UNWATCH_STOCK_QUOTES,
             super::COMMAND_LIST_PARAM_SUGGESTIONS,
             // #329 三条：discover 零新 op 编排（不走三张路由表），两条写 op 走 stock.analysis。
             super::COMMAND_DISCOVER_STOCK_CANDIDATES,

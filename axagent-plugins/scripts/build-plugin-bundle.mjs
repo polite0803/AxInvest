@@ -492,7 +492,7 @@ function stockManifest({ version, binaryName, sha256 }) {
     name: "stock",
     version,
     description:
-      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件）+ 1 个前端页面与 2 个任务中心任务源",
+      "股票域功能包：行情工具 get_stock_quote + 107 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录/行业成分股/市场主线写入/逐票因子/管道历史与详情/进化计划/DES 仿真/三族 cron 配置 CRUD/自选监视列表/批量行情/批量财务/组合风险/交易对比/板块联动扫描/监控优先级/财务快照/交易日历/组合持仓与压力测试/组合限制/投资组合导入/决策回测查询/NeoDATA 令牌/决策回测触发/验证记录/验证报告/情绪深度/因子清单/基本面报告/基本面 Markdown/最近分析摘要/参数调整建议/热门候选发现/失效荐股缓存/自改进分析循环/批量分析摘要/权重时间线/一致性分数历史/节点反馈通用版/月度投资报告/宏观数据快照/漏检回灌清单/回测反馈分析/VLM 截图解析/回测记录读取/量化策略列表/指标对比/Rhai 策略注册/vendor 状态/任务取消/漏检补分析批次三件/自选股与分组/股票与反思定时任务/自选股扫描/行情监控）+ 1 个前端页面与 2 个任务中心任务源",
     // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
     // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
     // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -886,6 +886,244 @@ function stockManifest({ version, binaryName, sha256 }) {
             analysisId: { type: "string", description: "分析任务 ID" },
           },
           required: ["analysisId"],
+        },
+      },
+      {
+        // #342：宿主 `watch_stock_quotes` 的接缝面 —— 加入实时行情监控（写语义，零新 op）。
+        name: "stock_watch_stock_quotes",
+        description: "加入实时行情监控（前端订阅 stock-quote-update 推送；经 quote.watcher 接缝）",
+        command: "worker://stock_watch_stock_quotes",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCodes: {
+              type: "array",
+              items: { type: "string" },
+              description: "要监控的股票代码列表",
+            },
+            priority: { type: "string", description: "active（2s）| background（10s），缺省 active" },
+            replace: { type: "boolean", description: "true=替换当前监控列表" },
+          },
+          required: ["stockCodes"],
+        },
+      },
+      {
+        // #342：宿主 `unwatch_stock_quotes` 的接缝面 —— 移除实时行情监控（写语义）。
+        name: "stock_unwatch_stock_quotes",
+        description: "移除实时行情监控（经 quote.watcher 接缝）",
+        command: "worker://stock_unwatch_stock_quotes",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCodes: {
+              type: "array",
+              items: { type: "string" },
+              description: "要移除监控的股票代码列表",
+            },
+          },
+          required: ["stockCodes"],
+        },
+      },
+      {
+        // #342：宿主 `list_watchlist` 的接缝面 —— 自选股列表（读）。
+        name: "stock_list_watchlist",
+        description: "自选股列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_watchlist",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #342：宿主 `add_to_watchlist` 的接缝面 —— 添加自选股（写）。
+        name: "stock_add_to_watchlist",
+        description: "添加自选股（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_add_to_watchlist",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "股票代码" },
+            stockName: { type: "string", description: "股票名称" },
+            notes: { type: "string", description: "备注/分组 JSON" },
+          },
+          required: ["stockCode", "stockName"],
+        },
+      },
+      {
+        // #342：宿主 `watchlist_update_group` 的接缝面 —— 更新自选股分组（写）。
+        name: "stock_watchlist_update_group",
+        description: "更新自选股分组（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_watchlist_update_group",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "自选股记录 ID" },
+            groupName: { type: "string", description: "目标分组名" },
+          },
+          required: ["id", "groupName"],
+        },
+      },
+      {
+        // #342：宿主 `watchlist_list_groups` 的接缝面 —— 自选股分组列表（读）。
+        name: "stock_watchlist_list_groups",
+        description: "自选股分组列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_watchlist_list_groups",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #342：宿主 `watchlist_save_groups` 的接缝面 —— 保存自选股分组（写）。
+        name: "stock_watchlist_save_groups",
+        description: "保存自选股分组（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_watchlist_save_groups",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            groups: { type: "array", items: { type: "string" }, description: "全量分组名列表" },
+          },
+          required: ["groups"],
+        },
+      },
+      {
+        // #342：宿主 `create_stock_cron` 的接缝面 —— 创建股票定时分析任务（写）。
+        name: "stock_create_stock_cron",
+        description: "创建股票定时分析任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_create_stock_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            stockCode: { type: "string", description: "股票代码" },
+            stockName: { type: "string", description: "股票名称" },
+            cronExpression: { type: "string", description: "cron 表达式（5 段）" },
+          },
+          required: ["stockCode", "stockName", "cronExpression"],
+        },
+      },
+      {
+        // #342：宿主 `list_stock_crons` 的接缝面 —— 股票定时任务列表（读）。
+        name: "stock_list_stock_crons",
+        description: "股票定时任务列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_stock_crons",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #342：宿主 `toggle_stock_cron` 的接缝面 —— 开关股票定时任务（写）。
+        name: "stock_toggle_stock_cron",
+        description: "开关股票定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_toggle_stock_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "任务 ID" },
+            enabled: { type: "boolean", description: "true=启用 false=暂停" },
+          },
+          required: ["id", "enabled"],
+        },
+      },
+      {
+        // #342：宿主 `create_validate_decisions_cron` 的接缝面 —— 创建决策校验定时任务（写）。
+        name: "stock_create_validate_decisions_cron",
+        description: "创建决策校验定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_create_validate_decisions_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            cronExpression: { type: "string", description: "cron 表达式（缺省 0 6 * * *）" },
+            minConfidenceThreshold: { type: "integer", description: "最低置信度 0-100（缺省 0）" },
+            reflectionDepth: { type: "string", description: "light | deep（缺省 light）" },
+            enabled: { type: "boolean", description: "缺省启用" },
+          },
+        },
+      },
+      {
+        // #342：宿主 `list_validate_decisions_crons` 的接缝面 —— 决策校验定时任务列表（读）。
+        name: "stock_list_validate_decisions_crons",
+        description: "决策校验定时任务列表（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_list_validate_decisions_crons",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        // #342：宿主 `toggle_validate_decisions_cron` 的接缝面 —— 开关决策校验定时任务（写）。
+        name: "stock_toggle_validate_decisions_cron",
+        description: "开关决策校验定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_toggle_validate_decisions_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "任务 ID" },
+            enabled: { type: "boolean", description: "true=启用 false=暂停" },
+          },
+          required: ["id", "enabled"],
+        },
+      },
+      {
+        // #342：宿主 `update_validate_decisions_cron` 的接缝面 —— 更新决策校验定时任务配置（写）。
+        name: "stock_update_validate_decisions_cron",
+        description: "更新决策校验定时任务配置（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_update_validate_decisions_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "任务 ID" },
+            cronExpression: { type: "string", description: "cron 表达式（5 段）" },
+            minConfidenceThreshold: { type: "integer", description: "最低置信度 0-100" },
+            reflectionDepth: { type: "string", description: "light | deep" },
+          },
+          required: ["id", "cronExpression", "minConfidenceThreshold", "reflectionDepth"],
+        },
+      },
+      {
+        // #342：宿主 `create_batch_reflection_cron` 的接缝面 —— 创建批量反思定时任务（写）。
+        name: "stock_create_batch_reflection_cron",
+        description: "创建批量反思定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_create_batch_reflection_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            cronExpression: { type: "string", description: "cron 表达式（缺省 0 18 * * *）" },
+            period: { type: "string", description: "ultra_short | short | mid | long（缺省全部档位）" },
+            dueOnly: { type: "boolean", description: "true=到期才反思" },
+            maxCount: { type: "integer", description: "单批最多条数" },
+            enabled: { type: "boolean", description: "缺省启用" },
+          },
+        },
+      },
+      {
+        // #342：宿主 `create_watchlist_scan_cron` 的接缝面 —— 创建自选股扫描定时任务（写）。
+        name: "stock_create_watchlist_scan_cron",
+        description: "创建自选股扫描定时任务（经宿主 stock.analysis 接缝）",
+        command: "worker://stock_create_watchlist_scan_cron",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            cronExpression: { type: "string", description: "cron 表达式（5 段）" },
+            enabled: { type: "boolean", description: "缺省启用" },
+          },
+          required: ["cronExpression"],
         },
       },
       {

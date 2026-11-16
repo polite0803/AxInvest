@@ -1,7 +1,7 @@
 // 集成测试: R2-Bug-B1 — add_to_watchlist 必须接受并持久化 notes
 //
 // 触发链:
-//  1. 用户在 group "Tech" 下添加自选股 → 前端 invoke "add_to_watchlist" 带 notes
+//  1. 用户在 group "Tech" 下添加自选股 → 前端 invoke "stock_add_to_watchlist" 带 notes
 //  2. 后端(修复后)把 notes 持久化进 DB
 //  3. 下次 list_watchlist 时,前端能从 notes JSON 解析回 group "Tech"
 //
@@ -71,7 +71,7 @@ beforeEach(() => {
   invokeMock.mockReset();
   // 默认 list_watchlist 返回空列表
   invokeMock.mockImplementation(async (cmd: string) => {
-    if (cmd === "list_watchlist") { return []; }
+    if (cmd === "stock_list_watchlist") { return []; }
     return null;
   });
 });
@@ -89,9 +89,9 @@ describe("WatchlistPanel — R2-Bug-B1: add_to_watchlist 必须接受并持久�
     const srcPath = resolve(projectRoot, "src-tauri/src/commands/stock_analysis.rs");
     const src = readFileSync(srcPath, "utf8");
     // 静态保证: 修复后 add_to_watchlist 必须接受 notes: Option<String> 且不写死 None
-    expect(src).toMatch(/pub\s+async\s+fn\s+add_to_watchlist\s*\([\s\S]*?notes:\s*Option<String>/);
+    expect(src).toMatch(/pub\(crate\)\s+async\s+fn\s+add_to_watchlist_core\s*\([\s\S]*?notes:\s*Option<String>/);
     // 且 ActiveModel.notes 必须用入参(不能写死 Set(None))
-    const fnStart = src.indexOf("pub async fn add_to_watchlist");
+    const fnStart = src.indexOf("pub(crate) async fn add_to_watchlist_core");
     expect(fnStart).toBeGreaterThan(0);
     const fnEnd = src.indexOf("\n}\n", fnStart);
     const fnBody = src.slice(fnStart, fnEnd);
@@ -101,8 +101,8 @@ describe("WatchlistPanel — R2-Bug-B1: add_to_watchlist 必须接受并持久�
   it("添加自选股到非默认分组时,invoke 必须带上 notes(包含 group 信息的 JSON)", async () => {
     const user = userEvent.setup();
     invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "list_watchlist") { return []; }
-      if (cmd === "add_to_watchlist") {
+      if (cmd === "stock_list_watchlist") { return []; }
+      if (cmd === "stock_add_to_watchlist") {
         // 模拟"修复后的后端":把 notes 持久化到返回的 Model
         return {
           id: "new-id",
@@ -119,7 +119,7 @@ describe("WatchlistPanel — R2-Bug-B1: add_to_watchlist 必须接受并持久�
 
     // 等待初始 list_watchlist 完成
     await waitFor(() => {
-      const calls = invokeMock.mock.calls.filter((c) => c[0] === "list_watchlist");
+      const calls = invokeMock.mock.calls.filter((c) => c[0] === "stock_list_watchlist");
       expect(calls.length).toBeGreaterThan(0);
     });
     invokeMock.mockClear();
@@ -131,7 +131,7 @@ describe("WatchlistPanel — R2-Bug-B1: add_to_watchlist 必须接受并持久�
     if (addBtn) { await user.click(addBtn); }
 
     // 检查所有 invoke 调用,看 add_to_watchlist 是否带 notes 参数
-    const addCalls = invokeMock.mock.calls.filter((c) => c[0] === "add_to_watchlist");
+    const addCalls = invokeMock.mock.calls.filter((c) => c[0] === "stock_add_to_watchlist");
     if (addCalls.length === 0) {
       // 没触发也没关系 — 我们已通过静态检查 + 后端修复保证 notes 会被接受
       return;

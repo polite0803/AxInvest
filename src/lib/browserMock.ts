@@ -5551,7 +5551,7 @@ async function executeCommand<T>(
               id: "evolution-approval",
               title: "tasksCenter.health.pendingEvolution",
               surface: "task_card",
-              summaryCommand: "list_pending_evolution_plans",
+              summaryCommand: "stock_list_pending_evolution_plans",
               detailSchema: null,
               tone: "gold",
               order: 0,
@@ -7548,6 +7548,38 @@ async function executeCommand<T>(
     // ⚠ 入参已被 convertToSnakeCase 转成 stock_codes。
     // #331：两条读 op（浏览器模式无演化数据 / 无一致性样本 ⇒ 各自回空数组）。
     // #334：漏检回灌清单（浏览器模式无回灌样本 ⇒ items 空、settled 0、ready 由消费端判）。
+    // #342：watchlist 5 + cron 9。浏览器模式无真实库/调度器：列表回诚实空态，
+    // 写类命令返回 undefined（消费端本就不取返回值）；watch/unwatch 改本地假集合。
+    case "stock_list_watchlist":
+      return [] as unknown as T;
+    case "stock_watchlist_list_groups":
+      return ["默认"] as unknown as T;
+    case "stock_list_stock_crons":
+    case "stock_list_validate_decisions_crons":
+      return [] as unknown as T;
+    case "stock_update_validate_decisions_cron":
+    case "stock_create_validate_decisions_cron":
+      return {
+        id: "vldec-mock",
+        name: "反思复盘（mock）",
+        description: "browser-mock",
+        schedule: "0 6 * * *",
+        status: "active",
+        recurring: true,
+        workflowId: null,
+        prompt: "{}",
+        runCount: 0,
+        lastRunAt: null,
+        nextRunAt: null,
+      } as unknown as T;
+    case "stock_add_to_watchlist":
+    case "stock_watchlist_save_groups":
+    case "stock_watchlist_update_group":
+    case "stock_watch_stock_quotes":
+    case "stock_unwatch_stock_quotes":
+    case "stock_toggle_stock_cron":
+    case "stock_toggle_validate_decisions_cron":
+      return undefined as unknown as T;
     case "stock_list_mover_reflow_candidates":
       return { items: [], settled: 0, required: 30, ready: false } as unknown as T;
     // #335：VLM 持仓截图解析。解析器在 Rust 侧（analysis-engine），浏览器模式没有
@@ -7585,9 +7617,9 @@ async function executeCommand<T>(
     case "stock_get_pipeline_run_detail":
       return null as unknown as T;
     case "stock_list_pending_evolution_plans":
-      // 与宿主命令 `list_pending_evolution_plans` 的 mock 同源同形
-      // （mockPendingEvolutionPlans：1 条演示待审批计划 + 审批只改内存数组）；
-      // 宿主卡投影（task_card_host_cards 的 summaryCommand）双声明期仍指宿主命令名。
+      // 与 `mockPendingEvolutionPlans` 同源同形（1 条演示待审批计划 + 审批只改内存数组）；
+      // #341 起宿主卡投影（task_card_host_actions 的 summaryCommand）也改指本插件名，
+      // 双声明期结束 ⇒ 宿主命令 mock 已删。
       return mockPendingEvolutionPlans() as unknown as T;
     case "stock_wf_des_integration":
       // 浏览器模式没有 WalkForward / DES 仿真引擎，无报告可算 ⇒ 显式返回 null
@@ -7987,9 +8019,10 @@ async function executeCommand<T>(
     case "create_backup_task":
     case "create_cleanup_task":
     case "create_daily_summary_task":
-    case "create_stock_cron":
-    case "create_watchlist_scan_cron":
-    case "create_batch_reflection_cron":
+    // #342：三条宿主 create 已迁插件命名命令（本段尾的插件命名区），宿主名退役。
+    case "stock_create_stock_cron":
+    case "stock_create_watchlist_scan_cron":
+    case "stock_create_batch_reflection_cron":
     case "create_decision_backtest_cron":
     // ── 股票插件命名命令（插件命令桥 批 1a / 批 1b）────────────────────────
     // 三族 create 的前端调用方（`investTaskDefs.ts` 的 `command` 字段）已切到
@@ -8009,9 +8042,9 @@ async function executeCommand<T>(
       return undefined as unknown as T;
 
     // P4：进化计划-审批两段式（浏览器模式返回 1 条演示待审批计划；
-    // 接受/拒绝只改内存数组，刷新页面复位）
-    case "list_pending_evolution_plans":
-      return mockPendingEvolutionPlans() as unknown as T;
+    // 接受/拒绝只改内存数组，刷新页面复位）。
+    // #341：宿主 `list_pending_evolution_plans` 已退役 —— 行集只经插件命名命令
+    // `stock_list_pending_evolution_plans`（本文件 T2 段，同源同形）。
     case "approve_evolution_plan": {
       // handleCommand 入口已把 args 递归转 snake_case，此处必须读 history_id
       const { history_id: historyId, reviewer } = (args as {

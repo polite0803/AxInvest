@@ -34,7 +34,7 @@ vi.mock("@/stores", () => ({
 function stubInvokes(cronJobs: unknown[]) {
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "list_reflections") { return Promise.resolve([]); }
-    if (cmd === "list_validate_decisions_crons") { return Promise.resolve(cronJobs); }
+    if (cmd === "stock_list_validate_decisions_crons") { return Promise.resolve(cronJobs); }
     if (cmd === "reflection_stats") { return Promise.resolve({}); }
     return Promise.resolve(null);
   });
@@ -142,7 +142,7 @@ describe("ReflectionPanel 定时配置回读", () => {
       },
     ]);
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "update_validate_decisions_cron") {
+      if (cmd === "stock_update_validate_decisions_cron") {
         return Promise.resolve({
           id: "vldec-3",
           name: "决策校验",
@@ -171,7 +171,7 @@ describe("ReflectionPanel 定时配置回读", () => {
       fireEvent.click(screen.getByRole("button", { name: SAVE_BTN }));
     });
     await waitFor(() => {
-      const call = invokeMock.mock.calls.find((c) => c[0] === "update_validate_decisions_cron");
+      const call = invokeMock.mock.calls.find((c) => c[0] === "stock_update_validate_decisions_cron");
       expect(call).toBeTruthy();
       expect(call?.[1]).toEqual({
         id: "vldec-3",
@@ -187,7 +187,7 @@ describe("ReflectionPanel 定时配置回读", () => {
 /** 第 ④ 条测试里除 update 之外仍要能列任务的返回值。 */
 function stubInvokesResult(cmd: string): unknown {
   if (cmd === "list_reflections") { return []; }
-  if (cmd === "list_validate_decisions_crons") {
+  if (cmd === "stock_list_validate_decisions_crons") {
     return [
       {
         id: "vldec-3",

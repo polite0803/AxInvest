@@ -32,6 +32,10 @@ vi.mock("@/lib/invoke", () => ({
   isTauri: () => true,
 }));
 
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (...args: unknown[]) => invokeMock(...args),
+}));
+
 vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (selector: (s: Record<string, unknown>) => unknown) => selector({ asOfDate: null, mode: "live" }),
 }));
@@ -104,10 +108,10 @@ beforeEach(() => {
   handlers.clear();
   invokeMock.mockReset();
   invokeMock.mockImplementation(async (cmd: string) => {
-    if (cmd === "list_watchlist") {
+    if (cmd === "stock_list_watchlist") {
       return [{ id: "w1", stockCode: "600000", stockName: "浦发银行", createdAt: 0, updatedAt: 0 }];
     }
-    if (cmd === "watchlist_list_groups") { return []; }
+    if (cmd === "stock_watchlist_list_groups") { return []; }
     return null;
   });
 });

@@ -825,7 +825,7 @@ pub use vector_search::VectorSearch;
 pub mod vector_store;
 pub use vector_store::{
     EmbeddingRecord, HnswConfig, VectorCollectionAdmin, VectorReader, VectorSearchResult,
-    VectorWriter,
+    VectorSearchSeam, VectorWriter,
 };
 
 // ── 能力发现契约（Capability Discovery Pipeline） ──

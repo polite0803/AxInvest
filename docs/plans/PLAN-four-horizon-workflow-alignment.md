@@ -4604,7 +4604,7 @@ if let Some((found, has_summary)) = try_extract_candidates_from_text(content) {
 所以「全图零实例」是我此前的**误判**（零实例只对股票模板成立，`stock_workflow/reflection.rs:318` 记着 v2 主动退役过）。
 但普查读出三条硬事实，决定不能直接改图：
 
-1. **子图失败被父图吞成成功**：`engine/mod.rs:5027-5041` 的 `run_workflow` 失败仍返回 `Ok(status=Failed)`，
+1. **子图失败被父图吞成成功**：`engine/mod.rs:5063-5075` 的 `run_workflow` 失败仍返回 `Ok(status=Failed)`，
    而两处 sub 回调（`engine/mod.rs:2703-2710`、`3507-3516`）只 `.map_err` **不查 status**，
    失败时 `output.unwrap_or({})` 当成功返回 ⇒ 父节点的 `continue_on_fail` 与下游对「子图整段失败」完全无感。
    四档分支若走这条路，一档子图失败就会落回一个**空对象**，界面按「该档无结论」渲染 —— 这是

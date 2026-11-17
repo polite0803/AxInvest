@@ -256,6 +256,10 @@ pub struct ExecutionState {
     pub credential_manager: Option<axagent_harness::SharedCredentialService>,
     /// 数据库查询服务（可选，None = 不支持 DatabaseQuery 节点）。
     /// 执行器通过它执行跨数据库的通用 SQL 查询。
+    /// P6.0-⑥ 批 D：**契约与宿主实现早已齐备**（harness `DatabaseQueryService` +
+    /// 宿主 `SqlxDatabaseQueryService`），但本字段此前**零注入点** ⇒ 恒 None ⇒
+    /// databaseQuery 节点恒报 `DATABASE_SERVICE_UNAVAILABLE`（死接缝）；
+    /// 同批由 WorkEngine setter + 注入链 + init 装配补上，节点才真正可达。
     #[serde(skip, default)]
     pub database_query_service: Option<Arc<dyn axagent_harness::DatabaseQueryService>>,
     /// 工具注册表（可选，设置后 tool_executor 优先通过 ToolRegistry.execute_tool() 执行工具）
@@ -269,6 +273,11 @@ pub struct ExecutionState {
     /// DOCUMENT_PARSER_NOT_INJECTED）。P6.0-⑥：解析实现归 document-parser crate。
     #[serde(skip, default)]
     pub document_parser: Option<Arc<dyn axagent_harness::DocumentParser>>,
+    /// 知识库文本检索接缝（可选，None = vectorRetrieve 节点报
+    /// VECTOR_SEARCH_SEAM_NOT_INJECTED）。P6.0-⑥ 批 D：embedding 与向量库都在
+    /// 实现层，执行器只传「知识库 id + 查询文本 + top_k + 阈值」。
+    #[serde(skip, default)]
+    pub vector_search: Option<Arc<dyn axagent_harness::VectorSearchSeam>>,
     /// partial_result 流式事件广播通道。LoopExecutor 在每次迭代完成后 send。
     /// 接收端由 WorkEngine.subscribe_partial_results 暴露给外部。
     #[serde(skip, default)]
@@ -350,6 +359,7 @@ impl ExecutionState {
             tool_registry: None,
             notification_sink: None,
             document_parser: None,
+            vector_search: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(
@@ -394,6 +404,7 @@ impl ExecutionState {
             tool_registry: None,
             notification_sink: None,
             document_parser: None,
+            vector_search: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(

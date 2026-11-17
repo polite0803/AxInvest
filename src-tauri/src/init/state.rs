@@ -767,6 +767,11 @@ pub async fn create_app_state_with_resource_dir(
         }
     }
 
+    // P6.0-⑥ 批 D: 通用 SQL 查询接缝的实现 —— 必须在 WorkEngine 装配块之前构造
+    // （装配块要把它注入引擎；此前它只在 :1155 附近声明，恒晚于装配块 ⇒ 节点恒不可达）。
+    let database_query_service: Arc<dyn axagent_harness::DatabaseQueryService> =
+        Arc::new(crate::database_query_impl::SqlxDatabaseQueryService);
+
     let work_engine: Arc<axagent_runtime::work_engine::WorkEngine> =
         {
             // 反思 / 进化 / 优化 / 业务规则统一经能力接缝分发（下方注册），
@@ -803,6 +808,19 @@ pub async fn create_app_state_with_resource_dir(
             // （格式分派归 document-parser crate，与 search/tools 同一实现）。
             engine.set_document_parser(std::sync::Arc::new(
                 axagent_document_parser::parser_impl::DefaultDocumentParser,
+            ));
+            // P6.0-⑥ 批 D: 注入通用 SQL 查询接缝 —— databaseQuery 节点此前
+            // 「契约 + 宿主实现齐备但零注入点」⇒ 恒报 DATABASE_SERVICE_UNAVAILABLE。
+            engine.set_database_query_service(database_query_service.clone());
+            // P6.0-⑥ 批 D: 注入知识库检索接缝 —— vectorRetrieve 节点此前恒返回
+            // not_configured 假成功；实现转调既有检索全链（embedding + 向量库 +
+            // 混合检索都在 indexing::search_knowledge，不新造第二套检索）。
+            engine.set_vector_search(std::sync::Arc::new(
+                crate::capability_vector_search::HostVectorSearch::new(
+                    sea_db.clone(),
+                    master_key,
+                    vector_store_arc.clone(),
+                ),
             ));
             // 注：ToolRegistry 暂未注入到 WorkEngine。
             // 原因：local_tool_registry 是 Arc<tokio::sync::Mutex<UnifiedToolRegistry>>，
@@ -1152,8 +1170,6 @@ pub async fn create_app_state_with_resource_dir(
     let credential_manager = Arc::new(axagent_credential::CredentialManager::new(credential_store));
     let session_share_manager: crate::app_state::SessionShareStore =
         Arc::new(TokioRwLock::new(std::collections::HashMap::new()));
-    let database_query_service: Arc<dyn axagent_harness::DatabaseQueryService> =
-        Arc::new(crate::database_query_impl::SqlxDatabaseQueryService);
     #[cfg(not(mobile))]
     let pty_manager = Arc::new(axagent_runtime::pty::PtyManager::new());
     let sandbox_executor_field: SandboxExecutorField = {

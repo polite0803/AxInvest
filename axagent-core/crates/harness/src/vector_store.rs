@@ -53,6 +53,24 @@ pub struct VectorSearchResult {
     pub has_embedding: bool,
 }
 
+/// 知识库文本检索接缝（P6.0-⑥ 批 D：工作流 `vectorRetrieve` 节点的唯一能力出口）。
+///
+/// 与 [`VectorReader`] 的区别：`VectorReader` 收**已向量化的**查询向量（调用方自带
+/// embedding），本 trait 收**原始查询文本**——embedding 与向量库都在实现层，
+/// 调用方（工作流引擎）不接触 embedding 细节。
+#[async_trait::async_trait]
+pub trait VectorSearchSeam: Send + Sync {
+    /// 按查询文本检索知识库分块。
+    /// `min_similarity` = 相关度下限 ∈ [0,1]（None = 不过滤）。
+    async fn search_text(
+        &self,
+        knowledge_base_id: &str,
+        query: &str,
+        top_k: usize,
+        min_similarity: Option<f32>,
+    ) -> Result<Vec<VectorSearchResult>>;
+}
+
 /// Configuration for HNSW (Hierarchical Navigable Small World) index.
 /// HNSW provides faster approximate nearest neighbor search for large collections.
 ///

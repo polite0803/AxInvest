@@ -11,6 +11,8 @@
 
 mod android_utils;
 mod capability_embedding;
+// P6.0-⑥ 批 D：知识库文本检索接缝的宿主实现（vectorRetrieve 节点的真检索出口）。
+mod capability_vector_search;
 mod commands;
 mod context_manager;
 mod database_query_impl;

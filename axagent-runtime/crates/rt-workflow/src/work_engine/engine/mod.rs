@@ -623,6 +623,11 @@ pub struct WorkEngine {
         Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::IncomingWebhookSender>>>>,
     /// 文档解析接缝（可选，P6.0-⑥：document_parser_executor 经此接缝真解析，不再空壳回显）
     document_parser: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::DocumentParser>>>>,
+    /// 通用 SQL 查询接缝（可选，P6.0-⑥ 批 D：databaseQuery 节点此前零注入点 ⇒ 恒失败）
+    database_query_service:
+        Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::DatabaseQueryService>>>>,
+    /// 知识库文本检索接缝（可选，P6.0-⑥ 批 D：vectorRetrieve 节点此前恒返回 not_configured）
+    vector_search: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::VectorSearchSeam>>>>,
     /// per-execution partial_result 广播器。LoopExecutor 通过 ExecutionState.partial_result_tx
     /// 拿到 sender，每次迭代完成时 broadcast 一个 PartialResultEvent。
     /// 外部通过 `subscribe_partial_results(execution_id)` 拿到 Receiver 实时观察进度。
@@ -1004,6 +1009,29 @@ impl WorkEngine {
         self.document_parser.lock().clone()
     }
 
+    /// 注册通用 SQL 查询接缝（可选，P6.0-⑥ 批 D：让 databaseQuery 节点真正可达）
+    pub fn set_database_query_service(
+        &self,
+        service: Arc<dyn axagent_harness::DatabaseQueryService>,
+    ) {
+        *self.database_query_service.lock() = Some(service);
+    }
+
+    /// 取出当前注册的 SQL 查询接缝（用于在执行节点时注入到 ExecutionState）
+    fn database_query_service(&self) -> Option<Arc<dyn axagent_harness::DatabaseQueryService>> {
+        self.database_query_service.lock().clone()
+    }
+
+    /// 注册知识库文本检索接缝（可选，P6.0-⑥ 批 D：让 vectorRetrieve 节点真正可达）
+    pub fn set_vector_search(&self, seam: Arc<dyn axagent_harness::VectorSearchSeam>) {
+        *self.vector_search.lock() = Some(seam);
+    }
+
+    /// 取出当前注册的知识库检索接缝（用于在执行节点时注入到 ExecutionState）
+    fn vector_search(&self) -> Option<Arc<dyn axagent_harness::VectorSearchSeam>> {
+        self.vector_search.lock().clone()
+    }
+
     /// 取出当前注册的工具注册表（用于在执行节点时注入到 ExecutionState）
     fn tool_registry(&self) -> Option<Arc<dyn axagent_harness::ToolRegistry>> {
         self.tool_registry.lock().clone()
@@ -1081,6 +1109,8 @@ impl WorkEngine {
             tool_registry: Arc::new(parking_lot::Mutex::new(None)),
             notification_sink: Arc::new(parking_lot::Mutex::new(None)),
             document_parser: Arc::new(parking_lot::Mutex::new(None)),
+            database_query_service: Arc::new(parking_lot::Mutex::new(None)),
+            vector_search: Arc::new(parking_lot::Mutex::new(None)),
             loop_partial_txs: Arc::new(Mutex::new(HashMap::new())),
             loop_interrupt_signals: Arc::new(Mutex::new(HashMap::new())),
             in_flight_nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -3520,6 +3550,10 @@ impl WorkEngine {
                 exec_ctx.notification_sink = self.notification_sink();
                 // 注入文档解析接缝（可选），documentParser 文件路径分支走真解析
                 exec_ctx.document_parser = self.document_parser();
+                // 注入通用 SQL 查询接缝（可选），databaseQuery 节点走 trait 路径
+                exec_ctx.database_query_service = self.database_query_service();
+                // 注入知识库检索接缝（可选），vectorRetrieve 节点走 trait 路径
+                exec_ctx.vector_search = self.vector_search();
                 // 注入真实工作流 execution_id，供容器执行器（debate/swarm）内部
                 // build_debate_body_dispatch 正确查找 execution_workflows。
                 // per-node exec_ctx.execution_id 是随机 UUID（format!("node_{uuid})），
@@ -4790,6 +4824,8 @@ impl WorkEngine {
                         exec_ctx.tool_registry = self.tool_registry();
                         exec_ctx.notification_sink = self.notification_sink();
                         exec_ctx.document_parser = self.document_parser();
+                        exec_ctx.database_query_service = self.database_query_service();
+                        exec_ctx.vector_search = self.vector_search();
                         exec_ctx.cancel_token = Some(cancel_token.clone());
                         exec_ctx.dry_run = options.dry_run;
                         exec_ctx.business_rule_engine = seam_business_rule();
@@ -5270,6 +5306,8 @@ impl WorkEngine {
         state.tool_registry = self.tool_registry();
         state.notification_sink = self.notification_sink();
         state.document_parser = self.document_parser();
+        state.database_query_service = self.database_query_service();
+        state.vector_search = self.vector_search();
         let input_params = serde_json::to_string(&input).ok();
         workflow_execution_repository()
             .create_workflow_execution(&execution_id, workflow_id, input_params.as_deref())

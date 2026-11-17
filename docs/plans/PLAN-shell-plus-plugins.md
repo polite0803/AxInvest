@@ -371,7 +371,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 
 1. **数据模型是编译期封闭 enum，穿透全域（最难，且不是「引用了一个 crate」）**
  `axagent-core/crates/harness/src/workflow_types.rs:1363-1366` `pub enum WorkflowNode`（`#[serde(tag = "type")]`，**32** 个 variant；旧记 33，2026-11-01 实点 `:1366-1418` 订正）
- + **`axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:233`** 的 `node_type_name` 穷举 match（⚠ 该文件在 **rt-workflow**，不在 harness）+ `harness/src/workflow_node_deserializer.rs` 类型字符串表。
+ + **`axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs`** 的 `node_type_name` 穷举 match（⚠ 该文件在 **rt-workflow**，不在 harness；阶段3 已收口，行号不再适用）+ `harness/src/workflow_node_deserializer.rs` 类型字符串表。
  ⇒ 种子数据、OPC、进化、认知路由全域都**按这个 enum 构造 DAG**（例 `stock_analysis_setup/seed_stock_analysis.rs:1450`）。
  **新增一个节点类型要改 8 处**（enum / match / deserializer / executor 新文件 / `rt-workflow/src/work_engine/dispatcher.rs:80-109` 注册 / `engine/schema_validator.rs:38-43` / 前端 `WorkflowEditor.tsx:110-146` nodeTypes 表 / 前端 PropertyPanels+i18n），
  而 `capability_registry.rs` 的 15 条接缝与 `worker.rs:110` 的 13 条远程接缝**都不含节点执行器**。⇒ L2 机制对节点类型零覆盖。
@@ -10233,7 +10233,7 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 
 **① `WorkflowNode` 开放化**：§6.1 原记「新增一个节点类型要改 8 处」。实测 8 类位点全部仍存在，且部分位点内含双份表：
 - enum `WorkflowNode` **32 variant**（`axagent-core/crates/harness/src/workflow_types.rs:1366-1418`）；
-- 穷举 match `node_type_name` 32 臂（`axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:233-266`，同文件 `:271` `node_kind` 又一份）；
+- 穷举 match `node_type_name` 32 臂（`axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs` 的 `node_type_name` / `node_kind` 两段（阶段3 已收口到注册表，行号不再适用））；
 - deserializer 32 臂 + 32 名 `unknown_variant` 白名单双表（`axagent-core/crates/harness/src/workflow_node_deserializer.rs:31-99`）；
 - dispatcher `init_builtin` 27 个 register + agent 共享 Arc 段（`axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:80-110`、`axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs:1214-1230`）；
 - `axagent-runtime/crates/rt-workflow/src/work_engine/engine/schema_validator.rs:43-64`（9 契约 + 兜底）；

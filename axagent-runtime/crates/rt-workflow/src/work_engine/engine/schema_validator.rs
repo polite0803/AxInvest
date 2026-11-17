@@ -100,42 +100,12 @@ impl SchemaValidator {
 
 // ── 内部工具函数 ──
 
-/// 获取节点类型字符串
+/// 获取节点类型字符串（阶段3：32 臂 match 收口到节点契约注册表，与
+/// `node_type_name` 共用同一权威；未注册即 panic，不静默降级）。
 fn get_node_type(node: &WorkflowNode) -> &'static str {
-    match node {
-        WorkflowNode::Trigger(_) => "trigger",
-        WorkflowNode::Agent(_) => "agent",
-        WorkflowNode::Llm(_) => "llm",
-        WorkflowNode::Condition(_) => "condition",
-        WorkflowNode::Parallel(_) => "parallel",
-        WorkflowNode::Loop(_) => "loop",
-        WorkflowNode::Merge(_) => "merge",
-        WorkflowNode::Delay(_) => "delay",
-        WorkflowNode::Validation(_) => "validation",
-        WorkflowNode::SubWorkflow(_) => "subWorkflow",
-        WorkflowNode::WorkflowRef(_) => "workflowRef",
-        WorkflowNode::DocumentParser(_) => "documentParser",
-        WorkflowNode::VectorRetrieve(_) => "vectorRetrieve",
-        WorkflowNode::End(_) => "end",
-        WorkflowNode::HttpRequest(_) => "httpRequest",
-        WorkflowNode::Switch(_) => "switch",
-        WorkflowNode::DatabaseQuery(_) => "databaseQuery",
-        WorkflowNode::Notification(_) => "notification",
-        WorkflowNode::Approval(_) => "approval",
-        WorkflowNode::FileOperation(_) => "fileOperation",
-        WorkflowNode::DataTransformer(_) => "dataTransformer",
-        WorkflowNode::WebhookSend(_) => "webhookSend",
-        WorkflowNode::Logging(_) => "logging",
-        WorkflowNode::LlmClassifier(_) => "llmClassifier",
-        WorkflowNode::Aggregator(_) => "aggregator",
-        WorkflowNode::Email(_) => "email",
-        WorkflowNode::Debate(_) => "debate",
-        WorkflowNode::Swarm(_) => "swarm",
-        WorkflowNode::MultiAgent(_) => "multiAgent",
-        WorkflowNode::Storage(_) => "storage",
-        WorkflowNode::Tool(_) => "tool",
-        WorkflowNode::Code(_) => "code",
-    }
+    axagent_harness::workflow_node_descriptors::descriptor_for_node(node)
+        .expect("WorkflowNode 类型必须已注册 descriptor（阶段3 不应静默降级）")
+        .type_name()
 }
 
 /// 针对 Schema 格式校验数据

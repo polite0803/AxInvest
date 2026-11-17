@@ -362,15 +362,19 @@ mod tests {
         ctx.kv_store = Some(writes.clone());
         let out = StorageExecutor.execute(&node_with("sqlite", "upsert"), &ctx).await.unwrap();
         assert_eq!(out.output["status"], "sqlite_upsert");
-        let calls = writes.kv.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        let (collection, key, content, mode) = &calls[0];
-        assert_eq!(collection, "/data/coll.json");
-        // key_var 未配置 ⇒ 回退到 collection 作为键
-        assert_eq!(key, "/data/coll.json");
-        assert_eq!(mode, "upsert");
-        assert_eq!(serde_json::from_str::<serde_json::Value>(content).unwrap(), json!({"a": 1}));
-        drop(calls);
+        {
+            let calls = writes.kv.lock().unwrap();
+            assert_eq!(calls.len(), 1);
+            let (collection, key, content, mode) = &calls[0];
+            assert_eq!(collection, "/data/coll.json");
+            // key_var 未配置 ⇒ 回退到 collection 作为键
+            assert_eq!(key, "/data/coll.json");
+            assert_eq!(mode, "upsert");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(content).unwrap(),
+                json!({"a": 1})
+            );
+        }
         // 关键：无接缝时不再假成功
         let bare = ctx_with(None);
         assert!(StorageExecutor.execute(&node_with("sqlite", "upsert"), &bare).await.is_err());

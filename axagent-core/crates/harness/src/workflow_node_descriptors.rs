@@ -5,9 +5,11 @@
 //! 由宏批量生成，字段口径与 `AUDIT-workflow-node-open-baseline-2026-11-17.md` 一致。
 //! 阶段1 只注册、不替换 enum；本文件提供 descriptor 供共存期与后续迁移使用。
 
+use std::sync::{Arc, OnceLock};
+
 use serde_json::Value;
 
-use crate::workflow_node_dyn::WorkflowNodeDescriptor;
+use crate::workflow_node_dyn::{NodeDescriptorRegistry, WorkflowNodeDescriptor};
 use crate::workflow_types::{NodeKind, *};
 
 /// 生成内置节点 descriptor：config 强类型解析 + 分类 + output_var 提取。
@@ -200,6 +202,33 @@ pub fn register_builtin_descriptors(registry: &crate::workflow_node_dyn::NodeDes
     registry.register(StorageDescriptor);
     registry.register(ToolDescriptor);
     registry.register(CodeDescriptor);
+}
+
+/// 全局内置描述符注册表（懒初始化一次）。
+///
+/// 阶段2 供 deserializer 判未知类型；阶段3 供 rt-workflow 三处 match 查表。
+/// 这是「类型字符串 → 契约」的单一权威，新增内置节点只需在此多注册一条。
+pub fn builtin_descriptors() -> &'static NodeDescriptorRegistry {
+    static REGISTRY: OnceLock<NodeDescriptorRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let registry = NodeDescriptorRegistry::new();
+        register_builtin_descriptors(&registry);
+        registry
+    })
+}
+
+/// 按类型串查内置契约（阶段3 的三处 match 收口入口）。
+pub fn builtin_descriptor_for(type_name: &str) -> Option<Arc<dyn WorkflowNodeDescriptor>> {
+    builtin_descriptors().get(type_name)
+}
+
+/// 从 `WorkflowNode` 的序列化标签查内置契约（共存期桥接）。
+///
+/// enum 仍是权威时，三处 match 需要「node → type 串 → descriptor」；
+/// 阶段6 删除 enum 后，调用方直接持有 `WorkflowNodeDyn.node_type` 即可。
+pub fn descriptor_for_node(node: &WorkflowNode) -> Option<Arc<dyn WorkflowNodeDescriptor>> {
+    let value = serde_json::to_value(node).ok()?;
+    builtin_descriptor_for(value.get("type")?.as_str()?)
 }
 
 #[cfg(test)]

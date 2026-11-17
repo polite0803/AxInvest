@@ -1,6 +1,6 @@
 # PROPOSAL：WorkflowNode 开放化 —— 从封闭 enum 到动态注册模型（P6.0-①）
 
-> 状态：in-progress（阶段0/1/2 完成，阶段3 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
+> 状态：in-progress（阶段0/1/2/3 完成，阶段4 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
 >
 > 定位：P6.0 六项前置中的第 ① 项，是 P6.3（工作流编辑器迁出）的前置；对 P6.1 股票线改动面为 0
 > 估工：12–18 人日（沿用 PLAN §6.1 口径，本方案不改估工数，只把它拆成可执行阶段）
@@ -188,8 +188,16 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 - 回退：git revert 本阶段提交。
 
 ### 阶段 3 —— 收口 rt-workflow 侧（node_type_name / node_kind / schema_validator）（2–3 人日）
-- 三处 match 改为从 descriptor 读 type_name / kind / schema；
-- 验证：dispatcher 能跑通现有工作流（用现有 e2e / 单测）；定点 `cargo check -p axagent-rt-workflow`；
+- 三处 32 臂 match 改为从 `NodeDescriptorRegistry` 查表：harness 新增
+  `builtin_descriptors()` / `builtin_descriptor_for()` / `descriptor_for_node(node)` 公共入口，
+  deserializer 与 rt-workflow 共用同一张注册表（阶段2 已抽出）；
+- `config_schema` 部分**未动**：`schema_validator` 的 9 份契约 + 兜底是独立校验表，
+  与 descriptor 的 `config_schema()` 尚未并轨，留到阶段4（工厂化时一并接）；
+- 未注册类型在此 panic 而非静默降级（enum 变体全覆盖，正常路径不可达）；
+- 验证：`cargo check` / `cargo clippy --all-targets -- -D warnings` /
+  `cargo test -p axagent-rt-workflow --lib schema_validator`（10 passed）/
+  新增 `descriptor_bridge` 回归测试（1 passed）；定点 check 全绿；
+- 顺带修复任务①测试遗留的 `await_holding_lock`：storage 测试把 MutexGuard 收进作用域；
 - 回退：git revert。
 
 ### 阶段 4 —— dispatcher 自动注册 + executor 工厂化（3–4 人日）

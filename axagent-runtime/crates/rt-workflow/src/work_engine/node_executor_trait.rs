@@ -230,75 +230,40 @@ pub trait NodeExecutorTrait: Send + Sync {
     ) -> Result<NodeOutput, NodeError>;
 }
 
+/// 阶段3：两处 32 臂 match 收口到节点契约注册表。
+/// 共存期 enum 仍是权威，但 descriptor 的 type_name/kind 与原 match 逐字同集
+/// （阶段2 测试 `registry_and_match_arms_cover_same_types` 已锁），故查表等价。
+/// 未注册类型在此 panic 而非静默降级——enum 变体全覆盖，正常路径不可达。
+fn descriptor_of(node: &WorkflowNode) -> std::sync::Arc<dyn axagent_harness::workflow_node_dyn::WorkflowNodeDescriptor> {
+    axagent_harness::workflow_node_descriptors::descriptor_for_node(node)
+        .expect("WorkflowNode 类型必须已注册 descriptor（阶段3 不应静默降级）")
+}
+
 pub fn node_type_name(node: &WorkflowNode) -> &'static str {
-    match node {
-        WorkflowNode::Trigger(_) => "trigger",
-        WorkflowNode::Agent(_) => "agent",
-        WorkflowNode::Llm(_) => "llm",
-        WorkflowNode::Condition(_) => "condition",
-        WorkflowNode::Parallel(_) => "parallel",
-        WorkflowNode::Loop(_) => "loop",
-        WorkflowNode::Merge(_) => "merge",
-        WorkflowNode::Delay(_) => "delay",
-        WorkflowNode::SubWorkflow(_) => "subWorkflow",
-        WorkflowNode::DocumentParser(_) => "documentParser",
-        WorkflowNode::VectorRetrieve(_) => "vectorRetrieve",
-        WorkflowNode::End(_) => "end",
-        WorkflowNode::Tool(_) => "tool",
-        WorkflowNode::Code(_) => "code",
-        WorkflowNode::HttpRequest(_) => "httpRequest",
-        WorkflowNode::Validation(_) => "validation",
-        WorkflowNode::Switch(_) => "switch",
-        WorkflowNode::DatabaseQuery(_) => "databaseQuery",
-        WorkflowNode::Notification(_) => "notification",
-        WorkflowNode::Approval(_) => "approval",
-        WorkflowNode::FileOperation(_) => "fileOperation",
-        WorkflowNode::DataTransformer(_) => "dataTransformer",
-        WorkflowNode::WebhookSend(_) => "webhookSend",
-        WorkflowNode::Logging(_) => "logging",
-        WorkflowNode::LlmClassifier(_) => "llmClassifier",
-        WorkflowNode::Aggregator(_) => "aggregator",
-        WorkflowNode::Email(_) => "email",
-        WorkflowNode::Debate(_) => "debate",
-        WorkflowNode::Swarm(_) => "swarm",
-        WorkflowNode::MultiAgent(_) => "multiAgent",
-        WorkflowNode::Storage(_) => "storage",
-        WorkflowNode::WorkflowRef(_) => "workflowRef",
-    }
+    descriptor_of(node).type_name()
 }
 
 /// 获取节点的高级分类（NodeKind）
 pub fn node_kind(node: &WorkflowNode) -> NodeKind {
-    match node {
-        WorkflowNode::Trigger(_) => NodeKind::Input,
-        WorkflowNode::End(_) => NodeKind::Output,
-        WorkflowNode::Tool(_)
-        | WorkflowNode::Code(_)
-        | WorkflowNode::HttpRequest(_)
-        | WorkflowNode::FileOperation(_)
-        | WorkflowNode::WebhookSend(_)
-        | WorkflowNode::Logging(_)
-        | WorkflowNode::Notification(_)
-        | WorkflowNode::DatabaseQuery(_)
-        | WorkflowNode::DocumentParser(_)
-        | WorkflowNode::DataTransformer(_)
-        | WorkflowNode::Email(_)
-        | WorkflowNode::Validation(_)
-        | WorkflowNode::Delay(_)
-        | WorkflowNode::SubWorkflow(_)
-        | WorkflowNode::WorkflowRef(_)
-        | WorkflowNode::VectorRetrieve(_)
-        | WorkflowNode::LlmClassifier(_)
-        | WorkflowNode::Approval(_)
-        | WorkflowNode::Aggregator(_) => NodeKind::Tool,
-        WorkflowNode::Agent(_) | WorkflowNode::Llm(_) => NodeKind::Agent,
-        WorkflowNode::Condition(_) | WorkflowNode::Switch(_) => NodeKind::Condition,
-        WorkflowNode::Loop(_) => NodeKind::Loop,
-        WorkflowNode::Parallel(_)
-        | WorkflowNode::Merge(_)
-        | WorkflowNode::Debate(_)
-        | WorkflowNode::Swarm(_)
-        | WorkflowNode::MultiAgent(_) => NodeKind::Container,
-        WorkflowNode::Storage(_) => NodeKind::Storage,
+    descriptor_of(node).kind()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 阶段3 桥接回归：从 enum 序列化标签查 descriptor，返回值必须与旧 match 一致。
+    #[test]
+    fn descriptor_bridge_matches_legacy_type_and_kind() {
+        let node: WorkflowNode = serde_json::from_value(serde_json::json!({
+            "type": "storage", "id": "s1", "title": "存储",
+            "position": {"x": 0, "y": 0},
+            "retry": {"enabled": false, "maxRetries": 0, "backoffType": "Fixed", "baseDelayMs": 1000, "maxDelayMs": 1000},
+            "enabled": true,
+            "config": {"backend": "sqlite", "operation": "upsert", "input_var": "v", "collection": "c"}
+        }))
+        .unwrap();
+        assert_eq!(node_type_name(&node), "storage");
+        assert_eq!(node_kind(&node), NodeKind::Storage);
     }
 }

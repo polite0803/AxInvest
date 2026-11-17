@@ -6743,7 +6743,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // v140 前本档风险节点 `cls-risk-level-<档>` 曾**留在父图**，理由是它有四个父侧消费者
     //   （下面 `portfolio-mgr` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射，
     //   消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`），而子执行只把父扇出节点的
-    //   `node_id` 与 `output_var` **双键**写回父池（`work_engine/engine/mod.rs:1791-1796`）
+    //   `node_id` 与 `output_var` **双键**写回父池（`work_engine/engine/mod.rs:1850-1857`）
     //   ⇒ 直接搬走会让那四条映射指向不存在的路径 ⇒ 按档风险收紧整条静默退役。
     //   v140 的解法：分支脚本把读到的风险档**回写进决策行**（`riskCategory`），主链读端随之
     //   改指 `pm-h-<档>.result.riskCategory` ⇒ 双键写回把它带回父池，偏离收口（详见该文件头部）。
@@ -7032,7 +7032,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             tool_name: None,
             execute_directly: true,
             // CodeNode 的输出按 `<节点 id>.result` 读，与 `("pm_result", "portfolio-mgr.result")` 同形
-            //（引擎同时按 node_id 与 output_var 写键，见 `crates/rt-workflow/src/work_engine/engine/mod.rs:1791-1796`）。
+            //（引擎同时按 node_id 与 output_var 写键，见 `crates/rt-workflow/src/work_engine/engine/mod.rs:1850-1857`）。
             input_mapping: [
                 ("r_ultra_short", "pm-h-ultra-short.result"),
                 ("r_short", "pm-h-short.result"),

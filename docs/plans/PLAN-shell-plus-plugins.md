@@ -9843,7 +9843,7 @@ harness trait `latest_analyses_for_stocks`（默认实现报错 + `default_impls
 - **harness 默认必错**：`axagent-core/crates/harness/src/stock_analysis.rs:332` / `:344` / `:357`；stub 测试 +3（`:950` 起注释）。
 - **宿主 core**：`src-tauri/src/commands/mover_recall_analysis.rs` 两条读 core（`:439` / `:468`）、`launch` 开 `pub(crate)`（`:377`）、`start_for_scheduler`（`:362`）与调度器共用不变；三条 `#[tauri::command]` wrapper 与 `#[agent_command]` 标注删除（`tauri::State` / `AppState` / `agent_command` 三导入随之零引用同批删除）。`mover_recall_analysis` 模块 `#[tauri::command]` 归零 ⇒ 审计域模块数 16→15。
 - **宿主 service（三 impl）**：`mover_recall_analysis_batch` 在 `src-tauri/src/init/stock_analysis_service.rs:788`、`mover_recall_analysis_batches` 在 `:842`、`run_mover_recall_analysis` 在 `:806`。
-- **装配说明**：`HostStockAnalysis` 新增两个字段 —— `time_travel_batch_lock`（与 `AppState` **同一把** as-of 互斥锁，`init/state.rs:1805` 块外先落变量）与 `work_engine`（批次执行链走工作流引擎），`state.rs` 装配同批传入。
+- **装配说明**：`HostStockAnalysis` 新增两个字段 —— `time_travel_batch_lock`（与 `AppState` **同一把** as-of 互斥锁，`init/state.rs:1876-1878` 块外先落变量）与 `work_engine`（批次执行链走工作流引擎），`state.rs` 装配同批传入。
 - **启动钩子（接线）**：`src-tauri/src/init/services.rs:88`。
 - **启动钩子（定义）**：`start_mover_recall_batch_reclaim` 在 `src-tauri/src/init/services.rs:4708`（5s 延迟，与 `start_stale_analysis_reclaim` 同因）。
 - **worker 分派臂**：`axagent-plugins/crates/plugins/src/worker.rs:4633` / `:4647` / `:4661` 三臂；权限表 `:559` `run_mover_recall_analysis` 落 `Write`（两读不登记）；新测试 `stock_analysis_338_mover_recall_analysis_permissions`（`:15098`）。
@@ -10403,8 +10403,8 @@ mod / llm_resolve / var_filter 为辅助模块不计）。
 
 | 类 | 执行器 | 接缝/问题 |
 |---|---|---|
-| **已指到接缝（9）** | agent / llm / llm_classifier / switch（`ProviderRegistry`）、tool（`ToolRegistry`，engine/mod.rs:5237 真注入）、trigger（`TriggerManager`）、debate / swarm / multi_agent（`callbacks.debate_body_dispatch` 回调，内部走 dispatcher） | ✅ |
-| **死接缝（1）** | database_query：`ExecutionState.database_query_service` 字段在（execution_state.rs:260）但**全仓零赋值点**——`start_workflow`（engine/mod.rs:5235-5237）只注入 tool_registry 与 business_rule_engine ⇒ 恒 None ⇒ executor 恒报 `database_query_service not injected`。**形态级红灯**：与 vector_retrieve 同族的「看着存在但其实到不了」 | ⚠ 待修（接入 wiring） |
+| **已指到接缝（9）** | tool（`ToolRegistry`，engine/mod.rs:2569；start_workflow 真注入）、agent / llm / llm_classifier / switch（`ProviderRegistry`）、trigger（`TriggerManager`）、debate / swarm / multi_agent（`callbacks.debate_body_dispatch` 回调，内部走 dispatcher） | ✅ |
+| **死接缝（1）** | database_query：`ExecutionState.database_query_service` 字段在（execution_state.rs:260）但**全仓零赋值点**——`start_workflow`（engine/mod.rs:5244-5255）注入 tool_registry、business_rule_engine 与 notification_sink（#355 起三样）但不含 database_query_service ⇒ 恒 None ⇒ executor 恒报 `database_query_service not injected`。**形态级红灯**：与 vector_retrieve 同族的「看着存在但其实到不了」 | ⚠ 待修（接入 wiring） |
 | **死执行器（1）** | vector_retrieve：callback（`set_vector_retrieve_callback`）已删除，节点恒返回「not configured」（vector_retrieve_executor.rs:6,58） | ⚠ 待裁（接缝化或退役） |
 | **引擎自身职责（13）** | aggregator / condition / delay / end / fallback / loop / merge / parallel / validation / data_transformer / logging / approval（挂起+表持久化）/ code（rhai 引擎运行时——脚本执行是引擎能力本身，非外域能力） | ✅ 无需外接缝 |
 | **违规·自带领域 IO（7）** | email（lettre SMTP 173 行）、http_request（reqwest 263 行）、webhook_send（reqwest 133 行）、**notification（reqwest + 四平台 payload 构造 164 行，§964 点名）**、file_operation（std::fs 73 行）、storage（std::fs 151 行）、**document_parser（空壳假解析 58 行，§964 点名）** | ✖ 本单元主体 |

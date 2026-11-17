@@ -1,0 +1,249 @@
+{
+  "note": "P6.2 域包插件边界底册。id/domain/capabilities 从 manifest 抽取；page 从 src/pages/opc/routes.tsx 当前声明转录。新增或改名必须同批改 manifest、routes 与本底册。",
+  "version": 1,
+  "packs": [
+    {
+      "id": "accounting",
+      "domain": "finance",
+      "pluginId": "plugin-opc-accounting",
+      "page": {
+        "id": "domain:finance-accounting",
+        "path": "/opc/domain/accounting"
+      },
+      "capabilities": [
+        "tool:OpcListInvoices",
+        "tool:OpcCreateInvoice",
+        "tool:OpcGetFinancialReport",
+        "tool:OpcListCustomers",
+        "tool:OpcRecordKpi",
+        "tool:OpcTransitionInvoice"
+      ],
+      "assetDir": "config/opc/domain_packs/accounting"
+    },
+    {
+      "id": "ai_research",
+      "domain": "data_analysis",
+      "pluginId": "plugin-opc-ai-research",
+      "page": {
+        "id": "domain:data-ai-research",
+        "path": "/opc/domain/ai-research"
+      },
+      "capabilities": [
+        "tool:OpcListProjects",
+        "tool:OpcSearchWiki",
+        "tool:WebSearch",
+        "tool:FileRead",
+        "tool:Bash",
+        "tool:FileWrite"
+      ],
+      "assetDir": "config/opc/domain_packs/ai_research"
+    },
+    {
+      "id": "consulting",
+      "domain": "data_analysis",
+      "pluginId": "plugin-opc-consulting",
+      "page": {
+        "id": "domain:automation-consulting",
+        "path": "/opc/domain/consulting"
+      },
+      "capabilities": [
+        "tool:OpcSearchWiki",
+        "tool:WebSearch",
+        "tool:OpcGetDashboard",
+        "tool:OpcCreateContentAsset",
+        "tool:FileWrite"
+      ],
+      "assetDir": "config/opc/domain_packs/consulting"
+    },
+    {
+      "id": "content_media",
+      "domain": "content_creation",
+      "pluginId": "plugin-opc-content-media",
+      "page": {
+        "id": "domain:content-media",
+        "path": "/opc/domain/content-media"
+      },
+      "capabilities": [
+        "tool:OpcListBlogPosts",
+        "tool:WebSearch",
+        "tool:OpcCreateBlogPost",
+        "tool:FileWrite",
+        "tool:FileRead",
+        "tool:OpcCreatePublishSchedule",
+        "tool:OpcListPublishSchedules",
+        "tool:OpcCreateContentAsset",
+        "tool:OpcListContentAssets",
+        "tool:OpcUpdateContentAsset",
+        "tool:OpcDeleteContentAsset",
+        "tool:OpcCancelPublishSchedule",
+        "tool:OpcProcessDueSchedules"
+      ],
+      "assetDir": "config/opc/domain_packs/content_media"
+    },
+    {
+      "id": "design",
+      "domain": "ai_media",
+      "pluginId": "plugin-opc-design",
+      "page": {
+        "id": "domain:content-design",
+        "path": "/opc/domain/design"
+      },
+      "capabilities": [
+        "tool:WebSearch",
+        "tool:FileWrite",
+        "tool:OpcCreateContentAsset",
+        "tool:OpcCreateLandingPage"
+      ],
+      "assetDir": "config/opc/domain_packs/design"
+    },
+    {
+      "id": "ecommerce",
+      "domain": "content_creation",
+      "pluginId": "plugin-opc-ecommerce",
+      "page": {
+        "id": "domain:automation-ecommerce",
+        "path": "/opc/domain/ecommerce"
+      },
+      "capabilities": [
+        "tool:WebSearch",
+        "tool:OpcSearchWiki",
+        "tool:OpcListCustomers",
+        "tool:OpcCreateContentAsset",
+        "tool:OpcCreateLandingPage"
+      ],
+      "assetDir": "config/opc/domain_packs/ecommerce"
+    },
+    {
+      "id": "education",
+      "domain": "content_creation",
+      "pluginId": "plugin-opc-education",
+      "page": {
+        "id": "domain:content-education",
+        "path": "/opc/domain/education"
+      },
+      "capabilities": [
+        "tool:WebSearch",
+        "tool:OpcCreateContentAsset",
+        "tool:OpcCreateLandingPage",
+        "tool:FileWrite"
+      ],
+      "assetDir": "config/opc/domain_packs/education"
+    },
+    {
+      "id": "finance_invest",
+      "domain": "finance",
+      "pluginId": "plugin-opc-finance-invest",
+      "page": {
+        "id": "domain:finance-analysis",
+        "path": "/opc/domain/finance-invest"
+      },
+      "capabilities": [
+        "tool:OpcGetDashboard",
+        "tool:OpcListKpis",
+        "tool:OpcSearchWiki",
+        "tool:OpcListProjects",
+        "tool:OpcGetFinancialReport",
+        "tool:OpcRecordKpi"
+      ],
+      "assetDir": "config/opc/domain_packs/finance_invest"
+    },
+    {
+      "id": "game_dev",
+      "domain": "ai_media",
+      "pluginId": "plugin-opc-game-dev",
+      "page": {
+        "id": "domain:ai-media-game",
+        "path": "/opc/domain/game-dev"
+      },
+      "capabilities": [
+        "tool:WebSearch",
+        "tool:FileWrite",
+        "tool:FileRead"
+      ],
+      "assetDir": "config/opc/domain_packs/game_dev"
+    },
+    {
+      "id": "geospatial",
+      "domain": "data_analysis",
+      "pluginId": "plugin-opc-geospatial",
+      "page": {
+        "id": "domain:data-geospatial",
+        "path": "/opc/domain/geospatial"
+      },
+      "capabilities": [
+        "tool:OpcSearchWiki",
+        "tool:WebSearch",
+        "tool:OpcCreateContentAsset",
+        "tool:OpcCreateProject",
+        "tool:FileWrite"
+      ],
+      "assetDir": "config/opc/domain_packs/geospatial"
+    },
+    {
+      "id": "project_management",
+      "domain": "devops",
+      "pluginId": "plugin-opc-project-management",
+      "page": {
+        "id": "domain:automation-projects",
+        "path": "/opc/domain/project-management"
+      },
+      "capabilities": [
+        "tool:OpcCreateProject",
+        "tool:OpcAddMilestone",
+        "tool:OpcListProjects"
+      ],
+      "assetDir": "config/opc/domain_packs/project_management"
+    },
+    {
+      "id": "sales_growth",
+      "domain": "content_creation",
+      "pluginId": "plugin-opc-sales-growth",
+      "page": {
+        "id": "domain:automation-sales",
+        "path": "/opc/domain/sales-growth"
+      },
+      "capabilities": [
+        "tool:OpcCreateCustomer",
+        "tool:OpcListCustomers",
+        "tool:OpcCreateLandingPage",
+        "tool:WebSearch",
+        "tool:OpcCreatePublishSchedule",
+        "tool:OpcListLandingPages",
+        "tool:OpcListContacts"
+      ],
+      "assetDir": "config/opc/domain_packs/sales_growth"
+    },
+    {
+      "id": "security",
+      "domain": "devops",
+      "pluginId": "plugin-opc-security",
+      "page": {
+        "id": "domain:devops-security",
+        "path": "/opc/domain/security"
+      },
+      "capabilities": [
+        "tool:OpcSearchWiki",
+        "tool:WebSearch",
+        "tool:FileWrite"
+      ],
+      "assetDir": "config/opc/domain_packs/security"
+    },
+    {
+      "id": "software_dev",
+      "domain": "devops",
+      "pluginId": "plugin-opc-software-dev",
+      "page": {
+        "id": "domain:devops-software",
+        "path": "/opc/domain/software-dev"
+      },
+      "capabilities": [
+        "tool:OpcListProjects",
+        "tool:OpcCreateProject",
+        "tool:FileWrite",
+        "tool:WebSearch",
+        "tool:OpcAddMilestone"
+      ],
+      "assetDir": "config/opc/domain_packs/software_dev"
+    }
+  ]
+}

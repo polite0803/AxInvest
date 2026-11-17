@@ -1,6 +1,6 @@
 # PROPOSAL：WorkflowNode 开放化 —— 从封闭 enum 到动态注册模型（P6.0-①）
 
-> 状态：in-progress（阶段0/1/2/3 完成，阶段4 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
+> 状态：in-progress（阶段0/1/2/3/4 完成，阶段5 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
 >
 > 定位：P6.0 六项前置中的第 ① 项，是 P6.3（工作流编辑器迁出）的前置；对 P6.1 股票线改动面为 0
 > 估工：12–18 人日（沿用 PLAN §6.1 口径，本方案不改估工数，只把它拆成可执行阶段）
@@ -204,9 +204,21 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 - 回退：git revert。
 
 ### 阶段 4 —— dispatcher 自动注册 + executor 工厂化（3–4 人日）
-- `init_builtin` 改为遍历注册表；带 provider 的 executor 改为工厂闭包，provider 由 `WorkEngine::init` 注入；
-- 这是**最关键的一步**：完成后「新增节点不改主壳」在 Rust 侧成立；
-- 验证：新增一个**测试专用节点类型**（只写 descriptor + executor + 一次注册，不改任何主壳文件），跑通一次含该节点的工作流 ⇒ 这就是验收判据 1 的可执行证明；
+- 新增 `work_engine/executor_factory.rs`：全局工厂表（27 Simple + 5 Context），
+  `NodeDispatcher::init_builtin` 改为遍历 Simple 工厂（原 27 行手写 register 全删），
+  `WorkEngine::init_dispatcher` 改为用 `ExecutorFactoryCtx` 一次遍历全表（原 agent + pending 三步全删）；
+- `WorkEngine::pending_dispatcher_registrations`（Vec<Box<dyn Executor>>）改为
+  `pending_factory_ctx: Arc<Mutex<Option<ExecutorFactoryCtx>>>`——4 个带依赖 executor
+  不再在同步 `new()` 中构造，统一由工厂用 ctx 装配；AgentExecutor 工厂返回同一共享 Arc，
+  保住运行期 setter 热更新语义；
+- harness 侧补 `register_node_descriptor()` 外部注册入口（功能包自带节点类型用）；
+- **集合差集**：descriptor 有 `workflowRef` 无 executor，executor 有 `fallback` 无 descriptor
+  ⇒ 工厂表以「实际执行器集合」为准（32 个），不与 descriptor 表强行并表；
+- 验证：`executor_factory` 2 测试（32 集合 + 外部工厂不改 dispatcher 即出现在 build_all）、
+  `loop_e2e_workflow` 3 测试全绿；定点 check / clippy -D warnings 全绿；
+- **验收限制（如实记录）**：原计划「新增测试节点跑通端到端工作流」在 enum 共存期
+  无法完成——deserializer 只认 32 变体，新类型的节点无法进 DAG。当前 Rust 侧只证明
+  「注册 + 工厂构造不需改主壳」，**端到端新类型执行后移到阶段6**（删除 enum 后立即验收）；
 - 回退：git revert。
 
 ### 阶段 5 —— 前端数据驱动（3–4 人日）
@@ -218,7 +230,9 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 ### 阶段 6 —— 删除旧 enum + 全量门禁收官（1–2 人日）
 - 确认全仓零 `WorkflowNode::` 强类型构造后，删除旧 enum 与共存互转代码；
   §2.1 的 6 处 accessor + `adjust_position` / `set_base_id` 随 enum 删除自然收口
-  （阶段2 已说明后移理由）；同时补 32 变体完整合法实例往返比对（阶段0 审计 §4 后移项）；
+  （阶段2 已说明后移理由）；补 32 变体完整合法实例往返比对（阶段0 审计 §4 后移项）；
+  **执行验收判据1**：新增测试节点类型（descriptor + executor + 一次注册）跑通端到端
+  工作流（阶段4 因 enum 共存无法完成，后移到本阶段）；
 - 按 AGENTS.md 铁律：三锚同批改（capability-register.json + PLAN §0.7.2 镜像行）、doc-refs 行号订正、single-source 回正；
 - 全量门禁（CI 口径，只此一次）：
   ```

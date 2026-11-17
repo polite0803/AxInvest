@@ -57,14 +57,14 @@ use crate::workflow_engine::{
 
 use super::dispatcher::NodeDispatcher;
 use super::error_handling::ErrorContext;
+use super::executor_factory::ExecutorFactoryCtx;
 use super::execution_state::{
     ExecutionContextCallbacks, ExecutionState, ExecutionStateSnapshot, ExecutionStatus,
     NodeExecutionRecord, PauseReason, SubWorkflowOrigin,
 };
 use super::executors::{
-    AgentExecutor, ConditionExecutor, LlmClassifierExecutor, LlmExecutor, PlanCallbacks,
-    ProfileCache, ProviderCache, RagCallback, SubWorkflowCallback, SubWorkflowLaunch,
-    SwitchExecutor, ToolCallback,
+    AgentExecutor, PlanCallbacks, ProfileCache, ProviderCache, RagCallback, SubWorkflowCallback,
+    SubWorkflowLaunch, ToolCallback,
 };
 use super::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput, node_type_name};
 use super::prompt_template::{
@@ -602,12 +602,11 @@ pub struct WorkEngine {
     /// master_key / provider_registry 由 AgentExecutor / LlmExecutor / ConditionExecutor /
     /// LlmClassifierExecutor 各自持有，WorkEngine 不再冗余存储。
     agent_executor: Arc<AgentExecutor>,
-    /// P0-2: dispatcher 的 register 改 async 后，WorkEngine::new 处于同步上下文，
-    /// 无法直接 await register。这里把内置 executor（Llm/Condition/LlmClassifier）
-    /// 的注册动作延迟到 `init_dispatcher` 阶段在 tokio runtime 中完成。
-    /// 存储的是构造好的实例（已经注入 provider_registry），init_dispatcher 时消费。
-    /// 用 Option 包裹，便于 init_dispatcher 后清空释放。
-    pending_dispatcher_registrations: Arc<tokio::sync::Mutex<Vec<Box<dyn NodeExecutorTrait>>>>,
+    /// 阶段4：带依赖 executor 的构造上下文（master_key / provider_registry /
+    /// agent 共享 Arc / 缓存）。new() 处于同步上下文，无法 await register，
+    /// 故把工厂上下文暂存于此，由 init_dispatcher 在 tokio runtime 中消费。
+    /// 用 Option 包裹，便于初始化后清空释放。
+    pending_factory_ctx: Arc<parking_lot::Mutex<Option<ExecutorFactoryCtx>>>,
     /// 触发器管理器（Schedule / Webhook / Event）
     pub trigger_manager: Arc<crate::trigger::TriggerManager>,
     /// 审计记录器（可选，None = 不记录审计日志）
@@ -1111,7 +1110,6 @@ impl WorkEngine {
         // 统一走 HasProviderRegistry trait，避免 5 个 executor 各自实现 with_provider_registry。
         use axagent_harness::HasProviderRegistry;
 
-        let mut llm_exec = LlmExecutor::new(master_key);
         // 唯一构造路径：创建 Arc<AgentExecutor>，dispatcher 与 WorkEngine.agent_executor
         // 共享同一个实例。运行期不再 register(E) 重新注册，避免丢失 provider_registry。
         let mut agent_exec = AgentExecutor::with_shared_caches(
@@ -1119,29 +1117,18 @@ impl WorkEngine {
             agent_provider_cache.clone(),
             agent_profile_cache.clone(),
         );
-        let mut cond_exec = ConditionExecutor::new(master_key);
-        let mut classifier_exec = LlmClassifierExecutor::new(master_key);
-        let mut switch_exec = SwitchExecutor::new(master_key);
-
-        llm_exec.set_provider_registry(provider_registry.clone());
         agent_exec.set_provider_registry(provider_registry.clone());
-        cond_exec.set_provider_registry(provider_registry.clone());
-        classifier_exec.set_provider_registry(provider_registry.clone());
-        switch_exec.set_provider_registry(provider_registry.clone());
-
         let agent_exec = Arc::new(agent_exec);
 
-        // P0-2: dispatcher 的 register_arc 改 async 后，WorkEngine::new 处于同步上下文
-        // 不能 await register。改用 pending_dispatcher_registrations 暂存，调用方在
-        // tokio runtime 内执行 init_dispatcher 完成最终注册。
-        let pending_dispatcher_registrations: Vec<Box<dyn NodeExecutorTrait>> = vec![
-            Box::new(llm_exec),
-            Box::new(cond_exec),
-            Box::new(classifier_exec),
-            Box::new(switch_exec),
-        ];
-        let pending_dispatcher_registrations =
-            Arc::new(tokio::sync::Mutex::new(pending_dispatcher_registrations));
+        // 阶段4：其余 4 个带依赖 executor 不再在此构造，改为登记到工厂表，
+        // 由 init_dispatcher 用 ExecutorFactoryCtx 统一装配（新增节点不改主壳）。
+        let pending_factory_ctx = Arc::new(parking_lot::Mutex::new(Some(ExecutorFactoryCtx {
+            master_key,
+            provider_registry,
+            agent_executor: agent_exec.clone(),
+            agent_provider_cache: agent_provider_cache.clone(),
+            agent_profile_cache: agent_profile_cache.clone(),
+        })));
 
         // Self { ... }
         Self {
@@ -1163,7 +1150,7 @@ impl WorkEngine {
             agent_profile_cache,
             breakpoints: Arc::new(Mutex::new(HashSet::new())),
             agent_executor: agent_exec,
-            pending_dispatcher_registrations,
+            pending_factory_ctx,
             trigger_manager: Arc::new(crate::trigger::TriggerManager::new()),
             audit_recorder: Arc::new(parking_lot::Mutex::new(None)),
             tool_registry: Arc::new(parking_lot::Mutex::new(None)),
@@ -1327,27 +1314,23 @@ impl WorkEngine {
         self.trigger_manager.set_engine(self.clone()).await;
     }
 
-    /// P0-2: 在 tokio runtime 中完成 dispatcher 的初始化注册。
+    /// 在 tokio runtime 中完成 dispatcher 的初始化注册。
     /// 必须在 setup 阶段 rt.block_on 调用，确保 dispatch 工作前所有内置 executor 已就位。
-    /// 内部顺序：
-    /// 1. init_builtin：注册所有内置 executor（Trigger/Loop/End/Fallback/...）
-    /// 2. 注册 self.agent_executor 到 dispatcher（与 self.agent_executor 共享同一 Arc）
-    /// 3. 把 pending_dispatcher_registrations 中的 Llm/Condition/LlmClassifier 注册
+    ///
+    /// 阶段4：一次性遍历 `executor_factory` 全表（27 Simple + 5 Context），
+    /// 不再手写 init_builtin + agent + pending 三步。新增节点类型只需在工厂表
+    /// 登记一条，本函数零改。agent 工厂返回 `self.agent_executor` 的共享 Arc，
+    /// 保住运行期 setter 热更新语义。
     pub async fn init_dispatcher(self: &Arc<Self>) {
-        let disp = self.dispatcher.read().await;
-        disp.init_builtin().await;
-        // 共享 Arc：dispatcher 与 self.agent_executor 指向同一 AgentExecutor 实例
-        disp.register_arc(self.agent_executor.clone() as Arc<dyn NodeExecutorTrait>).await;
-        drop(disp);
+        use crate::work_engine::executor_factory::build_all;
 
-        // 取出 pending 中的 Llm / Condition / LlmClassifier 并注册
-        let pending: Vec<Box<dyn NodeExecutorTrait>> = {
-            let mut guard = self.pending_dispatcher_registrations.lock().await;
-            std::mem::take(&mut *guard)
-        };
+        let ctx = self
+            .pending_factory_ctx
+            .lock()
+            .take()
+            .unwrap_or_else(|| panic!("init_dispatcher 只能调用一次：工厂上下文已被消费"));
         let disp = self.dispatcher.read().await;
-        for exec in pending {
-            let exec: Arc<dyn NodeExecutorTrait> = Arc::from(exec);
+        for (_, exec) in build_all(Some(&ctx)) {
             disp.register_arc(exec).await;
         }
     }

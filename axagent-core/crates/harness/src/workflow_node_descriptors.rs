@@ -204,10 +204,15 @@ pub fn register_builtin_descriptors(registry: &crate::workflow_node_dyn::NodeDes
     registry.register(CodeDescriptor);
 }
 
-/// 全局内置描述符注册表（懒初始化一次）。
+/// 全局节点类型注册表（懒初始化：内置 32 种 + 外部功能包动态注册）。
 ///
-/// 阶段2 供 deserializer 判未知类型；阶段3 供 rt-workflow 三处 match 查表。
-/// 这是「类型字符串 → 契约」的单一权威，新增内置节点只需在此多注册一条。
+/// 这是「类型字符串 → 契约」的单一权威：
+/// - 阶段2 供 deserializer 判未知类型；
+/// - 阶段3 供 rt-workflow 三处 match 查表；
+/// - 阶段4 供 dispatcher 遍历自动装配 executor。
+///
+/// 外部新增节点类型无需改本文件：在启动期调用 `register_node_descriptor` 即可。
+/// 模式对齐 `capability_registry.rs` 的 `get_capability_registry()`。
 pub fn builtin_descriptors() -> &'static NodeDescriptorRegistry {
     static REGISTRY: OnceLock<NodeDescriptorRegistry> = OnceLock::new();
     REGISTRY.get_or_init(|| {
@@ -217,7 +222,17 @@ pub fn builtin_descriptors() -> &'static NodeDescriptorRegistry {
     })
 }
 
-/// 按类型串查内置契约（阶段3 的三处 match 收口入口）。
+/// 外部注册一个节点类型契约（功能包 / 插件 / 测试节点用）。
+///
+/// 返回 `false` 表示同名类型已注册（保留先注册者，不覆盖）——
+/// 避免第三方覆盖内置节点行为。新增节点类型 = 实现 descriptor + 调用本函数。
+pub fn register_node_descriptor<D: WorkflowNodeDescriptor + 'static>(descriptor: D) -> bool {
+    let before = builtin_descriptors().type_names().len();
+    builtin_descriptors().register(descriptor);
+    builtin_descriptors().type_names().len() > before
+}
+
+/// 按类型串查契约（阶段3 三处 match / 阶段4 dispatcher 入口）。
 pub fn builtin_descriptor_for(type_name: &str) -> Option<Arc<dyn WorkflowNodeDescriptor>> {
     builtin_descriptors().get(type_name)
 }
@@ -285,5 +300,37 @@ mod tests {
         assert_eq!(reg.get("trigger").unwrap().kind(), NodeKind::Input);
         assert_eq!(reg.get("agent").unwrap().kind(), NodeKind::Agent);
         assert_eq!(reg.get("storage").unwrap().kind(), NodeKind::Storage);
+    }
+
+    /// 阶段4 验收判据1（harness 侧）：外部类型仅靠实现 descriptor + 一次注册
+    /// 即进入注册表，无需改主壳任何既有文件；同名重复注册不覆盖。
+    /// 用局部注册表验证语义，避免污染进程级的 32 内置类型集合（其它测试依赖它）。
+    #[test]
+    fn external_descriptor_registers_into_registry() {
+        struct TestOnlyDescriptor;
+        impl WorkflowNodeDescriptor for TestOnlyDescriptor {
+            fn type_name(&self) -> &'static str {
+                "testOnlyExternalNode"
+            }
+            fn kind(&self) -> NodeKind {
+                NodeKind::Tool
+            }
+            fn parse_config(&self, _raw: &Value) -> Result<(), String> {
+                Ok(())
+            }
+            fn output_var(&self, _raw: &Value) -> Option<String> {
+                None
+            }
+        }
+
+        let reg = NodeDescriptorRegistry::new();
+        reg.register(TestOnlyDescriptor);
+        let found = reg.get("testOnlyExternalNode").unwrap();
+        assert_eq!(found.type_name(), "testOnlyExternalNode");
+        assert_eq!(found.kind(), NodeKind::Tool);
+        // 重复注册不覆盖、不新增
+        let before = reg.type_names().len();
+        reg.register(TestOnlyDescriptor);
+        assert_eq!(reg.type_names().len(), before);
     }
 }

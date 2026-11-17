@@ -9,14 +9,6 @@ use axagent_harness::{EnforcementResult, HookEvent, PermissionChecker, SharedWor
 use crate::expression_engine::{ExpressionContext, resolve_value_templates};
 
 use super::execution_state::ExecutionState;
-use super::executors::{
-    AggregatorExecutor, ApprovalExecutor, CodeExecutor, DataTransformerExecutor,
-    DatabaseQueryExecutor, DebateExecutor, DelayExecutor, DocumentParserExecutor, EmailExecutor,
-    EndExecutor, FallbackExecutor, FileOperationExecutor, HttpRequestExecutor, LoggingExecutor,
-    LoopExecutor, MergeExecutor, MultiAgentExecutor, NotificationExecutor, ParallelExecutor,
-    StorageExecutor, SubWorkflowExecutor, SwarmExecutor, ToolExecutor, TriggerExecutor,
-    ValidationExecutor, VectorRetrieveExecutor, WebhookSendExecutor,
-};
 use super::node_executor_trait::{
     NodeError, NodeExecutorTrait, NodeOutput, error_code, node_kind, node_type_name,
 };
@@ -76,37 +68,14 @@ impl NodeDispatcher {
     }
 
     /// 一次性注册所有内置 executor（异步版本）。
-    /// 必须在 tokio runtime 中调用（与 `WorkEngine::init_dispatcher` 配套）。
+    ///
+    /// 阶段4：改为遍历 `executor_factory` 的无依赖工厂，**不再手写 register 列表**——
+    /// 新增无依赖节点类型只需在工厂表登记一条，本函数零改。
+    /// 带依赖的 5 个由 `WorkEngine::init_dispatcher` 用完整 ctx 装配。
     pub async fn init_builtin(&self) {
-        self.register(TriggerExecutor::new()).await;
-        self.register(ParallelExecutor::new()).await;
-        self.register(LoopExecutor::new()).await;
-        self.register(MergeExecutor::new()).await;
-        self.register(DelayExecutor::new()).await;
-        self.register(SubWorkflowExecutor::new()).await;
-        self.register(DocumentParserExecutor::new()).await;
-        self.register(VectorRetrieveExecutor::new()).await;
-        self.register(EndExecutor::new()).await;
-        self.register(ValidationExecutor::new()).await;
-        self.register(ToolExecutor::new()).await;
-        self.register(CodeExecutor::new()).await;
-        self.register(DebateExecutor::new()).await;
-        self.register(FallbackExecutor::new()).await;
-        self.register(HttpRequestExecutor::new()).await;
-        // SwitchExecutor 由 WorkEngine::init_dispatcher 配置并注册（需注入 provider_registry）
-        self.register(DatabaseQueryExecutor::new()).await;
-        self.register(NotificationExecutor::new()).await;
-        self.register(ApprovalExecutor::new()).await;
-        self.register(FileOperationExecutor::new()).await;
-        self.register(DataTransformerExecutor::new()).await;
-        self.register(WebhookSendExecutor::new()).await;
-        self.register(LoggingExecutor::new()).await;
-        self.register(StorageExecutor::new()).await;
-        // LlmClassifierExecutor / SwitchExecutor 由 WorkEngine::init_dispatcher 配置并注册
-        self.register(AggregatorExecutor::new()).await;
-        self.register(EmailExecutor::new()).await;
-        self.register(SwarmExecutor::new()).await;
-        self.register(MultiAgentExecutor::new()).await;
+        for (_, exec) in super::executor_factory::build_all(None) {
+            self.register_arc(exec).await;
+        }
     }
 
     /// 注册 executor。若同名 executor 已存在，记录 warn 日志

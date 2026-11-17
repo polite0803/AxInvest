@@ -197,7 +197,7 @@ async fn release_slot(
 /// 把 `WorkflowStatus`（引擎视角，含 `Created`）折成 `ExecutionStatus`（六态运行视角）。
 ///
 /// `Created` 在执行结束时不该出现；与引擎收尾的 `_ => Completed` 同口径兜底
-/// （`engine/mod.rs:5019-5024`），不新造第七态。
+/// （`engine/mod.rs` 的 `WorkflowStatus` → `ExecutionStatus` 收尾兜底段），不新造第七态。
 fn execution_status_of(status: WorkflowStatus) -> ExecutionStatus {
     match status {
         WorkflowStatus::Completed | WorkflowStatus::Created | WorkflowStatus::Running => {

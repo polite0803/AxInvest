@@ -1127,7 +1127,7 @@ WARN ... node_id=t-sentiment-data    工具 'get_social_sentiment...' 未注册
 | 层 | 事实 |
 |---|---|
 | ① 谁在找工具 | `tool_executor.rs:122-181`：先试 `context.tool_registry`，再试 `callbacks.tool_handlers` → `tool_fallback`；**三条全空**才报「未注册」 |
-| ② 谁在填这三条 | `engine/mod.rs:2458-2468` 的 `run_workflow` **注册段**：先用 `tool_resolver` 自动注册，再用 `tool_registry` 补，最后用 Rhai 脚本缓存 |
+| ② 谁在填这三条 | `engine/mod.rs` 的 `run_workflow` **注册段**（行号随阶段4改动漂移，按符号定位）：先用 `tool_resolver` 自动注册，再用 `tool_registry` 补，最后用 Rhai 脚本缓存 |
 | ③ 谁注入 resolver | **`init/services.rs` 的 `start_cron_scheduler(app: &AppHandle, state)` 内部**（原 `:2015`）—— 一个**后台服务启动函数** |
 
 ⇒ 判据落到最致命的一处：**`create_app_state` 明确「不启动后台服务」**（bin 走的就是它）

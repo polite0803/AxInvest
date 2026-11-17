@@ -6,6 +6,7 @@ pub mod domain_constraints;
 pub mod engine;
 pub mod error_handling;
 pub mod execution_state;
+pub mod executor_factory;
 pub mod executors;
 pub mod node_executor;
 pub mod node_executor_trait;

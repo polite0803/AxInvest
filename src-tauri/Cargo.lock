@@ -825,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "axagent"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-agent"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-agent-command-types"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "inventory",
  "serde",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-agent-macro"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-agent-command-types",
  "inventory",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-analysis-engine"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-astock-data"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1036,7 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-cache"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-harness",
  "quick_cache",
@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-company-runtime"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-credential"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -1090,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-crypto"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-dao"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-entities",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-device"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-disk-cache"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-entities",
  "sea-orm",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-document-parser"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-harness",
  "calamine",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-entities"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-harness",
  "chrono",
@@ -1196,7 +1196,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-gateway"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1229,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-harness"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-kit"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1286,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-market-sim"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-harness",
  "chrono",
@@ -1302,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-mcp"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-migration"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-dao",
  "axagent-harness",
@@ -1338,14 +1338,14 @@ dependencies = [
 
 [[package]]
 name = "axagent-mobile"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent",
 ]
 
 [[package]]
 name = "axagent-notification"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1362,7 +1362,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-npm"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-orchestrator"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-plugin-proto"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1401,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-plugins"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-prompt-guard"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-harness",
  "regex",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-providers"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1451,7 +1451,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-quant"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-messaging"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1496,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-theme"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-webhook"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-harness",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-workflow"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-crypto",
@@ -1559,7 +1559,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime-core"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-search"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-disk-cache",
@@ -1673,14 +1673,14 @@ dependencies = [
 
 [[package]]
 name = "axagent-stock-core"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "axagent-storage"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-entities",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-telemetry"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "axagent-harness",
  "chrono",
@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-tools"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "axagent-dao",
@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-trajectory"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "anyhow",
  "async-trait",

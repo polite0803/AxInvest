@@ -6,6 +6,7 @@ import { invoke } from "@/lib/invoke";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { invokeStockTask } from "@/lib/stockTask";
 import { toDbVariable } from "@/lib/workflowVariables";
+import { useSettingsStore } from "@/stores";
 import type { Variable } from "@/types";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -282,6 +283,26 @@ type HealthStatus = "ok" | "fail" | "pending" | "idle";
 export function DataVendorsTab() {
   const { message } = App.useApp();
   const { t } = useTranslation();
+  const settings = useSettingsStore((s) => s.settings);
+  const saveSettings = useSettingsStore((s) => s.saveSettings);
+  // 判据③：主行情源只改配置（quote/klines 链首重排），不动主壳代码。
+  const primaryVendor = settings.marketDataPrimaryVendor ?? null;
+  const primaryOptions = useMemo(
+    () => VENDORS.filter((v) => v.capabilities.includes("quote")).map((v) => ({ value: v.enName })),
+    [],
+  );
+  const applyPrimaryVendor = useCallback(
+    async (vendor: string | null) => {
+      await saveSettings({ marketDataPrimaryVendor: vendor });
+      try {
+        await invoke("stock_set_market_data_primary_vendor", { vendor });
+        message.success(t("stockAnalysis.settings.vendors.primarySaved"));
+      } catch {
+        // 浏览器模式无后端：仅本地保存
+      }
+    },
+    [saveSettings, message, t],
+  );
   const [vendorValues, setVendorValues] = useState<Record<string, boolean>>({});
   const [iwencaiKey, setIwencaiKey] = useState("");
   const [xueqiuToken, setXueqiuToken] = useState("");
@@ -529,6 +550,29 @@ export function DataVendorsTab() {
           </Button>
         </Space>
       </div>
+
+      {/* 主行情源（判据③） */}
+      <Card size="small">
+        <Space size={8} wrap>
+          <span className="text-sm">{t("stockAnalysis.settings.vendors.primaryLabel")}</span>
+          <Select
+            size="small"
+            style={{ minWidth: 180 }}
+            value={primaryVendor ?? "__default__"}
+            options={[
+              { value: "__default__", label: t("stockAnalysis.settings.vendors.primaryDefault") },
+              ...primaryOptions.map((o) => ({
+                value: o.value,
+                label: t(`stockAnalysis.dataVendors.${o.value}`),
+              })),
+            ]}
+            onChange={(v: string) => void applyPrimaryVendor(v === "__default__" ? null : v)}
+          />
+          <span className="text-xs text-gray-400">
+            {t("stockAnalysis.settings.vendors.primaryDesc")}
+          </span>
+        </Space>
+      </Card>
 
       {/* Vendor 卡片（含依赖的固定工具） */}
       {VENDORS.map((v) => {

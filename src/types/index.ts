@@ -473,6 +473,15 @@ export interface GatewaySettings {
 }
 
 // === Settings ===
+/** 出站推送渠道的用户配置（判据③）；与后端 harness NotificationChannelConfig 对齐。 */
+export interface NotificationChannelConfig {
+  id: string;
+  enabled: boolean;
+  token: string;
+  apiUrl: string | null;
+  topic: string | null;
+}
+
 export interface AppSettings {
   language: string;
   themeMode: string;
@@ -553,6 +562,10 @@ export interface AppSettings {
   notifyBackup?: boolean;
   notifyImport?: boolean;
   notifyErrors?: boolean;
+  /** 出站推送渠道配置（判据③）；缺省 = 不装配任何出站渠道。 */
+  notificationChannels?: NotificationChannelConfig[];
+  /** 主行情源（判据③）；null/缺省 = 用默认顺序。 */
+  marketDataPrimaryVendor?: string | null;
   // Auto-backup settings
   backupDir?: string | null;
   autoBackupEnabled?: boolean;

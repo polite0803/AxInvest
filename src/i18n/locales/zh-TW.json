@@ -6720,7 +6720,21 @@
     "videoModel": "影片模型",
     "videoModelDesc": "影片理解任務使用的預設模型",
     "voiceModel": "語音模型",
-    "voiceModelDesc": "語音轉寫與語音合成任務使用的預設模型"
+    "voiceModelDesc": "語音轉寫與語音合成任務使用的預設模型",
+    "notificationChannelsDesc": "憑證保存在本機設定；關閉後通知不再外推到該渠道，無需改動主殼程式碼。",
+    "notificationChannels": {
+      "title": "出站推送渠道",
+      "pushplus": "PushPlus",
+      "serverchan": "Server 醬",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "已生效",
+      "inactive": "未裝配",
+      "needsCredentials": "缺少憑證",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "服務位址（選填）",
+      "topicPlaceholder": "Topic（選填）"
+    }
   },
   "settingsPage": {
     "refreshPage": "刷新頁面"
@@ -16331,7 +16345,11 @@
         "fallbackColDimension": "維度 · 代碼",
         "fallbackColPath": "首個健康候選 → 實際供數",
         "fallbackUnavailable": "目前執行環境沒有提供換向紀錄介面（返回值不是清單）；桌面版執行時這裡才會顯示紀錄",
-        "fallbackFailed": "換向紀錄讀取失敗（命令回報錯誤）"
+        "fallbackFailed": "換向紀錄讀取失敗（命令回報錯誤）",
+        "primaryLabel": "主行情源",
+        "primaryDefault": "預設順序",
+        "primaryDesc": "僅調整 quote/klines 鏈首，不改主殼程式碼；as_of 回放不受影響。",
+        "primarySaved": "主行情源已更新"
       },
       "collapseGroup": "收起",
       "expandGroup": "展开（{{total}} 项）",

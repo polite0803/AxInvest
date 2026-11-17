@@ -82,6 +82,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifyBackup: true,
   notifyImport: true,
   notifyErrors: true,
+  notificationChannels: [],
+  marketDataPrimaryVendor: null,
   lastSelectedConversationId: null,
   documentsRootOverride: null,
   updateCheckInterval: 60,

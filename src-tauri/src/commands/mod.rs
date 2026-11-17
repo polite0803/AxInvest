@@ -98,6 +98,7 @@ pub mod multi_agent;
 pub mod multi_agent_setup;
 pub mod narrative;
 pub mod nl_to_cron;
+pub mod notification;
 pub mod onboarding;
 pub mod opc_demand_capability;
 pub mod opc_demand_subscription;
@@ -184,6 +185,7 @@ pub mod screenshot_diagnosis;
 pub mod stock_analysis;
 pub mod stock_analysis_bridge;
 pub mod stock_analysis_rerun;
+pub mod stock_market_vendor;
 // 孤儿测试恢复挂载：P4 验证 20 个股票桥接工具（读/写闭环 + STOCK_WRITE_TOOLS 对账）
 #[cfg(test)]
 mod stock_analysis_bridge_tests;

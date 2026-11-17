@@ -3038,6 +3038,7 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
         )),
         event_bus: Arc::new(axagent_runtime_core::BroadcastEventBus::new(64))
             as Arc<dyn axagent_harness::EventBus>,
+        notification_dispatcher: Arc::new(axagent_notification::NotificationDispatcher::new()),
         gateway: Arc::new(tokio::sync::Mutex::new(None)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         app_data_dir: temp_dir.clone(),

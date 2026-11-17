@@ -1978,6 +1978,7 @@ pub async fn create_app_state_with_resource_dir(
 
     Ok(AppState {
         harness,
+        notification_dispatcher: Arc::new(axagent_notification::NotificationDispatcher::new()),
         gateway: gateway_server,
         close_to_tray,
         app_data_dir: app_dir.clone(),

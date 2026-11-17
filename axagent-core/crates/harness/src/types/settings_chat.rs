@@ -4,6 +4,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants;
 
+/// 出站推送渠道的用户配置（判据③：关一个渠道不动主壳代码）。
+///
+/// 四个 DSA 渠道（PushPlus / ServerChan / ntfy / Gotify）共用这一形状：
+/// `id` 是稳定键（`pushplus` / `serverchan` / `ntfy` / `gotify`），
+/// 凭据字段按渠道取用（ServerChan 用 `token` 作 sendkey，ntfy 用 `api_url` 作服务地址，
+/// Gotify 用 `api_url` + `token`）。随 `AppSettings` 落 DB，无需平行配置源。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NotificationChannelConfig {
+    pub id: String,
+    pub enabled: bool,
+    pub token: String,
+    pub api_url: Option<String>,
+    pub topic: Option<String>,
+}
+
+/// 判据③渠道 id 的单一权威（装配 / 前端面板 / 门共用）。
+pub const NOTIFICATION_CHANNEL_IDS: [&str; 4] = ["pushplus", "serverchan", "ntfy", "gotify"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
@@ -86,6 +105,11 @@ pub struct AppSettings {
     pub notify_backup: bool,
     pub notify_import: bool,
     pub notify_errors: bool,
+    /// 出站推送渠道配置（判据③）：默认空 = 不装配任何出站渠道，与历史行为一致。
+    pub notification_channels: Vec<NotificationChannelConfig>,
+    /// 主行情源（判据③）：`Some(vendor)` = 把该源提到 quote/klines 链首（运行时重排，不改主壳代码）；
+    /// `None` = 用硬编码默认顺序。as_of 回放不受影响。
+    pub market_data_primary_vendor: Option<String>,
     // Auto-backup settings
     pub backup_dir: Option<String>,
     pub auto_backup_enabled: bool,
@@ -293,6 +317,8 @@ impl Default for AppSettings {
             notify_backup: true,
             notify_import: true,
             notify_errors: true,
+            notification_channels: Vec::new(),
+            market_data_primary_vendor: None,
             backup_dir: None,
             auto_backup_enabled: false,
             auto_backup_interval_hours: 24,

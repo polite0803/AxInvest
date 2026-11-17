@@ -6720,7 +6720,21 @@
     "videoModel": "Modelo de video",
     "videoModelDesc": "Modelo predeterminado para tareas de comprensión de video",
     "voiceModel": "Modelo de voz",
-    "voiceModelDesc": "Modelo predeterminado para tareas de reconocimiento y síntesis de voz"
+    "voiceModelDesc": "Modelo predeterminado para tareas de reconocimiento y síntesis de voz",
+    "notificationChannelsDesc": "Las credenciales se guardan en la configuración local. Desactivar un canal detiene las notificaciones salientes hacia él sin modificar el código del host.",
+    "notificationChannels": {
+      "title": "Canales salientes",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "Activo",
+      "inactive": "No configurado",
+      "needsCredentials": "Faltan credenciales",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "URL del servidor (opcional)",
+      "topicPlaceholder": "Tema (opcional)"
+    }
   },
   "settingsPage": {
     "refreshPage": "Actualizar página"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "Dimensión · Código",
         "fallbackColPath": "Primer candidato sano → fuente real",
         "fallbackUnavailable": "Este entorno de ejecución no expone el endpoint de registros de cambio (la respuesta no es una lista). Las entradas aparecen en la app de escritorio.",
-        "fallbackFailed": "No se pudieron leer los registros de cambio (el comando devolvió un error)."
+        "fallbackFailed": "No se pudieron leer los registros de cambio (el comando devolvió un error).",
+        "primaryLabel": "Fuente de mercado principal",
+        "primaryDefault": "Orden predeterminado",
+        "primaryDesc": "Solo reordena la cabeza de las cadenas quote/klines sin modificar el código del host; las repeticiones as_of no se ven afectadas.",
+        "primarySaved": "Fuente de mercado principal actualizada"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

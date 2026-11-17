@@ -6,7 +6,12 @@ import { DataVendorsTab } from "../DataVendorsTab";
 // invoke 按命令名分流：模板加载恒回空 variables（让 loaded 置真、渲染继续），
 // get_vendor_fallback_log 由每条用例自己决定回什么形态。
 const invokeMock = vi.fn();
-vi.mock("@/lib/invoke", () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }));
+// 部分 mock：组件经 "@/stores" 桶会牵入 cacheStore/evolutionStore，它们要用
+// isTauri / listen 等导出 —— 用 importOriginal 保留真实导出，只替换 invoke。
+vi.mock("@/lib/invoke", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/invoke")>();
+  return { ...actual, invoke: (...args: unknown[]) => invokeMock(...args) };
+});
 
 // 同 DecisionBanner.test.tsx 的替身口径：字符串 ⇒ 回 key 原文（这样三态文案可按 key 断言），
 // 对象 ⇒ 拼成 `key|k=v`（这样能断言插值传的是几条）。

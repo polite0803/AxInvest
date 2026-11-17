@@ -6720,7 +6720,21 @@
     "videoModel": "Видеомодель",
     "videoModelDesc": "Модель по умолчанию для задач понимания видео",
     "voiceModel": "Голосовая модель",
-    "voiceModelDesc": "Модель по умолчанию для распознавания и синтеза речи"
+    "voiceModelDesc": "Модель по умолчанию для распознавания и синтеза речи",
+    "notificationChannelsDesc": "Учётные данные хранятся в локальных настройках. Отключение канала останавливает исходящие уведомления в него без изменения кода хоста.",
+    "notificationChannels": {
+      "title": "Исходящие каналы",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "Активен",
+      "inactive": "Не настроен",
+      "needsCredentials": "Нет учётных данных",
+      "tokenPlaceholder": "Токен / SendKey",
+      "apiUrlPlaceholder": "URL сервера (необязательно)",
+      "topicPlaceholder": "Тема (необязательно)"
+    }
   },
   "settingsPage": {
     "refreshPage": "Обновить страницу"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "Измерение · Код",
         "fallbackColPath": "Первый доступный → фактический источник",
         "fallbackUnavailable": "Эта среда выполнения не предоставляет endpoint журнала переключений (ответ не является списком). Записи появляются в десктопном приложении.",
-        "fallbackFailed": "Не удалось прочитать записи переключений (команда вернула ошибку)."
+        "fallbackFailed": "Не удалось прочитать записи переключений (команда вернула ошибку).",
+        "primaryLabel": "Основной источник рыночных данных",
+        "primaryDefault": "Порядок по умолчанию",
+        "primaryDesc": "Меняет только начало цепочек quote/klines без изменения кода хоста; воспроизведение as_of не затрагивается.",
+        "primarySaved": "Основной источник рыночных данных обновлён"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

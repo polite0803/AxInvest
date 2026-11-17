@@ -113,7 +113,32 @@ pub async fn start_background_services(
     // 装晚了这一轮就按默认起（不报错、不阻断 —— 正是「面板改了没人读」的静默形态）。
     // 其余两个装卸点见 `init/panel_variables.rs` 文件头（模板保存后、种子化后）。
     crate::init::panel_variables::refresh_from_db(state.harness.db()).await;
-    start_realtime_monitor(app);
+    // 判据③：从 settings 装配出站推送渠道到共享 dispatcher（关渠道只改配置、不动主壳）。
+    // 读库失败不阻断启动：保留 0 渠道空壳（历史行为），告警仍只走前端事件 + 落库。
+    match axagent_dao::repo::settings::get_settings(state.harness.db()).await {
+        Ok(settings) => {
+            let active = axagent_notification::config_assembly::apply_channel_configs(
+                &state.notification_dispatcher,
+                &settings.notification_channels,
+            )
+            .await;
+            tracing::info!(
+                target: "axagent_notification::assembly",
+                count = active.len(),
+                channels = ?active,
+                "出站推送渠道装配完成"
+            );
+            // 判据③：主行情源（quote/klines 链首重排）随 settings 装配，重启后即生效。
+            state
+                .stock()
+                .astock_client
+                .set_primary_market_vendor(settings.market_data_primary_vendor.as_deref());
+        },
+        Err(e) => {
+            tracing::warn!(target: "axagent_notification::assembly", error = %e, "读渠道配置失败，保留 0 渠道");
+        },
+    }
+    start_realtime_monitor(app, state);
     start_realtime_quote_watcher(app, state);
     start_batch_reflection(state);
     start_demand_discovery_cron(app, state);
@@ -2008,7 +2033,7 @@ pub async fn inject_work_engine_tool_resolver(state: &AppState) {
 /// ## 为什么要有组件版（R-3d，2026-10-26）
 ///
 /// `inject_work_engine_tool_resolver(state)` **当时只在**两个点被调用（2026-10-26，见上一节标题）：
-/// `src-tauri/src/init/services.rs:2189`（**Tauri 应用路径**）与 `src-tauri/src/bin/axagent-batch-rerun.rs:789` ⇒
+/// `src-tauri/src/init/services.rs:2187`（**Tauri 应用路径**）与 `src-tauri/src/bin/axagent-batch-rerun.rs:789` ⇒
 /// **另两个入口拿不到 resolver**：
 /// - `axagent-validate-backfill`（CLI，本轮用它跑回放批次）
 /// - `server_main`（无头服务）
@@ -5078,13 +5103,17 @@ fn start_retrieval_feedback_tick(state: &AppState) {
 /// 告警的「触发回写 + 通知外推」由 [`crate::init::monitor_emitter::TauriMonitorEmitter`] 承担。
 /// 此前这里是三行的 `AppMonitorEmitter`（只 `app.emit`，不回写也不外推），
 /// 而完整实现住在 `init/monitor_emitter.rs` 且全仓零构造点 —— 两份实现并存，正是「写了但没人装配」。
-fn start_realtime_monitor(app: &tauri::AppHandle) {
+fn start_realtime_monitor(app: &tauri::AppHandle, state: &AppState) {
     use crate::init::stock_domain_state::stock_alert_mapping::{
         alert_types, db_model_to_config_field,
     };
     use crate::init::stock_domain_state::stock_monitor::{RealtimeMonitor, TZeroCallback};
     use axagent_harness::market_data::MarketDataProvider;
     use axagent_harness::stock_monitor::MonitorConfig;
+
+    // 判据③：共享分发器在此克隆出来，供下方 spawn 的异步块使用 ——
+    // 直接在 async move 里引用外层 `state` 会让借用逃逸（E0521）。
+    let notification_dispatcher = state.notification_dispatcher.clone();
 
     // astock_client 依赖 AppState，但在同步段通过 Manager::state 拿引用克隆即可
     {
@@ -5133,7 +5162,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                     crate::init::monitor_emitter::TauriMonitorEmitter::new(
                         app_for_spawn.clone(),
                         db.clone(),
-                        std::sync::Arc::new(axagent_notification::NotificationDispatcher::new()),
+                        notification_dispatcher.clone(),
                         plugin_event_bus,
                     ),
                 ))

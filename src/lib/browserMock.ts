@@ -2203,6 +2203,50 @@ async function executeCommand<T>(
       return merged as T;
     }
 
+    // ── 出站推送渠道（判据③） ───────────────────────────────────────────
+    // 浏览器模式没有真实 dispatcher：`active` 恒 false、apply 返回空 —— 如实反映
+    // 「没有装配任何渠道」，不谎报已生效（判据③的装配只在真机发生）。
+    case "notification_list_channels": {
+      const store = getStore<{
+        notificationChannels?: Array<{
+          id: string;
+          enabled: boolean;
+          token?: string;
+          apiUrl?: string | null;
+        }>;
+      }>("settings", {});
+      const chs = store.notificationChannels ?? [];
+      const ids = ["pushplus", "serverchan", "ntfy", "gotify"];
+      const configured = (id: string, c?: { token?: string; apiUrl?: string | null }): boolean => {
+        const token = (c?.token ?? "").trim();
+        const apiUrl = (c?.apiUrl ?? "").trim();
+        if (id === "pushplus" || id === "serverchan") {
+          return token.length > 0;
+        }
+        if (id === "ntfy") {
+          return apiUrl.length > 0;
+        }
+        if (id === "gotify") {
+          return token.length > 0 && apiUrl.length > 0;
+        }
+        return false;
+      };
+      return ids.map((id) => {
+        const c = chs.find((x) => x.id === id);
+        return {
+          id,
+          enabled: c?.enabled ?? false,
+          configured: configured(id, c),
+          active: false,
+        };
+      }) as T;
+    }
+    case "notification_apply_channel_config":
+      return [] as T;
+    case "stock_set_market_data_primary_vendor":
+      // 浏览器模式无真实行情客户端：设置已由 save_settings 落到 localStorage，这里直接成功。
+      return undefined as T;
+
     // ── 数据库结构状态（`Settings → 数据库` 卡片） ────────────────────────
     // ⚠ 两个命令都必须在 `SNAKE_CASE_RESPONSE_COMMANDS` 中登记（理由见该处注释）。
     case "get_schema_status":

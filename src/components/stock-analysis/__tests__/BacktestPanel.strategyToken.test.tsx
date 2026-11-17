@@ -6,6 +6,8 @@ vi.mock("react-i18next", () => ({
     // 不返回 options 对象,只回 key(避免把 {count: N} 渲染为 React 子节点)
     t: (key: string) => key,
   }),
+  // stockTask → "@/i18n"（#351）需要该导出；缺它会让整个套件在加载期失败。
+  initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 
 const timeAnchorState: Record<string, unknown> = {

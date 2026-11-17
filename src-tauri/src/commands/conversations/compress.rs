@@ -818,6 +818,7 @@ mod tests_conversation {
             )),
             event_bus: Arc::new(axagent_runtime_core::BroadcastEventBus::new(64))
                 as Arc<dyn axagent_harness::EventBus>,
+            notification_dispatcher: Arc::new(axagent_notification::NotificationDispatcher::new()),
             gateway: Arc::new(Mutex::new(None)),
             close_to_tray: Arc::new(AtomicBool::new(false)),
             app_data_dir: temp_dir.clone(),

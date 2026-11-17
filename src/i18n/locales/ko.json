@@ -6720,7 +6720,21 @@
     "videoModel": "비디오 모델",
     "videoModelDesc": "비디오 이해 작업에 사용되는 기본 모델",
     "voiceModel": "음성 모델",
-    "voiceModelDesc": "음성 인식 및 음성 합성 작업에 사용되는 기본 모델"
+    "voiceModelDesc": "음성 인식 및 음성 합성 작업에 사용되는 기본 모델",
+    "notificationChannelsDesc": "자격 증명은 로컬 설정에 저장됩니다. 채널을 끄면 호스트 코드를 변경하지 않고 해당 채널로의 알림이 중지됩니다.",
+    "notificationChannels": {
+      "title": "아웃바운드 채널",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "활성",
+      "inactive": "미구성",
+      "needsCredentials": "자격 증명 누락",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "서버 URL(선택)",
+      "topicPlaceholder": "토픽(선택)"
+    }
   },
   "settingsPage": {
     "refreshPage": "페이지 새로고침"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "항목 · 코드",
         "fallbackColPath": "첫 정상 후보 → 실제 공급",
         "fallbackUnavailable": "이 실행 환경에서는 전환 기록 응답이 목록이 아니어서 표시할 수 없습니다. 데스크톱 앱에서 기록이 표시됩니다.",
-        "fallbackFailed": "전환 기록을 읽지 못했습니다(명령이 오류를 반환했습니다)."
+        "fallbackFailed": "전환 기록을 읽지 못했습니다(명령이 오류를 반환했습니다).",
+        "primaryLabel": "주 시세 소스",
+        "primaryDefault": "기본 순서",
+        "primaryDesc": "quote/klines 체인의 선두만 조정하며 호스트 코드는 변경하지 않습니다. as_of 재생에는 영향이 없습니다.",
+        "primarySaved": "주 시세 소스가 업데이트되었습니다"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

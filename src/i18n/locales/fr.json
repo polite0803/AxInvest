@@ -6720,7 +6720,21 @@
     "videoModel": "Modèle vidéo",
     "videoModelDesc": "Modèle par défaut pour la compréhension vidéo",
     "voiceModel": "Modèle vocal",
-    "voiceModelDesc": "Modèle par défaut pour la reconnaissance et la synthèse vocale"
+    "voiceModelDesc": "Modèle par défaut pour la reconnaissance et la synthèse vocale",
+    "notificationChannelsDesc": "Les identifiants sont stockés dans les paramètres locaux. Désactiver un canal arrête les notifications sortantes vers celui-ci sans modifier le code hôte.",
+    "notificationChannels": {
+      "title": "Canaux sortants",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "Actif",
+      "inactive": "Non assemblé",
+      "needsCredentials": "Identifiants manquants",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "URL du serveur (facultatif)",
+      "topicPlaceholder": "Sujet (facultatif)"
+    }
   },
   "settingsPage": {
     "refreshPage": "Actualiser la page"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "Dimension · Code",
         "fallbackColPath": "Premier candidat sain → source réelle",
         "fallbackUnavailable": "Cet environnement d'exécution n'expose pas l'endpoint des replis (la réponse n'est pas une liste). Les entrées s'affichent dans l'application de bureau.",
-        "fallbackFailed": "Lecture des enregistrements de repli échouée (la commande a renvoyé une erreur)."
+        "fallbackFailed": "Lecture des enregistrements de repli échouée (la commande a renvoyé une erreur).",
+        "primaryLabel": "Source de marché principale",
+        "primaryDefault": "Ordre par défaut",
+        "primaryDesc": "Ne réordonne que la tête des chaînes quote/klines sans modifier le code hôte ; les rejeux as_of ne sont pas affectés.",
+        "primarySaved": "Source de marché principale mise à jour"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

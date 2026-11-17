@@ -411,6 +411,9 @@ pub struct AStockClient {
     ///
     /// 用 parking_lot::RwLock 支持同步读取（find_vendor 是同步方法，不跨 await）
     enabled_vendors: parking_lot::RwLock<Option<HashSet<String>>>,
+    /// 判据③运行时行情源优先级覆盖：route_key → 置顶顺序（把这些源提到链首，其余保持原相对序）。
+    /// 只改顺序、不改注册表；as_of 回放模式下不生效（历史样本口径稳定）。
+    vendor_priority: parking_lot::RwLock<HashMap<String, Vec<String>>>,
     /// 空数据冷却（2026-07-31 新增）：
     /// key = "{datatype}:{code}" → 冷却到期时间戳(epoch ms)。
     /// 用于 north_bound / money_flow 等"全部源返回空"的场景：
@@ -692,6 +695,7 @@ impl AStockClient {
                     news_archive_sink: None,
                     browser_fetcher: None,
                     enabled_vendors: parking_lot::RwLock::new(None),
+                    vendor_priority: parking_lot::RwLock::new(HashMap::new()),
                     empty_cooldown: Arc::new(Mutex::new(HashMap::new())),
                 };
                 client.register_default_vendors(http);
@@ -826,6 +830,7 @@ impl AStockClient {
             news_archive_sink: None, // P6:默认不写入,调用方通过 with_news_archive_sink 注入
             browser_fetcher: None,   // 浏览器 fetch 通过 with_browser_fetcher() 注入
             enabled_vendors: parking_lot::RwLock::new(None), // 默认全部启用
+            vendor_priority: parking_lot::RwLock::new(HashMap::new()),
             empty_cooldown: Arc::new(Mutex::new(HashMap::new())),
         };
 
@@ -842,6 +847,42 @@ impl AStockClient {
     /// 传入空 set 等效于全部禁用；传入 None 等效于全部启用（向后兼容）
     pub fn set_enabled_vendors(&self, vendors: Option<HashSet<String>>) {
         *self.enabled_vendors.write() = vendors;
+    }
+
+    /// 运行时设置主行情源（判据③：换主源只改配置，不动主壳代码路径）。
+    ///
+    /// `Some(vendor)` 把该源提到 `quote` / `klines` 两条行情主链的**首位**（其余源的相对顺序不变）；
+    /// `None` 清除覆盖、回到硬编码默认顺序。只改顺序不改注册表 —— 未注册的名字自然不生效。
+    pub fn set_primary_market_vendor(&self, vendor: Option<&str>) {
+        let mut guard = self.vendor_priority.write();
+        guard.clear();
+        if let Some(v) = vendor.map(str::trim).filter(|v| !v.is_empty()) {
+            guard.insert("quote".to_string(), vec![v.to_string()]);
+            guard.insert("klines".to_string(), vec![v.to_string()]);
+        }
+    }
+
+    /// 当前优先级覆盖快照（诊断 / 命令回读用）。
+    pub fn vendor_priority_snapshot(&self) -> HashMap<String, Vec<String>> {
+        self.vendor_priority.read().clone()
+    }
+
+    /// 按覆盖顺序重排一份 vendor 名单（纯函数，便于单测自证）。
+    ///
+    /// 覆盖名单里出现、且确实在本名单里的源按覆盖序提到前面；其余保持原相对顺序。
+    /// `override_order` 里的未知名字被忽略（不影响其余源）。
+    pub(crate) fn reorder_vendors(
+        mut names: Vec<String>,
+        override_order: &[String],
+    ) -> Vec<String> {
+        let mut head: Vec<String> = Vec::with_capacity(override_order.len());
+        for want in override_order {
+            if let Some(pos) = names.iter().position(|n| n == want) {
+                head.push(names.remove(pos));
+            }
+        }
+        head.extend(names);
+        head
     }
 
     /// 运行时设置东财代理（设置页热更新，无需重启）。
@@ -1720,6 +1761,22 @@ impl AStockClient {
                     "[astock-data] vendor '{name}' 无凭据（neodata/iwencai），从路由链剔除"
                 );
             }
+        }
+        // 判据③：运行时优先级覆盖 —— 把配置指定的源提到链首（as_of 回放不生效，
+        // 保历史样本口径稳定）。只重排、不增删源；未知名字被忽略。
+        if !crate::as_of::is_asof_active()
+            && let Some(order) = self.vendor_priority.read().get(route_key).cloned()
+        {
+            let original = vendor_names_list.clone();
+            let reordered = Self::reorder_vendors(vendor_names_list, &order);
+            if reordered != original {
+                tracing::info!(
+                    route = route_key,
+                    order = ?reordered,
+                    "[astock-data] 应用行情源优先级覆盖（判据③）"
+                );
+            }
+            vendor_names_list = reordered;
         }
         let mut retry_count = 0u32;
         // 跨轮累计「哪些源明确回答过无数据（NotFound / 空数据都是**答案**）/
@@ -10486,5 +10543,38 @@ mod chain_give_up_composition_tests {
         );
         assert!(err.no_data_for_code());
         assert!(err.is_empty_data(), "对分红/复权等既有消费方仍是「空数据」语义");
+    }
+}
+
+#[cfg(test)]
+mod vendor_priority_tests {
+    use super::*;
+
+    /// 判据③（换主行情源）：覆盖顺序里出现且在本链的源提到前面，其余保持原相对序。
+    #[test]
+    fn reorder_puts_override_first_and_keeps_rest() {
+        let names = vec!["tencent".to_string(), "sina".to_string(), "xueqiu".to_string()];
+        let out = AStockClient::reorder_vendors(names, &["xueqiu".to_string()]);
+        assert_eq!(out, vec!["xueqiu".to_string(), "tencent".to_string(), "sina".to_string()]);
+
+        // 未知名字被忽略，原顺序不变
+        let names = vec!["tencent".to_string(), "sina".to_string()];
+        let out = AStockClient::reorder_vendors(names, &["does-not-exist".to_string()]);
+        assert_eq!(out, vec!["tencent".to_string(), "sina".to_string()]);
+    }
+
+    /// 设置主源写入 quote / klines 两条覆盖；清除后快照为空。
+    #[test]
+    fn set_primary_market_vendor_writes_and_clears_snapshot() {
+        let client = AStockClient::new();
+        assert!(client.vendor_priority_snapshot().is_empty(), "默认无覆盖");
+
+        client.set_primary_market_vendor(Some("sina"));
+        let snap = client.vendor_priority_snapshot();
+        assert_eq!(snap.get("quote"), Some(&vec!["sina".to_string()]));
+        assert_eq!(snap.get("klines"), Some(&vec!["sina".to_string()]));
+
+        client.set_primary_market_vendor(None);
+        assert!(client.vendor_priority_snapshot().is_empty(), "清除后应无覆盖");
     }
 }

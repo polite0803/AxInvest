@@ -29,6 +29,7 @@
 //! 因此 IM 平台适配为 `NotificationChannel` 的工作在 wiring 层（`src/init/`）完成。
 
 pub mod channels;
+pub mod config_assembly;
 pub mod dispatcher;
 
 pub use dispatcher::{LogChannel, NotificationDispatcher};

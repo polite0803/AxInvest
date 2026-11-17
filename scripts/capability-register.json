@@ -47,17 +47,17 @@
     {
       "id": "commandTotal",
       "label": "Tauri 命令总数（parseRegistry 逐行条目）",
-      "value": 1173,
+      "value": 1176,
       "check": "registryCommandCount",
       "hard": true,
-      "planNumber": "1173",
+      "planNumber": "1176",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 366,
           "mustContain": [
-            "1173",
-            "142",
+            "1176",
+            "144",
             "`register_commands.rs` 共"
           ]
         }
@@ -68,10 +68,10 @@
     {
       "id": "commandModules",
       "label": "命令模块数",
-      "value": 142,
+      "value": 144,
       "check": "registryModuleCount",
       "hard": true,
-      "planNumber": "142",
+      "planNumber": "144",
       "planMustAppear": true,
       "note": "与 commandTotal 同一份 parseRegistry 读数（PLAN:366 驻留口径「… 共 1540 条 / 165 模块」）。**2026-11-11 #264 批 1：165→164** = 整文件删除 `src-tauri/src/commands/opc_delivery.rs`（五条交付环命令改走插件命名命令通道）⇒ 少一个命令模块；`opc` 模块本身不动（它只少了这五条命令之外的零条），故仅模块数降 1。**2026-11-08 对账批 164→165**：`376b4d766`（#216）新增 `commands/task_card_host_actions` 模块（并删 `7cb13bde5` 的三条命令只在 `opc` 模块内增减，不改模块数）；模块数不随单条命令增减而变。**2026-11-11 #264 批 2：164→163** = 整模块删除 `src-tauri/src/commands/opc_demand_discovery.rs`（八条需求发现命令迁 T2 插件命令通道）⇒ 少一个命令模块；该模块名以 `opc_` 开头 ⇒ 同批 `opcBoundaryCommands` −8/−1、`opcAuditDomainCommands` −8/−1（股票两锚不动，实测读数已核）。**2026-11-11 #264 批 3 ⇒ 163→162**（整文件删除 `src-tauri/src/commands/opc_demand_implement.rs`，三条需求实现命令迁 T2 插件命令通道）。**2026-11-11 #264 批 4 ⇒ 162→161**（整文件删除 `src-tauri/src/commands/opc_workflows/domain_workflows.rs`，三条领域工作流只读命令迁 T2 插件命令通道；`opc_workflows` 父模块仍在，只少一个子模块文件）。**2026-11-11 #264 批 6 ⇒ 161→160**（整文件删除 `src-tauri/src/commands/demand_discovery.rs`，剩余五条发现面命令迁 T2；该模块按审计域归「股票分析与管线」⇒ `stockAuditDomainCommands` 同批 −5/−1，OPC 两锚不动，实测读数已核）。**2026-11-12 G19 DojoSDK 死通道退役批 ⇒ 160→159**（整模块删除 `src-tauri/src/commands/dojo_sdk.rs`，`commands/mod.rs` 同批摘掉 `pub mod dojo_sdk;` 一行 ⇒ 注册表少一个模块名；`commandTotal` 同批 −3、`registryFileLines` −3，三锚精确配对，见 PLAN §156）。**2026-11-12 #264 批 7 刀 B3 ⇒ 159→155**（四个模块整块退出注册表：`opc_capability_pack_runtime` 最后 4 条命令删尽 ⇒ 模块退出、`opc_learning_hook` 整文件删除、`opc_demand_subscription` 最后 2 条命令删尽、`opc_demand_capability` 唯一命令删尽；`commandTotal` 同批 −8、`registryFileLines` −8，三锚精确配对，见 PLAN §163）。**2026-11-12 #264 刀 C 批 3 ⇒ 154 的上一跳 155→154**（`opc_capability_pack_actions` 最后 7 条学习面命令删尽 ⇒ 模块整体退出注册表；`commandTotal` 同批 −7、`registryFileLines` −7，三锚精确配对，见 PLAN §166）。**2026-11-13 #264 批 4 双声明收口 ⇒ 153 的上一跳 154→153**（`commands/opc.rs` 最后 12 条命令删尽 ⇒ `opc` 模块整块退出注册表、`commands/mod.rs` 摘 `pub mod opc;` 一行；`commandTotal` 同批 −12、`registryFileLines` −12，三锚精确配对，见 PLAN §167）。**2026-11-13 #35 候选 B trade_intent 退役 ⇒ 153→152**（`trade_intent` 模块八条命令整批退役 ⇒ 该模块 `#[tauri::command]` 归零、整块退出注册表；文件保留，`commands/mod.rs` 的 `pub mod trade_intent;` 不摘 —— §156 红线物仍在文件内被 init/调度器消费；归因见 `commandTotal`）。**2026-11-13 #35 C3 market_mainline 退役 ⇒ 152→151**（整文件删除 `src-tauri/src/commands/market_mainline.rs` 十条命令、无 §156 红线物 ⇒ 与 trade_intent「文件保留」形态不同：`commands/mod.rs` 摘 `pub mod market_mainline;` 一行；归因见 `commandTotal`）。**2026-11-15 #338 批 A12：151→150（−1）** = `mover_recall_analysis` 模块三条命令全迁 ⇒ `#[tauri::command]` 归零、模块整块退出注册表（core 与调度器入口留文件，`start_for_scheduler` 仍被 cron 消费）。`--dump-readings` 实测 150。**2026-11-15 #341+#342：150→149（−1）** = `wf_des` 模块 `#[tauri::command]` 归零退出注册表（函数本体留文件供接缝复用）。**2026-11-15 #344：1258→1229（−29）**，同 `commandTotal`。**2026-11-15 #345：148→145（−3）** = 三个模块 `#[tauri::command]` 归零退出注册表。 **2026-11-16 #349：145→142（−3）** = universe_scan / time_travel_batch / mover_recall 三模块归零退出。"
     },
@@ -96,7 +96,7 @@
     {
       "id": "commandNameSetParity",
       "label": "不变量：契约 A 名集合数 == 产物条目数 == 登记值",
-      "value": 1173,
+      "value": 1176,
       "check": "commandNameSetCount",
       "hard": true,
       "planMustAppear": false,
@@ -105,13 +105,13 @@
     {
       "id": "stockBoundaryCommands",
       "label": "股票命令数（插件边界口径 cmdRe，逐 entry 计数）",
-      "value": 70,
-      "value2": 11,
+      "value": 71,
+      "value2": 12,
       "value2Label": "模块",
       "check": "registryBoundaryCount",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "70",
+      "planNumber": "71",
       "planMustAppear": true,
       "planPinned": [
         {
@@ -127,13 +127,13 @@
     {
       "id": "stockAuditDomainCommands",
       "label": "股票命令数（审计 19 域口径「股票分析与管线」）",
-      "value": 69,
-      "value2": 10,
+      "value": 70,
+      "value2": 11,
       "value2Label": "模块",
       "check": "registryDomainCount",
       "domainName": "股票分析与管线",
       "hard": true,
-      "planNumber": "69",
+      "planNumber": "70",
       "planMustAppear": true,
       "note": "并行口径（PLAN:501/515 已裁定两者皆真）⇒ 本门把两个数都钉住，任一变化都必须同批改表。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 305→304**（同批 `stockBoundaryCommands` 303→302）。**2026-11-10 #35 批 1：304→298（−6）** = 删 `stock_analysis.rs` 六条 cron 死命令；另 3 条 `backtest_validation.rs` 命令不在本审计域（归「量化与仿真」）⇒ 只降 6，模块数 19 不动。**2026-11-10 #35 批 1b：298→289（−9）** = 同上 9 条 cron 宿主 wrapper，全部计入本审计域 ⇒ 模块数 19 不动。**2026-11-10 #35 批 1c：289→288（−1）** = 同上 `delete_recommendation_cron` 退役 ⇒ 模块数 19 不动。**2026-11-11 #264 批 5：288→282（−6）** = 删 `demand_discovery.rs` 交付段六条命令（该文件在审计 19 域口径整域归「股票分析与管线」，与批 2/3/4 同因）⇒ 模块数 19 不动。**2026-11-11 #264 批 6：282→277（−5）/ 模块 19→18** = 整文件删除 `src-tauri/src/commands/demand_discovery.rs` 剩余五条发现面命令（`opc_scan_capabilities` / `opc_proactive_evaluate_leads` / `opc_list_capability_gaps` / `opc_close_capability_gap` / `opc_analyze_capability_gaps`，迁 T2 插件命令通道）⇒ `demand_discovery` 模块整块退出本审计域（域归属按 DOMAIN_RULES 不看命令名前缀、看模块路径）。⚠ 同批 OPC 两锚分叉：`opcBoundaryCommands` 边界口径 cmdRe 逐条命中**命令名** ⇒ 五条 `opc_` 前缀命令命中 ⇒ 同批 −5/−1（79→74、9→8，见该锚批 6 段）；`opcAuditDomainCommands` 审计域口径按**模块路径**归属 ⇒ `demand_discovery` 本就不在 OPC 域 ⇒ 零进出（见该锚批 6 段）。PLAN:515 同批已写 277/18。**2026-11-13 #35 候选 B trade_intent 退役：277→269（−8）、模块 18→17** = `trade_intent` 模块八条命令整批退役且整块退出审计域（`--dump-readings` 实测 269/17；归因见 `commandTotal` 与 `stockBoundaryCommands` 本批段）。**2026-11-13 #35 C2 aggregator 三命令退役：269→266（−3）、模块 17 不动** = 三条全在「股票分析与管线」域（`stock_workflow` 模块 24→21），`--dump-readings` 实测 266/17（归因见 `commandTotal`）。**2026-11-13 #35 C3 market_mainline 退役：266→256（−10）、模块 17→16** = `market_mainline` 模块整块退出「股票分析与管线」审计域（DOMAIN_RULES `^market_(close|mainline)` 按模块路径命中——`command-domains.mjs:26`；`--dump-readings` 实测 256/16；归因见 `commandTotal`）。**2026-11-13 #307：256→253（−3）、模块 16 不动** = 与边界口径等降（三条全归「股票分析与管线」域）。**2026-11-14 #311：253→249（−4）、模块 16 不动** = 与边界口径等降（四条全归「股票分析与管线」域）；「量化与仿真」15/3 不动。**2026-11-14 #321（补记）：249→246（−3）、模块 16 不动** = F1 余三条全在 `stock_analysis` ⇒ 与边界口径等降；#321 收口批只改了本锚 value 而漏追本 note 批次段（断链由 #322 收口批补记），见 PLAN §178 锚点段。**2026-11-14 #322：246→236（−10）、模块 16 不动** = `stock_analysis` 155→151（−4）+ `analyst_evolution` / `analyst_feedback` 各 −3（按模块路径归属，两模块 DOMAIN_RULES 归「股票分析与管线」；`--dump-readings` 实测 236/16），与边界口径等降。**2026-11-14 #322 时点「量化与仿真」15/3 不动。****2026-11-14 #323 五命令批：236→231（−5）、模块 16 不动** = 五条全归「股票分析与管线」域（`stock_analysis` −4 + `stock_workflow` −1，两模块均未整块退出），与边界口径等降；`--dump-readings` 实测 231/16；「量化与仿真」15/3 不动。 **2026-11-14 #326：231→227（−4）、模块 16 不动** = 四条全在 `stock_analysis`（两口径同命中 ⇒ 集合差不新增）。 **2026-11-14 #327：227→203（−24）、模块 16 不动**。 **2026-11-15 #328：203→198（−5）、模块 16 不动** = 3×finance + 2×invest，两口径同命中。 **2026-11-15 #329：198→195（−3）、模块 16 不动** = 3×finance（§183 表 F3 余三条），两口径同命中。 **2026-11-15 #330：195→194（−1）、模块 16 不动** = 1×finance（批量摘要），两口径同命中。 **2026-11-15 #331：194→192（−2）、模块 16 不动** = 2×finance，两口径同命中。 **2026-11-15 #332：192→190（−2）、模块 16 不动** = 2×finance，两口径同命中。 **2026-11-15 #333：190→188（−2）、模块 16 不动** = 2×finance，两口径同命中。 **2026-11-15 #334：188→187（−1）、模块 16 不动** = 1×mover_recall，两口径同命中。**2026-11-15 #335：187→185（−2）、模块 16 不动** = 2×finance，两口径同命中。**2026-11-15 #335：187→185（−2）、模块 16 不动** = 2×finance，两口径同命中。**2026-11-15 #337：185→183（−2）、模块 16 不动** = 2×finance，两口径同命中。**2026-11-15 #338：183→180（−3）、模块 16→15** = 三条全归「股票分析与管线」域；`mover_recall_analysis` 模块 `#[tauri::command]` 归零（core 留文件）⇒ 模块整块退出本域。`--dump-readings` 实测 180/15。**2026-11-15 #341+#342：180→162（−18）、模块 15 不动** = 18 条均在 `stock_analysis` 模块（2×A14 + 16×A15，全 finance）。**2026-11-15 #343：162→149（−13）、模块 15 不动** = 13×finance。**2026-11-15 #344：149→120（−29）、模块 15→14** = 29 条全归本域（26 finance 标注 + 3 mover 无标注亦按模块归属）；evolution 模块退出。**2026-11-15 #345：120→106（−14）、模块 14→12** = 14 条归本域（2×mover 模块非本域口径）；`analyst_evolution`/`analyst_feedback` 退出，`backtest_validation` 归「量化与仿真」（该桶 8→6/3→2）。**2026-11-15 #346：106→95（−11）、模块 12 不动** = 11×finance。 **2026-11-16 #349：87→69（−18）、模块 12→10、finance 52** = 20 条退役中 18 条归本域。"
     },
@@ -271,20 +271,20 @@
     {
       "id": "frontendFileCaliber",
       "label": "前端体量（脚本文件名口径 feRe 匹配 src/** 全部 .ts/.tsx）",
-      "value": 91297,
+      "value": 91357,
       "value2": 319,
       "value2Label": "文件",
       "check": "frontendVolume",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "91 297",
+      "planNumber": "91 357",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 522,
           "mustContain": [
             "319",
-            "91 297",
+            "91 357",
             "脚本文件名口径"
           ]
         }
@@ -294,20 +294,20 @@
     {
       "id": "frontendDirCaliber",
       "label": "前端体量（目录口径 components/stock-analysis）",
-      "value": 67585,
+      "value": 67636,
       "value2": 240,
       "value2Label": "文件",
       "check": "frontendDirVolume",
       "dir": "src/components/stock-analysis",
       "hard": true,
-      "planNumber": "67 585",
+      "planNumber": "67 636",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 521,
           "mustContain": [
             "240",
-            "67 585",
+            "67 636",
             "目录口径"
           ]
         }
@@ -481,16 +481,16 @@
     {
       "id": "k1RsFileCount",
       "label": "K1 扫描面 .rs 文件数（8 根）",
-      "value": 2044,
+      "value": 2047,
       "check": "k1RsFileCount",
       "hard": true,
-      "planNumber": "2044",
+      "planNumber": "2047",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 250,
           "mustContain": [
-            "2044",
+            "2047",
             "329",
             "K1：`pub trait` 总数"
           ]
@@ -589,19 +589,19 @@
     {
       "id": "agentCommandFace",
       "label": "智能体工具面（`#[agent_command]` 标注条数 / 非宿主根条数）",
-      "value": 1179,
+      "value": 1182,
       "value2": 0,
       "value2Label": "条非宿主根",
       "check": "agentCommandFaceCount",
       "hard": true,
-      "planNumber": "1179",
+      "planNumber": "1182",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 8952,
           "mustContain": [
             "标注总数",
-            "1179",
+            "1182",
             "domain 桶"
           ]
         }
@@ -1143,17 +1143,17 @@
           "role": "契约"
         },
         {
-          "ref": "axagent-quant/crates/astock-data/src/lib.rs:837",
+          "ref": "axagent-quant/crates/astock-data/src/lib.rs:842",
           "file": "axagent-quant/crates/astock-data/src/lib.rs",
-          "line": 837,
+          "line": 842,
           "token": "pub fn register_vendor",
           "anchorText": "    pub fn register_vendor(&mut self, name: &str, vendor: Box<dyn StockVendor>) {",
           "role": "键控注册"
         },
         {
-          "ref": "axagent-quant/crates/astock-data/src/lib.rs:1646",
+          "ref": "axagent-quant/crates/astock-data/src/lib.rs:1687",
           "file": "axagent-quant/crates/astock-data/src/lib.rs",
-          "line": 1646,
+          "line": 1687,
           "token": "fn find_vendor",
           "anchorText": "    fn find_vendor(&self, name: &str) -> Option<&dyn StockVendor> {",
           "role": "键控取回"
@@ -1730,9 +1730,9 @@
       "check": "implementorCount",
       "evidence": [
         {
-          "ref": "axagent-plugins/crates/plugins/src/manager.rs:991",
+          "ref": "axagent-plugins/crates/plugins/src/manager.rs:1008",
           "file": "axagent-plugins/crates/plugins/src/manager.rs",
-          "line": 991,
+          "line": 1008,
           "token": "pub fn execute_plugin_command",
           "anchorText": "pub fn execute_plugin_command(",
           "role": "CLI 派发口（本批已改成真授权门槛）"

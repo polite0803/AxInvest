@@ -682,6 +682,23 @@ impl PluginManager {
         })?;
         // 走完整载入链而非直接读盘：清单校验与完整性核对都无法被绕过（同 read_panel_asset）。
         let manifest = load_plugin_from_directory(&record.install_path)?;
+        // 判据③（可关）：与命令执行链同口径，未启用的插件不得解析其页面资产。
+        // 前端 flattenPages 只做 UI 过滤，这里补执行层闸——脚本直接 invoke 本命令时
+        // 不能绕过「关掉插件」的语义（否则页面已从清单消失，资产却仍可被取到）。
+        // 直接读 config.enabled_plugins（is_enabled 的权威源），默认口径与 is_enabled 一致：
+        // External 未记录时视为关闭，其余按 manifest 默认值——不触发 plugin_registry 全量重扫。
+        let enabled =
+            self.config.enabled_plugins.get(plugin_id).copied().unwrap_or(match record.kind {
+                PluginKind::External => false,
+                PluginKind::Builtin | PluginKind::Bundled | PluginKind::OpenClaw => {
+                    manifest.default_enabled
+                },
+            });
+        if !enabled {
+            return Err(PluginError::CommandFailed(format!(
+                "插件 `{plugin_id}` 未启用，页面 `{page_id}` 资产不可解析"
+            )));
+        }
         let page = manifest.pages.iter().find(|p| p.id == page_id).ok_or_else(|| {
             PluginError::NotFound(format!("plugin `{plugin_id}` has no page `{page_id}`"))
         })?;
@@ -5265,7 +5282,7 @@ mod tests {
                 .expect("写入 ui.json");
         }
 
-        let manager = PluginManager::new(isolated_config(temp));
+        let mut manager = PluginManager::new(isolated_config(temp));
         let integrity = if pinned {
             hash_plugin_directory(installed_dir)
                 .ok()
@@ -5290,6 +5307,11 @@ mod tests {
             },
         );
         manager.store_registry(&registry).expect("写 registry");
+        // 判据③：assets 正例模拟「已安装且已启用」态；External 默认 disabled，
+        // 不显式置 enabled 会让所有资产正例在新增的执行层闸前失败。
+        // 直接写权威源，不走 enable()——后者要 plugin_registry 全量重扫认可该夹具。
+        manager.write_enabled_state(plugin_id, Some(true)).expect("写启用态");
+        manager.config.enabled_plugins.insert(plugin_id.to_string(), true);
         manager
     }
 
@@ -5552,6 +5574,24 @@ mod tests {
         manager.store_registry(&registry).expect("改写 registry");
         let err = manager.resolve_page_asset("ui-pages", "main").expect_err("无锚点应 fail-closed");
         assert!(matches!(err, PluginError::IntegrityUnpinned(_)), "实际 = {err:?}");
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 判据③：关掉插件后，资产解析在执行层拒绝（前端 flattenPages 只做 UI 过滤，
+    /// 脚本绕过 UI 直接 invoke 本命令时不能拿到已关插件的页面资产）。
+    #[test]
+    fn resolve_page_asset_refuses_disabled_plugin() {
+        let temp = temp_dir("page-disabled");
+        let mut manager = manager_with_page_pack(&temp, BUNDLE_PAGE_JSON);
+        // 先确认为启用态能解析，再将同一夹具关掉——差异只来自 enabled 开关。
+        manager.resolve_page_asset("ui-pages", "main").expect("启用时应可解析");
+        manager.write_enabled_state("ui-pages", Some(false)).expect("写关闭态");
+        manager.config.enabled_plugins.insert("ui-pages".to_string(), false);
+
+        let err = manager.resolve_page_asset("ui-pages", "main").expect_err("关闭后应拒绝");
+        let text = err.to_string();
+        assert!(matches!(err, PluginError::CommandFailed(_)), "实际 = {text}");
+        assert!(text.contains("ui-pages") && text.contains("未启用"), "实际 = {text}");
         let _ = std::fs::remove_dir_all(&temp);
     }
 

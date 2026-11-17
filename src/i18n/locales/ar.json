@@ -6720,7 +6720,21 @@
     "videoModel": "نموذج الفيديو",
     "videoModelDesc": "النموذج الافتراضي لمهام فهم الفيديو",
     "voiceModel": "النموذج الصوتي",
-    "voiceModelDesc": "النموذج الافتراضي لمهام التعرف على الكلام وتحويل النص إلى كلام"
+    "voiceModelDesc": "النموذج الافتراضي لمهام التعرف على الكلام وتحويل النص إلى كلام",
+    "notificationChannelsDesc": "تُحفظ بيانات الاعتماد في الإعدادات المحلية. إيقاف قناة يوقف الإشعارات الصادرة إليها دون تعديل شيفرة المضيف.",
+    "notificationChannels": {
+      "title": "القنوات الصادرة",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "نشط",
+      "inactive": "غير مُهيّأ",
+      "needsCredentials": "بيانات الاعتماد ناقصة",
+      "tokenPlaceholder": "الرمز / SendKey",
+      "apiUrlPlaceholder": "عنوان الخادم (اختياري)",
+      "topicPlaceholder": "الموضوع (اختياري)"
+    }
   },
   "settingsPage": {
     "refreshPage": "تحديث الصفحة"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "البُعد · الرمز",
         "fallbackColPath": "أول مرشح سليم → المصدر الفعلي",
         "fallbackUnavailable": "لا يعرض وقت التشغيل هذا نقطة نهاية سجل التبديل (الاستجابة ليست قائمة). تظهر السجلات في تطبيق سطح المكتب.",
-        "fallbackFailed": "تعذّرت قراءة سجلات التبديل (أرجعت الأمر خطأ)."
+        "fallbackFailed": "تعذّرت قراءة سجلات التبديل (أرجعت الأمر خطأ).",
+        "primaryLabel": "مصدر بيانات السوق الأساسي",
+        "primaryDefault": "الترتيب الافتراضي",
+        "primaryDesc": "يعيد ترتيب رأس سلاسل quote/klines فقط دون تعديل شيفرة المضيف؛ لا تتأثر إعادة تشغيل as_of.",
+        "primarySaved": "تم تحديث مصدر بيانات السوق الأساسي"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

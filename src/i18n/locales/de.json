@@ -6720,7 +6720,21 @@
     "videoModel": "Videomodell",
     "videoModelDesc": "Standardmodell für Videoverständnis",
     "voiceModel": "Sprachmodell",
-    "voiceModelDesc": "Standardmodell für Spracherkennung und Sprachsynthese"
+    "voiceModelDesc": "Standardmodell für Spracherkennung und Sprachsynthese",
+    "notificationChannelsDesc": "Anmeldedaten werden in den lokalen Einstellungen gespeichert. Das Deaktivieren eines Kanals stoppt ausgehende Benachrichtigungen an ihn, ohne den Host-Code zu ändern.",
+    "notificationChannels": {
+      "title": "Ausgehende Kanäle",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "Aktiv",
+      "inactive": "Nicht eingerichtet",
+      "needsCredentials": "Anmeldedaten fehlen",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "Server-URL (optional)",
+      "topicPlaceholder": "Thema (optional)"
+    }
   },
   "settingsPage": {
     "refreshPage": "Seite aktualisieren"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "Dimension · Code",
         "fallbackColPath": "Erster gesunder Kandidat → tatsächliche Quelle",
         "fallbackUnavailable": "Diese Laufzeit stellt den Fallback-Log-Endpunkt nicht bereit (die Antwort ist keine Liste). In der Desktop-App erscheinen die Einträge hier.",
-        "fallbackFailed": "Fallback-Einträge konnten nicht gelesen werden (der Befehl lieferte einen Fehler)."
+        "fallbackFailed": "Fallback-Einträge konnten nicht gelesen werden (der Befehl lieferte einen Fehler).",
+        "primaryLabel": "Primäre Marktdatenquelle",
+        "primaryDefault": "Standardreihenfolge",
+        "primaryDesc": "Ändert nur den Kopf der quote/klines-Ketten, ohne Host-Code zu ändern; as_of-Replays sind nicht betroffen.",
+        "primarySaved": "Primäre Marktdatenquelle aktualisiert"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

@@ -6720,7 +6720,21 @@
     "videoModel": "Video Model",
     "videoModelDesc": "Default model for video understanding tasks",
     "voiceModel": "Voice Model",
-    "voiceModelDesc": "Default model for speech-to-text and text-to-speech tasks"
+    "voiceModelDesc": "Default model for speech-to-text and text-to-speech tasks",
+    "notificationChannelsDesc": "Credentials are stored in local settings. Turning a channel off stops outbound notifications to it without touching the host code.",
+    "notificationChannels": {
+      "title": "Outbound channels",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "Active",
+      "inactive": "Not assembled",
+      "needsCredentials": "Missing credentials",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "Server URL (optional)",
+      "topicPlaceholder": "Topic (optional)"
+    }
   },
   "settingsPage": {
     "refreshPage": "Refresh Page"
@@ -16620,7 +16634,11 @@
         "fallbackColDimension": "Dimension · Code",
         "fallbackColPath": "First healthy candidate → Actual source",
         "fallbackUnavailable": "This runtime does not expose the fallback-log endpoint (the response is not a list). Records appear when running the desktop app.",
-        "fallbackFailed": "Failed to read fallback records (the command returned an error)."
+        "fallbackFailed": "Failed to read fallback records (the command returned an error).",
+        "primaryLabel": "Primary market data vendor",
+        "primaryDefault": "Default order",
+        "primaryDesc": "Only reorders the head of quote/klines chains without changing host code; as_of replays are unaffected.",
+        "primarySaved": "Primary market data vendor updated"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",

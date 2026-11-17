@@ -30,6 +30,24 @@ interface Prefs {
 }
 
 const ROW_KEYS = ["notification:enabled", "notification:errors", "notification:import", "notification:backup"];
+const CHANNEL_ROW_KEYS = [
+  "notification:channel:pushplus",
+  "notification:channel:serverchan",
+  "notification:channel:ntfy",
+  "notification:channel:gotify",
+];
+
+function prefSwitch(container: HTMLElement, key: string): HTMLElement {
+  const row = container.querySelector(`[data-search-key="${key}"]`);
+  if (!row) {
+    throw new Error(`row ${key} not found`);
+  }
+  const sw = row.querySelector('[role="switch"]');
+  if (!sw) {
+    throw new Error(`switch in ${key} not found`);
+  }
+  return sw as HTMLElement;
+}
 
 function setPrefs(prefs: Prefs) {
   useSettingsStore.setState((s) => ({ settings: { ...s.settings, ...prefs } }));
@@ -48,17 +66,21 @@ describe("NotificationSettings", () => {
     setPrefs({ notificationsEnabled: true, notifyErrors: true, notifyImport: true, notifyBackup: true });
     const { container } = renderPanel();
 
-    expect(screen.getAllByRole("switch")).toHaveLength(4);
+    // 4 个通知中心开关 + 4 个出站渠道开关（判据③）
+    expect(screen.getAllByRole("switch")).toHaveLength(8);
     for (const key of ROW_KEYS) {
+      expect(container.querySelector(`[data-search-key="${key}"]`)).not.toBeNull();
+    }
+    for (const key of CHANNEL_ROW_KEYS) {
       expect(container.querySelector(`[data-search-key="${key}"]`)).not.toBeNull();
     }
   });
 
   it("开关状态跟随偏好：总闸关、错误开、导入关、备份开", () => {
     setPrefs({ notificationsEnabled: false, notifyErrors: true, notifyImport: false, notifyBackup: true });
-    renderPanel();
 
-    expect(screen.getAllByRole("switch").map((s) => s.getAttribute("aria-checked"))).toEqual([
+    const { container } = renderPanel();
+    expect(ROW_KEYS.map((k) => prefSwitch(container, k).getAttribute("aria-checked"))).toEqual([
       "false",
       "true",
       "false",
@@ -73,11 +95,11 @@ describe("NotificationSettings", () => {
     useSettingsStore.setState({ saveSettings });
 
     try {
-      renderPanel();
+      const { container } = renderPanel();
 
       await act(async () => {
-        for (const s of screen.getAllByRole("switch")) {
-          fireEvent.click(s);
+        for (const key of ROW_KEYS) {
+          fireEvent.click(prefSwitch(container, key));
         }
       });
 

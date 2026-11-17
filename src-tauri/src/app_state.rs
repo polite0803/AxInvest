@@ -309,6 +309,9 @@ pub struct AppState {
     pub parallel_execution_service:
         Arc<tokio::sync::RwLock<axagent_trajectory::ParallelExecutionService>>,
     pub cron_job_store: Arc<axagent_runtime_core::CronJobStore>,
+    /// 出站推送渠道分发器（判据③）：init 从 settings 装配，命令层可即时重配，
+    /// monitor_emitter 与通知命令共用同一 Arc，不再各自临时 new 空壳。
+    pub notification_dispatcher: Arc<axagent_notification::NotificationDispatcher>,
     pub cron_scheduler: Arc<tokio::sync::RwLock<Option<Arc<axagent_runtime::cron::CronScheduler>>>>,
     /// 时间旅行批次复盘全局互斥锁：同一时刻只允许一个批次在跑。
     /// as_of 栈是**进程级**的，两个批次并发会互相串扰；批次还要避开 live 流水线时间窗

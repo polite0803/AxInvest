@@ -6720,7 +6720,21 @@
     "videoModel": "视频模型",
     "videoModelDesc": "视频理解任务使用的默认模型",
     "voiceModel": "语音模型",
-    "voiceModelDesc": "语音转写与语音合成任务使用的默认模型"
+    "voiceModelDesc": "语音转写与语音合成任务使用的默认模型",
+    "notificationChannelsDesc": "凭据保存在本地设置；关闭后通知不再外推到该渠道，无需改动主壳代码。",
+    "notificationChannels": {
+      "title": "出站推送渠道",
+      "pushplus": "PushPlus",
+      "serverchan": "Server 酱",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "已生效",
+      "inactive": "未装配",
+      "needsCredentials": "缺少凭据",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "服务地址（可选）",
+      "topicPlaceholder": "Topic（可选）"
+    }
   },
   "settingsPage": {
     "refreshPage": "刷新页面"
@@ -16410,7 +16424,11 @@
         "fallbackColDimension": "维度 · 代码",
         "fallbackColPath": "首个健康候选 → 实际供数",
         "fallbackUnavailable": "当前运行环境没有提供换源记录接口（返回值不是列表）；桌面版运行时这里才会显示记录",
-        "fallbackFailed": "换源记录读取失败（命令报错）"
+        "fallbackFailed": "换源记录读取失败（命令报错）",
+        "primaryLabel": "主行情源",
+        "primaryDefault": "默认顺序",
+        "primaryDesc": "仅调整 quote/klines 链首，不改主壳代码；as_of 回放不受影响。",
+        "primarySaved": "主行情源已更新"
       },
       "collapseGroup": "收起",
       "expandGroup": "展开（{{total}} 项）",

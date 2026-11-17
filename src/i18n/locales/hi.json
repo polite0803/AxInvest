@@ -6720,7 +6720,21 @@
     "videoModel": "वीडियो मॉडल",
     "videoModelDesc": "वीडियो समझ कार्यों के लिए डिफ़ॉल्ट मॉडल",
     "voiceModel": "वॉइस मॉडल",
-    "voiceModelDesc": "स्पीच-टू-टेक्स्ट और टेक्स्ट-टू-स्पीच कार्यों के लिए डिफ़ॉल्ट मॉडल"
+    "voiceModelDesc": "स्पीच-टू-टेक्स्ट और टेक्स्ट-टू-स्पीच कार्यों के लिए डिफ़ॉल्ट मॉडल",
+    "notificationChannelsDesc": "क्रेडेंशियल स्थानीय सेटिंग्स में सहेजे जाते हैं। किसी चैनल को बंद करने पर होस्ट कोड बदले बिना उस चैनल को आउटबाउंड सूचनाएँ रुक जाती हैं।",
+    "notificationChannels": {
+      "title": "आउटबाउंड चैनल",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "सक्रिय",
+      "inactive": "असेंबल नहीं",
+      "needsCredentials": "क्रेडेंशियल अनुपलब्ध",
+      "tokenPlaceholder": "टोकन / SendKey",
+      "apiUrlPlaceholder": "सर्वर URL (वैकल्पिक)",
+      "topicPlaceholder": "टॉपिक (वैकल्पिक)"
+    }
   },
   "settingsPage": {
     "refreshPage": "पृष्ठ रीफ़्रेश करें"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "आयाम · कोड",
         "fallbackColPath": "पहला स्वस्थ उम्मीदवार → वास्तविक स्रोत",
         "fallbackUnavailable": "यह रनटाइम फॉलबैक-लॉग एंडपॉइंट उपलब्ध नहीं कराता (प्रतिक्रिया सूची नहीं है)। डेस्कटॉप ऐप में रिकॉर्ड दिखेंगे।",
-        "fallbackFailed": "फॉलबैक रिकॉर्ड पढ़े नहीं जा सके (कमांड ने त्रुटि लौटाई)।"
+        "fallbackFailed": "फॉलबैक रिकॉर्ड पढ़े नहीं जा सके (कमांड ने त्रुटि लौटाई)।",
+        "primaryLabel": "प्राथमिक बाज़ार डेटा स्रोत",
+        "primaryDefault": "डिफ़ॉल्ट क्रम",
+        "primaryDesc": "केवल quote/klines श्रृंखलाओं का शीर्ष पुनःक्रमित करता है, होस्ट कोड नहीं बदलता; as_of पुनरावृत्ति अप्रभावित रहती है।",
+        "primarySaved": "प्राथमिक बाज़ार डेटा स्रोत अपडेट हुआ"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

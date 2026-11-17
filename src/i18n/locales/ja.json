@@ -6720,7 +6720,21 @@
     "videoModel": "動画モデル",
     "videoModelDesc": "動画理解タスクで使用するデフォルトモデル",
     "voiceModel": "音声モデル",
-    "voiceModelDesc": "音声認識・音声合成タスクで使用するデフォルトモデル"
+    "voiceModelDesc": "音声認識・音声合成タスクで使用するデフォルトモデル",
+    "notificationChannelsDesc": "認証情報はローカル設定に保存されます。チャネルをオフにすると、ホストコードを変更せずにそのチャネルへの通知が停止します。",
+    "notificationChannels": {
+      "title": "外部送信チャネル",
+      "pushplus": "PushPlus",
+      "serverchan": "ServerChan",
+      "ntfy": "ntfy",
+      "gotify": "Gotify",
+      "active": "有効",
+      "inactive": "未構成",
+      "needsCredentials": "認証情報が不足",
+      "tokenPlaceholder": "Token / SendKey",
+      "apiUrlPlaceholder": "サーバー URL（任意）",
+      "topicPlaceholder": "トピック（任意）"
+    }
   },
   "settingsPage": {
     "refreshPage": "ページを更新"
@@ -16236,7 +16250,11 @@
         "fallbackColDimension": "項目 · コード",
         "fallbackColPath": "最初の正常候補 → 実際の供給元",
         "fallbackUnavailable": "この実行環境では切替記録の取得結果がリストではないため表示できません。デスクトップ版では記録が表示されます。",
-        "fallbackFailed": "切替記録の読み込みに失敗しました（コマンドがエラーを返しました）。"
+        "fallbackFailed": "切替記録の読み込みに失敗しました（コマンドがエラーを返しました）。",
+        "primaryLabel": "メイン行情ソース",
+        "primaryDefault": "既定の順序",
+        "primaryDesc": "quote/klines チェーンの先頭のみ調整し、ホストコードは変更しません。as_of リプレイには影響しません。",
+        "primarySaved": "メイン行情ソースを更新しました"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

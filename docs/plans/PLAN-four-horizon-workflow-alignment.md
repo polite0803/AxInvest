@@ -895,7 +895,7 @@ ScreenerPage vitest 7/7；tsc / oxlint / dprint / 三道 i18n 门全绿。主 cr
 `shapes.windows(2).any(|w| w[0]!=w[1])`，把一套表抄四遍会直接红。不做绕过，如实标注。
 
 **本批剩余（按依赖序）**：① `market-analyst.md` 等专家 prompt 的逐档契约段（含 §10-4 的显式作废声明）；
-② `agent_executor.rs:5473` 的 `VERDICT_MACHINE_FIELDS` 从全局 6 键改成逐档白名单
+② `:5530` 的 `VERDICT_MACHINE_FIELDS` 从全局 6 键改成逐档白名单
 （现在是 `VERDICT_SPEC_NOT_EXHAUSTIVE` 自承认「角色特有字段无门」）；③ 四路子图 + 四份 Rhai 决策脚本
 （§十一 清单，含退役清单 `leg_mult`/`snr_confidence`/√(h/28) 同批删）；④ 缺席/条件文案键 11 语言；
 ⑤ `TEMPLATE_VERSION` bump + 重启实跑。

@@ -10347,3 +10347,19 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 - **UI + 11 语言**：`DataVendorsTab.tsx` 顶部加「主行情源」Select（默认顺序 / 各 quote-capable 源），改选即保存+apply；11 语言各 +4 key；browserMock 桩返回成功。
 - **判据测试**：`vendor_priority_tests` 两条（重排+未知名忽略、设置/清除快照），`cargo test -p axagent-astock-data --lib vendor_priority` 2/2。
 - 验收口径：改配置换主源 → 重跑分析，`[astock-data] 应用行情源优先级覆盖` 日志给出实际链序；主壳零重编（只改 settings/运行时顺序）。
+
+## §209 P6.0-⑤ 引擎去域化落地（2026-11-17）
+
+**目标**（§6.1）：把 `rt-workflow` 生产区的股票工具名/股票变量名清出引擎，改为「模板声明 → 引擎按配置执行」，**不迁命令、不加粗接缝**。
+
+- **引擎**（`axagent-runtime/crates/rt-workflow/src/work_engine/executors/agent_executor.rs`）：
+  删除 `PREFETCHABLE_TOOLS`（22 个 `get_stock_*` 工具名）与 `build_prefetch_args`（stock_code/kline_limit 专用形状）；
+  新增 `PrefetchSpec::from_variables`（读模板变量 `prefetch_tools` / `prefetch_args`，兼容 JSON 字符串声明）
+  + `resolve_var_template`（`{{var:NAME}}` 整串保类型 / 内嵌字符串化 / 缺变量放弃该工具）；
+  预取主块由「读 `stock_code` 变量并判空」改为「spec.tools 非空」，prompt 中 `search_stock / get_stock_financials` 举例改为「数据类工具」。
+- **模板声明**（`src-tauri/src/commands/stock_analysis_setup/seed_variables.rs`）：新增 `prefetch_tools` / `prefetch_args` 两个变量，值与旧常量**逐项等价**（22 工具；5 个空参；kline 带 limit；其余带 stock_code）。
+  必须升版：`seed_stock_analysis.rs` `TEMPLATE_VERSION 194 → 195`（否则旧库照跑引擎内置白名单）。
+- **验证**：rt-workflow `cargo test --lib` **344/344**；主 crate seed_* 测试 **80/80**（TEMPLATE_VERSION/变量表门禁）；`cargo check --all-targets` 0；
+  rt-workflow 与 axagent 两 crate `clippy --all-targets --all-features -D warnings` 0；8 根 `cargo fmt --all --check` 0；
+  doc-refs 0（修 1 条行号漂移）；single-source --ci 0；判定档 0；`ci-check.mjs --quick` **EXIT=0（121.5s）**。
+- **未做**：`agent_executor.rs` 生产区其余股票词（属性/字段注释）本轮只清了预取链；全量 `grep -i stock` 归零属 ⑤ 的收尾面，列下一步。

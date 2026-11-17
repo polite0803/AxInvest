@@ -851,7 +851,7 @@ impl NodeExecutorTrait for AgentExecutor {
 4. **绝不允许拒绝回答** — 即使数据不足也要如实输出低评分。必须在报告中说明数据缺口，配置相关字段为低分值。禁止输出"抱歉我无法回答"或任何拒绝句式
 5. **不要做额外假设** — 只基于给定的输入数据执行操作
 6. **JSON 字符串值必须正确转义** — report 等长文本字段中的半角双引号 `"` 必须写成 `\"`，换行符必须写成 `\n`（反斜杠 n），而不是真实换行。这是最常见的 JSON 错误，请输出前检查
-7. **工具调用后必须输出最终 JSON** — 如果你通过工具调用获得了数据（search_stock / get_stock_financials 等），请在工具执行结果之后立即输出最终的 JSON 分析结果，不要再继续调用额外的工具。**每轮最多只能调用一次工具，调用后必须基于结果输出 JSON。**
+7. **工具调用后必须输出最终 JSON** — 如果你通过工具调用获得了数据（如数据类工具），请在工具执行结果之后立即输出最终的 JSON 分析结果，不要再继续调用额外的工具。**每轮最多只能调用一次工具，调用后必须基于结果输出 JSON。**
 "#
             } else {
                 r#"
@@ -1229,21 +1229,12 @@ impl NodeExecutorTrait for AgentExecutor {
         let mut prefetched_tools: Vec<String> = Vec::new();
         check_cancellation_or_pause(context).await?;
         if should_prefetch_tools(analyst_tool_mode) {
-            let stock_code = context
-                .variables
-                .get("stock_code")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if !stock_code.is_empty() {
+            // 判据：引擎不出现域工具名/域变量名 —— 预取清单与参数模板全部由模板变量声明。
+            let prefetch_spec = PrefetchSpec::from_variables(&context.variables);
+            if !prefetch_spec.tools.is_empty() {
                 if let Some(ref tool_list) = tools {
-                    let kline_limit = context
-                        .variables
-                        .get("kline_limit")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(120);
                     let (note, succeeded) =
-                        prefetch_tool_results(context, tool_list, &stock_code, kline_limit).await;
+                        prefetch_tool_results(context, tool_list, &prefetch_spec).await;
                     if !note.is_empty() {
                         prefetch_chars = note.chars().count();
                         if let ChatContent::Text(ref mut system) = messages[0].content {
@@ -4332,14 +4323,103 @@ fn tool_call_budget_exhausted(executed: usize, max: usize) -> bool {
 }
 
 /// P0-B：从节点工具集里挑出可被程序化预取的子集（白名单 + 参数可由 stock_code 确定）。
+/// 预取规格（引擎去域化）：由工作流模板变量声明，引擎不出现任何域工具名。
+///
+/// - `prefetch_tools`: `["tool", ...]`——只预取清单内的工具；
+/// - `prefetch_args`: `{"tool": { ... }}`——实参模板；值内 `{{var:NAME}}` 引用运行期变量：
+///   整串即占位 ⇒ 原样克隆变量值（保 JSON 类型），内嵌占位 ⇒ 字符串化替换；
+///   任一变量缺失 ⇒ 该工具不预取（与旧「无股票代码则不预取」同判）。
+#[derive(Debug, Clone, Default)]
+struct PrefetchSpec {
+    tools: Vec<String>,
+    args: Value,
+}
+
+const PREFETCH_TOOLS_VAR: &str = "prefetch_tools";
+const PREFETCH_ARGS_VAR: &str = "prefetch_args";
+const VAR_PLACEHOLDER_PREFIX: &str = "{{var:";
+
+impl PrefetchSpec {
+    fn from_variables(variables: &std::collections::HashMap<String, Value>) -> Self {
+        // 变量表没有 json 类型 ⇒ 允许以 JSON 字符串声明（面板里可直接编辑），两种形态都认。
+        let as_json = |v: &Value| -> Option<Value> {
+            match v {
+                Value::String(s) => serde_json::from_str(s).ok(),
+                other => Some(other.clone()),
+            }
+        };
+        let tools = variables
+            .get(PREFETCH_TOOLS_VAR)
+            .and_then(as_json)
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let args = variables
+            .get(PREFETCH_ARGS_VAR)
+            .and_then(as_json)
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        Self { tools, args }
+    }
+}
+
+fn scalar_to_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn resolve_var_template(
+    template: &Value,
+    variables: &std::collections::HashMap<String, Value>,
+) -> Option<Value> {
+    match template {
+        Value::String(s) => {
+            if let Some(rest) = s.strip_prefix(VAR_PLACEHOLDER_PREFIX)
+                && let Some(name) = rest.strip_suffix("}}")
+                && !name.contains("{{")
+            {
+                return variables.get(name).cloned();
+            }
+            let mut out = String::new();
+            let mut rest = s.as_str();
+            loop {
+                let Some(i) = rest.find(VAR_PLACEHOLDER_PREFIX) else {
+                    out.push_str(rest);
+                    break;
+                };
+                out.push_str(&rest[..i]);
+                let after = &rest[i + VAR_PLACEHOLDER_PREFIX.len()..];
+                let Some(j) = after.find("}}") else {
+                    out.push_str(&rest[i..]);
+                    break;
+                };
+                let name = &after[..j];
+                let value = variables.get(name)?;
+                out.push_str(&scalar_to_string(value));
+                rest = &after[j + 2..];
+            }
+            Some(Value::String(out))
+        },
+        Value::Array(items) => items
+            .iter()
+            .map(|v| resolve_var_template(v, variables))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Array),
+        Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| resolve_var_template(v, variables).map(|rv| (k.clone(), rv)))
+            .collect::<Option<serde_json::Map<_, _>>>()
+            .map(Value::Object),
+        other => Some(other.clone()),
+    }
+}
+
 fn split_prefetch_targets(
     tools: &[axagent_harness::types::ChatTool],
+    allowed: &[String],
 ) -> Vec<axagent_harness::types::ChatTool> {
-    tools
-        .iter()
-        .filter(|t| PREFETCHABLE_TOOLS.contains(&t.function.name.as_str()))
-        .cloned()
-        .collect()
+    tools.iter().filter(|t| allowed.contains(&t.function.name)).cloned().collect()
 }
 
 /// P0-B：真正执行预取（并行 + 单条 3000 字符截断），返回注入文本与成功清单。
@@ -4348,25 +4428,37 @@ fn split_prefetch_targets(
 async fn prefetch_tool_results(
     context: &ExecutionState,
     tool_list: &[axagent_harness::types::ChatTool],
-    stock_code: &str,
-    kline_limit: u64,
+    spec: &PrefetchSpec,
 ) -> (String, Vec<String>) {
-    let targets = split_prefetch_targets(tool_list);
+    let targets = split_prefetch_targets(tool_list, &spec.tools);
     if targets.is_empty() {
         return (String::new(), Vec::new());
     }
-    let futures = targets.iter().map(|t| {
-        let name = t.function.name.clone();
-        let args = build_prefetch_args(&name, stock_code, kline_limit);
-        async move {
-            let result =
-                tokio::time::timeout(Duration::from_secs(20), execute_tool(context, &name, args))
-                    .await;
-            (name, result)
-        }
+    // 参数模板先解析（纯 CPU）；任一占位变量缺失 ⇒ 该工具本轮不预取。
+    let resolved: Vec<(String, Value)> = targets
+        .iter()
+        .filter_map(|t| {
+            let name = t.function.name.clone();
+            let template =
+                spec.args.get(&name).cloned().unwrap_or(Value::Object(Default::default()));
+            resolve_var_template(&template, &context.variables).map(|args| (name, args))
+        })
+        .collect();
+    if resolved.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let futures = resolved.into_iter().map(|(name, args)| async move {
+        let result =
+            tokio::time::timeout(Duration::from_secs(20), execute_tool(context, &name, args)).await;
+        (name, result)
     });
     let results = futures::future::join_all(futures).await;
-    let mut note = String::from("\n\n--- 系统预取工具结果（无需再次调用同名工具）---\n");
+    let mut note = String::from(
+        "
+
+--- 系统预取工具结果（无需再次调用同名工具）---
+",
+    );
     let mut succeeded: Vec<String> = Vec::new();
     for (name, result) in results {
         let text = match result {
@@ -4377,50 +4469,15 @@ async fn prefetch_tool_results(
             Ok(Err(e)) => format!("Error: {e}"),
             Err(_) => "Error: 预取超时".to_string(),
         };
-        note.push_str(&format!("\n[{name}] {}\n", truncate_tool_result(&text)));
+        note.push_str(&format!(
+            "
+[{name}] {}
+",
+            truncate_tool_result(&text)
+        ));
     }
     (note, succeeded)
 }
-
-const PREFETCHABLE_TOOLS: &[&str] = &[
-    "get_stock_quote",
-    "get_stock_kline",
-    "get_stock_news",
-    "get_stock_money_flow",
-    "get_stock_dragon_tiger",
-    "get_north_bound_flow",
-    "get_stock_margin_data",
-    "get_stock_pledge_data",
-    "get_stock_announcements",
-    "get_stock_consensus_eps",
-    "get_stock_institutional_visits",
-    "get_stock_peers",
-    "get_stock_concept_blocks",
-    "get_stock_option_pcr",
-    "get_limit_up_pool",
-    "macro_data_snapshot",
-    "get_hot_stocks",
-    "compute_scoring",
-    "compute_kdj",
-    "compute_obv",
-    "compute_valuation",
-    "detect_earnings_surprise",
-];
-
-fn build_prefetch_args(name: &str, stock_code: &str, kline_limit: u64) -> Value {
-    match name {
-        "macro_data_snapshot"
-        | "get_limit_up_pool"
-        | "get_hot_stocks"
-        | "get_stock_option_pcr"
-        | "get_north_bound_flow" => serde_json::json!({}),
-        "get_stock_kline" => {
-            serde_json::json!({"stock_code": stock_code, "limit": kline_limit})
-        },
-        _ => serde_json::json!({"stock_code": stock_code}),
-    }
-}
-
 fn truncate_tool_result(s: &str) -> String {
     const TOOL_RESULT_MAX_CHARS: usize = 3000;
     if s.len() > TOOL_RESULT_MAX_CHARS {
@@ -6693,12 +6750,12 @@ mod repair_malformed_json_output_tests {
 #[cfg(test)]
 mod context_optimization_tests {
     use super::{
-        InputMappingGap, absent_context_missing, absent_context_output, build_prefetch_args,
+        InputMappingGap, PrefetchSpec, absent_context_missing, absent_context_output,
         context_sources_user_prompt_parts, format_context_source_gaps,
         format_debate_context_source, format_debate_state,
         include_raw_context_sources_in_user_prompt, input_mapping_gap, json_response_format,
-        should_prefetch_tools, split_prefetch_targets, tool_call_budget_exhausted,
-        truncate_tool_result,
+        resolve_var_template, should_prefetch_tools, split_prefetch_targets,
+        tool_call_budget_exhausted, truncate_tool_result,
     };
     use axagent_harness::types::{ChatTool, ChatToolFunction};
     use serde_json::{Value, json};
@@ -6825,17 +6882,32 @@ mod context_optimization_tests {
         }
     }
 
+    /// 引擎去域化：预取实参由模板变量声明，`{{var:NAME}}` 整串保类型、内嵌字符串化、缺变量放弃。
     #[test]
-    fn prefetch_args_are_whitelisted_and_bounded() {
+    fn prefetch_args_resolve_from_declared_templates() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("code".to_string(), json!("003006"));
+        vars.insert("limit".to_string(), json!(250));
+
+        let tpl = json!({"code": "{{var:code}}", "limit": "{{var:limit}}"});
         assert_eq!(
-            build_prefetch_args("get_stock_kline", "003006", 250),
-            json!({"stock_code": "003006", "limit": 250})
+            resolve_var_template(&tpl, &vars),
+            Some(json!({"code": "003006", "limit": 250}))
         );
-        assert_eq!(build_prefetch_args("macro_data_snapshot", "003006", 250), json!({}));
+        // 内嵌占位：字符串化后拼入
         assert_eq!(
-            build_prefetch_args("compute_scoring", "003006", 250),
-            json!({"stock_code": "003006"})
+            resolve_var_template(&json!("sync:{{var:code}}"), &vars),
+            Some(json!("sync:003006"))
         );
+        // 缺变量 ⇒ None（该工具本轮不预取）
+        assert_eq!(resolve_var_template(&json!("{{var:missing}}"), &vars), None);
+        // 空对象模板原样通过
+        assert_eq!(resolve_var_template(&json!({}), &vars), Some(json!({})));
+
+        // 变量表 → 规格：缺省 prefetch_tools 为空 = 不预取
+        assert!(PrefetchSpec::from_variables(&vars).tools.is_empty());
+        vars.insert("prefetch_tools".to_string(), json!(["a", "b"]));
+        assert_eq!(PrefetchSpec::from_variables(&vars).tools, vec!["a", "b"]);
     }
 
     #[test]
@@ -6878,7 +6950,15 @@ mod context_optimization_tests {
             chat_tool("get_stock_news"),
             chat_tool("search_stock"), // 不在白名单
         ];
-        let targets = split_prefetch_targets(&tools);
+        let spec = PrefetchSpec {
+            tools: vec![
+                "get_stock_quote".to_string(),
+                "compute_scoring".to_string(),
+                "get_stock_news".to_string(),
+            ],
+            args: json!({}),
+        };
+        let targets = split_prefetch_targets(&tools, &spec.tools);
         assert_eq!(targets.len(), 3);
         let mut tools_for_llm = tools.clone();
         tools_for_llm.retain(|t| !targets.iter().any(|p| p.function.name == t.function.name));
@@ -6912,8 +6992,17 @@ mod context_optimization_tests {
             chat_tool("get_stock_news"),
             chat_tool("search_stock"),
         ];
+        let spec = PrefetchSpec {
+            tools: vec![
+                "get_stock_quote".to_string(),
+                "compute_scoring".to_string(),
+                "get_stock_news".to_string(),
+            ],
+            args: json!({"get_stock_quote": {"code": "{{var:code}}"}}),
+        };
+        state.variables.insert("code".to_string(), json!("003006"));
         let started = Instant::now();
-        let (note, succeeded) = prefetch_tool_results(&state, &tools, "003006", 120).await;
+        let (note, succeeded) = prefetch_tool_results(&state, &tools, &spec).await;
         let elapsed = started.elapsed();
         assert_eq!(succeeded.len(), 3);
         assert!(note.contains("get_stock_quote"));

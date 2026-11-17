@@ -224,6 +224,27 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             ),
             is_secret: false,
         },
+        // ── 判定 P6.0-⑤：引擎去域化 —— 固定预取的清单与实参模板由模板声明 ──
+        // 引擎只认这两个变量（`prefetch_tools` / `prefetch_args`），不再内置任何域工具名；
+        // `{{var:NAME}}` 由引擎按运行期变量解析（整串保类型、内嵌字符串化、缺变量则不预取）。
+        Variable {
+            name: "prefetch_tools".into(),
+            var_type: "string".into(),
+            value: serde_json::json!(r#"["get_stock_quote","get_stock_kline","get_stock_news","get_stock_money_flow","get_stock_dragon_tiger","get_north_bound_flow","get_stock_margin_data","get_stock_pledge_data","get_stock_announcements","get_stock_consensus_eps","get_stock_institutional_visits","get_stock_peers","get_stock_concept_blocks","get_stock_option_pcr","get_limit_up_pool","macro_data_snapshot","get_hot_stocks","compute_scoring","compute_kdj","compute_obv","compute_valuation","detect_earnings_surprise"]"#),
+            description: Some(
+                "固定预取工具清单（JSON 数组；仅 analyst_tool_mode=fixed_prefetch 生效）".into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
+            name: "prefetch_args".into(),
+            var_type: "string".into(),
+            value: serde_json::json!(r#"{"get_stock_quote":{"stock_code":"{{var:stock_code}}"},"get_stock_kline":{"stock_code":"{{var:stock_code}}","limit":"{{var:kline_limit}}"},"get_stock_news":{"stock_code":"{{var:stock_code}}"},"get_stock_money_flow":{"stock_code":"{{var:stock_code}}"},"get_stock_dragon_tiger":{"stock_code":"{{var:stock_code}}"},"get_north_bound_flow":{},"get_stock_margin_data":{"stock_code":"{{var:stock_code}}"},"get_stock_pledge_data":{"stock_code":"{{var:stock_code}}"},"get_stock_announcements":{"stock_code":"{{var:stock_code}}"},"get_stock_consensus_eps":{"stock_code":"{{var:stock_code}}"},"get_stock_institutional_visits":{"stock_code":"{{var:stock_code}}"},"get_stock_peers":{"stock_code":"{{var:stock_code}}"},"get_stock_concept_blocks":{"stock_code":"{{var:stock_code}}"},"get_stock_option_pcr":{},"get_limit_up_pool":{},"macro_data_snapshot":{},"get_hot_stocks":{},"compute_scoring":{"stock_code":"{{var:stock_code}}"},"compute_kdj":{"stock_code":"{{var:stock_code}}"},"compute_obv":{"stock_code":"{{var:stock_code}}"},"compute_valuation":{"stock_code":"{{var:stock_code}}"},"detect_earnings_surprise":{"stock_code":"{{var:stock_code}}"}}"#),
+            description: Some(
+                "固定预取实参模板（JSON 对象：tool → 实参；值内 {{var:NAME}} 引用运行期变量）".into(),
+            ),
+            is_secret: false,
+        },
         Variable {
             name: "analyst_tool_mode".into(),
             var_type: "string".into(),

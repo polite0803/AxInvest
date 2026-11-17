@@ -122,10 +122,29 @@ function main() {
     }
   }
 
+  const shared = registry.policy?.sharedCommands ?? [];
+  const commandOwners = new Map();
+  for (const pack of registry.packs) {
+    for (const capability of pack.capabilities) {
+      if (!capability.startsWith("tool:Opc")) continue;
+      const lower = capability.slice("tool:Opc".length).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+      const aliases = [lower, ...(pack.commandAliases ?? [])];
+      for (const command of aliases) {
+        if (shared.includes(command)) continue;
+        if (commandOwners.has(command) && commandOwners.get(command) !== pack.id) {
+          problems.push(`命令 ${command} 被 ${pack.id} 与 ${commandOwners.get(command)} 同时声明；共享命令必须登记在 policy.sharedCommands`);
+        } else {
+          commandOwners.set(command, pack.id);
+        }
+      }
+    }
+  }
+
   const result = {
     packCount: registry.packs.length,
     manifestCount: manifestIds.length,
     configCount: configIds.length,
+    commandOwnerCount: commandOwners.size,
     problems,
   };
   if (JSON_OUT) {

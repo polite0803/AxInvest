@@ -1,6 +1,38 @@
 {
   "note": "P6.2 域包插件边界底册。id/domain/capabilities 从 manifest 抽取；page 从 src/pages/opc/routes.tsx 当前声明转录。新增或改名必须同批改 manifest、routes 与本底册。",
   "version": 1,
+  "policy": {
+    "unit": "domain_pack",
+    "granularity": "one_plugin_per_domain_pack",
+    "forbiddenAggregation": [
+      "8+1 CapabilityDomain 粗域合并",
+      "单一 plugin-opc 承接全部 OPC 域包"
+    ],
+    "commandOwnership": {
+      "domainPackCommand": "由目标域包插件声明；插件 id = plugin-opc-<domain_pack_id>",
+      "sharedCommand": "不属于任何域包时归 plugin-opc-common；不得复制到 14 个域包插件",
+      "commandAliases": "同一后端能力允许多个命令别名，但只能被一个插件声明；owner 与 aliases 必须显式登记"
+    },
+    "sharedCommands": [
+      "search_wiki",
+      "create_content_asset",
+      "list_customers",
+      "create_landing_page",
+      "create_project",
+      "record_kpi",
+      "create_publish_schedule",
+      "add_milestone",
+      "get_dashboard",
+      "list_projects",
+      "get_financial_report",
+      "opc_list_projects",
+      "opc_get_dashboard",
+      "opc_list_kpis",
+      "opc_get_financial_report",
+      "opc_get_capability_pack_config",
+      "opc_get_capability_pack_dashboard"
+    ]
+  },
   "packs": [
     {
       "id": "accounting",

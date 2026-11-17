@@ -1000,12 +1000,30 @@ jobs:
             #     **零 `extract()` 调用** ⇒ 漏洞接口不可达。
             # 退役条件：任一来源升级到 zip >=9、或 C/D 阶段替换 docx-rs/candle 后，删除
             # 对应 ignore；若 updater 真正启用且解包前不再验签，本豁免立即失效并重新评估。
+            #
+            # RUSTSEC-2026-0459 (libsqlite3-sys 0.37.0)：sqlx 0.9.0 的 sqlx-sqlite 约束
+            # `libsqlite3-sys >=0.30.1,<0.38`，而 rusqlite 0.43 + libsqlite3-sys 0.40
+            # 与之冲突（同一 `links = "sqlite3"` 全图只能一个版本）。已在 2026-11-18
+            # 实测 `cargo update` 被 Cargo 拒绝；需等 sqlx 升到依赖 libsqlite3-sys >=0.39
+            # 的版本（或移除 sqlx 直依赖）后才能真正升级。
+            #
+            # RUSTSEC-2026-0429/0545/0546/0547/0548 (zip 8.6.0)：唯一来源现在是
+            # docx-rs 0.4.22（最新 0.4.x 仍锁 `^8.6`）。已逐文件确认本仓只用
+            # `ZipWriter` 生成 docx，**零 `extract()` 调用** ⇒ 漏洞接口不可达。
+            # 注意：RUSTSEC-2026-0429 是同一漏洞在 advisory-db 里的旧 ID，
+            # cargo-audit 会同时打印两条 ID，两个都要 ignore 才能真正放行。
             cargo audit --file "$(dirname "$manifest")/Cargo.lock" \
               --ignore RUSTSEC-2026-0235 \
               --ignore RUSTSEC-2024-0429 \
+              --ignore RUSTSEC-2026-0429 \
               --ignore RUSTSEC-2026-0367 \
               --ignore RUSTSEC-2026-0368 \
-              --ignore RUSTSEC-2026-0369
+              --ignore RUSTSEC-2026-0369 \
+              --ignore RUSTSEC-2026-0459 \
+              --ignore RUSTSEC-2026-0545 \
+              --ignore RUSTSEC-2026-0546 \
+              --ignore RUSTSEC-2026-0547 \
+              --ignore RUSTSEC-2026-0548
           done
 
   cargo-deny:
@@ -1032,7 +1050,9 @@ jobs:
             if ! grep -q '^\[workspace\]' "$manifest"; then continue; fi
             echo "== cargo deny: $manifest =="
             cargo generate-lockfile --manifest-path "$manifest"
-            cargo deny --config src-tauri/deny.toml check --manifest-path "$manifest" licenses bans sources
+            # cargo-deny 0.19 起 --manifest-path 是 `check` 的参数；旧写法（跟在
+            # `check` 后）在新版本里会报 `unexpected argument '--manifest-path'`。
+            cargo deny --config src-tauri/deny.toml check licenses bans sources --manifest-path "$manifest"
           done
 
   # ── 多 workspace 构建配置同源（8 根的 profile / lints / 三份工具配置）──

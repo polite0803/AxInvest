@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Display, Formatter};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -816,6 +816,65 @@ impl PluginManager {
             });
         }
         Ok(out)
+    }
+
+    /// OPC 域包清单投影 —— `manifest.domainPacks[]` 指向的相对 JSON 文件。
+    ///
+    /// 真相源是插件安装目录里的域包 logical manifest；每次调用实时扫描，不缓存、
+    /// 不建第二套注册表。单份清单读失败只跳过该域包，不让整张清单失效。
+    pub fn list_plugin_domain_packs(
+        &self,
+    ) -> Result<Vec<crate::types::PluginDomainPacksInfo>, PluginError> {
+        let mut out = Vec::new();
+        for summary in self.list_plugins()? {
+            let Some(root) = summary.metadata.root.as_deref() else { continue };
+            let Ok(manifest) = load_plugin_from_directory(root) else { continue };
+            if manifest.domain_packs.is_empty() {
+                continue;
+            }
+            let mut packs = Vec::new();
+            for rel in &manifest.domain_packs {
+                let Some(file) = Self::safe_relative_path(root, rel) else {
+                    tracing::warn!(plugin = %summary.metadata.id, rel = %rel, "域包清单路径逃逸，跳过");
+                    continue;
+                };
+                let Ok(contents) = fs::read_to_string(&file) else {
+                    tracing::warn!(plugin = %summary.metadata.id, rel = %rel, "域包清单读取失败，跳过");
+                    continue;
+                };
+                match serde_json::from_str::<crate::types::PluginDomainPackDecl>(&contents) {
+                    Ok(decl) => packs.push(decl),
+                    Err(error) => tracing::warn!(
+                        plugin = %summary.metadata.id, rel = %rel, error = %error,
+                        "域包清单解析失败，跳过"
+                    ),
+                }
+            }
+            if packs.is_empty() {
+                continue;
+            }
+            out.push(crate::types::PluginDomainPacksInfo {
+                id: summary.metadata.id,
+                name: summary.metadata.name,
+                version: summary.metadata.version,
+                description: summary.metadata.description,
+                author: manifest.author,
+                enabled: summary.enabled,
+                domain_packs: packs,
+            });
+        }
+        Ok(out)
+    }
+
+    /// 把清单里的相对路径限制在安装目录内；不解析符号链接（域包 JSON 是只读声明）。
+    fn safe_relative_path<'a>(root: &'a Path, rel: &str) -> Option<PathBuf> {
+        let candidate = Path::new(rel);
+        if candidate.is_absolute()
+            || candidate.components().any(|c| matches!(c, Component::ParentDir))
+        {
+            return None;
+        }
+        Some(root.join(candidate))
     }
 
     /// 任务中心任务源清单 —— `manifest.taskSources[]` 的只读投影（任务 #148）。
@@ -2446,6 +2505,7 @@ fn load_manifest_from_skill_md(
         capabilities: Vec::new(),
         // SKILL.md 派生的清单没有 worker 声明（该声明只能来自 plugin.json）。
         worker: None,
+        domain_packs: Vec::new(),
     };
     Ok(manifest)
 }
@@ -2764,6 +2824,7 @@ fn build_plugin_manifest(
         integrity: raw.integrity,
         capabilities: raw.capabilities,
         worker: raw.worker,
+        domain_packs: raw.domain_packs,
     })
 }
 
@@ -4411,6 +4472,7 @@ mod tests {
                 evolvable: "derived".into(),
             }],
             worker: None,
+            domain_packs: Vec::new(),
         }
     }
 

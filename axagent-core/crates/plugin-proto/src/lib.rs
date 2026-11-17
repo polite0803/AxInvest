@@ -1718,7 +1718,7 @@ mod tests {
             (
                 "exec",
                 TOOL_SET_EXEC_TIMEOUT_MS,
-                "axagent-plugins/crates/plugins/src/types.rs:837 DEFAULT_TOOL_TIMEOUT_SECS = 60（用于同文件 :867 / :955）",
+                "axagent-plugins/crates/plugins/src/types.rs:1188 DEFAULT_TOOL_TIMEOUT_SECS = 60（用于同文件 :1218 / :1306）",
             ),
         ];
         for (op, timeout_ms, source) in EVIDENCED {

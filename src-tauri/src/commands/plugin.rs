@@ -571,6 +571,34 @@ pub async fn plugin_list_pages(
     .map_err(|e| format!("plugin list pages task panicked: {e}"))?
 }
 
+/// OPC 域包清单 —— `manifest.domainPacks[]` 指向的 logical manifest 的只读投影。
+///
+/// 真相源是插件安装目录里的域包 JSON；每次调用实时扫描，不缓存、不建第二套注册表。
+/// 单份清单读失败跳过该域包，不让整个插件列表失效。
+#[agent_command(
+    domain = plugin,
+    safety = Safe,
+    call_mode = StateOnly,
+    description = "列出插件贡献的 OPC 域包"
+)]
+#[command]
+pub async fn plugin_list_domain_packs(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_plugins::types::PluginDomainPacksInfo>, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = plugin_manager.blocking_read();
+        manager.list_plugin_domain_packs().map_err(|e| {
+            String::from(ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })
+    })
+    .await
+    .map_err(|e| format!("plugin list domain packs task panicked: {e}"))?
+}
+
 /// 任务中心任务源清单 —— `manifest.taskSources[]` 的只读投影（任务 #148，PLAN §97.4）。
 ///
 /// 与 [`plugin_list_pages`] 同形：真相源是 `PluginManifest.task_sources`，每次调用实时扫描，

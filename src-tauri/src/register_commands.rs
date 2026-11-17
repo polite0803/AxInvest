@@ -783,6 +783,7 @@ macro_rules! register_all_commands {
             commands::plugin::plugin_execute_command,
             commands::plugin::plugin_install,
             commands::plugin::plugin_list,
+            commands::plugin::plugin_list_domain_packs,
             commands::plugin::plugin_list_pages,
             commands::plugin::plugin_list_task_cards,
             commands::plugin::plugin_list_task_sources,

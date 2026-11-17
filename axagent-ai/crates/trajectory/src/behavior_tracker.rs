@@ -255,8 +255,7 @@ impl BehaviorTracker {
     }
 
     pub(crate) fn flush_events(&mut self) -> Vec<BehaviorEvent> {
-        let events: Vec<BehaviorEvent> = self.event_buffer.drain(..).collect();
-        events
+        std::mem::take(&mut self.event_buffer)
     }
 
     pub(crate) fn get_buffered_count(&self) -> usize {

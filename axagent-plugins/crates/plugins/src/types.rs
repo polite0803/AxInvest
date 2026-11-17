@@ -596,6 +596,41 @@ pub struct PluginManifest {
     /// B 层 worker 进程声明（PLAN §5.3）；缺省 = 不启动子进程，只贡献声明式资产。
     #[serde(default)]
     pub worker: Option<PluginWorkerDecl>,
+    /// OPC 域包插件的逐域声明（P6.2）：路径相对插件安装目录。
+    ///
+    /// 缺省 = 该插件不贡献 OPC 域包。当前 `plugin-opc` 产物内每域一份 JSON，
+    /// 宿主侧只读投影与未来按域启停都从这里取，不在 registry / DB 建第二份清单。
+    #[serde(default, alias = "domainPacks", rename = "domainPacks")]
+    pub domain_packs: Vec<String>,
+}
+
+/// `plugin_list_domain_packs` 的返回形状：某插件贡献的域包清单 + 启停位。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDomainPacksInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: Option<String>,
+    pub enabled: bool,
+    pub domain_packs: Vec<PluginDomainPackDecl>,
+}
+
+/// 单个 OPC 域包 logical manifest 的宿主侧投影。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDomainPackDecl {
+    pub id: String,
+    pub plugin_id: String,
+    pub transport_owner: String,
+    pub page: serde_json::Value,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub commands: Vec<String>,
+    #[serde(default)]
+    pub calls: Vec<String>,
 }
 
 /// B 层插件 worker 进程声明（PLAN §5.3「声明获取」/ §10.5-2「action 回流」）。
@@ -1034,6 +1069,9 @@ pub(crate) struct RawPluginManifest {
     /// `plugin.json` 里声明的 `worker` 会被静默丢弃，插件永远起不来子进程。
     #[serde(default)]
     pub worker: Option<PluginWorkerDecl>,
+    /// 域包 logical manifest 路径（相对插件安装目录）；不参与通用插件契约校验。
+    #[serde(default, alias = "domainPacks", rename = "domainPacks")]
+    pub domain_packs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -43,7 +43,7 @@ const WRITE_SIDE = "src-tauri/src/commands/backtest_validation.rs";
 /** 三个跨行池化的统计读点（按**文件**列，一条一个分母）。 */
 const READ_POINTS = [
   { name: "compute_validation_report", file: "src-tauri/src/commands/backtest_validation.rs" },
-  { name: "reco_ic_stats", file: "src-tauri/src/commands/stock_analysis.rs" },
+  { name: "reco_ic_stats_core", file: "src-tauri/src/commands/stock_analysis.rs" },
   { name: "reco_loop", file: crateRel("analysis-engine", "src/recommender/reco_loop.rs") },
 ];
 /** 旧窗口集字面量的两种写法（dprint 会在逗号后补空格，两种都要拦）。 */

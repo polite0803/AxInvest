@@ -209,7 +209,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = "2.14"
 tempfile = "3"
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }

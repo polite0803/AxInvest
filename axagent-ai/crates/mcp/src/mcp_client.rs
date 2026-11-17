@@ -697,11 +697,13 @@ pub async fn call_tool_stdio_pooled(
 
     let client = pool.get_or_connect(&key).await?;
 
-    let mut progress_meta = serde_json::Map::new();
-    progress_meta.insert("progressToken".to_string(), serde_json::json!(next_rpc_id()));
+    let mut progress_meta = rmcp::model::RequestMetaObject::new();
+    progress_meta.set_progress_token(rmcp::model::ProgressToken(
+        rmcp::model::NumberOrString::Number(next_rpc_id() as i64),
+    ));
     let mut params = CallToolRequestParams::new(tool_name.to_string())
         .with_arguments(value_to_map(tool_arguments));
-    params.meta = Some(rmcp::model::Meta(progress_meta));
+    params.meta = Some(progress_meta);
 
     match client.call_tool(params).await {
         Ok(result) => {
@@ -775,11 +777,13 @@ pub async fn call_tool_stdio(
     };
 
     // Generate a unique progress token so the server can send progress notifications
-    let mut progress_meta = serde_json::Map::new();
-    progress_meta.insert("progressToken".to_string(), serde_json::json!(next_rpc_id()));
+    let mut progress_meta = rmcp::model::RequestMetaObject::new();
+    progress_meta.set_progress_token(rmcp::model::ProgressToken(
+        rmcp::model::NumberOrString::Number(next_rpc_id() as i64),
+    ));
     let mut params = CallToolRequestParams::new(tool_name.to_string())
         .with_arguments(value_to_map(tool_arguments));
-    params.meta = Some(rmcp::model::Meta(progress_meta));
+    params.meta = Some(progress_meta);
     let result = client
         .call_tool(params)
         .await

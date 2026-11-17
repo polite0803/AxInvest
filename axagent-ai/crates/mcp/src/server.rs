@@ -19,7 +19,7 @@ use axagent_harness::{Agent, AgentExecuteRequest, AgentSessionBroker};
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::wrapper::Parameters,
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    model::{Implementation, ServerCapabilities, ServerConfig},
     schemars, tool, tool_router,
 };
 use serde::Deserialize;
@@ -164,9 +164,9 @@ impl McpAgentServer {
 // ── ServerHandler impl ────────────────────────────────────────────────────
 
 impl ServerHandler for McpAgentServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let caps = ServerCapabilities::builder().enable_tools().build();
-        ServerInfo::new(caps)
+        ServerConfig::new(caps)
             .with_server_info(Implementation::new("AxAgent", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "AxAgent MCP Server — 把 agent 能力暴露为 MCP tools。\

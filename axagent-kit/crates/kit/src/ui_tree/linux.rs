@@ -379,7 +379,11 @@ mod tests {
     #[tokio::test]
     async fn stale_handle_rejected() {
         let provider = LinuxUiTreeProvider::new();
-        let stale_id = make_id(BACKEND, "n0", 0);
+        // 先建立当前代次句柄，再让代次失效；只测「从未存在的句柄」会先撞
+        // `object_ref` 的查表失败，无法证明 stale-gen 判据生效（CI 实测红）。
+        let raw_id = provider.store_handle(ObjectRefOwned::default());
+        provider.generation.fetch_add(1, Ordering::SeqCst);
+        let stale_id = make_id(BACKEND, &raw_id, 0);
         let err = provider.invoke(&stale_id).await.unwrap_err();
         assert!(matches!(err, UiAutomationError::StaleHandle(_)));
     }

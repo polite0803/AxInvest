@@ -79,7 +79,7 @@ const REGISTRY = [
   },
   {
     file: "src-tauri/src/commands/stock_analysis.rs",
-    fn: "backtest_all_history",
+    fn: "backtest_all_history_task",
     class: "statistics",
     note: "批量回测统计（§七十七）",
   },
@@ -166,7 +166,7 @@ const REGISTRY = [
   // 前置 = 跑一次荐股循环让新 pick 带章。不登记就会让 pending 桶看着是空的 = 谎报全清。
   {
     file: "src-tauri/src/commands/stock_analysis.rs",
-    fn: "reco_ic_stats",
+    fn: "reco_ic_stats_core",
     class: "pending",
     marker: MARKER_RECO,
     note:

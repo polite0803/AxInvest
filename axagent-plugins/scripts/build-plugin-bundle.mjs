@@ -279,7 +279,11 @@ if (domainPackSource) {
   if (files.length === 0) { fail(`域包清单目录为空：${domainPackSource}`); }
   for (const file of files) {
     const raw = fs.readFileSync(path.join(domainPackSource, file), "utf8");
-    try { JSON.parse(raw); } catch (error) { fail(`域包清单不是合法 JSON（${file}）：${error.message}`); }
+    try {
+      JSON.parse(raw);
+    } catch (error) {
+      fail(`域包清单不是合法 JSON（${file}）：${error.message}`);
+    }
     fs.writeFileSync(path.join(target, file), raw.endsWith("\n") ? raw : `${raw}\n`);
   }
   domainPackCount = files.length;
@@ -452,8 +456,11 @@ function checkDeclaredDomainPacks(root) {
   const commandOwners = new Map();
   for (const file of files) {
     let manifest;
-    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8")); }
-    catch (error) { fail(`--check：域包清单不是合法 JSON（${file}）：${error.message}`); }
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+    } catch (error) {
+      fail(`--check：域包清单不是合法 JSON（${file}）：${error.message}`);
+    }
     if (!manifest.id || !manifest.pluginId || manifest.transportOwner !== "plugin-opc-common") {
       fail(`--check：域包清单 ${file} 缺 id/pluginId 或 transportOwner 不是 plugin-opc-common`);
     }
@@ -3508,6 +3515,11 @@ function withRequiredPermission(commands) {
 }
 
 function opcManifest({ version, binaryName, sha256 }) {
+  const domainPackManifests = fs
+    .readdirSync(path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs"))
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .map((f) => path.posix.join(DOMAIN_PACK_DIR, f));
   return {
     name: "opc",
     version,
@@ -3529,6 +3541,8 @@ function opcManifest({ version, binaryName, sha256 }) {
     // 宿主 resolve_page_asset 解析、前端只传 (pluginId, pageId)）。键序同 stock：pages
     // 插在 worker 与 commands 之间。
     pages: [{ id: "opc-home", title: "OPC", entry: PAGE_ENTRY, loading: "bundle" }],
+    // P6.2：一域一 logical manifest；宿主只读投影，不在此复制 worker/命令实现。
+    domainPacks: domainPackManifests,
     // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
     // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` / `COMMAND_PUBLISH_BLOG_POST` 逐字一致。
     commands: withRequiredPermission([

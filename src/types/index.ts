@@ -2223,6 +2223,33 @@ export interface PluginPagesInfoDto {
 }
 
 /**
+ * `plugin_list_domain_packs` 的返回形状（后端 `plugins::types::PluginDomainPacksInfo`）。
+ *
+ * P6.2 的一域一插件边界在宿主侧的只读投影：`domainPacks` 来自插件安装目录内的
+ * logical manifest，前端不得据此建立第二份域包清单或按粗域重新聚合。
+ */
+export interface PluginDomainPacksInfoDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  enabled: boolean;
+  domainPacks: PluginDomainPackDto[];
+}
+
+/** 单个 OPC 域包的 logical manifest 投影；字段与插件产物里的 JSON 同源。 */
+export interface PluginDomainPackDto {
+  id: string;
+  pluginId: string;
+  transportOwner: string;
+  page: Record<string, unknown>;
+  capabilities: string[];
+  commands: string[];
+  calls: string[];
+}
+
+/**
  * `plugin_list_task_sources` 的返回形状（后端 `plugins::types::PluginTaskSourcesInfo`，任务 #148）。
  *
  * 与 [`PluginPagesInfoDto`] 同族：真相源是 `manifest.taskSources[]`，每次调用实时扫描，

@@ -2046,6 +2046,7 @@ const SNAKE_CASE_RESPONSE_COMMANDS = new Set<string>([
   "repair_schema",
   "get_db_config",
   "list_reflections",
+  "stock_list_reflections",
   // ReplaySweepResult 内层键（stock_code / as_of_date / return_rate 等）按
   // snake_case 契约消费（见 ReplaySweep.tsx 接口定义），不可被出口 camel 转换。
   "run_replay_backtest",
@@ -7714,7 +7715,6 @@ async function executeCommand<T>(
       return undefined as unknown as T;
     // #344：分析读写 / 监控 / 数据源 / 台账 / mover 轮次（浏览器模式回诚实空态）。
     case "stock_list_stock_analyses":
-    case "stock_list_reflections":
     case "stock_list_price_alerts":
     case "stock_list_mover_recall_runs":
     case "stock_list_param_changes":
@@ -7722,6 +7722,11 @@ async function executeCommand<T>(
     case "stock_get_vendor_health_all":
     case "stock_get_vendor_fallback_log":
       return [] as unknown as T;
+
+    // 四周期反思 fixture：#344 迁 T2 后命令名换成 stock_ 前缀，但面板仍从
+    // `axagent_mock.reflections` 读固定夹具。保留 opt-in 注入，未预置时为 []。
+    case "stock_list_reflections":
+      return getStore<unknown[]>("mock.reflections", []) as unknown as T;
     case "stock_get_asof_degradation_count":
       return 0 as unknown as T;
     case "stock_get_recent_analyses":

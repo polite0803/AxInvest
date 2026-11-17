@@ -1,0 +1,39 @@
+{
+  "id": "content_media",
+  "pluginId": "plugin-opc-content-media",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:content-media",
+    "path": "/opc/domain/content-media"
+  },
+  "capabilities": [
+    "tool:OpcListBlogPosts",
+    "tool:WebSearch",
+    "tool:OpcCreateBlogPost",
+    "tool:FileWrite",
+    "tool:FileRead",
+    "tool:OpcCreatePublishSchedule",
+    "tool:OpcListPublishSchedules",
+    "tool:OpcCreateContentAsset",
+    "tool:OpcListContentAssets",
+    "tool:OpcUpdateContentAsset",
+    "tool:OpcDeleteContentAsset",
+    "tool:OpcCancelPublishSchedule",
+    "tool:OpcProcessDueSchedules"
+  ],
+  "commands": [
+    "opc_list_blog_posts",
+    "opc_create_blog_post",
+    "opc_create_publish_schedule",
+    "opc_list_publish_schedules",
+    "opc_create_content_asset",
+    "opc_list_content_assets",
+    "opc_update_content_asset",
+    "opc_delete_content_asset",
+    "opc_cancel_publish_schedule",
+    "opc_process_due_schedules"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

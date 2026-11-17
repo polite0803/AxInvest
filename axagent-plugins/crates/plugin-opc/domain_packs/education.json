@@ -1,0 +1,22 @@
+{
+  "id": "education",
+  "pluginId": "plugin-opc-education",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:content-education",
+    "path": "/opc/domain/education"
+  },
+  "capabilities": [
+    "tool:WebSearch",
+    "tool:OpcCreateContentAsset",
+    "tool:OpcCreateLandingPage",
+    "tool:FileWrite"
+  ],
+  "commands": [
+    "opc_create_content_asset",
+    "opc_create_landing_page"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

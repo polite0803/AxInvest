@@ -1,0 +1,25 @@
+{
+  "id": "ecommerce",
+  "pluginId": "plugin-opc-ecommerce",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:automation-ecommerce",
+    "path": "/opc/domain/ecommerce"
+  },
+  "capabilities": [
+    "tool:WebSearch",
+    "tool:OpcSearchWiki",
+    "tool:OpcListCustomers",
+    "tool:OpcCreateContentAsset",
+    "tool:OpcCreateLandingPage"
+  ],
+  "commands": [
+    "opc_search_wiki",
+    "opc_list_customers",
+    "opc_create_content_asset",
+    "opc_create_landing_page"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

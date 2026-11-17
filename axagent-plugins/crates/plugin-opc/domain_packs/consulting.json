@@ -1,0 +1,23 @@
+{
+  "id": "consulting",
+  "pluginId": "plugin-opc-consulting",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:automation-consulting",
+    "path": "/opc/domain/consulting"
+  },
+  "capabilities": [
+    "tool:OpcSearchWiki",
+    "tool:WebSearch",
+    "tool:OpcGetDashboard",
+    "tool:OpcCreateContentAsset",
+    "tool:FileWrite"
+  ],
+  "commands": [
+    "opc_search_wiki",
+    "opc_create_content_asset"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

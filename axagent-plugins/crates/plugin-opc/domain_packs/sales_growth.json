@@ -1,0 +1,29 @@
+{
+  "id": "sales_growth",
+  "pluginId": "plugin-opc-sales-growth",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:automation-sales",
+    "path": "/opc/domain/sales-growth"
+  },
+  "capabilities": [
+    "tool:OpcCreateCustomer",
+    "tool:OpcListCustomers",
+    "tool:OpcCreateLandingPage",
+    "tool:WebSearch",
+    "tool:OpcCreatePublishSchedule",
+    "tool:OpcListLandingPages",
+    "tool:OpcListContacts"
+  ],
+  "commands": [
+    "opc_create_customer",
+    "opc_list_customers",
+    "opc_create_landing_page",
+    "opc_create_publish_schedule",
+    "opc_list_landing_pages",
+    "opc_list_contacts"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

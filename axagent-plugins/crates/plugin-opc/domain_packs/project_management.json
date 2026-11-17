@@ -1,0 +1,21 @@
+{
+  "id": "project_management",
+  "pluginId": "plugin-opc-project-management",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:automation-projects",
+    "path": "/opc/domain/project-management"
+  },
+  "capabilities": [
+    "tool:OpcCreateProject",
+    "tool:OpcAddMilestone",
+    "tool:OpcListProjects"
+  ],
+  "commands": [
+    "opc_create_project",
+    "opc_add_milestone"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "finance_invest",
+  "pluginId": "plugin-opc-finance-invest",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:finance-analysis",
+    "path": "/opc/domain/finance-invest"
+  },
+  "capabilities": [
+    "tool:OpcGetDashboard",
+    "tool:OpcListKpis",
+    "tool:OpcSearchWiki",
+    "tool:OpcListProjects",
+    "tool:OpcGetFinancialReport",
+    "tool:OpcRecordKpi"
+  ],
+  "commands": [
+    "opc_search_wiki",
+    "opc_record_kpi"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

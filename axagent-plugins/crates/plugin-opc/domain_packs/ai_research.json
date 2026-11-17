@@ -1,0 +1,23 @@
+{
+  "id": "ai_research",
+  "pluginId": "plugin-opc-ai-research",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:data-ai-research",
+    "path": "/opc/domain/ai-research"
+  },
+  "capabilities": [
+    "tool:OpcListProjects",
+    "tool:OpcSearchWiki",
+    "tool:WebSearch",
+    "tool:FileRead",
+    "tool:Bash",
+    "tool:FileWrite"
+  ],
+  "commands": [
+    "opc_search_wiki"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

@@ -32,7 +32,9 @@ export function validateManifest(m, expected) {
   const own = [...new Set(m.capabilities ?? [])].sort();
   const want = [...new Set(expected.capabilities)].sort();
   if (own.join("|") !== want.join("|")) problems.push(`capabilities 不一致：manifest=${own.join(",")} / 底册=${want.join(",")}`);
-  if ((m.commands ?? []).length === 0) problems.push("commands 为空");
+  const hasOpcCommand = expected.capabilities.some((c) => c.startsWith("tool:Opc"));
+  if (hasOpcCommand && (m.commands ?? []).length === 0) problems.push("commands 为空");
+  if (!hasOpcCommand && (m.commands ?? []).length !== 0) problems.push("无 tool:Opc 能力时 commands 必须为空");
   if (!m.calls?.includes("opc.store")) problems.push("calls 缺 opc.store");
   return problems;
 }
@@ -79,10 +81,14 @@ function main() {
     problems.push(...validateManifest(m, expected).map((p) => `${file}: ${p}`));
     manifests.push({ id: m.id, pluginId: m.pluginId, commands: m.commands.length, transportOwner: m.transportOwner });
   }
-  const expectedSlices = [...slices.keys()].sort();
-  const foundSlices = manifests.map((m) => m.id).sort();
-  if (expectedSlices.join("|") !== foundSlices.join("|")) {
-    problems.push(`vertical slice 清单不一致：期望 ${expectedSlices.join(",")}，实得 ${foundSlices.join(",")}`);
+  const expectedIds = registry.packs.map((p) => p.id).sort();
+  const foundIds = manifests.map((m) => m.id).sort();
+  if (expectedIds.join("|") !== foundIds.join("|")) {
+    problems.push(`域包 logical manifest 清单不一致：期望 ${expectedIds.join(",")}，实得 ${foundIds.join(",")}`);
+  }
+  for (const [id, slice] of slices) {
+    const m = manifests.find((x) => x.id === id);
+    if (m && m.pluginId !== slice.pluginId) problems.push(`${id}: pluginId=${m.pluginId}，vertical slice 期望 ${slice.pluginId}`);
   }
   if (JSON_OUT) {
     console.log(JSON.stringify({ manifestCount: manifests.length, manifests, problems }, null, 2));

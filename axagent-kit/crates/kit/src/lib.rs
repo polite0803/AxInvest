@@ -10,8 +10,6 @@ pub mod browser_automation;
 pub mod command_validator;
 #[cfg(feature = "computer-use")]
 pub mod computer_control;
-#[cfg(not(feature = "computer-use"))]
-pub mod computer_control;
 pub mod git_tools;
 pub mod html_cleaner;
 pub mod model_knowledge;
@@ -33,8 +31,9 @@ pub mod utils;
 
 #[cfg(feature = "computer-use")]
 pub mod ui_automation;
-#[cfg(not(feature = "computer-use"))]
-pub mod ui_automation;
+
+/// 无障碍树语义化实现（Windows UIA / macOS AX / Linux AT-SPI2）。
+pub mod ui_tree;
 
 pub mod billing;
 pub mod bridge_impls;

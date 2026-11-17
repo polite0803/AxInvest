@@ -123,7 +123,9 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
     fn kind(&self) -> NodeKind;
     /// 把原始 config 解析成该类型期望的形状；校验失败返回可读错误。
     fn parse_config(&self, raw: &serde_json::Value) -> Result<(), String>;
-    /// config 的 JSON Schema（供 schema_validator 与前端表单生成）
+    /// config 参数的 JSON Schema（供前端属性面板表单生成）。
+    /// 注意：与 schema_validator 的 NodeContract.input/output_schema 是两个维度，
+    /// 后者校验节点间传递的数据，本方法只描述节点自身配置参数。
     fn config_schema(&self) -> serde_json::Value;
 }
 ```
@@ -191,8 +193,9 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 - 三处 32 臂 match 改为从 `NodeDescriptorRegistry` 查表：harness 新增
   `builtin_descriptors()` / `builtin_descriptor_for()` / `descriptor_for_node(node)` 公共入口，
   deserializer 与 rt-workflow 共用同一张注册表（阶段2 已抽出）；
-- `config_schema` 部分**未动**：`schema_validator` 的 9 份契约 + 兜底是独立校验表，
-  与 descriptor 的 `config_schema()` 尚未并轨，留到阶段4（工厂化时一并接）；
+- `schema_validator` 的 9 份契约**未动且不应并轨**：它们是 `NodeContract.input_schema /
+  output_schema`（节点间传递**数据**的校验），与 descriptor 的 `config_schema`（节点
+  **配置参数**的 schema）是两个不同维度，方案 §3.2 原表述把两者混为一谈，此处订正；
 - 未注册类型在此 panic 而非静默降级（enum 变体全覆盖，正常路径不可达）；
 - 验证：`cargo check` / `cargo clippy --all-targets -- -D warnings` /
   `cargo test -p axagent-rt-workflow --lib schema_validator`（10 passed）/

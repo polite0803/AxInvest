@@ -12,8 +12,14 @@ rustflags = ["-C", "target-feature=+crt-static"]
 #   运行测试: $env:__TAURI_WORKSPACE__ = "true"; cargo test -p axagent --lib
 
 [build]
-# 16 核全利用：原 jobs=8 只用了一半核心
-jobs = 16
+# 并发编译数必须与本机内存匹配，不能只看核数：
+# 本机 16 核但 WSL `.wslconfig` 限 memory=8GB / swap=4GB；rustc 处理 axagent 主 crate
+# （1000+ 命令注册）单个进程峰值可达数 GB，jobs=16 全开会瞬间吃爆 8GB ⇒ swap 抖动 +
+# WSL 级 OOM，整个 VM 失去响应（2026-11-18 全量 cargo test/clippy 两次实测卡死重启）。
+# jobs=2 把峰值压在内存水位内，与 CI 口径一致（`.github/workflows/ci.yml` 的
+# `CARGO_BUILD_JOBS: 2`、release.yml 的多处 `=1`）；环境变量优先级高于本配置，
+# 需要更高并发时可显式覆盖。
+jobs = 2
 
 [unstable]
 # 增量编译优化：提前发送分析结果，减少等待时间

@@ -20,5 +20,8 @@ linker = "rust-lld"
 rustflags = ["-C", "target-feature=+crt-static"]
 
 [build]
-# 与 src-tauri 保持一致；若本机核数不同可被环境变量 CARGO_BUILD_JOBS 覆盖。
-jobs = 16
+# 与 src-tauri/.cargo/config.toml 逐字一致：本机 16 核但 WSL 限 memory=8GB，
+# jobs=16 全开会让大型 crate 的 rustc 并发吃爆内存并卡死整个 VM（2026-11-18 实证）。
+# jobs=2 把峰值压在内存水位内，与 CI 口径一致（`.github/workflows/ci.yml` 的
+# `CARGO_BUILD_JOBS: 2`）；环境变量优先级高于本配置，需要更高并发时可显式覆盖。
+jobs = 2

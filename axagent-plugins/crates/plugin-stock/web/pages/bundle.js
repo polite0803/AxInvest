@@ -274,18 +274,16 @@
   // src-web/main.ts
   var client = createAxAgentPluginClient();
   client.announceReady();
-  var CALLS = [
+  var BASE_CALLS = [
     { name: "stock_reflection_stats" },
     { name: "stock_reco_ic_stats", input: {} },
     { name: "stock_get_reco_strategy_weights" },
     { name: "stock_get_market_status" },
     { name: "stock_get_vendor_fallback_log" },
     { name: "stock_list_reco_history", input: { limit: 20, offset: 0 } },
-    { name: "stock_get_reco_detail", input: { generatedAt: "", styleFilter: "" } },
-    { name: "stock_get_reco_signal_history", input: { strategyId: "" } },
-    { name: "stock_get_cached_recommendation", input: { period: "" } },
     { name: "stock_list_stock_tools" },
   ];
+  var PERIOD_VARIANTS = ["ultra_short", "short", "long", "mid"];
   var EMPTY_TEXT = "\u672C\u73AF\u5883\u4E0D\u63D0\u4F9B\u8BE5\u6570\u636E";
   function isEmpty(value) {
     if (value === null || value === void 0) {
@@ -309,17 +307,98 @@
       return raw;
     }
   }
-  function renderSection(root, name, raw) {
+  function parseRecoRows(raw) {
+    const value = parseReceipt(raw);
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((row) => row !== null && typeof row === "object");
+  }
+  function extractStrategyId(raw) {
+    const value = parseReceipt(raw);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    for (const key of Object.keys(value)) {
+      for (const period of PERIOD_VARIANTS) {
+        const suffix = `_${period}`;
+        if (key.endsWith(suffix) && key.length > suffix.length) {
+          return key.slice(0, key.length - suffix.length);
+        }
+      }
+    }
+    return null;
+  }
+  function resolveDependentCalls(firstRound) {
+    const rows = parseRecoRows(firstRound.get("stock_list_reco_history"));
+    const detailRow = rows.find(
+      (row) => typeof row.generatedAt === "string" && row.generatedAt !== "",
+    );
+    const cachedRow = rows.find(
+      (row) => typeof row.period === "string" && PERIOD_VARIANTS.includes(row.period),
+    );
+    const strategyId = extractStrategyId(firstRound.get("stock_get_reco_strategy_weights"));
+    return [
+      detailRow
+        ? {
+          call: { name: "stock_get_reco_detail", input: { generatedAt: detailRow.generatedAt } },
+          skip: null,
+        }
+        : {
+          call: { name: "stock_get_reco_detail" },
+          skip:
+            "\u5E93\u4E2D\u6682\u65E0\u8350\u80A1\u8BB0\u5F55\uFF08\u7F3A generatedAt\uFF09\uFF0C\u672A\u53D1\u8C03\u7528",
+        },
+      cachedRow
+        ? {
+          call: { name: "stock_get_cached_recommendation", input: { period: cachedRow.period } },
+          skip: null,
+        }
+        : {
+          call: { name: "stock_get_cached_recommendation" },
+          skip:
+            "\u5E93\u4E2D\u6682\u65E0\u5E26\u5408\u6CD5\u6863\u4F4D\uFF08period\uFF09\u7684\u8350\u80A1\u8BB0\u5F55\uFF0C\u672A\u53D1\u8C03\u7528",
+        },
+      strategyId
+        ? {
+          call: { name: "stock_get_reco_signal_history", input: { strategyId } },
+          skip: null,
+        }
+        : {
+          call: { name: "stock_get_reco_signal_history" },
+          skip:
+            "\u6743\u91CD\u53F0\u8D26\u4E3A\u7A7A\uFF08\u65E0 {strategy}_{period} \u952E\uFF09\uFF0C\u65E0\u6CD5\u786E\u5B9A\u7B56\u7565 id\uFF0C\u672A\u53D1\u8C03\u7528",
+        },
+    ];
+  }
+  async function invokeOne(call) {
+    try {
+      const raw = await client.executeCommand({
+        name: call.name,
+        ...call.input === void 0 ? {} : { input: call.input },
+      });
+      return { kind: "receipt", raw };
+    } catch (error) {
+      return { kind: "error", message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  function renderSection(root, name, outcome) {
     const section = document.createElement("section");
     section.style.cssText = "margin:0 0 12px;padding:8px 10px;border:1px solid #ddd;border-radius:6px";
     const title = document.createElement("h2");
     title.style.cssText = "margin:0 0 6px;font-size:13px;font-weight:600";
     title.textContent = name;
     section.appendChild(title);
-    const value = parseReceipt(raw);
     const pre = document.createElement("pre");
     pre.style.cssText = "margin:0;white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,monospace";
-    pre.textContent = isEmpty(value) ? EMPTY_TEXT : JSON.stringify(value, null, 2);
+    if (outcome.kind === "error") {
+      pre.textContent = `\u8C03\u7528\u5931\u8D25\uFF1A${outcome.message}`;
+    } else if (outcome.kind === "skipped") {
+      pre.textContent = `\u672A\u53D1\u8C03\u7528\uFF1A${outcome.reason}`;
+    } else {
+      const value = parseReceipt(outcome.raw);
+      pre.textContent = isEmpty(value) ? EMPTY_TEXT : JSON.stringify(value, null, 2);
+    }
     section.appendChild(pre);
     root.appendChild(section);
   }
@@ -328,20 +407,17 @@
     if (!root) {
       return;
     }
-    for (const call of CALLS) {
-      try {
-        const raw = await client.executeCommand({
-          name: call.name,
-          ...call.input === void 0 ? {} : { input: call.input },
-        });
-        renderSection(root, call.name, raw);
-      } catch (error) {
-        renderSection(
-          root,
-          call.name,
-          `\u8C03\u7528\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`,
-        );
+    const firstRound = /* @__PURE__ */ new Map();
+    for (const call of BASE_CALLS) {
+      const outcome = await invokeOne(call);
+      if (outcome.kind === "receipt") {
+        firstRound.set(call.name, outcome.raw);
       }
+      renderSection(root, call.name, outcome);
+    }
+    for (const dep of resolveDependentCalls(firstRound)) {
+      const outcome = dep.skip === null ? await invokeOne(dep.call) : { kind: "skipped", reason: dep.skip };
+      renderSection(root, dep.call.name, outcome);
     }
   }
   void main();

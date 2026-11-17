@@ -10367,3 +10367,28 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
   `ExecutionState.input_params` 对象键派生（调用方 `agent_executor` 传入，零内置领域键名）；
   两处内嵌提示词（“该股票的基本面信息”→ “该标的…”；“你是一位股票分析师”→ “你是一位分析师”）；
   其余 20+ 处注释/示例统一去域化。cargo test 344/344、clippy 0、fmt 0、doc-refs 0、ci-check --quick 0。
+
+## §210 B2 切片页红灯订正：三条带参命令空串入参改级联取参（2026-11-17）
+
+**红灯（验收审查发现）**：`main.ts` 三条带参命令硬编码空串入参——`period: ""` 对宿主
+`Period` 枚举（`axagent-core/crates/harness/src/holding_period.rs:31` serde lowercase 四变体）
+必然反序列化失败；`generatedAt: ""` 对 `get_reco_detail_core` 的精确等值查询恒不命中；
+`strategyId: ""` 透传 `run_signal_history` 非合法策略 id。三种后果分别被渲染层收进
+「调用失败/本环境不提供该数据」，而旧 `verify-bundle.mjs` 把全部回执 mock 成 null——
+正好构成任务书 B2 验收明令禁止的「伪装空态」，且验证器对此零覆盖。
+
+**修法（级联取参，两阶段）**：第一轮发 7 条无依赖命令（`stock_list_reco_history` 与
+`stock_get_reco_strategy_weights` 是参数源）；级联三条的入参只从第一轮真实回执提取——
+`generatedAt` ← list 首行非空值、`period` ← list 首行且 ∈ Period 四变体（尾切权重键时
+按长度降序防 `_short` 吞 `_ultra_short`）、`strategyId` ← weights 回执首个
+`{strategy}_{period}` 键切分（键形态权威：`reco_loop.rs:1233`）。提取不到 ⇒ 渲染
+「未发调用：原因」，**不发空串**。渲染四态分列：回执 JSON / 空回执（本环境不提供）/
+未发调用 / 调用失败。
+
+**验证器同步改造**：`verify-bundle.mjs` 重构为两场景——①有数据（list 1 行 mid +
+weights `{trend_mid,capital_long}`）断言三条级联入参逐字等于源值 + 全帧无空串入参；
+②无数据（list=[]、weights={}）断言三条零帧发出 + 恰 3 个「未发调用」+ 7 个空态文案。
+
+**读数**：tsc 0；esbuild 重建 bundle（14.0kb）；verify 两场景 **38 项全 PASS**（EXIT=0）；
+`build-plugin-bundle.mjs --plugin stock --check` 3✅（describe 握手 + shutdown 回执 +
+sha256 一致）；dprint check 0。提交 `fix(stock): #354`。

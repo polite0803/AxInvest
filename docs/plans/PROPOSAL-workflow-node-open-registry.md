@@ -1,6 +1,6 @@
 # PROPOSAL：WorkflowNode 开放化 —— 从封闭 enum 到动态注册模型（P6.0-①）
 
-> 状态：draft（待评审，未动工） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
+> 状态：in-progress（阶段0/1/2 完成，阶段3 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
 >
 > 定位：P6.0 六项前置中的第 ① 项，是 P6.3（工作流编辑器迁出）的前置；对 P6.1 股票线改动面为 0
 > 估工：12–18 人日（沿用 PLAN §6.1 口径，本方案不改估工数，只把它拆成可执行阶段）
@@ -167,10 +167,24 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 - 验证：新增单元测试断言「enum → 外壳 → enum」往返序列化字节逐字相等（32 种全覆盖）；定点 `cargo check -p axagent-harness`；
 - 回退：删新增文件即可，enum 未动。
 
-### 阶段 2 —— 收口 harness 侧 7 处 accessor + 反序列化（2–3 人日）
-- 把 §2.1 的 base_id/base/base_mut/base_output_var/adjust_position/set_base_id 改为读统一 `base` 字段；
-- deserializer 改为注册表查表 + parse_config；
-- 验证：既有 DAG 反序列化测试全绿，序列化字节与阶段 0 基线逐字比对；定点 check；
+### 阶段 2 —— 反序列化注册表化 + 序列化形状锁定（2–3 人日）
+> **2026-11-17 实况订正**：原计划本阶段收口 6 处 accessor，但阶段1 明确 enum 与外壳**共存**、
+> enum 仍是权威 ⇒ accessor 必须返回 enum 变体内字段的引用（`base_mut()` 尤其如此，
+> 无法经 JSON 往返返回 `&mut`）。**accessor 6 处 + adjust_position/set_base_id 的收口
+> 后移到阶段6**：删除 enum、动态外壳成为唯一权威时它们自然消失，不需要"假装收口"。
+> 本阶段交付可独立验收的两件事：
+- `workflow_node_deserializer.rs` 的 `unknown_variant` 32 名手写白名单改为查
+  `NodeDescriptorRegistry`（`OnceLock` 懒初始化），消除"match 臂 + 名单"双表；
+  合法类型仍走原强类型 wrapper 解析，行为逐字不变；
+- **修复阶段1 遗留缺陷**：`WorkflowNodeDyn.node_type` 原受 `#[serde(rename_all="camelCase")]`
+  影响输出 `nodeType`（与 enum 的 `"type"` 不一致）——阶段1 的 `TryFrom` 桥接手工拆装 JSON
+  绕过了自身 Serialize 故未暴露；本阶段加 `#[serde(rename="type")]` `#[ts(rename="type")]`
+  并用 32 标签测试锁住形状；
+- 新增 32 标签「外壳无损」测试 + 注册表/match 同集测试（7 个 workflow_node 测试全绿）；
+- 验证：`cargo check -p axagent-harness --all-targets` / `cargo clippy -p axagent-harness
+  --all-targets -- -D warnings` / `cargo test -p axagent-harness --lib workflow_node` 三绿；
+- 阶段0 审计 §4 后移的「32 变体完整合法实例往返比对」进一步后移到阶段6（理由：届时
+  `config: Value` 直接是权威，比对才有意义；共存期逐个猜必填字段收益低）；
 - 回退：git revert 本阶段提交。
 
 ### 阶段 3 —— 收口 rt-workflow 侧（node_type_name / node_kind / schema_validator）（2–3 人日）
@@ -192,6 +206,8 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 
 ### 阶段 6 —— 删除旧 enum + 全量门禁收官（1–2 人日）
 - 确认全仓零 `WorkflowNode::` 强类型构造后，删除旧 enum 与共存互转代码；
+  §2.1 的 6 处 accessor + `adjust_position` / `set_base_id` 随 enum 删除自然收口
+  （阶段2 已说明后移理由）；同时补 32 变体完整合法实例往返比对（阶段0 审计 §4 后移项）；
 - 按 AGENTS.md 铁律：三锚同批改（capability-register.json + PLAN §0.7.2 镜像行）、doc-refs 行号订正、single-source 回正；
 - 全量门禁（CI 口径，只此一次）：
   ```

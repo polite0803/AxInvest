@@ -28,6 +28,10 @@ use crate::workflow_types::{NodeKind, WorkflowNode, WorkflowNodeBase};
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowNodeDyn {
     /// 节点类型字符串；对应原 enum 的 serde tag。
+    /// 必须显式 rename 为 `type`（而非 camelCase 默认的 `nodeType`），
+    /// 才能与既有 32 变体的 `{"type":"..."}` 序列化形状逐字一致。
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
     pub node_type: String,
     /// 节点通用字段（id / title / position / retry / enabled …）。
     #[serde(flatten)]
@@ -66,6 +70,9 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
 ///
 /// 用 `std::sync::RwLock` 持有 map：注册发生在启动期，读取是高频但只读，
 /// 且临界区不跨 await（ trait 方法均同步）⇒ 同步锁语义正确。
+// SAFETY: 本注册表的 std::sync::RwLock 仅在同步临界区使用，guard 不跨 await
+// （trait 方法均同步，注册发生在启动期、读取为只读），无死锁 / 毒化风险。
+#[allow(clippy::disallowed_types)]
 pub struct NodeDescriptorRegistry {
     entries: std::sync::RwLock<HashMap<String, Arc<dyn WorkflowNodeDescriptor>>>,
 }
@@ -77,6 +84,8 @@ impl Default for NodeDescriptorRegistry {
 }
 
 impl NodeDescriptorRegistry {
+    // SAFETY: 同上，构造时的 RwLock 不跨 await。
+    #[allow(clippy::disallowed_types)]
     pub fn new() -> Self {
         Self { entries: std::sync::RwLock::new(HashMap::new()) }
     }
@@ -213,5 +222,41 @@ mod tests {
             config: serde_json::json!({}),
         };
         assert!(WorkflowNode::try_from(&dyn_node).is_err());
+    }
+
+    /// 阶段2：32 个内置 type 标签逐个验证「enum JSON → 动态外壳」无损。
+    ///
+    /// 这里只断言外壳这一步：config 原样保留、base 字段集合不变、type 正确。
+    /// 「外壳 → enum」的完整往返要求每个 config 的最小合法实例，阶段0 审计
+    /// §4 已把该项后移到阶段6（届时 enum 删除，Value 直接成为权威，比对更有意义）。
+    #[test]
+    fn all_32_builtin_types_wrap_losslessly() {
+        let registry = crate::workflow_node_dyn::NodeDescriptorRegistry::new();
+        crate::workflow_node_descriptors::register_builtin_descriptors(&registry);
+        let names = registry.type_names();
+        assert_eq!(names.len(), 32);
+        for name in names {
+            // 动态外壳的 Deserialize 不解析 config 内容，故可用同一最小 payload
+            // 覆盖全部 32 个 type 标签，逐个验证平坦化后字段无损。
+            let mut envelope = serde_json::to_value(sample_base()).unwrap();
+            envelope
+                .as_object_mut()
+                .unwrap()
+                .insert("type".into(), Value::String(name.clone()));
+            envelope
+                .as_object_mut()
+                .unwrap()
+                .insert("config".into(), serde_json::json!({"probe": 1}));
+            let dyn_node: WorkflowNodeDyn = serde_json::from_value(envelope).unwrap();
+            assert_eq!(dyn_node.node_type, name);
+            assert_eq!(dyn_node.config, serde_json::json!({"probe": 1}));
+            assert_eq!(dyn_node.base.id, "n1");
+            // 锁住序列化形状：动态外壳自身输出必须是 `type`（不是 nodeType），
+            // 且与 enum 的 tagged 布局同层。阶段6 删除 enum 后此断言即契约本身。
+            let out = serde_json::to_value(&dyn_node).unwrap();
+            assert_eq!(out.get("type").and_then(|v| v.as_str()), Some(name.as_str()));
+            assert!(out.get("nodeType").is_none(), "不得输出 nodeType");
+            assert_eq!(out.get("config"), Some(&serde_json::json!({"probe": 1})));
+        }
     }
 }

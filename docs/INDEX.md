@@ -593,6 +593,7 @@
 
 | 文件名 | 标题 | 一句话用途 | 状态 | 日期 | 对应版本 | 功能点 | 来源 | 关联 |
 |---|---|---|---|---|---|---|---|---|
+| `AUDIT-p62-start-baseline-2026-11-18.md` | AUDIT — P6.2 OPC 迁出启动基线（2026-11-18） | P6.2 业务迁移面实测归零：OPC 阻塞面/跨包口/前端反向均为 0；剩余工作聚焦真实前端页面入插件产物、独立仓与端到端卸载验证。 | active | 2026-11-18 | v3.0.1 | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `AUDIT-p61-completion-2026-11-18.md` | AUDIT — P6.1 股票迁出完成度实测（2026-11-18） | P6.1 四项原判据与盘上实况逐条对账：截至已推送提交 `00918c06a`，已裁定工作全完成、阻塞面 0/跨包口 0；两阶段口径获用户批准并已同步订正计划，审计提交与本次订正暂留本地。 | active | 2026-11-18 | v3.0.1 | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `AUDIT-workflow-node-open-baseline-2026-11-17.md` | AUDIT — WorkflowNode 开放化阶段0：位点复核与序列化基线冻结（2026-11-17） | 18 处位点实读复核 + 32 变体 type 标签/wrapper/config 字段序列化基线，作为改造行为不变的回归依据。 | active | 2026-11-17 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PROPOSAL-workflow-node-open-registry.md` |
 | `AUDIT-capability-inventory-2026-11-01.md` | AUDIT-capability-inventory-2026-11-01 — AxInvest 功能点全集清点（一次扫全） | 「跨面共享消费方」= 同一个前端文件（组件目录 / 页面 / store）既 invoke 了本域的某个命令，又 invoke 了别的域的命令。 | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |

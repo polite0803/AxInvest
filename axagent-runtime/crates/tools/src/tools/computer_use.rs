@@ -1,15 +1,52 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! ComputerUseTool - 桌面控制和浏览器自动化工具
-
-// SPDX-License-Identifier: AGPL-3.0-only
-
-//! ComputerUseTool - 桌面控制和浏览器自动化工具
+//! ComputerUseTool —— 无障碍树语义化桌面控制工具。
+//!
+//! 观察走系统无障碍树（query），操作走语义节点句柄（invoke / set_value / focus /
+//! perform），键盘仅保留纯键盘注入（press_key）。全链路零坐标、零屏幕像素读取。
 
 use crate::{PermissionResult, Tool, ToolCategory, ToolContext, ToolError, ToolResult};
 use async_trait::async_trait;
-use axagent_kit::computer_control;
+use axagent_harness::ui_tree::{
+    UiActionKind, UiKeyModifier, UiNodeId, UiScrollIntent, UiTreeProvider, UiTreeQuery,
+};
 use serde_json::Value;
+
+/// 平台 provider 工厂与命令层共用同一实现。
+fn provider() -> std::sync::Arc<dyn UiTreeProvider> {
+    axagent_kit::ui_tree::platform_ui_tree_provider()
+}
+
+fn parse_node_id(input: &Value, name: &str) -> Result<UiNodeId, ToolError> {
+    let id = &input["nodeId"];
+    let backend = id["backend"]
+        .as_str()
+        .ok_or_else(|| ToolError::invalid_input_for(name, "nodeId.backend 缺失（字符串）"))?;
+    let raw_id = id["rawId"]
+        .as_str()
+        .ok_or_else(|| ToolError::invalid_input_for(name, "nodeId.rawId 缺失（字符串）"))?;
+    let session_gen = id["sessionGen"]
+        .as_u64()
+        .ok_or_else(|| ToolError::invalid_input_for(name, "nodeId.sessionGen 缺失（非负整数）"))?;
+    Ok(UiNodeId { backend: backend.to_string(), raw_id: raw_id.to_string(), session_gen })
+}
+
+fn parse_modifiers(input: &Value) -> Vec<UiKeyModifier> {
+    input["modifiers"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| match v.as_str()? {
+                    "ctrl" => Some(UiKeyModifier::Ctrl),
+                    "alt" => Some(UiKeyModifier::Alt),
+                    "shift" => Some(UiKeyModifier::Shift),
+                    "meta" => Some(UiKeyModifier::Meta),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 pub struct ComputerUseTool;
 
@@ -19,33 +56,56 @@ impl Tool for ComputerUseTool {
         "ComputerUse"
     }
     fn description(&self) -> &str {
-        "控制计算机桌面：截图、鼠标点击、键盘输入、滚动、鼠标移动。适用于 GUI 自动化和浏览器交互。"
+        "通过系统无障碍树控制桌面：查询语义节点、激活/设值/聚焦/执行语义动作、纯键盘注入。零坐标。"
     }
     fn input_schema(&self) -> Value {
+        let node_id_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "backend": { "type": "string", "description": "节点后端标识（来自查询结果）" },
+                "rawId": { "type": "string", "description": "平台原始节点 id（不透明）" },
+                "sessionGen": { "type": "integer", "description": "查询代次（来自查询结果）" }
+            },
+            "required": ["backend", "rawId", "sessionGen"]
+        });
         serde_json::json!({
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["screenshot", "click", "type", "key", "scroll", "move"],
+                    "enum": ["query", "invoke", "set_value", "focus", "perform", "press_key"],
                     "description": "要执行的操作"
                 },
-                "coordinate": {
-                    "type": "array",
-                    "items": { "type": "number" },
-                    "description": "坐标 [x, y]"
+                "query": {
+                    "type": "object",
+                    "description": "query 操作的查询条件（空对象 = 查全部）",
+                    "properties": {
+                        "application": { "type": "string" },
+                        "windowTitle": { "type": "string" },
+                        "role": { "type": "string" },
+                        "nameContains": { "type": "string" },
+                        "maxDepth": { "type": "integer" },
+                        "includeOffscreen": { "type": "boolean" }
+                    }
                 },
-                "text": { "type": "string", "description": "要输入的文本或按键名称" },
-                "modifiers": {
-                    "type": "array",
-                    "items": { "type": "string", "enum": ["ctrl", "alt", "shift", "meta"] },
-                    "description": "修饰键列表（仅 key 操作使用）"
+                "nodeId": node_id_schema,
+                "value": { "type": "string", "description": "set_value 操作的目标值" },
+                "semanticAction": {
+                    "type": "string",
+                    "enum": ["invoke", "setValue", "focus", "toggle", "select", "expand", "collapse", "scrollIntoView", "scroll"],
+                    "description": "perform 操作的语义动作"
                 },
-                "scroll_direction": {
+                "scrollIntent": {
                     "type": "string",
                     "enum": ["up", "down", "left", "right"]
                 },
-                "scroll_amount": { "type": "number", "default": 3 }
+                "key": { "type": "string", "description": "press_key 的按键名（如 enter / tab / a）" },
+                "text": { "type": "string", "description": "press_key 的可选文本注入" },
+                "modifiers": {
+                    "type": "array",
+                    "items": { "type": "string", "enum": ["ctrl", "alt", "shift", "meta"] },
+                    "description": "press_key 的修饰键列表"
+                }
             },
             "required": ["action"]
         })
@@ -66,106 +126,91 @@ impl Tool for ComputerUseTool {
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let name = self.name();
-        // SECURITY (C4): AI 工具路径也必须经过计算机控制授权闸门，
-        // 否则默认关闭的 C4 主开关对 Agent 控制电脑这一主要入口形同虚设。
+        // SECURITY (C4): AI 工具路径与 Tauri 命令、内置 MCP 描述符共用同一授权闸门。
         axagent_kit::permission::ensure_computer_control_granted()
             .map_err(|e| ToolError::execution_failed_for(name, e))?;
-        let action = input["action"].as_str().unwrap_or("screenshot");
+        let action = input["action"].as_str().unwrap_or("query");
 
         let output = match action {
-            "screenshot" => {
-                let result = computer_control::screen_capture(None, None, None)
+            "query" => {
+                let query: UiTreeQuery =
+                    serde_json::from_value(input["query"].clone()).map_err(|e| {
+                        ToolError::invalid_input_for(name, format!("query 参数无效: {e}"))
+                    })?;
+                let snapshot = provider()
+                    .query(query)
                     .await
                     .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
-                let image_base64 = result["image_base64"].as_str().unwrap_or("");
-                let width = result["width"].as_u64().unwrap_or(0);
-                let height = result["height"].as_u64().unwrap_or(0);
-                format!(
-                    "## 屏幕截图\n({}x{})\n\n![screenshot](data:image/png;base64,{})",
-                    width, height, image_base64
-                )
+                serde_json::to_string(&snapshot)
+                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?
             },
-            "click" => {
-                let coord = input["coordinate"].as_array().ok_or_else(|| {
-                    ToolError::invalid_input_for(name, "click 需要 coordinate [x, y]")
+            "invoke" => {
+                let id = parse_node_id(&input, name)?;
+                provider()
+                    .invoke(&id)
+                    .await
+                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
+                format!("已激活节点: {}:{}", id.backend, id.raw_id)
+            },
+            "set_value" => {
+                let id = parse_node_id(&input, name)?;
+                let value = input["value"].as_str().ok_or_else(|| {
+                    ToolError::invalid_input_for(name, "set_value 需要 value 参数")
                 })?;
-                let x = coord[0].as_f64().unwrap_or(0.0);
-                let y = coord[1].as_f64().unwrap_or(0.0);
-                let button = input["button"].as_str().unwrap_or("left");
-                computer_control::mouse_click(x, y, Some(button.to_string()))
+                provider()
+                    .set_value(&id, value)
                     .await
                     .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
-                format!("鼠标点击: ({}, {}) [{}]", x, y, button)
+                format!("已设置节点值: {}:{}", id.backend, id.raw_id)
             },
-            "type" => {
-                let text = input["text"]
+            "focus" => {
+                let id = parse_node_id(&input, name)?;
+                provider()
+                    .focus(&id)
+                    .await
+                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
+                format!("已聚焦节点: {}:{}", id.backend, id.raw_id)
+            },
+            "perform" => {
+                let id = parse_node_id(&input, name)?;
+                let semantic = input["semanticAction"].as_str().ok_or_else(|| {
+                    ToolError::invalid_input_for(name, "perform 需要 semanticAction 参数")
+                })?;
+                let action_kind: UiActionKind =
+                    serde_json::from_value(serde_json::Value::String(semantic.to_string()))
+                        .map_err(|e| {
+                            ToolError::invalid_input_for(name, format!("semanticAction 无效: {e}"))
+                        })?;
+                let scroll_intent: Option<UiScrollIntent> = input
+                    .get("scrollIntent")
+                    .filter(|v| !v.is_null())
+                    .map(|v| serde_json::from_value(v.clone()))
+                    .transpose()
+                    .map_err(|e| {
+                        ToolError::invalid_input_for(name, format!("scrollIntent 无效: {e}"))
+                    })?;
+                provider()
+                    .perform(&id, action_kind, scroll_intent)
+                    .await
+                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
+                format!("已对节点执行 {semantic}: {}:{}", id.backend, id.raw_id)
+            },
+            "press_key" => {
+                let key = input["key"]
                     .as_str()
-                    .ok_or_else(|| ToolError::invalid_input_for(name, "type 需要 text 参数"))?;
-                let x = input["coordinate"].as_array().and_then(|c| c.first()?.as_f64());
-                let y = input["coordinate"].as_array().and_then(|c| c.get(1)?.as_f64());
-                computer_control::type_text(text.to_string(), x, y)
+                    .ok_or_else(|| ToolError::invalid_input_for(name, "press_key 需要 key 参数"))?;
+                let text = input["text"].as_str();
+                provider()
+                    .press_key(key, &parse_modifiers(&input), text)
                     .await
                     .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
-                match (x, y) {
-                    (Some(cx), Some(cy)) => {
-                        format!("在 ({}, {}) 输入文本: {}", cx, cy, text)
-                    },
-                    _ => format!("输入文本: {}", text),
-                }
-            },
-            "key" => {
-                let key = input["text"].as_str().ok_or_else(|| {
-                    ToolError::invalid_input_for(name, "key 需要 text 参数（按键名称）")
-                })?;
-                let modifiers: Vec<String> = input["modifiers"]
-                    .as_array()
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                    .unwrap_or_default();
-                let desc = if modifiers.is_empty() {
-                    format!("按键: {}", key)
-                } else {
-                    format!("组合键: {}+{}", modifiers.join("+"), key)
-                };
-                computer_control::press_key(key.to_string(), modifiers)
-                    .await
-                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
-                desc
-            },
-            "scroll" => {
-                let coord = input["coordinate"].as_array().ok_or_else(|| {
-                    ToolError::invalid_input_for(name, "scroll 需要 coordinate [x, y]")
-                })?;
-                let x = coord[0].as_f64().unwrap_or(0.0);
-                let y = coord[1].as_f64().unwrap_or(0.0);
-                let dir = input["scroll_direction"].as_str().unwrap_or("down");
-                let amount = input["scroll_amount"].as_f64().unwrap_or(3.0) as i32;
-                let delta = match dir {
-                    "up" => amount,
-                    "down" => -amount,
-                    _ => -amount,
-                };
-                computer_control::mouse_scroll(x, y, delta)
-                    .await
-                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
-                format!("滚动: {} x{} (at {}, {})", dir, amount, x, y)
-            },
-            "move" => {
-                let coord = input["coordinate"].as_array().ok_or_else(|| {
-                    ToolError::invalid_input_for(name, "move 需要 coordinate [x, y]")
-                })?;
-                let x = coord[0].as_f64().unwrap_or(0.0);
-                let y = coord[1].as_f64().unwrap_or(0.0);
-                computer_control::mouse_move(x, y)
-                    .await
-                    .map_err(|e| ToolError::execution_failed_for(name, e.to_string()))?;
-                format!("鼠标移动到: ({}, {})", x, y)
+                format!("已注入按键: {key}")
             },
             _ => {
                 return Err(ToolError::invalid_input_for(
                     name,
                     format!(
-                        "未知操作: {}。支持: screenshot, click, type, key, scroll, move",
-                        action
+                        "未知操作: {action}。支持: query, invoke, set_value, focus, perform, press_key"
                     ),
                 ));
             },

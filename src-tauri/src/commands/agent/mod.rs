@@ -28,7 +28,7 @@ use axagent_storage::cloud_workspace::CloudWorkspace;
 use axagent_storage::workspace_uri::WorkspaceUri;
 use axagent_tools::context_keys;
 use axagent_tools::registry::{
-    DISCLOSURE_TOOLS, McpServerConfig, SCREEN_PERCEPTION_TOOL, UnifiedToolRegistry,
+    DISCLOSURE_TOOLS, McpServerConfig, UI_AUTOMATION_TOOL, UnifiedToolRegistry,
     is_disclosure_immune,
 };
 use base64::Engine;
@@ -1543,21 +1543,21 @@ pub async fn agent_query(
     // `push`/`retain` 而非赋值，`unused_assignments` 也报不出来。改成本函数返回新
     // Vec 的写法后，编译器立刻暴露了该问题。挪动此处前请先看这条注释。
     let orchestration_tools: Vec<String> = request.extra_tools.clone().unwrap_or_default();
-    // 屏幕感知门控（可见性侧）：关闭时不把 ComputerUse 的 schema 下发给 LLM。
+    // UI 自动化门控（可见性侧）：关闭时不把 ComputerUse 的 schema 下发给 LLM。
     // 仅靠后段 `tool_registry.tools.disable(..)` 的执行期拦截是不够的 —— LLM 仍会在工具列表
     // 里看到它并尝试调用，每次都撞上 disabled 而失败，白耗一轮 tool call。
     // 执行期拦截保留，两侧不可互相替代：可见性挡的是「看到」，执行期挡的是「调成」。
-    let screen_perception_off = !settings.screen_perception_enabled;
+    let ui_automation_off = !settings.ui_automation_enabled;
     if !profile_recommended_tools.is_empty()
         || !profile_disallowed_tools.is_empty()
         || !orchestration_tools.is_empty()
-        || screen_perception_off
+        || ui_automation_off
     {
         let mut extra_names: HashSet<String> = profile_recommended_tools.into_iter().collect();
         extra_names.extend(orchestration_tools);
         let mut blocked_names: HashSet<String> = profile_disallowed_tools.into_iter().collect();
-        if screen_perception_off {
-            blocked_names.insert(SCREEN_PERCEPTION_TOOL.to_string());
+        if ui_automation_off {
+            blocked_names.insert(UI_AUTOMATION_TOOL.to_string());
         }
         // extra: 按名字从注册表取完整 schema（复用 registry 的统一实现）
         let extra_schemas =
@@ -2237,17 +2237,17 @@ pub async fn agent_query(
     tool_registry.plugin_command_bridge =
         Some(Arc::new(AppPluginCommandBridge::from_app_handle(&app)));
 
-    // 屏幕感知（computer_use 工具）受 settings.screen_perception_enabled 门控。
+    // UI 自动化（computer_use 工具）受 settings.ui_automation_enabled 门控。
     // 关闭时禁用该工具，用户无法触发桌面控制 / 截图能力。
     // 注意：UnifiedToolRegistry::clone 不复制 disabled 集合，故必须在最终传入
     // runtime 之前（create_conversation_runtime 之前）禁用，避免被后续 clone 清空。
     //
     // ⚠️ 本处是**执行期**拦截，管不到「已下发给 LLM 的工具列表」——那个列表在
     // `build_streaming_api_client` 处就已按值快照（约 1458 行），早于此处。故可见性侧的
-    // 过滤放在前段工具策略块（并入 blocked_names），两处共用 `SCREEN_PERCEPTION_TOOL`。
+    // 过滤放在前段工具策略块（并入 blocked_names），两处共用 `UI_AUTOMATION_TOOL`。
     // 只保留本处会导致「LLM 看得到却调不动」，只保留前段则挡不住手工构造的调用。
-    if !settings.screen_perception_enabled {
-        tool_registry.tools.disable(SCREEN_PERCEPTION_TOOL);
+    if !settings.ui_automation_enabled {
+        tool_registry.tools.disable(UI_AUTOMATION_TOOL);
     }
 
     // Tree of Thoughts 多路径推理预处理：仅当用户开启时生效。
@@ -4056,19 +4056,19 @@ mod tests {
         assert_eq!(names(&apply_tool_policy(Vec::new(), all, &blocked_all)), expected);
     }
 
-    /// 屏幕感知工具**不享受**披露工具豁免：被并入 blocked 时必须移除，且不能通过
+    /// UI 自动化工具**不享受**披露工具豁免：被并入 blocked 时必须移除，且不能通过
     /// recommended 追加复活。
     ///
     /// 与上一条 `apply_tool_policy_disclosure_tools_immune_to_blocklist` 互为对照——
     /// 两者走同一个 `blocked_names`，结果相反。这两个测试一起锁定了「哪些名字免疫、
     /// 哪些不免疫」的边界。
     #[test]
-    fn apply_tool_policy_screen_perception_tool_is_blockable() {
+    fn apply_tool_policy_ui_automation_tool_is_blockable() {
         let out = apply_tool_policy(
-            vec![tool(SCREEN_PERCEPTION_TOOL), tool("read_file")],
+            vec![tool(UI_AUTOMATION_TOOL), tool("read_file")],
             // 即使通过 recommended/extra 追加也不能复活
-            vec![tool(SCREEN_PERCEPTION_TOOL)],
-            &blocked(&[SCREEN_PERCEPTION_TOOL]),
+            vec![tool(UI_AUTOMATION_TOOL)],
+            &blocked(&[UI_AUTOMATION_TOOL]),
         );
         assert_eq!(names(&out), vec!["read_file"]);
     }

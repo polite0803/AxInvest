@@ -111,7 +111,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   // Closed-loop nudge scheduler settings
   closedLoopEnabled: true,
   closedLoopIntervalMinutes: 5,
-  screenPerceptionEnabled: false,
+  uiAutomationEnabled: false,
   guardianReviewEnabled: false,
   rlOptimizerEnabled: false,
   loraFinetuneEnabled: false,

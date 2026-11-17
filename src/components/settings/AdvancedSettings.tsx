@@ -809,12 +809,12 @@ function AgentBehaviorSection() {
       <div
         className="flex items-center justify-between"
         style={{ padding: "4px 0" }}
-        data-search-key="advanced:screenPerception"
+        data-search-key="advanced:uiAutomation"
       >
-        <span>{t("advancedSettings.screenPerception")}</span>
+        <span>{t("advancedSettings.uiAutomation")}</span>
         <Switch
-          checked={settings.screenPerceptionEnabled ?? false}
-          onChange={(v) => saveSettings({ screenPerceptionEnabled: v })}
+          checked={settings.uiAutomationEnabled ?? false}
+          onChange={(v) => saveSettings({ uiAutomationEnabled: v })}
         />
       </div>
       <Divider style={{ margin: "4px 0" }} />

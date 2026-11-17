@@ -203,6 +203,73 @@ export interface ToolCall {
   };
 }
 
+// ── 无障碍树语义化 DTO（与 harness ui_tree.rs camelCase 对齐）──
+
+/** 语义节点的不透明句柄；rawId 前端不得解析。 */
+export interface UiNodeId {
+  backend: string;
+  rawId: string;
+  sessionGen: number;
+}
+
+/** 节点屏幕矩形（仅诊断展示，不参与任何语义动作）。 */
+export interface UiBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 节点支持的语义动作。 */
+export type UiActionKind =
+  | "invoke"
+  | "setValue"
+  | "focus"
+  | "toggle"
+  | "select"
+  | "expand"
+  | "collapse"
+  | "scrollIntoView"
+  | "scroll";
+
+/** 无障碍树节点。 */
+export interface UiNode {
+  id: UiNodeId;
+  role: string;
+  name: string;
+  value?: string;
+  description?: string;
+  states: string[];
+  supportedActions: UiActionKind[];
+  application: string;
+  windowTitle?: string;
+  bounds?: UiBounds;
+  children: UiNode[];
+}
+
+/** 一次查询的树快照（扁平表 + 根 id 列表）。 */
+export interface UiTreeSnapshot {
+  nodes: UiNode[];
+  roots: UiNodeId[];
+  capturedAt: number;
+}
+
+/** 无障碍树查询条件。 */
+export interface UiTreeQuery {
+  application?: string;
+  windowTitle?: string;
+  role?: string;
+  nameContains?: string;
+  maxDepth?: number;
+  includeOffscreen?: boolean;
+}
+
+/** 滚动方向（语义动作 Scroll 的参数，无坐标）。 */
+export type UiScrollIntent = "up" | "down" | "left" | "right";
+
+/** 纯键盘修饰键（无坐标）。 */
+export type UiKeyModifier = "ctrl" | "alt" | "shift" | "meta";
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -620,7 +687,7 @@ export interface AppSettings {
   /** Default workspace directory for new sessions when not manually set */
   defaultWorkspaceDir?: string | null;
   /** Enable screen perception and vision-based UI control */
-  screenPerceptionEnabled?: boolean;
+  uiAutomationEnabled?: boolean;
   /** Guardian review gate: an LLM pre-screening pass before asking the user to approve sensitive commands */
   guardianReviewEnabled?: boolean;
   /** Enable RL optimizer for tool selection and task strategies */

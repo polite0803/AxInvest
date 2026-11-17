@@ -504,18 +504,18 @@ pub const DISCLOSURE_TOOLS: [&str; 7] = [
     "CapabilityBrowse",
 ];
 
-/// 屏幕感知能力的承载工具名（`settings.screen_perception_enabled` 的落点）。
+/// UI 自动化能力的承载工具名（`settings.ui_automation_enabled` 的落点）。
 ///
 /// **两个消费点必须共用本常量**（禁区 12：禁止重复字面量）：
 /// - 可见性侧：`commands/agent/mod.rs` 工具策略块把它并入 blocked，使 schema 不下发 LLM
-/// - 执行期侧：同文件 `tool_registry.tools.disable(SCREEN_PERCEPTION_TOOL)`
+/// - 执行期侧：同文件 `tool_registry.tools.disable(UI_AUTOMATION_TOOL)`
 ///
 /// 两侧缺一不可 —— 只做执行期会让 LLM「看得到却调不动」（每次调用都注定失败），
 /// 只做可见性则挡不住手工构造的调用。
 ///
-/// 常量与真实注册名的一致性由测试 `screen_perception_tool_matches_registered_name` 锁定：
+/// 常量与真实注册名的一致性由测试 `ui_automation_tool_matches_registered_name` 锁定：
 /// 若有人改了 `ComputerUseTool::name()` 而漏改此常量，该测试会红。
-pub const SCREEN_PERCEPTION_TOOL: &str = "ComputerUse";
+pub const UI_AUTOMATION_TOOL: &str = "ComputerUse";
 
 /// 判断工具名是否对 **profile 黑名单**（`AgentProfile.disallowed_tools`）免疫。
 ///
@@ -2282,17 +2282,17 @@ mod tests {
         assert!(!is_disclosure_immune("capabilityview"));
     }
 
-    /// `SCREEN_PERCEPTION_TOOL` **不得**落在 `DISCLOSURE_TOOLS` 豁免名单里。
+    /// `UI_AUTOMATION_TOOL` **不得**落在 `DISCLOSURE_TOOLS` 豁免名单里。
     ///
-    /// 两个名单若发生交集，屏幕感知的黑名单门控会被「披露工具免疫」逻辑吃掉，
-    /// 形成「用户在设置里关掉屏幕感知、工具却照样下发给 LLM」的**静默失效**——
+    /// 两个名单若发生交集，UI 自动化的黑名单门控会被「披露工具免疫」逻辑吃掉，
+    /// 形成「用户在设置里关掉UI 自动化、工具却照样下发给 LLM」的**静默失效**——
     /// 而且两侧代码各自看起来都正确。这条断言守住两个名单的互斥边界。
     #[test]
-    fn screen_perception_tool_is_not_disclosure_immune() {
+    fn ui_automation_tool_is_not_disclosure_immune() {
         assert!(
-            !is_disclosure_immune(SCREEN_PERCEPTION_TOOL),
-            "测试：{} 不得享受披露工具豁免，否则屏幕感知门控会被免疫逻辑绕过",
-            SCREEN_PERCEPTION_TOOL
+            !is_disclosure_immune(UI_AUTOMATION_TOOL),
+            "测试：{} 不得享受披露工具豁免，否则UI 自动化门控会被免疫逻辑绕过",
+            UI_AUTOMATION_TOOL
         );
         // 顺带锁定披露名单本身不含大小写变体（避免将来加名单时手滑）
         for name in DISCLOSURE_TOOLS {
@@ -2304,25 +2304,25 @@ mod tests {
         }
     }
 
-    /// `SCREEN_PERCEPTION_TOOL` 常量必须与真实注册的工具名一致。
+    /// `UI_AUTOMATION_TOOL` 常量必须与真实注册的工具名一致。
     ///
     /// 该常量在两处被消费（可见性过滤 + 执行期 disable）。若有人改了
     /// `ComputerUseTool::name()` 而漏改常量，两道门控会**静默失效** —— 工具照常暴露给
-    /// LLM，而故障现象（屏幕感知关不掉）很难归因到「常量对不上」。本测试把这条
+    /// LLM，而故障现象（UI 自动化关不掉）很难归因到「常量对不上」。本测试把这条
     /// 一致性从人肉约定变成可执行断言。
     #[test]
-    fn screen_perception_tool_matches_registered_name() {
+    fn ui_automation_tool_matches_registered_name() {
         let registry = UnifiedToolRegistry::new();
-        let tools = registry.get_chat_tools_by_names([SCREEN_PERCEPTION_TOOL]);
+        let tools = registry.get_chat_tools_by_names([UI_AUTOMATION_TOOL]);
         assert_eq!(
             tools.len(),
             1,
-            "测试：常量 SCREEN_PERCEPTION_TOOL({}) 应取到唯一一个已注册工具，实际 {} 个。\
+            "测试：常量 UI_AUTOMATION_TOOL({}) 应取到唯一一个已注册工具，实际 {} 个。\
              若工具已改名，请同步更新该常量与其两处消费点",
-            SCREEN_PERCEPTION_TOOL,
+            UI_AUTOMATION_TOOL,
             tools.len()
         );
-        assert_eq!(tools[0].function.name, SCREEN_PERCEPTION_TOOL);
+        assert_eq!(tools[0].function.name, UI_AUTOMATION_TOOL);
     }
 }
 

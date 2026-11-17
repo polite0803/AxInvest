@@ -251,13 +251,13 @@ const RUST_COMMANDS = [
   "dashboard_disable_plugin",
   "dashboard_render_panel",
   "dashboard_reload_plugins",
-  // Computer control
-  "screen_capture",
+  // Computer control（无障碍树语义化阶段3）
   "find_ui_elements",
-  "mouse_click",
-  "type_text",
+  "invoke_ui_element",
+  "set_ui_element_value",
+  "focus_ui_element",
+  "perform_ui_element_action",
   "press_key",
-  "mouse_scroll",
   // Browser
   "browser_navigate",
   "browser_screenshot",
@@ -600,12 +600,6 @@ const RUST_COMMANDS = [
   "get_available_tools",
   "get_tools_by_category",
   "record_tool_usage",
-  // Screen vision
-  "analyze_screen",
-  "find_element_on_screen",
-  "suggest_screen_action",
-  "click_element_at_position",
-  "execute_vision_action",
   // LLM Wiki
   "llm_wiki_list",
   "llm_wiki_create",

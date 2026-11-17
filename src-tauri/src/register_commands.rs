@@ -173,23 +173,21 @@ macro_rules! register_all_commands {
             #[cfg(not(mobile))]
             commands::computer_control::find_ui_elements,
             #[cfg(not(mobile))]
+            commands::computer_control::focus_ui_element,
+            #[cfg(not(mobile))]
             commands::computer_control::grant_computer_control_permission,
+            #[cfg(not(mobile))]
+            commands::computer_control::invoke_ui_element,
             #[cfg(not(mobile))]
             commands::computer_control::is_computer_control_granted,
             #[cfg(not(mobile))]
-            commands::computer_control::mouse_click,
-            #[cfg(not(mobile))]
-            commands::computer_control::mouse_move,
-            #[cfg(not(mobile))]
-            commands::computer_control::mouse_scroll,
+            commands::computer_control::perform_ui_element_action,
             #[cfg(not(mobile))]
             commands::computer_control::press_key,
             #[cfg(not(mobile))]
             commands::computer_control::revoke_computer_control_permission,
             #[cfg(not(mobile))]
-            commands::computer_control::screen_capture,
-            #[cfg(not(mobile))]
-            commands::computer_control::type_text,
+            commands::computer_control::set_ui_element_value,
             commands::conditional_order::create_conditional_order,
             commands::conditional_order::delete_conditional_order,
             commands::conditional_order::list_conditional_orders,
@@ -917,16 +915,6 @@ macro_rules! register_all_commands {
             commands::scheduled_task::update_scheduled_task,
             #[cfg(not(mobile))]
             commands::screen_vision::analyze_image,
-            #[cfg(not(mobile))]
-            commands::screen_vision::analyze_screen,
-            #[cfg(not(mobile))]
-            commands::screen_vision::click_element_at_position,
-            #[cfg(not(mobile))]
-            commands::screen_vision::execute_vision_action,
-            #[cfg(not(mobile))]
-            commands::screen_vision::find_element_on_screen,
-            #[cfg(not(mobile))]
-            commands::screen_vision::suggest_screen_action,
             commands::screenshot_diagnosis::screenshot_diagnosis_archive,
             commands::screenshot_diagnosis::screenshot_diagnosis_create,
             commands::screenshot_diagnosis::screenshot_diagnosis_create_from_image,

@@ -257,26 +257,17 @@
 
 ### 插件体系（`plugin-system`）
 
-- 摘要：文档 22 篇（本地 17 / 导入 5）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-17
+- 摘要：文档 14 篇（本地 9 / 导入 5）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-17
 - 说明书：`docs/features/plugin-system.md`
 
 | 文件名 | 类型 | 一句话用途 | 状态 | 日期 | 对应版本 | 来源 |
 |---|---|---|---|---|---|---|
-| `AUDIT-l1-blockers-2026-11-04-0322.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-04 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-04-0422.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | active | 2026-11-04 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-04.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | active | 2026-11-04 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `plugin-system.md` | 说明书 | 插件体系把「内置功能」与「外部扩展」统一成同一套装载形态：一份 plugin.json 清单 + 可选的长驻 worker 子进程 + 可选的动态 UI 资产。目标是让扩展能力与内… | active | 2026-11-04 | v3.0.0 | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-03-1421.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-03-1557.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-03-1632.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-03.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-shell-plus-plugins.md` | 计划 | 对齐性自检：口径 1 与既有 §1.1 的主路径（独立二进制 + 长驻 worker + 长度前缀 JSON 帧）同形， | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-workflow-node-open-registry.md` | 方案 | 把 WorkflowNode 从 32 变体封闭 enum 改为「类型字符串 + 契约声明 + 运行期注册表」模型，使新增节点类型不改主壳（P6.0-①）。 | draft | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `AUDIT-workflow-node-open-baseline-2026-11-17.md` | 审计 | WorkflowNode 开放化阶段0：18 处位点实读复核 + 32 变体 type 标签/wrapper/config 字段序列化基线冻结。 | active | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-shared-primitives-neutrality.md` | 计划 | 51 处前端反向阻塞逐符号判定：真中性只有 2 处、判据误报 7 处、域内错位 20 处、宿主内联域逻辑 22 处；「20 处共享基元」原判据不成立。 | proposed | 2026-11-05 | v3.0.0+（未定版） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-02.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-02 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `AUDIT-capability-inventory-2026-11-01.md` | 审计 | 「跨面共享消费方」= 同一个前端文件（组件目录 / 页面 / store）既 invoke 了本域的某个命令，又 invoke 了别的域的命令。 | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `AUDIT-l1-blockers-2026-11-01.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-01 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-everything-is-plugin.md` | 计划 | 关键判据：A 与 B 不是二选一。B 层插件在注册表里必须与 A 层内置实现是同一个类型， | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-plugin-gap-closure.md` | 计划 | 1. B 层零真实用户：仓内无任何插件声明 worker 或 capabilities（bundled 仅 2 个 shell hook 脚手架）；真实子进程集成测试默认门控跳过（… | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-dsh-plugin-gap.md` | 计划 | 这些是 AxInvest 里“通用基座”的部分。迁移时应删除自研、改用 DSH 实现，只保留配置与少量接线。 | done | 2026-10-27 | v2.9.9 | 本地原创 |
@@ -482,7 +473,7 @@
 | `PLAN-four-horizon-workflow-alignment.md` | PLAN：四周期工作流对齐 —— 十项需求差距分析与实现方案 | 数据源四周期满足度（这是需求①后半的答案，也是需求⑦的输入） | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 股票决策链 | 本地原创 | `PLAN-multi-horizon-decision-science.md` `AUDIT-jev-adoption-stock-workflow-2026-09-20.md` `PLAN-analysis-data-repair.md` |
 | `PLAN-r2-daily-replay.md` | PLAN-r2-daily-replay —— 每日时间旅行回放（R-2） | R-1 接通回放验证后发现回放样本价格错位（详见 AUDIT-stock-business-profitability-2026-10-25.md §11）。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 时间旅行回放 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-25.md` |
 | `PLAN-r3h-long-sample-calibration.md` | PLAN-r3h-long-sample-calibration —— 打破「0 买入」死循环（门槛不变，增加 long/mid 样本） | 用户裁决：门槛（30）不变 ⇒ 必须从「样本供给」侧解。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 股票决策链 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-26.md` |
-| `PLAN-shell-plus-plugins.md` | PLAN · 主壳 + 按能力插件（= `PLAN-everything-is-plugin.md` 的 P5 阶段） | 对齐性自检：口径 1 与既有 §1.1 的主路径（独立二进制 + 长驻 worker + 长度前缀 JSON 帧）同形， | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-everything-is-plugin.md` `PLAN-plugin-gap-closure.md` `AUDIT-capability-inventory-2026-11-01.md` `AUDIT-l1-blockers-2026-11-01.md` `PLAN-repo-split.md` `PLAN-asof-gaps.md` |
+| `PLAN-shell-plus-plugins.md` | PLAN · 主壳 + 按能力插件（= `PLAN-everything-is-plugin.md` 的 P5 阶段） | 对齐性自检：口径 1 与既有 §1.1 的主路径（独立二进制 + 长驻 worker + 长度前缀 JSON 帧）同形， | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-everything-is-plugin.md` `PLAN-plugin-gap-closure.md` `AUDIT-capability-inventory-2026-11-01.md` `PLAN-repo-split.md` `PLAN-asof-gaps.md` |
 | `PLAN-shared-primitives-neutrality.md` | PLAN · 共享基元的逐符号中性判定（B8-4 前置） | 51 处前端反向阻塞逐符号判定：真中性只有 2 处、判据误报 7 处、域内错位 20 处、宿主内联域逻辑 22 处；「20 处共享基元」原判据不成立。 | proposed | 2026-11-05 | v3.0.0+（未定版） | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `PLAN-everything-is-plugin.md` | PLAN · 一切皆插件 + 动态插件 | 关键判据：A 与 B 不是二选一。B 层插件在注册表里必须与 A 层内置实现是同一个类型， | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
 | `PLAN-plugin-gap-closure.md` | PLAN-plugin-gap-closure — 「一切皆为插件」缺口收编计划 | 1. B 层零真实用户：仓内无任何插件声明 worker 或 capabilities（bundled 仅 2 个 shell hook 脚手架）；真实子进程集成测试默认门控跳过（… | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-everything-is-plugin.md` |
@@ -601,17 +592,7 @@
 | 文件名 | 标题 | 一句话用途 | 状态 | 日期 | 对应版本 | 功能点 | 来源 | 关联 |
 |---|---|---|---|---|---|---|---|---|
 | `AUDIT-workflow-node-open-baseline-2026-11-17.md` | AUDIT — WorkflowNode 开放化阶段0：位点复核与序列化基线冻结（2026-11-17） | 18 处位点实读复核 + 32 变体 type 标签/wrapper/config 字段序列化基线，作为改造行为不变的回归依据。 | active | 2026-11-17 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PROPOSAL-workflow-node-open-registry.md` |
-| `AUDIT-l1-blockers-2026-11-04-0322.md` | L1 功能包拆分阻塞面实测（2026-11-04-0322） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-04 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-06.md` | L1 功能包拆分阻塞面实测（2026-11-06） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。**本轮两处读数值得注意**：前端反向阻塞股票侧 = **56 处 / 43 文件**、OPC 侧 = **29 处 / 11 文件**（本索引原登记的 47/34 与 28/11 是 11-05 21:52 快照的读数，差额已按提交逐条归因，见 PLAN §125.7）；而 `docs/audits/` 下 2026-11-05 的 **18 份同族快照没有登记进本索引**（脚本每次跑都无条件落一份带时间戳的文档 ⇒ 本轮验证复跑又落了一份 `…-1257.md`，内容与本行逐字相同，已删）⇒ 见任务 #207。 | active | 2026-11-06 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-04-0422.md` | L1 功能包拆分阻塞面实测（2026-11-04-0422） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-04 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-04.md` | L1 功能包拆分阻塞面实测（2026-11-04） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-04 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-03-1421.md` | L1 功能包拆分阻塞面实测（2026-11-03-1421） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-03-1557.md` | L1 功能包拆分阻塞面实测（2026-11-03-1557） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-03-1632.md` | L1 功能包拆分阻塞面实测（2026-11-03-1632） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-03.md` | L1 功能包拆分阻塞面实测（2026-11-03） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
-| `AUDIT-l1-blockers-2026-11-02.md` | L1 功能包拆分阻塞面实测（2026-11-02） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-02 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
 | `AUDIT-capability-inventory-2026-11-01.md` | AUDIT-capability-inventory-2026-11-01 — AxInvest 功能点全集清点（一次扫全） | 「跨面共享消费方」= 同一个前端文件（组件目录 / 页面 / store）既 invoke 了本域的某个命令，又 invoke 了别的域的命令。 | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
-| `AUDIT-l1-blockers-2026-11-01.md` | L1 功能包拆分阻塞面实测（2026-11-01） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
 | `AUDIT-data-outcome-coverage-2026-10-28.md` | 取数状态信封：覆盖扩展（2026-10-28） | get_index_quotes 在三条通道全部失败时曾返回 Ok(vec![])，LLM 只能看到「今天没有指数行情」， | active | 2026-10-28 | v2.9.9 | 行情与数据源 | 本地原创 |  |
 | `AUDIT-gate-and-daemon-impact-2026-10-26.md` | 裁决补充：①三门放开的价值量化　②剥离常驻调度的影响面（2026-10-26 15:10） | ⇒ 上一版裁决里「G5 仍为 0」这条要撤销。 | active | 2026-10-26 | v2.9.9 | 任务中心与调度 | 本地原创 |  |
 | `AUDIT-gates-and-headless-scheduler-2026-10-26.md` | 实施结果：开放档内买入 + 三门可配置　/　cron 剥离为常驻调度（2026-10-26） | 默认全关 ⇒ 与引入前逐位一致（改动不改变既有行为，除非显式打开）。 | done | 2026-10-26 | v2.9.9 | 任务中心与调度 | 本地原创 |  |

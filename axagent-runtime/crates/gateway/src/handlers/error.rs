@@ -67,6 +67,7 @@ pub(crate) fn provider_type_to_str(pt: &ProviderType) -> &'static str {
 /// OpenClaw-typed provider is configured first.  This helper centralises
 /// the "find provider → fetch & decrypt active key → build ctx" dance so
 /// each handler stays a thin pass-through.
+#[allow(clippy::result_large_err)]
 pub(crate) async fn resolve_hermes_provider_context(
     adapter: &Arc<dyn axagent_harness::PlatformAdapter>,
     _registry: &dyn axagent_harness::registry::ProviderRegistry,

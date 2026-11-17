@@ -455,6 +455,7 @@ fn observe_sse_chunk(buffer: &mut String, bytes: &Bytes, observer: &mut StreamUs
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn resolve_native_context(
     state: &GatewayAppState,
     protocol: NativeProtocol,

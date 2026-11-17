@@ -29,6 +29,7 @@ use crate::server::GatewayAppState;
 ///
 /// 注意返回的是 **owned `Arc<dyn ProviderAdapter>`**（`provider_registry.get()` 本身
 /// 返回 owned Arc），不是引用 —— 原先误写成 `&Arc<...>` 会触发 E0308。
+#[allow(clippy::result_large_err)]
 async fn jobs_ctx(
     state: &GatewayAppState,
 ) -> Result<(Arc<dyn ProviderAdapter>, ProviderRequestContext, String), axum::response::Response> {

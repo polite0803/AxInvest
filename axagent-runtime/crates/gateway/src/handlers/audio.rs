@@ -100,6 +100,7 @@ fn content_type_for_format(fmt: Option<&str>) -> &'static str {
 ///
 /// 返回 `(provider, model_id, ctx, adapter)`。`require_stt` / `require_tts`
 /// 用于过滤 provider 是否具备所需语音能力。
+#[allow(clippy::result_large_err)]
 async fn resolve_speech_provider(
     state: &GatewayAppState,
     model: &str,

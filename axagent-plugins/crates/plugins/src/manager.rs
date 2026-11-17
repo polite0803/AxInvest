@@ -867,7 +867,7 @@ impl PluginManager {
     }
 
     /// 把清单里的相对路径限制在安装目录内；不解析符号链接（域包 JSON 是只读声明）。
-    fn safe_relative_path<'a>(root: &'a Path, rel: &str) -> Option<PathBuf> {
+    fn safe_relative_path(root: &Path, rel: &str) -> Option<PathBuf> {
         let candidate = Path::new(rel);
         if candidate.is_absolute()
             || candidate.components().any(|c| matches!(c, Component::ParentDir))

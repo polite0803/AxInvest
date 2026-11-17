@@ -186,7 +186,7 @@ const EXEMPT = new Map([
     "R3：幂等查重按 (pick_id, t_plus_n)，pick_id 全局唯一 ⇒ 代际已由键本身决定，再加谓词是重复表达",
   ],
   [
-    "src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail",
+    "src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail_core",
     "R1：按 generated_at 取整批 —— 批次键即代际（实盘与回放各写各的批），不重复加谓词",
   ],
   [
@@ -303,7 +303,7 @@ function evaluateBody(body) {
 // R8：出现**未登记**的读点 ⇒ 红。名单腐烂比缺门更坏 —— 新读点必须先判语义再登记，不能静默通过。
 const POOL_A = new Map([
   ["src-tauri/src/commands/stock_analysis.rs|backtest_reco_strategies_inner", "正负样本分母"],
-  ["src-tauri/src/commands/stock_analysis.rs|get_reco_signal_history", "策略信号明细"],
+  ["src-tauri/src/commands/stock_analysis.rs|get_reco_signal_history_core", "策略信号明细"],
   ["src-tauri/src/commands/stock_workflow/hooks.rs|fetch_reco_prior", "两链对照先验"],
   ["src-tauri/src/commands/pool_scan.rs|load_pool_selection", "池分析分母"],
   ["src-tauri/src/commands/backtest_validation.rs|run_decision_backtest_inner", "验证样本分母"],
@@ -321,7 +321,7 @@ const POOL_C = new Map([
     "按 pick_id 主键回查 reco_version，与降级无关",
   ],
   ["src-tauri/src/commands/backtest_validation.rs|compute_validation_report", "报告侧主键回查"],
-  ["src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail", "按主键取详情"],
+  ["src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail_core", "按主键取详情"],
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|batch_delete_reco_history", "按批次键删除"],
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|delete_serenity_pick", "按主键删单行"],
   [
@@ -336,7 +336,7 @@ const POOL_C = new Map([
 ]);
 const POOL_P = new Map([
   [
-    "src-tauri/src/commands/stock_analysis.rs|get_cached_recommendation",
+    "src-tauri/src/commands/stock_analysis.rs|get_cached_recommendation_core",
     "荐股页缓存回读：降级候选必须显示，声明已在 reasons/risk_notes",
   ],
 ]);

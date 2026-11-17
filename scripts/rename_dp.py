@@ -1,6 +1,8 @@
 import os, sys
+from pathlib import Path
 
-ROOT = sys.argv[1] if len(sys.argv) > 1 else r"D:\OneManager\AxInvest\src-tauri"
+# 默认指向仓库的 src-tauri/，由脚本位置推断；命令行仍可显式覆盖
+ROOT = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).resolve().parent.parent / "src-tauri")
 SKIP_FILE = {"register_commands.rs"}
 
 # ---- KEEP protected substrings (+ placeholders) ----

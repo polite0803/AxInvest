@@ -11,8 +11,10 @@ AxAgent 重复定义审计器
 """
 import os, re, json, hashlib
 from collections import defaultdict
+from pathlib import Path
 
-ROOT = r"d:\OneManager\AxAgent"
+# 仓库根由脚本位置推断（scripts/ 的上一级），不再硬编码机器路径
+ROOT = str(Path(__file__).resolve().parent.parent)
 
 # ---------- 路径扫描 ----------
 rust_files = []

@@ -439,7 +439,7 @@ pub fn vendors_satisfied(required: &[&str], enabled: &HashSet<String>) -> bool {
 }
 
 /// 把 vendor 列表 (a股 vendor 名) 映射到 PANEL_VENDORS 里的 key
-/// 与前端 [PANEL_VENDORS](file:///d:/OneManager/AxInvest/src/components/stock-analysis/vendorCheck.ts) 保持一致
+/// 与前端 `src/components/stock-analysis/vendorCheck.ts` 的 PANEL_VENDORS 保持一致
 pub fn required_vendors_for_style(
     style: crate::recommender::types::Style,
 ) -> &'static [&'static str] {

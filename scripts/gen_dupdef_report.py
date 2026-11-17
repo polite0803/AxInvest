@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """依据 dupdef_result.json 生成重复定义审计报告 (HTML + Markdown)。"""
 import json, os, html
+from pathlib import Path
 
-ROOT = r"d:\OneManager\AxAgent"
+# 仓库根由脚本位置推断（scripts/ 的上一级），不再硬编码机器路径
+ROOT = str(Path(__file__).resolve().parent.parent)
 d = json.load(open(os.path.join(ROOT, "output", "dupdef_result.json"), encoding="utf-8"))
 
 # --- 排除项：sea-orm 每实体自动生成的规范名（非业务重复）---

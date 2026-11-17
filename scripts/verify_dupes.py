@@ -12,8 +12,10 @@
 """
 import os, re, json
 from collections import defaultdict
+from pathlib import Path
 
-ROOT = r"d:\OneManager\AxAgent"
+# 仓库根由脚本位置推断（scripts/ 的上一级），不再硬编码机器路径
+ROOT = str(Path(__file__).resolve().parent.parent)
 d = json.load(open(os.path.join(ROOT, "output", "dupdef_result.json"), encoding="utf-8"))
 SEAORM = {"Model", "Relation", "ActiveModel", "Column", "Entity", "Linked"}
 DATA_KINDS = {"struct", "enum", "type"}

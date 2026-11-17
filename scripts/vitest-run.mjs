@@ -96,7 +96,7 @@ if (canonical.startsWith("\\\\")) {
   if (filterAt > 0) {
     console.error(
       `[vitest-run] root 仍是 UNC 坐标（${canonical}），而位置过滤参数「${argv[filterAt]}」按相对 root 匹配 ⇒ 恒 0 命中。\n` +
-        "修法二选一：① 从盘符路径调用（cd D:\\OneManager\\AxInvest）；② 先 net use 把该共享映射成盘符。",
+        "修法：从仓库盘符路径（非 UNC）调用本脚本，或先 net use 把共享映射成盘符。",
     );
     process.exit(2);
   }

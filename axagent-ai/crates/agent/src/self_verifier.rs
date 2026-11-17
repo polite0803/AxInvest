@@ -1070,16 +1070,7 @@ impl SelfVerifier {
     }
 
     fn is_empty_ok_tool(tool_name: &str) -> bool {
-        matches!(
-            tool_name,
-            "delete_file"
-                | "move_file"
-                | "create_directory"
-                | "mouse_click"
-                | "type_text"
-                | "key_press"
-                | "scroll"
-        )
+        matches!(tool_name, "delete_file" | "move_file" | "create_directory" | "ComputerUse")
     }
 
     fn truncate_string(s: &str, max_len: usize) -> String {
@@ -1529,6 +1520,14 @@ mod tests {
         assert!(SelfVerifier::is_empty_ok_tool("delete_file"));
         assert!(SelfVerifier::is_empty_ok_tool("move_file"));
         assert!(SelfVerifier::is_empty_ok_tool("create_directory"));
+        // UI 自动化语义动作（invoke/set_value/press_key 等）统一经 ComputerUse，
+        // 成功时同样无输出，按旧坐标工具名的语义保留豁免。
+        assert!(SelfVerifier::is_empty_ok_tool("ComputerUse"));
+        // 旧坐标工具名已随阶段 5 清退，不再享有豁免。
+        assert!(!SelfVerifier::is_empty_ok_tool("mouse_click"));
+        assert!(!SelfVerifier::is_empty_ok_tool("type_text"));
+        assert!(!SelfVerifier::is_empty_ok_tool("key_press"));
+        assert!(!SelfVerifier::is_empty_ok_tool("scroll"));
         assert!(!SelfVerifier::is_empty_ok_tool("read_file"));
         assert!(!SelfVerifier::is_empty_ok_tool("web_search"));
     }

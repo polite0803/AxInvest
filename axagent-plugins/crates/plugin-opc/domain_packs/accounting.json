@@ -1,0 +1,27 @@
+{
+  "id": "accounting",
+  "pluginId": "plugin-opc-accounting",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:finance-accounting",
+    "path": "/opc/domain/accounting"
+  },
+  "capabilities": [
+    "tool:OpcListInvoices",
+    "tool:OpcCreateInvoice",
+    "tool:OpcGetFinancialReport",
+    "tool:OpcListCustomers",
+    "tool:OpcRecordKpi",
+    "tool:OpcTransitionInvoice"
+  ],
+  "commands": [
+    "opc_list_invoices",
+    "opc_create_invoice",
+    "opc_list_customers",
+    "opc_record_kpi",
+    "opc_transition_invoice"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

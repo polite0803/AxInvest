@@ -13,6 +13,24 @@
       "sharedCommand": "不属于任何域包时归 plugin-opc-common；不得复制到 14 个域包插件",
       "commandAliases": "同一后端能力允许多个命令别名，但只能被一个插件声明；owner 与 aliases 必须显式登记"
     },
+    "verticalSlices": [
+      {
+        "phase": 1,
+        "domainPackId": "accounting",
+        "pluginId": "plugin-opc-accounting",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "logical-manifest",
+        "reason": "manifest 有 6 条完整领域能力，页面是 CapabilityPackHub 配置驱动；先拆逻辑清单，不复制 4382 行公共 worker"
+      },
+      {
+        "phase": 2,
+        "domainPackId": "security",
+        "pluginId": "plugin-opc-security",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "logical-manifest",
+        "reason": "manifest 仅 3 条通用工具，适合验证跨域共享命令只归公共底座、不复制进领域插件"
+      }
+    ],
     "sharedCommands": [
       "search_wiki",
       "create_content_asset",
@@ -25,6 +43,8 @@
       "get_dashboard",
       "list_projects",
       "get_financial_report",
+      "create_invoice",
+      "transition_invoice",
       "opc_list_projects",
       "opc_get_dashboard",
       "opc_list_kpis",

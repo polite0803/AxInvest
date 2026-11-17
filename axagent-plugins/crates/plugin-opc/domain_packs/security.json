@@ -1,0 +1,20 @@
+{
+  "id": "security",
+  "pluginId": "plugin-opc-security",
+  "transportOwner": "plugin-opc-common",
+  "page": {
+    "id": "domain:devops-security",
+    "path": "/opc/domain/security"
+  },
+  "capabilities": [
+    "tool:OpcSearchWiki",
+    "tool:WebSearch",
+    "tool:FileWrite"
+  ],
+  "commands": [
+    "opc_search_wiki"
+  ],
+  "calls": [
+    "opc.store"
+  ]
+}

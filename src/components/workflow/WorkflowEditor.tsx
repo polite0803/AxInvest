@@ -212,6 +212,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     diagnoseLoading,
     diagnoseDrawerVisible,
     setDiagnoseDrawerVisible,
+    loadNodeDescriptors,
   } = useWorkflowEditorStore();
 
   // ── 并发安全控制器（新增 Hooks） ──────────────────────────
@@ -251,6 +252,12 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  // P6.0-① 阶段5：编辑器挂载时拉取节点类型清单并注入运行时表；
+  // 失败（浏览器 mock / 后端未就绪）时保留内置快照，不阻塞编辑器。
+  useEffect(() => {
+    void loadNodeDescriptors();
+  }, [loadNodeDescriptors]);
   const removeIdsRef = React.useRef<Set<string>>(new Set());
   const [, setDragStopVersion] = useState(0);
 

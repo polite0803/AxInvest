@@ -8,40 +8,7 @@ import { Trash2 } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { type JsonSchema, NODE_TYPE_MAP, type WorkflowEdge, type WorkflowNode } from "../types";
-import {
-  AgentPropertyPanel,
-  AggregatorPropertyPanel,
-  ApprovalPropertyPanel,
-  CodePropertyPanel,
-  ConditionPropertyPanel,
-  DatabaseQueryPropertyPanel,
-  DataTransformerPropertyPanel,
-  DebatePropertyPanel,
-  DelayPropertyPanel,
-  DocumentParserPropertyPanel,
-  EmailPropertyPanel,
-  EndPropertyPanel,
-  FileOperationPropertyPanel,
-  HttpRequestPropertyPanel,
-  LlmClassifierPropertyPanel,
-  LLMPropertyPanel,
-  LoggingPropertyPanel,
-  LoopPropertyPanel,
-  MergePropertyPanel,
-  MultiAgentPropertyPanel,
-  NotificationPropertyPanel,
-  ParallelPropertyPanel,
-  StoragePropertyPanel,
-  SubWorkflowPropertyPanel,
-  SwarmPropertyPanel,
-  SwitchPropertyPanel,
-  ToolPropertyPanel,
-  TriggerPropertyPanel,
-  ValidationPropertyPanel,
-  VectorRetrievePropertyPanel,
-  WebhookSendPropertyPanel,
-  WorkflowRefPropertyPanel,
-} from "./PropertyPanels";
+import { NODE_PANEL_COMPONENTS } from "./PropertyPanels";
 
 interface RightPanelProps {
   width: number;
@@ -59,276 +26,38 @@ function NodePropertyPanel({
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
+  const Panel = NODE_PANEL_COMPONENTS[selectedNode.type];
 
-  switch (selectedNode.type) {
-    case "trigger":
-      return (
-        <TriggerPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "agent":
-      return (
-        <AgentPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "multiAgent":
-      return (
-        <MultiAgentPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "llm":
-      return (
-        <LLMPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "condition":
-      return (
-        <ConditionPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "parallel":
-      return (
-        <ParallelPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "loop":
-      return (
-        <LoopPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "merge":
-      return (
-        <MergePropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "delay":
-      return (
-        <DelayPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "tool":
-      return (
-        <ToolPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "code":
-      return (
-        <CodePropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "subWorkflow":
-      return (
-        <SubWorkflowPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "documentParser":
-      return (
-        <DocumentParserPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "vectorRetrieve":
-      return (
-        <VectorRetrievePropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "validation":
-      return (
-        <ValidationPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "end":
-      return (
-        <EndPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "debate":
-      return (
-        <DebatePropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "httpRequest":
-      return (
-        <HttpRequestPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "switch":
-      return (
-        <SwitchPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "databaseQuery":
-      return (
-        <DatabaseQueryPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "storage":
-      return (
-        <StoragePropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "notification":
-      return (
-        <NotificationPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "approval":
-      return (
-        <ApprovalPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "fileOperation":
-      return (
-        <FileOperationPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "dataTransformer":
-      return (
-        <DataTransformerPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "webhookSend":
-      return (
-        <WebhookSendPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "logging":
-      return (
-        <LoggingPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "llmClassifier":
-      return (
-        <LlmClassifierPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "aggregator":
-      return (
-        <AggregatorPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "email":
-      return (
-        <EmailPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "swarm":
-      return (
-        <SwarmPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    case "workflowRef":
-      return (
-        <WorkflowRefPropertyPanel
-          node={selectedNode}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-        />
-      );
-    default:
-      return (
-        <div style={{ padding: 20, textAlign: "center" }}>
-          <div style={{ opacity: 0.45, marginBottom: 12 }}>
-            {t("workflow.rightPanel.unsupportedNodeType")}
-          </div>
-          <Button type="text" danger onClick={onDelete}>
-            {t("workflow.rightPanel.deleteNode")}
-          </Button>
+  // P6.0-① 阶段5：原来是 32 臂 switch + 静默 default；改为按注册表查表，
+  // 未注册类型显式展示 type 字符串与原始 config，不再是空白降级。
+  if (!Panel) {
+    return (
+      <div style={{ padding: 20, textAlign: "center" }}>
+        <div style={{ opacity: 0.65, marginBottom: 8 }}>
+          {t("workflow.rightPanel.unsupportedNodeType")}
         </div>
-      );
+        <code style={{ display: "block", marginBottom: 12, wordBreak: "break-all" }}>
+          {selectedNode.type}
+        </code>
+        <pre
+          style={{
+            maxHeight: 200,
+            overflow: "auto",
+            textAlign: "left",
+            fontSize: 12,
+            opacity: 0.75,
+          }}
+        >
+          {JSON.stringify(selectedNode.config ?? {}, null, 2)}
+        </pre>
+        <Button type="text" danger onClick={onDelete}>
+          {t("workflow.rightPanel.deleteNode")}
+        </Button>
+      </div>
+    );
   }
+
+  return <Panel node={selectedNode} onUpdate={onUpdate} onDelete={onDelete} />;
 }
 
 /** 深度限制（防止 5.2 深度嵌套 JSON 触发栈溢出 / RangeError） */

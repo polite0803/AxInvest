@@ -22,7 +22,7 @@ import type {
   WorkflowTemplateInput,
   WorkflowTemplateResponse,
 } from "@/components/workflow/types";
-import { NODE_TYPE_MAP } from "@/components/workflow/types";
+import { NODE_TYPE_MAP, registerNodeTypes } from "@/components/workflow/types";
 import type { NarrativeStructureRecord } from "@/lib/narrativeStructure";
 import {
   createNarrativeStructure as apiCreateNarrative,
@@ -31,7 +31,7 @@ import {
   listNarrativeStructures as apiListNarrative,
 } from "@/lib/narrativeStructure";
 import { autoLayout } from "@/lib/workflowLayout";
-import type { LlmDiagnoseV2 } from "@/types";
+import type { LlmDiagnoseV2, WorkflowNodeDescriptorDto } from "@/types";
 import type { ChapterMeta, NarrativeStructure, StructureAdjustmentSuggestion } from "@/types/narrative";
 
 export interface ExpandedSubWorkflowData {
@@ -96,6 +96,10 @@ type HistoryEntry = {
 interface WorkflowEditorState {
   currentTemplate: WorkflowTemplateResponse | null;
   templates: WorkflowTemplateResponse[];
+  /** 后端下发的节点类型清单（P6.0-① 阶段5）；失败时保留内置快照 */
+  nodeDescriptors: WorkflowNodeDescriptorDto[];
+  /** 加载节点类型清单并注入运行时 NODE_TYPE_MAP */
+  loadNodeDescriptors: () => Promise<void>;
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   isLoading: boolean;
@@ -752,6 +756,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
   immer((set, get) => ({
     currentTemplate: null,
     templates: [],
+    nodeDescriptors: [],
     selectedNodeId: null,
     selectedEdgeId: null,
     isLoading: false,
@@ -803,6 +808,19 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     _subWorkflowExpandVersion: 0,
     _loadRequestId: 0,
     _batchDeletingIds: new Set<string>(),
+
+    loadNodeDescriptors: async () => {
+      try {
+        const descriptors = await invoke<WorkflowNodeDescriptorDto[]>(
+          "list_workflow_node_descriptors",
+        );
+        registerNodeTypes(descriptors);
+        set({ nodeDescriptors: descriptors });
+      } catch (error) {
+        // 浏览器 mock 模式 / 后端未就绪：保留内置 34 条快照，编辑器不阻塞。
+        console.warn("加载工作流节点类型清单失败，使用内置快照：", error);
+      }
+    },
 
     undo: () => {
       const { past } = get();

@@ -1187,6 +1187,7 @@ macro_rules! register_all_commands {
             commands::workflow_execution_stats::get_workflow_stats_by_mission,
             commands::workflow_execution_stats::get_workflow_stats_by_template,
             commands::workflow_execution_stats::record_workflow_execution,
+            commands::workflow_node_descriptors::list_workflow_node_descriptors,
             commands::workflow_reflection::workflow_evolution_is_running,
             commands::workflow_reflection::workflow_evolution_stats,
             commands::workflow_reflection::workflow_evolve_template,

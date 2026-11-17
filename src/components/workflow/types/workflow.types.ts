@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { CategoricalHue } from "@/theme/categoricalColors";
+import type { WorkflowNodeDescriptorDto } from "@/types";
 
 export interface Position {
   x: number;
@@ -1002,7 +1003,16 @@ export const NODE_KIND_MAP: Record<string, NodeKind> = {
   groupFrame: "tool",
 };
 
-export const NODE_TYPE_MAP: Record<
+/**
+ * 节点类型元数据表（P6.0-① 阶段5）。
+ *
+ * 运行时可注入：后端清单经 `registerNodeTypes()` 合并进来（同名以清单为准），
+ * 内置 34 条是浏览器模式 / 清单未加载时的初始快照。
+ *
+ * ⚠ `kind` 是**展示配色分类**（来自后端 `displayKind`），不是引擎调度分类；
+ * 二者在 11 个节点上不同，切勿混用。
+ */
+export let NODE_TYPE_MAP: Record<
   string,
   { labelKey: string; category: string; hue: CategoricalHue; isContainer?: boolean; kind?: NodeKind }
 > = {
@@ -1228,6 +1238,28 @@ export const NODE_TYPE_MAP: Record<
     kind: "tool",
   },
 };
+
+/**
+ * 把后端下发的节点类型清单合并进运行时表（P6.0-① 阶段5）。
+ *
+ * - 同名类型以清单为准（后端是权威），其余内置项保留作兜底；
+ * - `hue` / `displayKind` 由后端受控映射下发，直接收窄到前端联合类型；
+ * - 用整体替换而非逐项 mutate，保证 ES module live binding 让所有消费方看到新表。
+ */
+export function registerNodeTypes(descriptors: WorkflowNodeDescriptorDto[]): void {
+  if (descriptors.length === 0) { return; }
+  const next: typeof NODE_TYPE_MAP = { ...NODE_TYPE_MAP };
+  for (const d of descriptors) {
+    next[d.typeName] = {
+      labelKey: d.labelKey,
+      category: d.category,
+      hue: d.hue as CategoricalHue,
+      isContainer: d.isContainer,
+      kind: d.displayKind as NodeKind,
+    };
+  }
+  NODE_TYPE_MAP = next;
+}
 
 export interface SkillMatchResult {
   existingSkill: { id: string; name: string };

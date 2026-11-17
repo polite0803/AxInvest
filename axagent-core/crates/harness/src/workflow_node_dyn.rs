@@ -64,6 +64,77 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
     /// 从 config 中提取 output_var（统一返回 owned String，规避生命周期差异）。
     /// 无 output_var 字段的节点类型返回 `None`。
     fn output_var(&self, raw: &Value) -> Option<String>;
+
+    /// 展示配色分类（P6.0-① 阶段5）。
+    ///
+    /// 与 `kind()` 是**两个维度**：`kind()` 是引擎调度分类，`display_kind()`
+    /// 是编辑器配色 / 容器判定分类。二者在 32 个内置类型中 11 个不同
+    /// （如 `aggregator` 引擎=Tool、展示=Container）。默认等于 `kind()`，
+    /// 内置类型由 `BUILTIN_DISPLAY_KIND` 映射表覆盖，外部类型可自行实现。
+    fn display_kind(&self) -> NodeKind {
+        self.kind()
+    }
+
+    /// 左侧节点面板分组（P6.0-① 阶段5）。默认 `"flow"`。
+    fn display_category(&self) -> &'static str {
+        "flow"
+    }
+
+    /// 供前端按清单渲染的展示元数据（P6.0-① 阶段5）。
+    ///
+    /// 默认从 `type_name` / `display_kind` / `display_category` 公式派生，
+    /// 与前端原 `NODE_KIND_HUE` / `workflow.nodeTypes.${type}` 逐字对齐，
+    /// 插件类型只需保证 i18n key 存在即可零改主壳。
+    fn display_meta(&self) -> WorkflowNodeDescriptorDto {
+        let display_kind = self.display_kind();
+        let hue = match display_kind {
+            NodeKind::Input => "yellow",
+            NodeKind::Output => "red",
+            NodeKind::Tool => "green",
+            NodeKind::Agent => "blue",
+            NodeKind::Condition => "orange",
+            NodeKind::Loop => "purple",
+            NodeKind::Container => "cyan",
+            NodeKind::Storage => "pink",
+        };
+        let is_container =
+            matches!(display_kind, NodeKind::Container) || self.type_name() == "loop";
+        WorkflowNodeDescriptorDto {
+            type_name: self.type_name().to_string(),
+            kind: self.kind(),
+            display_kind,
+            label_key: format!("workflow.nodeTypes.{}", self.type_name()),
+            category: self.display_category().to_string(),
+            hue: hue.to_string(),
+            is_container,
+            config_schema: self.config_schema(),
+        }
+    }
+}
+
+/// 节点类型的展示元数据 DTO（P6.0-① 阶段5，供清单命令下发前端）。
+///
+/// 字段 snake_case，经 `#[serde(rename_all = "camelCase")]` 输出 camelCase，
+/// 与前端 `src/types/workflow.ts` 的 `WorkflowNodeDescriptorDto` 对齐（禁区13）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowNodeDescriptorDto {
+    /// 类型字符串，与序列化 tag 一致。
+    pub type_name: String,
+    /// 引擎调度分类（保留给引擎侧；前端配色不读此字段）。
+    pub kind: NodeKind,
+    /// 展示配色分类（与前端原 NODE_KIND_MAP 逐字等价）。
+    pub display_kind: NodeKind,
+    /// i18n key，形如 `workflow.nodeTypes.<type>`。
+    pub label_key: String,
+    /// 左侧面板分组 id。
+    pub category: String,
+    /// 类目色相（与前端 CategoricalHue 对齐）。
+    pub hue: String,
+    /// 是否容器节点（决定自动挂入 / 包围盒行为）。
+    pub is_container: bool,
+    /// config 参数 schema（当前内置类型为空 `{}`）。
+    pub config_schema: Value,
 }
 
 /// 节点类型契约注册表（foundation 层，零 axagent 依赖）。

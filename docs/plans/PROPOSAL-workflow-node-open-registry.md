@@ -1,6 +1,6 @@
 # PROPOSAL：WorkflowNode 开放化 —— 从封闭 enum 到动态注册模型（P6.0-①）
 
-> 状态：in-progress（阶段0/1/2/3/4 完成，阶段5 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
+> 状态：in-progress（阶段0/1/2/3/4/5 完成，阶段6 待启动） ｜ 日期：2026-11-17 ｜ 对应版本：v3.0.0+（未定版，待确认）
 >
 > 定位：P6.0 六项前置中的第 ① 项，是 P6.3（工作流编辑器迁出）的前置；对 P6.1 股票线改动面为 0
 > 估工：12–18 人日（沿用 PLAN §6.1 口径，本方案不改估工数，只把它拆成可执行阶段）
@@ -221,13 +221,40 @@ pub trait WorkflowNodeDescriptor: Send + Sync {
   「注册 + 工厂构造不需改主壳」，**端到端新类型执行后移到阶段6**（删除 enum 后立即验收）；
 - 回退：git revert。
 
-### 阶段 5 —— 前端数据驱动（3–4 人日）
+### 阶段 5 —— 前端数据驱动（3–4 人日）✅ 已完成（2026-11-17）
 - 节点清单接口 + `NODE_TYPE_MAP` / RightPanel / PropertyPanels / i18n 改为按清单渲染；
 - 未注册类型显式兜底；
 - 验证：新增测试节点类型的前端面板**无需改主壳**即可显示；`npm run typecheck` + `npm run test:run`；前端 lint（oxlint）；
 - 回退：git revert。
 
+> **2026-11-17 实施实况订正（写回 PROPOSAL，避免审计误判未完成）**：
+> - **kind 是双维度**（实施前实读发现）：后端 `descriptor.kind` 是引擎调度分类，前端原
+>   `NODE_KIND_MAP.kind` 是展示配色 / 容器判定分类，32 内置类型中 **11 个不一致**
+>   （`aggregator` 后端 Tool / 前端 Container，`approval` 后端 Tool / 前端 Output 等）。
+>   用户裁定「后端补展示 kind」：trait 新增 `display_kind()`（默认等于 `kind()`），
+>   `workflow_node_descriptors.rs` 用 `BUILTIN_DISPLAY_KIND` 映射表补齐 11 项，
+>   新增 `WorkflowNodeDescriptorDto` 同时下发 `kind` 与 `displayKind`，前端以 `displayKind`
+>   驱动配色 / 容器，避免 11 节点视觉回归。
+> - `display_meta()` 默认派生 `labelKey = workflow.nodeTypes.${typeName}`、`hue`（按 displayKind
+>   映射，与前端 `NODE_KIND_HUE` 逐字一致）、`isContainer = displayKind==Container || typeName=="loop"`
+>   （已实读验证与前端原 8 项完全等价）、`category`（`BUILTIN_CATEGORY` 32 项表，未命中回退 `flow`）。
+>   harness 测试 `display_meta_matches_legacy_frontend_tables` 锁定 32 类型逐字等价 + 11 双维度保持。
+> - 后端新增 `list_workflow_node_descriptors` 命令（`commands/workflow_node_descriptors.rs`），
+>   前端 `workflowEditorStore.loadNodeDescriptors()` 在 WorkflowEditor mount 时加载，
+>   `registerNodeTypes()` 合并进运行时 `NODE_TYPE_MAP`，失败保留内置快照不阻塞；
+>   `PropertyPanels/index.ts` 增 `NODE_PANEL_COMPONENTS` 表 + `registerNodePanel()`，
+>   RightPanel 删 32 臂 switch 改查表 + 未知类型显式兜底（显示 type 与原始 config）。
+> - **三锚同批**：`commandTotal` 1176→1177、`agentCommandFace` 1182→1183、
+>   `k1RsFileCount` 2054→2055、`k1PubTraitCount` 337 不变，PLAN 镜像行同步追加归因。
+> - **与计划原稿的偏差（如实记录）**：计划 §2.2 要求删除 `NODE_KIND_MAP` 与
+>   `src/lib/workflowLayout.ts:163 CONTAINER_NODE_TYPES` 影表。实施中确认 `CONTAINER_NODE_TYPES`
+>   有 4 份拷贝、20+ 消费点，`workflowLayout.ts` 是纯 lib（导入 components/types 会造成反向依赖），
+>   删除需同步改 20+ 处并承担回归风险；本阶段为控制风险**保留影表**，仅完成「清单下发 +
+>   运行时表 + 面板注册表 + 显式兜底」核心目标。影表清理后移到阶段6 与 enum 删除同批处理，
+>   届时统一切到 descriptor 派生的 `displayKind`/`isContainer`，消除双写。
+
 ### 阶段 6 —— 删除旧 enum + 全量门禁收官（1–2 人日）
+- 承接阶段5 后移项：删除 `NODE_KIND_MAP` / `CONTAINER_NODE_TYPES` 等展示影表，所有消费方统一切到 descriptor 下发的 `displayKind` / `isContainer`；
 - 确认全仓零 `WorkflowNode::` 强类型构造后，删除旧 enum 与共存互转代码；
   §2.1 的 6 处 accessor + `adjust_position` / `set_base_id` 随 enum 删除自然收口
   （阶段2 已说明后移理由）；补 32 变体完整合法实例往返比对（阶段0 审计 §4 后移项）；

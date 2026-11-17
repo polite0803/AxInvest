@@ -418,3 +418,28 @@ export interface LlmDiagnoseV2 {
   fixes?: DiagnosticFix[];
   autoApply?: boolean;
 }
+
+/**
+ * 工作流节点类型展示元数据（P6.0-① 阶段5）。
+ *
+ * 后端权威定义在 `axagent_harness::workflow_node_dyn::WorkflowNodeDescriptorDto`，
+ * 经 `list_workflow_node_descriptors` 命令下发。字段与后端 camelCase 逐一对齐。
+ */
+export interface WorkflowNodeDescriptorDto {
+  /** 类型字符串，与序列化 tag 一致（如 `agent` / `httpRequest`） */
+  typeName: string;
+  /** 引擎调度分类（前端配色不读此字段，仅透传备用） */
+  kind: string;
+  /** 展示配色分类，与前端 CategoricalHue 一一对应 */
+  displayKind: string;
+  /** i18n key，形如 `workflow.nodeTypes.<type>` */
+  labelKey: string;
+  /** 左侧节点面板分组 id */
+  category: string;
+  /** 类目色相：yellow/red/green/blue/orange/purple/cyan/pink */
+  hue: string;
+  /** 是否容器节点（决定自动挂入 / 包围盒行为） */
+  isContainer: boolean;
+  /** config 参数 schema（当前 32 内置类型为空对象） */
+  configSchema: Record<string, unknown>;
+}

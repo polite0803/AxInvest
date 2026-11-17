@@ -271,20 +271,20 @@
     {
       "id": "frontendFileCaliber",
       "label": "前端体量（脚本文件名口径 feRe 匹配 src/** 全部 .ts/.tsx）",
-      "value": 91357,
+      "value": 91366,
       "value2": 319,
       "value2Label": "文件",
       "check": "frontendVolume",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "91 357",
+      "planNumber": "91 366",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 522,
           "mustContain": [
             "319",
-            "91 357",
+            "91 366",
             "脚本文件名口径"
           ]
         }
@@ -294,20 +294,20 @@
     {
       "id": "frontendDirCaliber",
       "label": "前端体量（目录口径 components/stock-analysis）",
-      "value": 67636,
+      "value": 67645,
       "value2": 240,
       "value2Label": "文件",
       "check": "frontendDirVolume",
       "dir": "src/components/stock-analysis",
       "hard": true,
-      "planNumber": "67 636",
+      "planNumber": "67 645",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 521,
           "mustContain": [
             "240",
-            "67 636",
+            "67 645",
             "目录口径"
           ]
         }

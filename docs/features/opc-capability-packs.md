@@ -118,7 +118,7 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 ## 已知限制与坑
 
 1. **`domain` 缺省回退口径不一致**：manifest 字段注释写「缺省 `None` 回退 `Automation`」（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:71-74`），但「提示增加域」提案的兜底实际用 `general`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:999`）。写新包时不要依赖注释里的 `automation`。
-2. **`domain` 的「业务域子集」未被运行时校验**：注释称由 `assert_capability_pack_capability_closed` 保证（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:74`），但该函数只用 `existing_user_domains` 过滤提案（`:994-996`），并不拒绝 `domain: system`。类型层面能挡住拼写错误的自造域，挡不住把系统域写成归属域。
+2. **`domain` 的「业务域子集」未被运行时校验**：注释称由 `assert_capability_pack_capability_closed` 保证（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:752`），但该函数只用 `existing_user_domains` 过滤提案（`:994-996`），并不拒绝 `domain: system`。类型层面能挡住拼写错误的自造域，挡不住把系统域写成归属域。
 3. **能力集封闭是审计而非门禁**：三处调用均为非阻塞（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:1097`），导入失败也以 `Ok` 返回提示串（`src-tauri/src/init/opc_store_service.rs:2815-2858`）。因此「seed 期阻塞 / 增量期告警」两档处置目前无代码对应。
 4. **表名与注释漂移**：启用开关注释写「写 DB `opc_capability_packs.enabled`」（`src-tauri/src/init/opc_store_service.rs:2862`），实体真实表名是 `opc_domain_packs`（`axagent-core/crates/entities/src/opc_capability_packs.rs:9`）。排查 SQL 时以实体为准。
 5. **旧目录回退只能读不能写**：`LEGACY_CAPABILITY_PACKS_DIR` 仅用于存量读取，写路径一律走新常量（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:26-33`）。

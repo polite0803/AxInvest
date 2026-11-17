@@ -47,7 +47,7 @@
 
 - 后端命令：`src-tauri/src/commands/stock_workflow/core.rs:249` — `run_stock_workflow`（入参含 `stock_code` / `dry_run` / `as_of_date`）。
 - 引擎/业务层：`axagent-core/crates/harness/src/holding_period.rs:31`（四档枚举）、`:242`（来源白名单）、`:294`（持有期）、`src-tauri/src/commands/stock_workflow/decision.rs:741`（四档落库）、`src-tauri/src/commands/analyst-brief.rhai:45`（卡片解析）、`src-tauri/src/commands/stock_workflow/hooks.rs:146`（分歧归因）。
-- 前端：`src/stores/feature/stockAnalysisStore.ts:127`、`src/utils/workflowNodeLabel.ts:25`、`src/types/stock-analysis.ts:166`（`HorizonPriceMap`，键为 camelCase 四档）。
+- 前端：`src/stores/feature/stockAnalysisStore.ts:127`、`src/utils/workflowNodeLabel.ts:25`、`src/types/stock-analysis.ts:62`（`HorizonPriceMap`，键为 camelCase 四档）。
 - 数据表/迁移：`stock_analyses`（实体 `axagent-core/crates/entities/src/stock_analyses.rs`，含 `analysis_kind` 与 `horizon_decisions` 列）；`reco_picks`（`axagent-core/crates/entities/src/reco_picks.rs`）。迁移沿用实体所在的 `axagent-core/crates/migration`。
 
 ## 配置与开关

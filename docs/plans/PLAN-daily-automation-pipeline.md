@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | 智能荐股 | `recommender::run_recommendation_scan`（四档共享池扫描→逐档落 `reco_picks`） | `services.rs:2240` `stock-recommendation` | `stock_create_recommendation_cron`（插件命令，经 `stock.analysis` 接缝；宿主 wrapper 已随 #35 批 1b 退役） | 无自动建任务；不判交易日 |
 | 趋势智选 | `serenity-screening` / `-fast` 工作流，产物落 `reco_picks`（style='serenity'，`serenity.rs:1318`） | `services.rs:2947` `workflow_id` 兜底分支 | `stock_create_trend_screening_cron`（插件命令；默认 `0 16 * * 1-5`） | 无自动建任务 |
-| 候选池逐只分析 | `run_pool_scan`（`pool_scan.rs:172`，读近 N 天 reco_picks 含 serenity，串行 `run_single_stock_analysis`） | `services.rs:2556` `pool-scan` | `stock_create_pool_scan_cron`（插件命令；默认 `0 17 * * *`） | 无自动建任务；不判交易日；**无「尚未分析」筛选**（按 confidence 截断 max_stocks=10，未分析的积压被静默挡掉） |
+| 候选池逐只分析 | `run_pool_scan`（`pool_scan.rs:425`，读近 N 天 reco_picks 含 serenity，串行 `run_single_stock_analysis`） | `services.rs:2556` `pool-scan` | `stock_create_pool_scan_cron`（插件命令；默认 `0 17 * * *`） | 无自动建任务；不判交易日；**无「尚未分析」筛选**（按 confidence 截断 max_stocks=10，未分析的积压被静默挡掉） |
 | 四周期到期反思 | `run_batch_reflection_inner` + `BatchReflectionConfig{period, dueOnly, maxCount}`（`reflection.rs:1648`，due_only=按 2/5/28/90 天间隔判到期） | `services.rs:2674` `batch-reflection` | 有 | 无自动建任务；另有 6h 兜底服务不限周期（保留不动） |
 
 **关键前置缺陷（P0）**：`crates/runtime/src/cron/scheduler.rs:47` `should_run_now` 用 `chrono::Utc::now()` 匹配 cron 字段 ⇒ 写 `0 0 * * *` 实际在**北京时间 08:00** 跑。前端所有默认表达式（`0 16 * * 1-5`、`0 17 * * *`）都是按北京时间写的，即**现存定时任务全部晚 8 小时触发**。本项目仅 Windows 桌面单机、用户在东八区 ⇒ 修调度器为本地时区匹配是唯一能让「00:00 = 00:00」成立的口径（备选：种子表达式按 UTC-8 反写，但会和前端展示/用户手写语义永久分裂，否决）。
@@ -61,7 +61,7 @@
 
 **边界声明（全池口径的三个已知后果，均已实证，须让用户知情）**：
 
-- `reco_picks` **无任何自动清理**（全仓唯一删除入口 = 前端手动 `batch_delete_reco_history`，`reco_history.rs:244`）⇒ 表只增不减，「全池」= 全部历史积压。**上线首晚**会把库里所有从没分析过的历史候选一次性排入（按 confidence 降序逐只跑），首轮耗时长、消耗模型配额——这是诉求「第一次出现就必然分析」的直接推论，不是缺陷；接受则无需另加窗口，想限速可临时用 `maxStocks>0`。
+- `reco_picks` **无任何自动清理**（全仓唯一删除入口 = 前端手动 `batch_delete_reco_history`，`reco_history.rs:267`）⇒ 表只增不减，「全池」= 全部历史积压。**上线首晚**会把库里所有从没分析过的历史候选一次性排入（按 confidence 降序逐只跑），首轮耗时长、消耗模型配额——这是诉求「第一次出现就必然分析」的直接推论，不是缺陷；接受则无需另加窗口，想限速可临时用 `maxStocks>0`。
 - `minConfidence` 仍是**池成员资格**判据：历史低置信候选（< 阈值）永远不进队，即「未分析」不等于「必分析」，过滤是设计而非疏漏（种子任务取 50，与荐股档出厂先验一致；现默认 60 会挡掉大量超短档 pick）。
 - 失败重试：某只本轮 `run_single_stock_analysis` 失败 ⇒ 当日无分析记录 ⇒ 次晚自动再进队，**无限重试**直到成功或该 pick 被手动删出池；无「永久失败」标记（如需要另说，本计划不做）。
 

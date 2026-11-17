@@ -496,7 +496,7 @@ L1 声明即足够 —— 多写一条 extras 反而会被引擎当作需重建�
 - 窗口注入通道：`ToolContext.extra[context_keys::CONTEXT_WINDOW]`，两处 wiring 各注入一次 ——
   `src-tauri/src/commands/agent/mod.rs`（`agent_query` 内，`with_execution_context` 之后）与
   `src-tauri/src/init/agent_turn_adapter.rs`（`WorkflowAgentTurnRunner::run_turn` 内，模型解析之后）。
-  取值口径与 `src-tauri/src/commands/conversations/streaming.rs:1413` 的 `model_context_window`
+  取值口径与 `src-tauri/src/commands/conversations/streaming.rs:1419` 的 `model_context_window`
   **逐字一致**（均取模型记录的 `max_tokens`），避免两处各自解析窗口产出不同预算。
 
 **订正 1（不改三处消费点）**：`conversations/streaming.rs`（RAG 注入三段）、
@@ -537,7 +537,7 @@ L1 声明即足够 —— 多写一条 extras 反而会被引擎当作需重建�
 
 - `src-tauri/crates/tools/src/win_sandbox.rs:211-246` 用
   `SaferCreateLevel(SAFER_LEVELID_NORMALUSER)`（`:216`）+ `SaferComputeTokenFromLevel`（`:233`）；
-- `src-tauri/crates/tools/src/win_sandbox.rs:125` 起的 `spawn_sandboxed` 按 mode 分支，
+- `src-tauri/crates/tools/src/win_sandbox.rs:159` 起的 `spawn_sandboxed` 按 mode 分支，
   **只实现了 `ReadOnly`**，`WorkspaceWrite` 在 `:133` 直接返回 Err；
 - 子进程启动在 `src-tauri/crates/tools/src/win_sandbox.rs:320`（重建白名单环境变量 + 私有 Desktop
   + `CreateProcessAsUserW`）。
@@ -720,7 +720,7 @@ cargo clippy -p axagent-agent --all-targets -- -D warnings
 - 可回放基础设施**已存在**：`src-tauri/crates/entities/src/session_events.rs:1-28`（`session_id` /
   递增 `seq` / `event_type` / JSON payload，用于跨进程 Resume）；
 - 压缩锚点常量在 `src-tauri/src/context_manager.rs:40`（`COMPRESSION_MARKER = "<!-- context-compressed -->"`，已核实）；
-- 压缩相关的裁剪逻辑在 `src-tauri/src/context_manager.rs:94`（`build_context`）、
+- 压缩相关的裁剪逻辑在 `src-tauri/src/context_manager.rs:181`（`build_context`）、
   `:111`（`build_context_with_query`）、`:187`（`sliding_window`）、`:355`（`prune_by_relevance`）
   —— 行号已核实，函数体未逐行读。
 

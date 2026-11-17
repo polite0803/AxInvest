@@ -611,7 +611,7 @@ WARN  engine: Node failed node_id=data-quality error=VALIDATION_FAILED: Rhai exe
 | `server_main`（无头服务） | `create_app_state` | ❌ **缺** |
 
 `register_shared_engine_initializer` 的**唯一**调用点此前在
-`src/init/services.rs:35` 的 `start_background_services` 里 —— 那是 Tauri 专属路径。
+`src/init/services.rs:14` 的 `start_background_services` 里 —— 那是 Tauri 专属路径。
 共享 Engine 是进程级 `OnceLock`，**在首次创建时取走注册队列并冻结**；
 CLI 从没注册过 ⇒ 队列是空的 ⇒ Engine 里**一个 `pm_*` 都没有**。
 

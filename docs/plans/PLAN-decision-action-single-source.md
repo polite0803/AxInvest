@@ -159,7 +159,7 @@
   | ④ 反思后验评价 | `reflection-comparator.rhai:185` 与 `:295`（`predicted_direction == "观望"` 算「保持观望」而非「方向错误」） | 降级记录会落进 `else` ⇒ **被判成「方向误判」**，污染胜率与反思 | 两处把「不确定」与「观望」同等豁免 |
   | ⑤ 方向冲突的降级兜底 | `stock_workflow/decision.rs:2565-2575`（`opposite_direction_gated_action` 把非观望动作一律改写成「观望」） | 这一处本身就是「兜底占业务档名」的违规源 | 改写目标改「不确定」，幂等判据同步 |
   ⚠ ④ 会改变**仓位输出与胜率口径**，属可感知变化，实施后必须真跑一次分析 + 一次反思对账（不能只靠编译与单测）。
-- **R-DA-3** `map_posterior_to_action`（`analysis-engine/decision.rs:59`）确为**零调用者**，但它被 `harness/src/domain_semantics.rs:423` 的 `ConceptDecl`（`axinvest.decision.posterior`）当载体引用，evidence 直指该行 ⇒ 删除会破语义登记表门。先重定位该概念的载体，再删。
+- **R-DA-3** `map_posterior_to_action`（`analysis-engine/decision.rs:59`）确为**零调用者**，但它被 `harness/src/domain_semantics.rs:200` 的 `ConceptDecl`（`axinvest.decision.posterior`）当载体引用，evidence 直指该行 ⇒ 删除会破语义登记表门。先重定位该概念的载体，再删。
 
 - **R-DA-4** PLAN R9 的裸字面量消费端 5 处未动（`portfolio_formula.rs:742`、`recommender/gates.rs:96`、`reco_loop.rs:1053`、`strategies/watchlist.rs:291`、`reflection_stats.rs:166-167`）。
 - **阶段 B（ts-rs 生成通路）与 C（schema enum 收口）未开工。**

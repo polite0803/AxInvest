@@ -72,7 +72,7 @@ EvoFlow 把「执行授权」拆成了**独立于计划生命周期**的状态�
 
 实施前的进一步核查推翻了对第 4/5 条的定性：
 
-- `task_shape_approval_senders`（`app_state.rs:438`）+ `task-shape-approval-request` 事件（`cognitive.rs:1876`）+ `TaskShapeApprovalModal.tsx` + `respond_task_shape_approval`（`cognitive.rs:2731`，已注册 `register_commands.rs:203`）—— **完整闭环**：insert / emit / listener / UI / 回传齐全。
+- `task_shape_approval_senders`（`app_state.rs:438`）+ `task-shape-approval-request` 事件（`cognitive.rs:1876`）+ `TaskShapeApprovalModal.tsx` + `respond_task_shape_approval`（`cognitive.rs:2734`，已注册 `register_commands.rs:203`）—— **完整闭环**：insert / emit / listener / UI / 回传齐全。
 - 而 `agent_plan_approvals` 那条链：State 槽 + `agent_approve_plan` + TS 监听 + `PlanApprovalModal` 全在，**唯独 Rust 侧零 `insert`、零 `emit`**（真实模式下永不触发，仅浏览器 mock 会发事件）。
 
 ⇒ 定性应为 **「P0-2 旧实现被 P3 task_shape 实现取代」**，按铁律 #3（被覆盖 ⇒ 删）处置，而**不是**「补 insert/emit 让旧链复活」。本轮**不删**（`planApprovalEnabled` 是 `ChatView` 用户可见开关，删除属产品行为变更），改为在 `app_state.rs` / `agent/mod.rs` 处加警示注释标注为遗留链路，并把删除列入待决策。

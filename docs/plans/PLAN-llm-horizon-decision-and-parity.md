@@ -95,7 +95,7 @@
 2. **新门（运行门 + 负控，不许只有编译门）**：LLM 四档键集 ⊆ `Period::camel_key()` 全集且等长 4；负控两条——少一档仍绿、把 `ultraShort` 写成 `ultra_short` 仍绿，都必须变红。
 3. **门的第一个读数打在未修的树上**（先证它会红）。
 4. 现网读数对账：新列在跑一轮真实分析后必须由 0 → 4 键；拿不到就报「未产出」，不得显示成四档全「观望」。
-5. `TEMPLATE_VERSION`（`seed_stock_analysis.rs:1433`，现 160）bump + 现网库代际对照（库里高于/低于代码要四态报，不参与差值）。
+5. `TEMPLATE_VERSION`（`seed_stock_analysis.rs:1643`，现 160）bump + 现网库代际对照（库里高于/低于代码要四态报，不参与差值）。
 6. 新增 UI 文案 → 11 语言全量补 key，且插值槽逐语言回读断言。
 
 ## 4. 阶段 B：公式 / LLM 逐档对照验证
@@ -200,7 +200,7 @@
 3. **代 bump**：重播种门是 `existing.version >= TEMPLATE_VERSION` 早退（`:2370`，严格大于）；
    **现网已同步在 160**（`workflow_templates` 主模板 + 四个档分支模板全部 160，2026-10-16 实测）⇒ 本轮图改动 bump 到 **161**，
    并照 `debate_rounds_graph_drift`（`:2373-2379`）的形态为「逐档辩论是否真重展开」补一条同型漂移门。
-4. **会被打红的既有断言**：`analyst_brief_keys_match_tiered_instances` 锁 21 键（`seed_consistency_tests.rs:4245,4287`）、
+4. **会被打红的既有断言**：`analyst_brief_keys_match_tiered_instances` 锁 21 键（`seed_consistency_tests.rs:4672,4287`）、
    `check-tier-purity.mjs` R2（块内不得点名另一档）、`check-analyst-id-shape.mjs` R1/R2（逐档 id 只能由 `analyst_node_id` 生成，禁止字面量 `base--tier`）、
    `main_chain_risk_grade_is_tier_scoped_in_code_domain` 锁恰好 1 处 `pm_risk_veto`（`:3287,3300`）。
    ⇒ 门扫的是**字面量**，`format!` 拼出来的 id 会让门静默失明（`horizon_tier_template.rs:141-142,175-177` 已写成规矩）。
@@ -328,7 +328,7 @@ worktree 在 `.qoder/worktrees/agent-general-purpose-d8508181/`（**未提交，
 
 ### 9.2 新发现一：那 6 行脏 JSON 的真实受害面不是 UI，而是**一致性分数**
 
-`src/lib/agentOutput.ts:656 extractLlmField` 走 `parseJsonLoose`，**前端早就自动剥围栏** ⇒ 那 6 行在面板上看不出来。
+`src/lib/agentOutput.ts:648 extractLlmField` 走 `parseJsonLoose`，**前端早就自动剥围栏** ⇒ 那 6 行在面板上看不出来。
 真正的受害者是 Rust：`compute_decision_agreement`（`decision.rs:1577`）直接 `serde_json::from_str`，无围栏容错 ⇒ 这 6 行的 `llm_json` 解析失败 ⇒ **整条一致性返回 `None`（静默缺席）**。
 ⇒ 本轮的 `unwrap_json_fence` 修的是**对照层**，不是显示层；A2 阶段做呈现层时**不要**把它当成「UI 已经修好」的依据。
 

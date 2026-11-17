@@ -44,7 +44,7 @@
 | ------ | ------------ | --------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------- |
 | **M0** | 参数扁平化   | `mcp_tools.rs::compute_valuation` 新增 6 个扁平参数解析 + 单元测试          | 无    | 传 `dcf_discount_rate=6.0` 时输出与内部构造 `ValuationConfig{discount_rate:0.06}` 等价 |
 | **M1** | 种子接线     | `seed_stock_analysis.rs` 的 `tool_node` 闭包支持多映射；t-valuation 挂 6 项 | M0    | 种子后 DB 模板 JSON 中 t-valuation 的 `input_mapping` 含 7 项（stock_code + 6 变量）   |
-| **M2** | 模板升版     | `seed_stock_analysis.rs:254` `TEMPLATE_VERSION` 31 → **32** + 版本注释      | M1    | 启动后 DB 模板 `version=32`；日志出现「更新股票分析工作流模板 v31 → v32」              |
+| **M2** | 模板升版     | `seed_stock_analysis.rs:1643` `TEMPLATE_VERSION` 31 → **32** + 版本注释      | M1    | 启动后 DB 模板 `version=32`；日志出现「更新股票分析工作流模板 v31 → v32」              |
 | **M3** | 前端单位对齐 | `StockAnalysisConfigPanel.tsx` / `WhatIfBacktest.tsx` 传参口径 + i18n       | M0    | 面板输入 8.5 → 后端收到 8.5（百分数口径），执行侧换算为 0.085                          |
 | **M4** | 生产验证     | 重编译二进制 + 实跑 + DB 复核                                               | M1-M3 | 见 §1.1 四项                                                                           |
 

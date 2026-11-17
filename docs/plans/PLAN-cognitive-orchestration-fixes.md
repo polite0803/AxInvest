@@ -31,7 +31,7 @@
 | `agent/mod.rs` 工具微调块                | 先 retain 移除 disallowed，再注入 `extra_tools` | 认知编排按能力护照 `tool_ref` 注入的工具能把 profile 禁用的工具注回 | —                                                                                                                 |
 | `src-tauri/src/commands/local_tool.rs:145-156` `get_tool_count` | 先 remove disallowed，再 insert recommended     | 同时出现在 `recommended_tools` 的禁用工具被注回                     | 追加源用 `registry.tools.list_all()`，**连 registry 层 `disable()` 都不过滤**，会把用户在设置里关掉的工具算进计数 |
 
-关键事实：`get_chat_tools_by_names`（`crates/tools/src/registry.rs:918`）只过滤 registry 层的
+关键事实：`get_chat_tools_by_names`（`crates/tools/src/registry.rs:987`）只过滤 registry 层的
 `disable()`，不看 profile 的 `disallowed_tools`；而 `list_all()` 连 `disable()` 都不过滤。
 
 **修法**：两处统一改为「先追加（走 `get_chat_tools_by_names` 复用 registry 统一过滤），
@@ -227,7 +227,7 @@ trajectory 进化证据判定 3 处真实使用），删的只是 `clamp_mode_fo
 
 | #  | 修复项                                     | 状态 | 落点                                                                                                                                                                    |
 | -- | ------------------------------------------ | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1 | 模板固化不回灌能力索引                     | ✅   | harness `workflow_types.rs:2231` 抽 `workflow_template_passport` 权威入口 + `repo_dtos.rs:88` `to_capability_passport`；`save_as_workflow.rs`（move 前派生护照 + 回灌） |
+| F1 | 模板固化不回灌能力索引                     | ✅   | harness `workflow_types.rs:2369` 抽 `workflow_template_passport` 权威入口 + `repo_dtos.rs:93` `to_capability_passport`；`save_as_workflow.rs`（move 前派生护照 + 回灌） |
 | F6 | 模板 update/delete/duplicate 索引同步      | ✅   | `workflow_template.rs` 新增 `sync_template_passport` / `remove_template_passport`，接入 insert/update/delete/duplicate 四入口                                           |
 | F2 | 短路缓存 `execution_mode` 与实际分派不一致 | ✅   | `cognitive.rs` 短路覆盖块抽为 `apply_shortcut_override`（纯函数）+ 反推抽为 `derive_mode_from_execution_view`；补 2 个单测（四视图映射 + 缓存 mode=plan 撒谎场景）      |
 | F3 | Workflow/Direct 无视会话已加载能力         | ✅   | `cognitive.rs` 新增 `resolve_exposure_injection` + `merge_injection` + 前置 2.5 读取 `loaded_capability_ids` + domain 交集软档闸（match 守卫）                          |
@@ -261,8 +261,8 @@ trajectory 进化证据判定 3 处真实使用），删的只是 `clamp_mode_fo
 
 | 环节                       | 代码锚点                                                                                                   | 是否动索引                       |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| 启动期全量重建             | `src/init/state.rs:1657` `register_all_capabilities` → `:1687-1703` 从 `workflow_templates` 表全量收集护照 | ✅                               |
-| 启动时机                   | `src/init/state.rs:2442`（`run_deferred_init` 内，只在启动时跑一次）                                       | —                                |
+| 启动期全量重建             | `src/init/state.rs:2117` `register_all_capabilities` → `:1687-1703` 从 `workflow_templates` 表全量收集护照 | ✅                               |
+| 启动时机                   | `src/init/state.rs:2988`（`run_deferred_init` 内，只在启动时跑一次）                                       | —                                |
 | SaveAsWorkflow 工具        | `crates/tools/src/tools/save_as_workflow.rs:240-246`                                                       | ❌ 只 `create_workflow_template` |
 | save_dynamic_workflow 命令 | `src/commands/workflow_template.rs:2851-2855`                                                              | ❌ 只 `insert_workflow_template` |
 | 模板 update / delete       | `src/commands/workflow_template.rs`（全文无 `capability_indexer` 引用）                                    | ❌                               |
@@ -557,7 +557,7 @@ async fn resolve_exposure_injection(
 
 **步骤 2 — 路由前读取会话已加载能力**
 
-在 `cognitive_query_inner` 前置阶段（`cognitive.rs:659` JSON 检测之前）新增：
+在 `cognitive_query_inner` 前置阶段（`cognitive.rs:838` JSON 检测之前）新增：
 
 ```rust
 // 前置 2.5：会话已加载能力感知

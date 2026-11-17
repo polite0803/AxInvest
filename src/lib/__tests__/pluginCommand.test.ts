@@ -29,7 +29,7 @@ describe("invokePluginCommand", () => {
       limit: 20,
     });
 
-    expect(resolveMock).toHaveBeenCalledWith("stock_get_pipeline_history", expect.anything());
+    expect(resolveMock).toHaveBeenCalledWith("stock_get_pipeline_history");
     expect(invokeMock).toHaveBeenCalledWith("plugin_execute_command", {
       pluginId: "stock@bundled",
       name: "stock_get_pipeline_history",

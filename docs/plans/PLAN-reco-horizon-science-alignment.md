@@ -525,4 +525,4 @@ commands/stock_analysis、seed_*、面板）在 lib 口径下全绿。
 | R4 | **已落地，但只覆盖策略链** | `recommender/scale.rs`（Phase R-B）是档位→尺度的唯一入口，trend/capital/value/reversion 全改走 `scale::fetch`；门 f 锁「`recommender/strategies/` 内不得出现写死 `"daily"` 的 `get_klines(`」。**⚠ 未覆盖第三条链**：趋势智选 `commands/stock_workflow/serenity.rs:1485` 仍用 `risk::daily_closes`（日线）推 `vol_stop` / `vol_target`，`:1940` 另一处 `get_klines(code, "daily", 120)` ⇒ 用日线幅度覆盖 28/90 天档，正是 `scale::dev_move` 要归一的错。**登记为 R4b，勿再当「R4 未修」** |
 | R1 | **已修（并发会话在途、未提交）** | `recommender/scoring.rs` 新增 `candidate_score_to_win_rate`（候选评分→该档上涨胜率：逐档先验→logit 合成→SNR 时间折算），`serenity.rs` 落库前调用 ⇒ 档间不再逐位相同、且与分析链同量纲（工作树未提交） |
 | R2 | **已收口** | 同 R3：经验乘数退出主路径 |
-| 未登记于本表、本轮实测新发现 | 智选 `pick_data.reasons` 只剩风控一行 | `serenity.rs:1491` 的 `reasons_base` 取自 LLM 候选自身的 `reasons` 字段，实测 688498 / 002812 四档全为空 ⇒ 面板「推荐理由」实际只展示建仓带与仓位上限，**入选判据一个字没有，且缺席未声明**。登记为 R15 |
+| 未登记于本表、本轮实测新发现 | 智选 `pick_data.reasons` 只剩风控一行 | `serenity.rs:1714` 的 `reasons_base` 取自 LLM 候选自身的 `reasons` 字段，实测 688498 / 002812 四档全为空 ⇒ 面板「推荐理由」实际只展示建仓带与仓位上限，**入选判据一个字没有，且缺席未声明**。登记为 R15 |

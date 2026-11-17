@@ -34,9 +34,9 @@
 
 ### 无头调度与 leader 租约
 
-- 入口：`src-tauri/src/init/services.rs:2089` 的 `start_cron_scheduler`（带 AppHandle）与 `:2104` 的 `start_cron_scheduler_headless`（无 GUI）；公共实现 `:2143` 的 `start_cron_scheduler_opt`。
+- 入口：`src-tauri/src/init/services.rs:2133` 的 `start_cron_scheduler`（带 AppHandle）与 `:2104` 的 `start_cron_scheduler_headless`（无 GUI）；公共实现 `:2143` 的 `start_cron_scheduler_opt`。
 - 无头化 + 跨进程 leader 租约属 v3.0.0：提交 `d787ebf37`（「调度器无头化 + 跨进程 leader 租约 + 决策否决门运行期可配 + 回放/验证双门禁」）。
-- 每个任务执行前显式钉 live 模式：`services.rs:2264-2284`（`cron_live` 用 `task_local` 的显式 `None`，避免定时任务被并发回放的 as-of 栈污染）。
+- 每个任务执行前显式钉 live 模式：`services.rs:2318`（`cron_live` 用 `task_local` 的显式 `None`，避免定时任务被并发回放的 as-of 栈污染）。
 - 交付通道：`services.rs:2262` 构造 `CronDeliverySink`；`:2257` 注释「任务可通过 `CronDeliveryConfig` 把执行结果推送到 webhook / 文件 / 通知渠道」。
 
 （对应版本：v3.0.0，当前实现）
@@ -53,7 +53,7 @@
 ### 手动触发按任务类型分流
 
 - 入口：`src-tauri/src/commands/scheduled_task.rs:417` 的 `execute_scheduled_task`。
-- 内置 handler 白名单：`BUILTIN_TASK_TYPES`（`scheduled_task.rs:128` 起、`:134-157` 逐个登记），对外只读 `builtin_task_types()` 在 `:170`。
+- 内置 handler 白名单：`BUILTIN_TASK_TYPES`（`scheduled_task.rs:134` 起、`:134-157` 逐个登记），对外只读 `builtin_task_types()` 在 `:170`。
 - 分流规则（按代码与注释）：
   1. **有关联工作流** → 走工作流执行；
   2. **无工作流但有内置 handler** → 直接调内置 handler（如 `POOL_SCAN_TASK_TYPE`、`MOVER_RECALL_TASK_TYPE`、`STOCK_ANALYSIS_RERUN_TASK_TYPE`、`TIME_TRAVEL_BATCH_TASK_TYPE` 等）；
@@ -73,7 +73,7 @@
 ### 告警与结果交付
 
 - 交付契约：`axagent-core/crates/harness/src/cron_delivery.rs:40` 的 `CronDeliveryConfig`、`:54` 的 `CronDeliveryChannel`。
-- 渠道装配：`src-tauri/src/init/services.rs:2262` 的 `create_cron_delivery_sink`（webhook / 文件 / 通知渠道）。
+- 渠道装配：`src-tauri/src/init/services.rs:5006` 的 `create_cron_delivery_sink`（webhook / 文件 / 通知渠道）。
 - 运行结果结构：`TaskRunResult`（`success` / `output` / `error` / `duration_ms` / `executed_at` / `skipped` / `partial`），在 `services.rs:2301-2314` 有构造样例。
 
 （对应版本：v3.0.0，当前实现）

@@ -339,7 +339,7 @@ knowledge_entities::Entity::insert(am)
 | # | 位置 | 冲突键 | 键怎么来 | 生产库足迹 |
 |---|---|---|---|---|
 | 1 | `dao/repo/knowledge_graph.rs:787`<br>`upsert_relation` | `knowledge_relations::Column::Id` | `:768 let id = format!("rel_{}", gen_id())` | 🔘 **零足迹** —— 见下「判别式」。与既有登记「零调用」一致 |
-| 2 | `trajectory/src/storage.rs:517`<br>`save_pattern` | `trajectory_patterns::Column::Id` | `harness/trajectory_types.rs:227` `Uuid::new_v4()`（每次 `TrajectoryPattern::new` 都新生成） | 🔴 **2038 行，却只有 3 个不同 `name`**（`tool-CapabilityView`×1019、`multi-step-13`×525、`multi-step-10`×494）；**今天仍在增**<br>✅ **2026-09-17 已修 —— 见 §5d-补** |
+| 2 | `trajectory/src/storage.rs:530`<br>`save_pattern` | `trajectory_patterns::Column::Id` | `harness/trajectory_types.rs:227` `Uuid::new_v4()`（每次 `TrajectoryPattern::new` 都新生成） | 🔴 **2038 行，却只有 3 个不同 `name`**（`tool-CapabilityView`×1019、`multi-step-13`×525、`multi-step-10`×494）；**今天仍在增**<br>✅ **2026-09-17 已修 —— 见 §5d-补** |
 | 3 | `trajectory/src/storage.rs:991`<br>`save_relationship` | `knowledge_relations::Column::Id` | `commands/memory.rs:1319` `format!("rel_{}", &uuid[..12])` | 🔘 **零足迹**（库里没有 `rel_{12位十六进制}` 形态的行） |
 
 **三处的证成方式不同，不能混为一谈**：
@@ -498,7 +498,7 @@ patterns 回灌 `PatternLearner`，但合成的 `Trajectory` 把 `steps` 置空�
 
 **⚠ 另一处红与本项无关（归属已钉死，勿误记到本项头上）**：`trajectory/tests/causal_integration.rs`
 **4 passed / 17 failed**，全部同源于 `code 787 FOREIGN KEY constraint failed` —— 真因是
-`trajectory/src/causal.rs:302` 的 `observe_edge` **写死 `knowledge_base_id = ""`**，而声明式引擎
+`trajectory/src/causal.rs:290` 的 `observe_edge` **写死 `knowledge_base_id = ""`**，而声明式引擎
 给 SQLite 新库建了 `knowledge_relations → knowledge_bases` 外键（FK 由 sqlx 默认 PRAGMA 打开，
 见 `PLAN-declarative-schema-sync.md:1279`）⇒ 无父行即 787。**与本项零交集**：本项只写
 `trajectory_patterns`，失败断言读的是 `knowledge_relations`；且未走边的用例（4 条）全绿。
@@ -523,7 +523,7 @@ patterns 回灌 `PatternLearner`，但合成的 `Trajectory` 把 `steps` 置空�
 上有指向 `knowledge_bases(id)` 的外键，**而读端早已按哨兵过滤** ——
 
 - `src/commands/proactive.rs:328` / `:568`：`list_causal_edge_stats(state…db(), TRAJECTORY_KB_ID)`
-- `trajectory/src/storage.rs:1016`：`get_all_relationships` 也 `.filter(KnowledgeBaseId.eq(Self::TRAJECTORY_KB_ID))`
+- `trajectory/src/storage.rs:1049`：`get_all_relationships` 也 `.filter(KnowledgeBaseId.eq(Self::TRAJECTORY_KB_ID))`
 
 ⇒ 写端写 `""`、读端按哨兵查 ⇒ **即便关掉外键让 `""` 写成功，这些读端也一条读不到**。
 本项修的是**写读口径冲突**，不是把测试弄绿。
@@ -741,7 +741,7 @@ panicked at crates\dao\src\repo\src-tauri/crates/dao/src/repo/knowledge_graph.rs
 本轮共改 **10 处行号引用**（harness 9 + schema_diff 1）。
 
 **剩余软判据（**存量、非本轮、按设计容忍**，需人判，本轮未改）**：
-`reconcile/apply.rs → render.rs:1100`（附近已无引号值 `"col"`）·
+`reconcile/apply.rs → render.rs:1686`（附近已无引号值 `"col"`）·
 `harness/page_type.rs → init/services.rs:375`（指向收尾括号）·
 `stock_workflow/core.rs → harness/workflow_types.rs:2565`（指向 `},`）·
 `decl-evidence` 侧 5 条（`wiki.rs:1149`、`GraphView.tsx:116` ×3 等）。

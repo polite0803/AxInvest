@@ -168,7 +168,7 @@
 **AxAgent（代码真实路径）**
 - 审批节点占位：`src-tauri/crates/rt-workflow/src/work_engine/executors/approval_executor.rs` —— `ApprovalExecutor::execute` 仅返回 `{"status":"pending",...}`，无挂起/恢复逻辑
 - 版本实体：`src-tauri/crates/entities/src/workflow_template_version.rs`（`workflow_template_versions` 表）
-- 版本回滚：`src-tauri/src/commands/workflow_ai_apply.rs:136` `apply_rollback_to_version`
+- 版本回滚：`src-tauri/src/commands/workflow_ai_apply.rs:141` `apply_rollback_to_version`
 - n8n 导入入口：`src-tauri/src/commands/workflow_template.rs:1849` `import_n8n_directory`
 - n8n 转换器：`workflow_template.rs:1350` `convert_n8n_to_axagent` → 调用 `infer_agent_from_n8n` / `extract_config_from_n8n`（私有 fn），节点映射：if/switch→Condition、merge→Merge、wait→Delay、其余→Agent；并通过 `ensure_agent_role`/`ensure_agent_profile` 自动建 Expert/AgentRole/AgentProfile
 - 引擎：`src-tauri/crates/rt-workflow/src/work_engine/engine/mod.rs:1097` `run_workflow`、`:482` `execute_node`

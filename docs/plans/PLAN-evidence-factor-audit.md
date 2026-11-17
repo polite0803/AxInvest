@@ -30,9 +30,9 @@
 2. **闭合基准**：`evidence.weightSum / avgSignal / prior / posterior`。文档化不变式在 `portfolio-mgr.rhai:3660`：`Σ(σ·w)/weightSum == avgSignal`。
 3. **快照命名空间**：`report.*`（22，带档后缀）/ `result.*`（44，工具与分支节点产出）/ `_raw.*`（90）/ `params.*`（53）/ `value.*`（2）。
 4. **归因权威表（Rust 侧既有，禁止另抄一份）**：
-   - `src-tauri/crates/analysis-engine/src/evidence_weight.rs:397` `DECISION_LEG_ANALYST`：fN → owner 分析师（f4/f6/f7 刻意 `None`＝元约束，不是分析师证据）
-   - `src-tauri/crates/analysis-engine/src/evidence_weight.rs:441` `VERDICT_FACTOR_SOURCES`：分支因子名 → `kind ∈ {tierScore, sharedTool, verdict}` + channel
-   - `src-tauri/crates/analysis-engine/src/evidence_weight.rs:426` `UNBRIDGED_ANALYST_IDS`：无腿分析师的显式登记
+   - `src-tauri/crates/analysis-engine/src/evidence_weight.rs:404` `DECISION_LEG_ANALYST`：fN → owner 分析师（f4/f6/f7 刻意 `None`＝元约束，不是分析师证据）
+   - `src-tauri/crates/analysis-engine/src/evidence_weight.rs:448` `VERDICT_FACTOR_SOURCES`：分支因子名 → `kind ∈ {tierScore, sharedTool, verdict}` + channel
+   - `src-tauri/crates/analysis-engine/src/evidence_weight.rs:433` `UNBRIDGED_ANALYST_IDS`：无腿分析师的显式登记
    - `src-tauri/crates/harness/src/holding_period.rs:344` `Period::scoring_node_id()`、`Period::verdict_spec()`：本档应参与腿集与逐档评分节点
 
 ### σ 可回算性实测（决定阶段 1 能做到什么程度）

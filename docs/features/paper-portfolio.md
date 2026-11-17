@@ -87,12 +87,12 @@
 | `paper_portfolio_create` | `src-tauri/src/commands/paper_portfolio.rs:28` |
 | `paper_portfolio_list` | `src-tauri/src/commands/paper_portfolio.rs:43` |
 | `paper_portfolio_get` | `src-tauri/src/commands/paper_portfolio.rs:58` |
-| `paper_portfolio_close` | `src-tauri/src/commands/paper_portfolio.rs:75` |
-| `paper_portfolio_archive` | `src-tauri/src/commands/paper_portfolio.rs:90` |
-| `paper_portfolio_add_position` | `src-tauri/src/commands/paper_portfolio.rs:105` |
-| `paper_portfolio_close_position` | `src-tauri/src/commands/paper_portfolio.rs:120` |
-| `paper_portfolio_close_all_positions` | `src-tauri/src/commands/paper_portfolio.rs:135` |
-| `paper_portfolio_list_active_details` | `src-tauri/src/commands/paper_portfolio.rs:154` |
+| `paper_portfolio_close` | `src-tauri/src/commands/paper_portfolio.rs:79` |
+| `paper_portfolio_archive` | `src-tauri/src/commands/paper_portfolio.rs:94` |
+| `paper_portfolio_add_position` | `src-tauri/src/commands/paper_portfolio.rs:109` |
+| `paper_portfolio_close_position` | `src-tauri/src/commands/paper_portfolio.rs:124` |
+| `paper_portfolio_close_all_positions` | `src-tauri/src/commands/paper_portfolio.rs:139` |
+| `paper_portfolio_list_active_details` | `src-tauri/src/commands/paper_portfolio.rs:158` |
 
 （对应版本：当前实现）
 

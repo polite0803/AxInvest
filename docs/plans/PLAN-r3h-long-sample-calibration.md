@@ -40,7 +40,7 @@
 
 ### 2.2 ⭐ 成熟判定**不看今天**
 
-`compute_market_snapshots`（`src/commands/stock_workflow/reflection.rs:3553`）：
+`compute_market_snapshots`（`src/commands/stock_workflow/reflection.rs:3850`）：
 - 取 **最近 500 根**日 K（`REFLECTION_KLINE_COUNT`），**不带 as-of 参数**；
 - `exit_idx = min(klines.len()-1, entry_idx + expected_days)`；
 - `within_expected_horizon = exit_idx < entry_idx + expected_days`。

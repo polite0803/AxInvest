@@ -12,7 +12,7 @@
 
 ### 多源适配与统一契约
 
-- 契约侧：`axagent-core/crates/harness/src/market_data.rs:201` 的 `trait MarketDataProvider`，行情入口 `get_quote` 在 `:203`，市场类型判定 `detect_market_type` 在 `:710`。
+- 契约侧：`axagent-core/crates/harness/src/market_data.rs:266` 的 `trait MarketDataProvider`，行情入口 `get_quote` 在 `:203`，市场类型判定 `detect_market_type` 在 `:710`。
 - 实现侧：`axagent-quant/crates/astock-data/src/lib.rs:6641` 的 `impl axagent_harness::market_data::MarketDataProvider for AStockClient`；`AStockClient` 结构在 `:373`，内含 moka L1 缓存字段（`:379`）。
 - 路由表：`axagent-quant/crates/astock-data/src/lib.rs:125` 的 `struct VendorRouting`，`impl` 在 `:172`，默认路由 `default_routing()` 在 `:188`——按「数据面 × 市场」决定 vendor 顺序，quote 与 klines 走不同链。
 - 个股数据面方法在 v3.0.0 的 `unreleased` 阶段扩到 25 个，且显式带 `as_of`（提交 `dd96731d6`、`0e55104b8`）；DTO 上收 harness 由 `e45649bd3` 完成。
@@ -31,7 +31,7 @@
 ### 抓取降级与健康回退
 
 - 健康追踪：`axagent-quant/crates/astock-data/src/lib.rs:380` 注释「连续失败 3 次自动降级，5 分钟后恢复」，跟踪器类型来自 `vendor_health` 模块（`lib.rs:42`、`:57`）。
-- 运行时探活：`check_vendor_health` 在 `axagent-quant/crates/astock-data/src/lib.rs:2344`；健康状态持久化在同文件 `:2360` 附近。
+- 运行时探活：`check_vendor_health` 在 `axagent-quant/crates/astock-data/src/lib.rs:2401`；健康状态持久化在同文件 `:2360` 附近。
 - 管道并发降档：`src-tauri/src/commands/stock_pipeline/core.rs:117` 的 `resolve_concurrency_with_vendor_health`，按健康供应商占比折半或退化为串行（单测 `:710`、`:728`、`:745` 锁住三档）。
 - 部分成功不等于失败：`src-tauri/src/commands/stock_workflow/decision.rs:39` 的 `SourceCheck` 区分 `Ok` / `Partial` / `Failed`，聚合在 `:72`——`Partial` 拼原因、`Failed` 才计入缺失源（`:78`、`:103`）。
 
@@ -49,7 +49,7 @@
 
 - L1：moka 缓存，1h idle 过期、4096 条上限（`axagent-quant/crates/astock-data/src/lib.rs:814-815`；结构字段 `:379`）。
 - L2：`DiskCache`（`axagent-quant/crates/astock-data/src/disk_cache.rs:60`），默认容量 10_000 条（`:22`）、磁盘预算 64 MiB（`:34`）；replay 模式 TTL 由 `cache_set` 截到 1h（模块头 `:10`）。读写入口 `get` 在 `:169`、`get_with_expiry` 在 `:179`。
-- 复权：K 线查询支持 `AdjType`（`axagent-quant/crates/astock-data/src/lib.rs:2877-2884`）；vendor 支持复权时回传 `adj_factor`，不支持（sina/163）则由本地 `compute_adj_factors` + `apply_adjustment` 兜底（`:2957-2958`）。
+- 复权：K 线查询支持 `AdjType`（`axagent-quant/crates/astock-data/src/lib.rs:2937`）；vendor 支持复权时回传 `adj_factor`，不支持（sina/163）则由本地 `compute_adj_factors` + `apply_adjustment` 兜底（`:2957-2958`）。
 - 缓存键必须带复权维度：`None`（不复权）与 `Forward` 不能共用键，否则不复权原始价会污染前复权请求（`lib.rs:1099-1102`，`v2` 版本号让旧 `fwd` 键整体失效）。
 
 （对应版本：v3.0.0，当前实现）

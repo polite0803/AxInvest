@@ -218,7 +218,7 @@ other_period 11 / recommended 12 / unexplained 2），但 UI 拿不到明细。�
 
 **D-4 结构出口最小可用版（F-8）**：把漏检反思产出的「该票应入池」类结论落成一张**可复核的回灌清单**
 （复用 `mover_recall_events.status` 加一态 `reflow_pending`，不新建表），下一轮 `refresh_mover_seed`
-（`src/commands/stock_analysis.rs:4771` 的 `MOVER_TOP_N` 那处）把它并入种子并标 origin。
+（`src/commands/stock_analysis.rs:3769` 的 `MOVER_TOP_N` 那处）把它并入种子并标 origin。
 转接判据**事前注册**：命中率不降 + 池内覆盖率不降 + 逐档 rank IC 不劣化，闸形制同 `reco_ic_gate`（先 shadow）。
 
 **D-5 核查轮次的读回入口（F-13）** —— 新增 `list_mover_recall_runs` / `list_mover_recall_run_events` 两条只读命令
@@ -359,7 +359,7 @@ other_period 11 / recommended 12 / unexplained 2），但 UI 拿不到明细。�
 |---|---|
 | 链词汇（唯一权威） | `src-tauri/crates/analysis-engine/src/mover_recall.rs:66` 的 `enum RecoChain` + `of_style`（:85）+ `CHAIN_UNLABELED = "unlabeled"`（:96）；`as_str` 产 `reco\|serenity`，与前端 i18n 键域由 parity 门 o 段对表 |
 | 列（声明层） | `src-tauri/crates/entities/src/mover_recall_runs.rs:49`、`.../mover_recall_events.rs:53` 各加 `pub chain: Option<String>`（走声明式对账，启动期 `additive_only` 不 DROP ⇒ 旧行为 NULL） |
-| 逐链视图 | `src-tauri/src/commands/mover_recall.rs:100` `struct SharedFacts` + :170 纯函数 `build_chain_view(chain, f)`；取数一趟、判链两遍（不因链重复打行情）；persist 在 :340 / :365 两处写 `chain` |
+| 逐链视图 | `src-tauri/src/commands/mover_recall.rs:162` `struct SharedFacts` + :170 纯函数 `build_chain_view(chain, f)`；取数一趟、判链两遍（不因链重复打行情）；persist 在 :340 / :365 两处写 `chain` |
 | 调度摘要 | `src-tauri/src/init/services.rs:3314` 起：逐链 persist 后把两行汇总拼成 `[reco] … / [serenity] …` 写进任务历史 `output` ⇒ 面板与任务中心不再各拼一遍计数 |
 | 补分析认领按三键 | `src-tauri/crates/dao/src/repo/mover_recall_events.rs`：`CHAIN_ROWS_PER_EVENT=2`（:20）、`event_key`（:27，`(run_id, code, period)` 之外的第三键域是链）、`dedupe_by_event_key`（:33）、`expand_to_siblings`（:42）；`claim_events/finish_event/stamp_reflected` 全部走姊妹扩散，`list_candidate_events` 先按 `limit×2` 取再去重截回配额 |
 | 权重闭环只吃荐股链 | `mover_recall.rs::load_mover_cell_signal` 过滤 `RecoChain::of_style(&p.style) == RecoChain::Reco` ⇒ 智选票不再进 `MoverCellSignal` 的分母（B-3 另起一趟，不混） |
@@ -579,7 +579,7 @@ other_period 11 / recommended 12 / unexplained 2），但 UI 拿不到明细。�
   `check-reflection-output-consumers` 正式跑「登记 **8** 条产物 → 消费面，豁免 1 条」、`--selftest` 11 例；
   `check-reco-generation` / `check-cron-job-authority` / `check-task-type-whitelist` 正式跑与自证全绿。
 - `cargo test --workspace --no-fail-fast`：**147 套件 / 1 failed**（`TEST_EXIT=101`）。
-  唯一红条 `win_sandbox::tests::network_block_status_is_truthful`（`crates/tools/src/win_sandbox.rs:1512`）：
+  唯一红条 `win_sandbox::tests::network_block_status_is_truthful`（`crates/tools/src/win_sandbox.rs:1445`）：
   `Unavailable` 档断言「网络确实没被断」，实测回环连接失败 ⇒ 判成「以为已隔离」。
   **归属与本批无关**：`git status` 对该文件为空（≡ HEAD），最后触碰是 `fdf976c0a`（2026-09-25 他人批）；
   单跑该 exe（`axagent_tools-*.exe network_block_status_is_truthful`）**1 passed** ⇒ 并行/环境 flake。

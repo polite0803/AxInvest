@@ -30,7 +30,7 @@
 
 - 时间窗拒绝 `in_live_window` 在 `time_travel_batch.rs:339-358`：北京时间 `23:50-02:10` 与 `17:50-18:10` 两个窗口内拒绝发起批次（as_of 栈是进程级的，会和 live 串扰）。
 - 拒绝文案见 `time_travel_batch.rs:654`：「当前处于 live 流水线时间窗（23:50-02:10 / 17:50-18:10）」。
-- 第二道互斥是 AppState 上的全局批次锁，`try_lock` 语义：已在跑直接拒绝、不排队（`time_travel_batch.rs:658`）。
+- 第二道互斥是 AppState 上的全局批次锁，`try_lock` 语义：已在跑直接拒绝、不排队（`time_travel_batch.rs:655`）。
 
 （对应版本：v3.0.0，当前实现）
 
@@ -53,7 +53,7 @@
 
 ## 关键代码入口
 
-- 后端命令：`src-tauri/src/commands/time_travel_batch.rs:730-740` — `run_time_travel_batch`；`:754` — `get_time_travel_batch`；`:776` — `list_time_travel_batches`。
+- 后端命令：`src-tauri/src/commands/time_travel_batch.rs:730-740` — `run_time_travel_batch`；`:754` — `get_time_travel_batch`；`:746` — `list_time_travel_batches`。
 - 引擎/业务层：`axagent-core/crates/harness/src/as_of.rs:57`（封闭世界）、`src-tauri/src/commands/stock_workflow/reflection.rs:1945`（批次反思）、`:3282`（反思主体）。
 - 前端：`src/components/time-travel/PageTimeAnchor.tsx:45-67`（实时 / 历史切换）、`ReplayBadge.tsx:8-45`（回放标识）、`ReplayWorkbench.tsx`、`TimeTravelBatchCard.tsx`、`AsOfDatePicker.tsx`；路由见 `src/components/layout/ContentArea.tsx:309-311`。
 - 数据表/迁移：`time_travel_batch_runs`（实体 `axagent-core/crates/entities/src/time_travel_batch_runs.rs`）；候选落 `reco_picks`、分析落 `stock_analyses`（`analysis_kind='replay'`）。

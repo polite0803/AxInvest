@@ -12,7 +12,7 @@
 
 - 超短档阈值 = **10%**（原「单日涨停」），短/中/长 = 20% / 30% / 40%。
 - 阈值**不分板块**：主板涨 10% 与创业板涨 10% 都算事件（不再用 `get_price_limit_pct` 判事件）。
-- **报告分组依据（已按实现回写）**：分组走 `detect_market_type()`（`src-tauri/crates/harness/src/market_data.rs:227-246`，取值 `main_sh` / `main_sz` / `chinext` / `bj` / `star` / `neeq` / `b_share` / `hk` / `us`），落在 `market_stock_universe.market_type` 列上，由引擎逐票读出（`crates/analysis-engine/src/mover_recall.rs:551`）。原句称「`get_price_limit_pct`（`src-tauri/crates/harness/src/market_data.rs:251`）只用于报告分组」**与实现不符**——本路径下该函数**根本未被调用**（既不用它判事件，也不用它分组）；分组目的不变：主板涨 10% ≈ 封板常买不进，创科涨 10% ≈ 寻常波动，混池会把优化方向带偏。
+- **报告分组依据（已按实现回写）**：分组走 `detect_market_type()`（`src-tauri/crates/harness/src/market_data.rs:227-246`，取值 `main_sh` / `main_sz` / `chinext` / `bj` / `star` / `neeq` / `b_share` / `hk` / `us`），落在 `market_stock_universe.market_type` 列上，由引擎逐票读出（`crates/analysis-engine/src/mover_recall.rs:551`）。原句称「`get_price_limit_pct`（`src-tauri/crates/harness/src/market_data.rs:840`）只用于报告分组」**与实现不符**——本路径下该函数**根本未被调用**（既不用它判事件，也不用它分组）；分组目的不变：主板涨 10% ≈ 封板常买不进，创科涨 10% ≈ 寻常波动，混池会把优化方向带偏。
 
 ## 1. 承重事实（已实证，含对本会话早前错误陈述的纠正）
 
@@ -50,13 +50,13 @@
 - 新表 `market_daily_close`（**实际落库形状已回写**，真源 `crates/entities/src/market_daily_close.rs`）：`id`（主键 = `"{stock_code}@{trade_date}"` ⇒ 天然去重，重复采集走 upsert 覆盖）、`stock_code`、`stock_name`、`trade_date`、`close`、`prev_close`、`change_pct`、`collected_at`、`source`。原设计的 `market_type` 列**不在本表**（已归到 `market_stock_universe.market_type`）；`(stock_code, trade_date)` 的唯一性由字符串主键承接，**未**另建唯一索引。选列理由：`stock_name` 避免回查清单、`collected_at` 区分「哪天采的」与「哪天的数据」、`source` 记来源（`tencent_batch` / `sina_batch` / `kline_backfill`）。
 - **建表正门 = 声明式 reconcile，不是写 migration**（实改：`crates/dao/src/migrations/mod.rs:112` 的 `const MIGRATIONS: &[Migration] = &[]` 已清空，P6 删过 74 条迁移；`crates/dao/src/migrations/mod.rs:167` 明文告诫「往 MIGRATIONS 加回任何一条之前先读它的文档」）。⇒ 落点：① 在 `crates/entities/src/` 加 SeaORM entity 并在 `lib.rs` 注册；② 唯一性/索引靠列属性承接（`#[sea_orm(unique)]` / `#[sea_orm(indexed)]`，索引名恒为 `idx-{表}-{列}`，判据见 `crates/dao/src/reconcile/expected.rs:741-747`）；③ 需要 CHECK / 生成列等实体表达不了的叠加，写进 `reconcile/extras.rs`（L2 声明认不到表就报错，不许静默跳过）。**AGENTS.md 禁区 10 的字面「必须写 migration」在本仓的现行形态是这样落地的，不要照字面去加迁移条目。**
 - **采集通道（按 Phase 0 实测定）**：主路腾讯批量 `qt.gtimg.cn/q=`（多码逗号拼接，80 码/请求，74 请求覆盖 5921 只，实测零失败）；降级 `hq.sinajs.cn` → 东财 clist 单页。复用既有件，不新写口径：
-  - 代码前缀转换复用 `to_tencent_code()`（`vendors/tencent.rs:293`），**禁止**另写一份 sh/sz/bj 拼接（探测脚本里那份是临时的，不进生产）；
+  - 代码前缀转换复用 `to_tencent_code()`（`vendors/tencent.rs:120`），**禁止**另写一份 sh/sz/bj 拼接（探测脚本里那份是临时的，不进生产）；
   - 响应解析复用 `get_quote` 的 `~` 分字段逻辑 ⇒ 先把它抽成「按行解析」的私有函数，批量与单票共用（禁区 12：不得出现第二套 f[3]/f[4]/f[32] 映射）；GBK 解码沿用 `encoding_rs::GBK`；
   - 涨幅口径已与东财 `clist` f3 互校 |Δ|=0.0，两源可互为降级而不产生两套数。
 - 批量大小 / 请求间隔 / 退避参数走模板变量或 `AStockClient` 配置，**不写死 80**（今天的观测不是永久契约）。
 - **停牌与缺值**：该票该日取不到现价或昨收 ⇒ **不落行**，绝不写 `change_pct = 0.0`（写 0.0 等于把「拿不到」伪装成「没涨」，直接污染事件表分母）。本轮未采到的票数必须显式计数并上报。
 - 采集器：新增 `market_daily_close_sweep(db, date)`，**复用** `daily_snapshot::snapshot_target_date` 的「最近一个已完成交易日」归属日判据（`stock_analysis.rs:4204` 已示范：盘中触发不得按收盘值落盘）；采集必须在 live 语义下跑，沿用 `as_of::enter_global_asof(None)` 的 RAII 压栈写法。
-- **调度形态（已按实现回写）**：实现**新开了一个采集调度器** `start_market_close_sweep`——注册于 `src-tauri/src/init/services.rs:98`，函数定义在同文件 `:3697`。原句「挂到既有每日自动化 cron，不新开调度器」已被实现取代：采集要「分 tick 摊薄扩清单」（每 tick 6 页 × 10 轮页号滚动），与既有每日一次性 cron 的形态不同，硬塞进旧注册反而会把封禁窗风险引到别的任务上。
+- **调度形态（已按实现回写）**：实现**新开了一个采集调度器** `start_market_close_sweep`——注册于 `src-tauri/src/init/services.rs:5763`，函数定义在同文件 `:3697`。原句「挂到既有每日自动化 cron，不新开调度器」已被实现取代：采集要「分 tick 摊薄扩清单」（每 tick 6 页 × 10 轮页号滚动），与既有每日一次性 cron 的形态不同，硬塞进旧注册反而会把封禁窗风险引到别的任务上。
 - **落库层选 DB 表而非 DiskCache**（理由见 F6）：窗口聚合要 SQL，且不能被 LRU 挤。引擎按 PG/SQLite 双方言走 `build(Dialect::…)`，PLAN 不锁定单一引擎。
 - 历史边界：核查能力起点 = 本表首个有数据交易日；早于此的日期**显式返回「未采集，不可核查」**。可选的一次性历史回填走 `web.ifzq.gtimg.cn` 日 K（实测单票 ≈0.53s、60/60 成功，全市场串行≈52min），回填完成后必须与批量口径抽样互校才允许进事件表。
 

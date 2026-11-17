@@ -41,7 +41,7 @@
 
 | 能力 | 位置 | 说明 |
 |---|---|---|
-| 服务注册表（`provide`） | `src-tauri/crates/harness/src/capability_registry.rs:29` | `ServiceDefinition` 已声明 11 条接缝 |
+| 服务注册表（`provide`） | `src-tauri/crates/harness/src/capability_registry.rs:32` | `ServiceDefinition` 已声明 11 条接缝 |
 | 可逆副作用（effect） | `src-tauri/crates/harness/src/reversible_effect.rs:83` | `EffectHandle::undo` / `EffectScope::rollback_all`（LIFO 逆序） |
 | Waterfall 拦截 | `src-tauri/crates/harness/src/typed_event.rs:36` | `DispatchMode::{Emit, Waterfall, Parallel, Serial}`，可改写 payload 或拒绝中断 |
 | 平权语义（语义层） | `capability_registry.rs:333` | `prepare_registration` 对 `ExternalPlugin` 先撤销同键内置 |
@@ -103,7 +103,7 @@
 1. 内置 sandbox 从两张表被撤销
 2. 插件只往 `inner` 写一份 descriptor
 3. `contains("workflow.sandbox") == true` 但 `get_sandbox() == None` —— **接缝变死**
-4. 禁用插件时 `unregister_plugin_capabilities`（`plugins/src/manager.rs:561`）只 undo 外部句柄，
+4. 禁用插件时 `unregister_plugin_capabilities`（`plugins/src/manager.rs:1486`）只 undo 外部句柄，
    **内置永不复活**
 5. `list_with_details()` 仍报「该接缝由插件 X 提供」⇒ **UI 显示有提供者，运行时该接缝已死**
 
@@ -780,7 +780,7 @@ plugin_validate_source                    src-tauri/src/commands/plugin.rs:48
 → 读 MANIFEST_FILE_NAME 或 SKILL.md
 ```
 
-`PluginInstallSource`（`crates/plugins/src/types.rs:734`）**只有四个变体**：
+`PluginInstallSource`（`crates/plugins/src/types.rs:1316`）**只有四个变体**：
 
 ```rust
 pub enum PluginInstallSource {

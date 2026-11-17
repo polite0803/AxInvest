@@ -101,7 +101,7 @@ func (c Chunk) EmbeddingContent() string {
 
 **借鉴来源**：`chunker/splitter.go:117-126`（7 条正则把 LaTeX 块 / 图片 / 链接 / 表头+分隔行 / 表行 / 代码块 / 行内代码划为不可切区域）+ `splitter.go:308,334-361`（超限保护块的强制切碎兜底，`maxProtectedSize=7500`）。
 
-**目标状态**：`find_break_point`（`text_chunker.rs:252+`）在选择切割点前，先识别保护块区间；切割点**不得落在保护块内部**；单个保护块超过 `chunk_size` 时按行/空格强制切（并记录该块被降级）。
+**目标状态**：`find_break_point`（`text_chunker.rs:301+`）在选择切割点前，先识别保护块区间；切割点**不得落在保护块内部**；单个保护块超过 `chunk_size` 时按行/空格强制切（并记录该块被降级）。
 
 **验证方式**：
 - 单测：含 40 行 Markdown 表格的文档，断言**没有** chunk 从表格中间断开；
@@ -556,8 +556,8 @@ PLAN 的依据是「铁律 #3 被覆盖 ⇒ 删」，而其自列前置条件是
 
 | 改动 | 位置 | 说明 |
 |---|---|---|
-| 新增取数 helper | `rag.rs:774` `search_entity_graph` | legacy 路径专用：直接取已注入的 provider 做一次图检索。**只对 Knowledge 源调用**（`graph_enhanced_search` 按 `knowledge_entities.kb_id` 过滤，Memory/Wiki 的 `container_id` 不同域 ⇒ 必然空结果 + 噪声 warn） |
-| 新增折叠 helper | `rag.rs:801` `fold_entity_graph_context` | 两条路径共用的出口转换：滤掉空白 `context_text`、命中打 info、**「开关已开 + 确有 Knowledge 源 + 零命中」打 warn**（这是 9.2 ③ id 域不匹配 / 图谱未构建的唯一现场线索） |
+| 新增取数 helper | `rag.rs:814` `search_entity_graph` | legacy 路径专用：直接取已注入的 provider 做一次图检索。**只对 Knowledge 源调用**（`graph_enhanced_search` 按 `knowledge_entities.kb_id` 过滤，Memory/Wiki 的 `container_id` 不同域 ⇒ 必然空结果 + 噪声 warn） |
+| 新增折叠 helper | `rag.rs:868` `fold_entity_graph_context` | 两条路径共用的出口转换：滤掉空白 `context_text`、命中打 info、**「开关已开 + 确有 Knowledge 源 + 零命中」打 warn**（这是 9.2 ③ id 域不匹配 / 图谱未构建的唯一现场线索） |
 | legacy 路径 | `rag.rs:1454` 累积 → `:1616` 折进 `extra_context` → `:1628` 填字段 | **不依赖向量命中**：向量没命中时图谱仍可能按实体名匹配到东西（pipeline 路径拿不到这个机会，见下） |
 | pipeline 路径 | `rag.rs:2438` 累积 → `:2554` 捕获 `output.graph_context` → `:2654` 折进 → `:2665` 填字段 | 阶段 4 的产出此前在此被整包丢弃 |
 | provider 收窄 | `rag.rs:2517` | 从「对每个源、每个增强查询都传」收窄为 **`qi == 0` 且 `source_type == Knowledge`**：多查询增强下避免 N× 重复图查询（与 self-RAG 只跑首查询同一策略）；非 Knowledge 源不传（同上 id 域理由） |
@@ -926,7 +926,7 @@ let use_pipeline = pipeline_config.query_enhancement.enabled
 而两次都不是被检查发现的，是「顺手核一下」核出来的。
 
 **同族登记（未逐条改，按本文件惯例）**：
-- §10.3 表里的 `rag.rs:774` / `rag.rs:801` 现真值为 **828**（`search_entity_graph_for_sources`）/
+- §10.3 表里的 `rag.rs:774` / `rag.rs:848` 现真值为 **828**（`search_entity_graph_for_sources`）/
   **848**（`fold_entity_graph_context`），偏 **+54 / +47**；§10.3 与 §11 的行号属**当时的快照**，
   本文件对此的既有处置是**只记录漂移事件、不重写历史**（§10.8 即如此）⇒ 读 §10.3 时**按函数名定位**。
 - 反过来，本轮新写的 §12.7 的行号**已逐行复核**：`reranker.rs:460-464`（`sort_by` 用阶段 `score_map`）
@@ -1263,7 +1263,7 @@ Z 后缀经 PowerShell 解析会变 `Kind=Local`，东八区静默差 8 小时�
 
 | 位置 | 规则 | 修法 |
 |---|---|---|
-| `crates/search/src/entity_graph.rs:88` `static TEST_LOCK: std::sync::Mutex<()>` | `clippy::disallowed_types`（×2：类型位 + 构造位） | `#[allow(clippy::disallowed_types)]` + 紧邻 `// SAFETY:` 说明「不跨 await」——**本仓约定**，`clippy.toml:7-8` 明写，同文件 `crates/search/src/entity_graph.rs:29`/`:39` 已有先例 |
+| `crates/search/src/entity_graph.rs:91` `static TEST_LOCK: std::sync::Mutex<()>` | `clippy::disallowed_types`（×2：类型位 + 构造位） | `#[allow(clippy::disallowed_types)]` + 紧邻 `// SAFETY:` 说明「不跨 await」——**本仓约定**，`clippy.toml:7-8` 明写，同文件 `crates/search/src/entity_graph.rs:29`/`:39` 已有先例 |
 | `crates/search/src/rag.rs:2802 / 2806` `assert!(DEFAULT_MAX_L2_DISTANCE >= 10.0)` | `clippy::assertions_on_constants`（×2） | 改 `const { assert!(..) }`（**编译期**断言：常量一越界构建即失败，比跑测试更强） |
 
 ⇒ 判据 **#201**：**新写的测试代码照样吃 lint**，「跑完 `cargo test`」**不等于**过门禁。
@@ -1525,7 +1525,7 @@ NONLOC 最大一桶正是「**同名 5 份 ×95**」= 1 真 + 4 worktree。
 | # | 站点 | 原引用 | 真相 |
 |---|---|---|---|
 | 6 | `seed_content_media.rs:1861` | `engine/mod.rs:3250-3252` | 「全量结果兜底注入」在**注释 3252-3256 + 代码 3257-3264**；`3250` 是个 `}` |
-| 7 | `_workflow_ai_protocol.rs:29` / `:191` | `workflow.types.ts:782` | `DiagnosticFix` 实在 **881**（漂移 **+99**）。`:782` 是 `TemplateFilter` 的收尾 `}` |
+| 7 | `_workflow_ai_protocol.rs:29` / `:191` | `workflow.types.ts:824` | `DiagnosticFix` 实在 **881**（漂移 **+99**）。`:721` 是 `TemplateFilter` 的收尾 `}` |
 
 **#7 同族的语义级缺陷（最值钱的一处）**：`condition_executor.rs:467` 写
 「宽松版（…；ToolNode **不用**，它有自己的严格副本 `tool_executor.rs:244`）」——

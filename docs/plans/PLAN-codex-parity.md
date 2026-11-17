@@ -161,7 +161,7 @@ Restricted Token ACL 细节多，微软文档陈旧——先写 spike 验证 `Cr
    session_events: id PK, session_id, seq, event_type, payload(JSON), created_at
    ```
    事件类型：`TurnStarted / Message / ToolCall / ToolResult / Compacted / TurnEnded / Interrupted`。
-2. 写入点：react_engine 主循环（`react_engine.rs:694` while 循环）在 `process_state()`（L1124）各分支发事件，经 `SessionManager` 落表；实现 `SessionEventSink` trait（harness 定义，agent 依赖 trait）。
+2. 写入点：react_engine 主循环（`react_engine.rs:1247` while 循环）在 `process_state()`（L1124）各分支发事件，经 `SessionManager` 落表；实现 `SessionEventSink` trait（harness 定义，agent 依赖 trait）。
 3. **恢复入口**：新命令 `agent_resume_from_events(session_id)`：
    - 读事件流重放构建 `ThoughtChain`（ToolCall/ToolResult 对可恢复 observation，未配对的 ToolCall 视为 Interrupted）；
    - `ContextWindow::from_chain`（`context_window.rs:51`）重建上下文；

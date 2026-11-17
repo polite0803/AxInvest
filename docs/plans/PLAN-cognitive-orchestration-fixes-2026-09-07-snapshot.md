@@ -31,7 +31,7 @@
 | `agent/mod.rs` 工具微调块                | 先 retain 移除 disallowed，再注入 `extra_tools` | 认知编排按能力护照 `tool_ref` 注入的工具能把 profile 禁用的工具注回 | —                                                                                                                 |
 | `local_tool.rs:145-156` `get_tool_count` | 先 remove disallowed，再 insert recommended     | 同时出现在 `recommended_tools` 的禁用工具被注回                     | 追加源用 `registry.tools.list_all()`，**连 registry 层 `disable()` 都不过滤**，会把用户在设置里关掉的工具算进计数 |
 
-关键事实：`get_chat_tools_by_names`（`crates/tools/src/registry.rs:815`）只过滤 registry 层的
+关键事实：`get_chat_tools_by_names`（`crates/tools/src/registry.rs:987`）只过滤 registry 层的
 `disable()`，不看 profile 的 `disallowed_tools`；而 `list_all()` 连 `disable()` 都不过滤。
 
 **修法**：两处统一改为「先追加（走 `get_chat_tools_by_names` 复用 registry 统一过滤），
@@ -227,7 +227,7 @@ trajectory 进化证据判定 3 处真实使用），删的只是 `clamp_mode_fo
 
 | #  | 修复项                                     | 状态 | 落点                                                                                                                                                                    |
 | -- | ------------------------------------------ | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1 | 模板固化不回灌能力索引                     | ✅   | harness `workflow_types.rs:2231` 抽 `workflow_template_passport` 权威入口 + `repo_dtos.rs:88` `to_capability_passport`；`save_as_workflow.rs`（move 前派生护照 + 回灌） |
+| F1 | 模板固化不回灌能力索引                     | ✅   | harness `workflow_types.rs:2369` 抽 `workflow_template_passport` 权威入口 + `repo_dtos.rs:93` `to_capability_passport`；`save_as_workflow.rs`（move 前派生护照 + 回灌） |
 | F6 | 模板 update/delete/duplicate 索引同步      | ✅   | `workflow_template.rs` 新增 `sync_template_passport` / `remove_template_passport`，接入 insert/update/delete/duplicate 四入口                                           |
 | F2 | 短路缓存 `execution_mode` 与实际分派不一致 | ✅   | `cognitive.rs` 短路覆盖块抽为 `apply_shortcut_override`（纯函数）+ 反推抽为 `derive_mode_from_execution_view`；补 2 个单测（四视图映射 + 缓存 mode=plan 撒谎场景）      |
 | F3 | Workflow/Direct 无视会话已加载能力         | ✅   | `cognitive.rs` 新增 `resolve_exposure_injection` + `merge_injection` + 前置 2.5 读取 `loaded_capability_ids` + domain 交集软档闸（match 守卫）                          |
@@ -261,8 +261,8 @@ trajectory 进化证据判定 3 处真实使用），删的只是 `clamp_mode_fo
 
 | 环节                       | 代码锚点                                                                                                   | 是否动索引                       |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| 启动期全量重建             | `src/init/state.rs:1384` `register_all_capabilities` → `:1413-1430` 从 `workflow_templates` 表全量收集护照 | ✅                               |
-| 启动时机                   | `src/init/state.rs:2170`（`run_deferred_init` 内，只在启动时跑一次）                                       | —                                |
+| 启动期全量重建             | `src/init/state.rs:2117` `register_all_capabilities` → `:1413-1430` 从 `workflow_templates` 表全量收集护照 | ✅                               |
+| 启动时机                   | `src/init/state.rs:2988`（`run_deferred_init` 内，只在启动时跑一次）                                       | —                                |
 | SaveAsWorkflow 工具        | `crates/tools/src/tools/save_as_workflow.rs:240-246`                                                       | ❌ 只 `create_workflow_template` |
 | save_dynamic_workflow 命令 | `src/commands/workflow_template.rs:2851-2855`                                                              | ❌ 只 `insert_workflow_template` |
 | 模板 update / delete       | `src/commands/workflow_template.rs`（全文无 `capability_indexer` 引用）                                    | ❌                               |
@@ -557,7 +557,7 @@ async fn resolve_exposure_injection(
 
 **步骤 2 — 路由前读取会话已加载能力**
 
-在 `cognitive_query_inner` 前置阶段（`cognitive.rs:659` JSON 检测之前）新增：
+在 `cognitive_query_inner` 前置阶段（`cognitive.rs:838` JSON 检测之前）新增：
 
 ```rust
 // 前置 2.5：会话已加载能力感知
@@ -699,7 +699,7 @@ Clarify 选一个 `kind = Tool` 且 `exposure = Auto` 的候选 → 断言 `Agen
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔴 OnDemand 死锁：不注 extra_tools → LLM 拿不到 CapabilityView/CapabilityLoad schema → 无法展开加载 | **不成立**。元工具走独立白名单 `DISCLOSURE_TOOLS`（`crates/tools/src/registry.rs:416-424`），点名放行 CapabilityView/CapabilityLoad/CapabilityBrowse/SkillsList/SkillView/SkillReference/DiscoverSkills；`src/commands/agent/mod.rs:1116-1128` 在 `execution_mode.is_some()` 时按名注入，**与 exposure 状态无关**。OnDemand 护照也照常进 `<capability-index>` 目录（`src/commands/agent/capability_index.rs:119` 只判 `is_user_visible()`）。加载后经 `DynamicToolSet` → `agent/mod.rs:446` 下发，下轮即可调用。闭环是通的，省的是 token 不是能力。 |
 | 🟡 Clarify 二次执行会命中短路缓存，用的是缓存能力而非用户所选                                       | **不成立**。短路缓存前置检查要求 `request.forced_capability_id.is_none()`（`cognitive.rs:537`），且 Clarify 模式不写缓存（`:1304-1307`）。前端二次调用带 `forcedCapabilityId`（`src/stores/domain/conversationStoreSend.ts:772`），走 `:724` 强制路径，完全绕开路由与缓存。                                                                                                                                                                                                                                                                         |
-| 🟡 L3 图谱路由与 `route_with_hint` 两套复制粘贴实现                                                 | **不成立**。两者调用同一个 `execution_mode_from_confidence`（`cognitive_router.rs:817`）和 `clamp_mode_for_kind`（`:838`），注释明写"供两处共用"。调用点 `:953-954` 与 `:1263-1264`。且 `route_with_hint` 不在生产链路（commands 层零引用）。                                                                                                                                                                                                                                                                                                       |
+| 🟡 L3 图谱路由与 `route_with_hint` 两套复制粘贴实现                                                 | **不成立**。两者调用同一个 `execution_mode_from_confidence`（`cognitive_router.rs:827`）和 `clamp_mode_for_kind`（`:838`），注释明写"供两处共用"。调用点 `:953-954` 与 `:1263-1264`。且 `route_with_hint` 不在生产链路（commands 层零引用）。                                                                                                                                                                                                                                                                                                       |
 | 🟡 Plan 路径 `candidate_details` 为空                                                               | **不成立**。`L3_NORMALIZE_EXPRESSION`（`src/init/cognitive_router_init.rs:945-950`）在 RAR 无候选时兜底构造单候选。唯一空候选是 `workflow.output = None` 的合成 general_qa（`cognitive.rs:1075-1088`），且 Clarify 空候选已有显式兜底（`:1345-1356`）。                                                                                                                                                                                                                                                                                             |
 | 🟡 Plan 只拆解不执行                                                                                | **不算缺陷，是设计**。`plan_generate`（`cognitive.rs:1453`）落库 + 发 `plan-generated` 事件，执行靠前端 `src/stores/feature/planStore.ts:161` 用户点批准后调 `plan_execute`。这是**人在环审批闸**，改掉等于去掉人工确认。若要改，正确方向是"审批通过后自动回填执行结果"，而非后端自转。                                                                                                                                                                                                                                                             |
 | 🟡 Ask/Act/Delegate 执行路径相同                                                                    | **不建议改**。`cognitive.rs:1489` 一个 `_ =>` arm，差异只在注入 `<cognitive-mode>` 提示词（`src/commands/agent/mod.rs:1894-1899`），靠 LLM 自觉。硬拆成三条执行路径会造成行为割裂且收益不明。真要落差异，应落到**请求参数**层面（如 `max_tool_iterations`、是否允许写操作），而不是拆执行分支 —— 属新需求，不在本次缺陷修复范围。                                                                                                                                                                                                                   |

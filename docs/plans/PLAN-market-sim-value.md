@@ -317,7 +317,7 @@ ValueAgent::new(..., (reference_price as f64 * 1.02) as i64, ...)
 3. **`decision` 是已不存在的旧 key** —— 真实现里是 `decision-comparison`，旧 `decision` tab 已改为**顶部全宽 hero**
    （见 `src/components/stock-analysis/StockAnalysisPage.tsx:369` 注释「Decision tab removed — now rendered as full-width hero at top」）。
 
-**它是否在跑**：唯一消费者是 `lib/seed-stock-schemas.ts:13,36`，而 `seedStockSchemas()` 全仓**零调用点**
+**它是否在跑**：唯一消费者是 `lib/seed-stock-schemas.ts:46,36`，而 `seedStockSchemas()` 全仓**零调用点**
 ⇒ 整条链是死的（判据 **I**：N 份实现只 1 份在跑）。
 
 **本轮未改它**的理由：① 它不跑，改它对界面零影响；② 删改死链属架构决策（判据 A「零调用可删吗」），
@@ -705,7 +705,7 @@ AGENTS.md「后端错误码 i18n 规范（强制）」：
 | 后端产出 | 事件 | 前端 |
 |---|---|---|
 | `sim_hook.rs:220`（`simulation` 字段，**已在本轮修复**） | `simulation-ready` | `stockAnalysisStore.ts:2815` `set({ simulation })` ⇒ 走 `translateBackendError` ✅ |
-| `llm_wiki.rs:613` | `wiki-note-indexed` | `IngestPanel.tsx:83` 类型为 `{ noteId: string }`，不读 error |
+| `llm_wiki.rs:613` | `wiki-note-indexed` | `IngestPanel.tsx:104` 类型为 `{ noteId: string }`，不读 error |
 
 **C. 前端零消费者（不构成缺陷，`error` 字段纯冗余）**
 
@@ -803,7 +803,7 @@ const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : 
 
 | 嗅探 | 位置 | 实证结论 |
 |---|---|---|
-| `msg.includes("LLM")` → `"LLM_FALLBACK"` | `stockAnalysisStore.ts:2718` | **不可达**。`WorkflowError`（`harness/src/workflow_types.rs:2509`）10 个变体**全部与 LLM 无关**；`stock_workflow/` 目录内含 "LLM" 的字符串只出现在 `decision.rs` 的**节点级** error 与日志里，不经 `workflow-error` 的 `detail`。且 `LLM_FALLBACK` 全仓 `grep` 后端 **0 产出** ⇒ 本就是幽灵码 |
+| `msg.includes("LLM")` → `"LLM_FALLBACK"` | `stockAnalysisStore.ts:2718` | **不可达**。`WorkflowError`（`harness/src/workflow_types.rs:2595`）10 个变体**全部与 LLM 无关**；`stock_workflow/` 目录内含 "LLM" 的字符串只出现在 `decision.rs` 的**节点级** error 与日志里，不经 `workflow-error` 的 `detail`。且 `LLM_FALLBACK` 全仓 `grep` 后端 **0 产出** ⇒ 本就是幽灵码 |
 | `lc.includes("timeout"/"503"/"busy"…)` | `isRetryableWorkflowError` | **判据来源错误**。它嗅探的是英文关键词，而后端的 detail 是**中文**（如「分析超时（超过 900 秒）」）。改由后端 `category="retryable"` 判定后，行为**从漏判变为正确判定**，不是等价 —— 这是修复 |
 
 ⇒ 删除嗅探**不丢任何真实能力**；第一条是去掉偶然性，第二条是纠正一个本就失效的判据。

@@ -52,13 +52,13 @@
 
 ## 3. 阶段 A —— 告警通路收口
 
-**缺陷**：引擎发字面量 `"stock-monitor-alert"`（`src-tauri/crates/analysis-engine/src/monitor.rs:433`），现役发射器只做 `let _ = self.app.emit(event, payload)`（`src-tauri/src/init/services.rs:3772-3776`）；前端只听 `price-alert-triggered`（`src/components/stock-analysis/PriceAlertPanel.tsx:60`），而发该名的 `TauriMonitorEmitter`（`src-tauri/src/init/monitor_emitter.rs:38`）全仓零构造点。`stock-monitor-alert` 不在 `src/types/generated/events.ts` 白名单内。
+**缺陷**：引擎发字面量 `"stock-monitor-alert"`（`src-tauri/crates/analysis-engine/src/monitor.rs:433`），现役发射器只做 `let _ = self.app.emit(event, payload)`（`src-tauri/src/init/services.rs:3772-3776`）；前端只听 `price-alert-triggered`（`src/components/stock-analysis/PriceAlertPanel.tsx:60`），而发该名的 `TauriMonitorEmitter`（`src-tauri/src/init/monitor_emitter.rs:54`）全仓零构造点。`stock-monitor-alert` 不在 `src/types/generated/events.ts` 白名单内。
 
 **改法（推荐形态，见裁定 1）**：接线既有完整实现，退役重复的三行胶水。
 1. `src-tauri/src/init/services.rs` 的 `start_realtime_monitor`：用 `TauriMonitorEmitter::new(app, db, dispatcher)` 取代 `AppMonitorEmitter`；删除 `AppMonitorEmitter`（struct + impl）整体。dispatcher 先传 `Arc<NotificationDispatcher::new()>`（空渠道，通知层在 B2/里程碑 M-NOTIF 装配），**并在 emit 侧如实记录「通知渠道未装配 ⇒ 本轮只走事件 + 落库」**，不得静默。
 2. `src-tauri/crates/analysis-engine/src/monitor.rs`：emit 的事件名改用权威枚举，禁止字面量 —— 但 analysis-engine 是 implementor，不能依赖 tauri；正解是**由调用方（wiring 层）传入事件名**：`MonitorEventEmitter::emit` 保持 `&str`，把 `monitor.rs` 里的字面量改成 `crate::monitor::ALERT_EVENT_NAME` 常量并由 `harness::event_names` 侧对齐 —— 具体落点在实施时二选一，但**判据锁死「事件名只有一处权威」**（见门 A-2）。
 3. `src-tauri/src/init/monitor_emitter.rs`：删掉「兼容别名」这一层（`monitor_emitter.rs:64-69`）—— 两头都有别名说明中间没人做主，收口后 emit 一次用 `IpcEventName::PriceAlertTriggered.as_str()`。
-4. 前端 payload 契约：`PriceAlertPanel.tsx:60` 的泛型是 `PriceAlert`（含 `id/condition/targetPrice/isTriggered`），而后端发的是 `MonitorAlert`（`monitor.rs:77-88`：`stockCode/alertType/alertMessage/currentPrice/changePct/timestamp/suggestedAction`）。当前 handler 忽略 payload 所以不崩，属契约漂移。⇒ 新增 `MonitorAlertPayload` 类型（放 `src/types/`，按禁区 12「前端权威来源」），handler 用 payload 显示「哪只股、哪类阈值、现价」。
+4. 前端 payload 契约：`PriceAlertPanel.tsx:13` 的泛型是 `PriceAlert`（含 `id/condition/targetPrice/isTriggered`），而后端发的是 `MonitorAlert`（`monitor.rs:77-88`：`stockCode/alertType/alertMessage/currentPrice/changePct/timestamp/suggestedAction`）。当前 handler 忽略 payload 所以不崩，属契约漂移。⇒ 新增 `MonitorAlertPayload` 类型（放 `src/types/`，按禁区 12「前端权威来源」），handler 用 payload 显示「哪只股、哪类阈值、现价」。
 
 **判据**
 - 门 A-1（组件测试，运行门）：`PriceAlertPanel` 收到 `price-alert-triggered` 后必须渲染出 payload 里的股票代码与 `alertType` 对应中文；破坏样本两条各红一条（改 payload 键名 / 撤 handler 消费）。

@@ -18,7 +18,7 @@
 
 ### 2. 布局与 `AppHeader` 40px 规范
 
-`AppHeader` 是全局顶栏的唯一实现（`src/components/layout/AppHeader.tsx:45`），由 `ContentArea` 挂载（`src/components/layout/ContentArea.tsx:3`、`:208`）。高度是硬规范：`height: 40` + `minHeight: 40`（`src/components/layout/AppHeader.tsx:68-69`），所有页面内容区的可用高度都按这 40px 扣减。
+`AppHeader` 是全局顶栏的唯一实现（`src/components/layout/AppHeader.tsx:45`），由 `ContentArea` 挂载（`src/components/layout/ContentArea.tsx:138`、`:208`）。高度是硬规范：`height: 40` + `minHeight: 40`（`src/components/layout/AppHeader.tsx:68-69`），所有页面内容区的可用高度都按这 40px 扣减。
 
 **按页面抑制**：对话页不显示 `AppHeader`（`src/components/layout/AppHeader.tsx:59`），股票页也不显示（`:61`）；股票工作台另有自己的 `sa-header`（`:20`），不要再叠一层全局顶栏。新增页面若自带顶栏，必须同时确认全局顶栏在该路由被抑制，否则会出现双顶栏 + 内容区被压两遍。
 

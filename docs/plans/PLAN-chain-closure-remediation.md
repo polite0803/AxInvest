@@ -150,7 +150,7 @@ i18n 须同批补满 11 语言并跑 `check-i18n-key-parity` + 占位符自检�
 ### B2　`refresh_serenity_feedback` 名实相符
 
 **现状**：命令描述写「跟踪推荐表现、验证催化剂、调优权重」
-（`src-tauri/src/commands/stock_workflow/serenity.rs:2025`），实现体 `do_feedback_loop`
+（`src-tauri/src/commands/stock_workflow/serenity.rs:2170`），实现体 `do_feedback_loop`
 （同文件 `:2040` 起，全文无 `ActiveModel`/`insert`/`update`）**全程零写库**，只返回 JSON 给面板
 （面板调用点 `src/components/stock-analysis/SerenityScreeningPanel.tsx:1339`）⇒ 按下面板按钮算完即丢，
 但文案让人以为调优已生效。

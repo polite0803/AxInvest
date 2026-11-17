@@ -222,7 +222,7 @@ i18n 量化（脚本 `output/tmp-i18n-audit.mjs`，全 11 语言 `stockAnalysis`
 |---|---|---|
 | 一致性评分的 `is_buy/is_hold/...` 判据只认中文 | `decision.rs:1330-1350`（**第二个**评分块，原计划只记了第一个） | P1-6 同类；英文值域下落 `(Some,Some) => 0.0` 被判「完全对立」 |
 | 声明分值与分支不互斥（不可达分支） | 同上：`(持有\|观望) vs 不确定 = 3` 吃掉 `观望 vs 不确定 = 6` | P1-6 同类；两处同病 |
-| `getActionColor` / `getActionTagStyle` **不解析**原串 | `stock-analysis-utils.ts:375,400` | 传中文/小写值即无配色；同文件 `getActionTKey` 却是解析的，三者判据不一致 |
+| `getActionColor` / `getActionTagStyle` **不解析**原串 | `stock-analysis-utils.ts:797,400` | 传中文/小写值即无配色；同文件 `getActionTKey` 却是解析的，三者判据不一致 |
 | `dual-view` 差异判据按**字形**比较 | `DecisionComparisonPanel.tsx:55`、`CompactDecisionComparison.tsx:100` | 「公式=BUY vs LLM=买入」被判成分歧 ⇒ 假警报 |
 | `ExperimentSidebar` 跨值域比较 | `ExperimentSidebar.tsx:128` | 本地仿真 `"buy"` vs 后端 `"BUY"` ⇒ 「参数已修改」指示器永久常亮 |
 | `trade_intent.rs` 半归一化 | `src-tauri/crates/analysis-engine/src/trade_intent.rs:171` | 判据含 `hold`/`watch` 却漏 `WAIT` 变体与「不确定」 |
@@ -257,7 +257,7 @@ i18n 量化（脚本 `output/tmp-i18n-audit.mjs`，全 11 语言 `stockAnalysis`
 |---|---|---|---|
 | 1 | `harness` 的「买入信号应有目标价」校验只认 3 个中文词 | `harness/dashboard_report.rs:272` | 英文 `BUY`/`INCREASE` 不匹配 ⇒ **校验被静默跳过**（fail-open，与 P0-3 同族） |
 | 2 | `market-sim` 策略派发只匹配中文 | `src-tauri/crates/market-sim/src/agent/strategy.rs:151` | 英文 `BUY` 落 `_` 只打印一条 warn 后**什么都不做**，而模拟仍报执行成功（**静默 no-op**）。现对 8 档穷举，第 5–8 档单列告警（不确定/缺失 ≠ 判断为观望） |
-| 3 | `backtest.rs` 同一文件**第三处**中文字面量分类点 | `backtest.rs:438, 450` | 英文值域全被计成「持有」⇒ `buy_r` 恒偏低 ⇒ 下方权重调整静默走错分支 |
+| 3 | `backtest.rs` 同一文件**第三处**中文字面量分类点 | `backtest.rs:466, 450` | 英文值域全被计成「持有」⇒ `buy_r` 恒偏低 ⇒ 下方权重调整静默走错分支 |
 | 4 | `node_quality` 的 action 校验白名单仅 8 个字面量 | `node_quality.rs:434` | 「观望 / 增持 / 减持 / wait / trim」等**合法**取值被误判「action 值异常」并扣 10 分（**假阳性惩罚**，让质量分系统性偏低）。改为 `normalize_action(a).is_some()` ∨ 命中 `ACTION_ALIASES`（保留对冗长 LLM 输出的容错） |
 | 5 | 报告 action 配色只认 4 个中文词 | `src-tauri/crates/analysis-engine/src/report.rs:205` | 英文值域落 `_` ⇒ 看多/看空**都被渲染成中性黄**（与前端 `getActionColor` 同类） |
 | 6 | 退出信号「分析建议卖出」只认中文 | `exit_recommend.rs:221` | 英文 `SELL`/`REDUCE` **不触发**退出信号（漏报，fail-open 方向） |

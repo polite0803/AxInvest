@@ -128,7 +128,7 @@ pending 行的三个建点全部**一分析一行、`horizon=NULL`**：
    - `commands/stock_analysis.rs:5826-5837` 参数建议聚合：无档过滤 ⇒ 四档混池；必须按档分组（教训与建议本就同档口径）。
    - `list_reflections`（`:5300-5352`，`take(50)`）：加 horizon 过滤入参 + 返回体带档（前端已有 `ReflectionRow.horizon`）。
    - RAG 记忆空间 `memory:stock_reflections`（`mod.rs:1755`）：检索不辨档 ⇒ 每档一行后相似检索会跨档命中；注入文本前按 horizon 过滤或在片段头标注档位。
-6. **绩效行**：`strategy_performance.period = "reflection:{档}"` 已按档（`reflection.rs:733`），但 `delete_stale_reflection_perf`（`axagent-batch-rerun.rs:177`）的清理键需核是否按档，避免重跑一档删掉四档。
+6. **绩效行**：`strategy_performance.period = "reflection:{档}"` 已按档（`reflection.rs:733`），但 `delete_stale_reflection_perf`（`axagent-batch-rerun.rs:232`）的清理键需核是否按档，避免重跑一档删掉四档。
 
 ### Phase 5 — 前端呈现 + 全量门禁
 1. `ReflectionPanel.tsx`：主表（`:836-868`）**新增档位列**；`rowKey="id"` 无需改（PK 天然唯一）。
@@ -254,7 +254,7 @@ pending 行的三个建点全部**一分析一行、`horizon=NULL`**：
 ⇒ 命中的片段自己声明属于哪一档，跨档套用可被识别（缺席不冒充通用）。
 
 **B. WFO 校准跨档混池 ⇒ 裁定：保持混池（这是正确口径，不是缺陷）。**
-事实依据：`PortfolioMgrParamSet`（`portfolio_formula.rs:800`）的字段 = 5 个行动阈值 + 3 个仓位上限 +
+事实依据：`PortfolioMgrParamSet`（`portfolio_formula.rs:946`）的字段 = 5 个行动阈值 + 3 个仓位上限 +
 3 个市况先验，**全部是档无关的旋钮**；逐档的 `sl_pct_*`/`tp_pct_*` 不在这个集合里。
 按档拆池会把本已稀薄的证据再切 4 份，样本量反而低于既有 IC/命中率门槛。
 **但这条裁定带前提**：若将来把逐档参数（`sl_pct_*`/`tp_pct_*`/k1/k2 的逐档形态）纳入同一 param set，

@@ -120,7 +120,7 @@
 
 ### R9 市场级量（封板率）为个股背书，ultra 档仍是方向腿（第二轮新增）
 
-- 封板率（涨停家数封板比例，解析自 `crates/astock-data/src/vendors/ths.rs:664` `parse_limit_up_breadth`）是**全市场共享的一个数**：同一天所有个股拿到完全相同的 breadth 信号。`crates/harness/src/holding_period.rs:490-494` 注释自承认它是市场级量。它对"紫金这只票次日涨不涨"没有个股区分度，却在 10-09 以 84% 封板率给紫金 ultra 腿 +0.683、54% 权重。
+- 封板率（涨停家数封板比例，解析自 `crates/astock-data/src/vendors/ths.rs:813` `parse_limit_up_breadth`）是**全市场共享的一个数**：同一天所有个股拿到完全相同的 breadth 信号。`crates/harness/src/holding_period.rs:490-494` 注释自承认它是市场级量。它对"紫金这只票次日涨不涨"没有个股区分度，却在 10-09 以 84% 封板率给紫金 ultra 腿 +0.683、54% 权重。
 - 10-09 的反讽在于：当天大盘盘中 -1.5% 急杀、全市场风险偏好实际在退潮，但早盘/前日残留的高封板率仍作为强看多信号喂给了每一只被分析的股票——**市场级情绪指标在拐点处最容易系统性误导，且误导是全市场同时发生的**。
 - 修过一半：short 档自 2026-10-10 起已把封板率降为背景过滤（`crates/analysis-engine/src/evidence_weight.rs:1260`），但 **ultra 档仍把它当方向腿**（与 R3 联动：ultra 一共只有两条腿，它占 54%）。这是同一缺陷在档位间修了一半的状态。
 
@@ -149,7 +149,7 @@
 2. **历史无点**：反思点随 10-14 的 v154/v156 模板才批量铺开（当天 46 行）；此前 live 分析在 `stock_reflections` 几乎零行（10/01–10/13 仅 10-11 有 2 行）。紫金三条分析（10-09/10-10/10-12）**至今没有任何反思行**——正是"误判后系统毫无自我反馈"的直接原因。
 3. **到期口径用自然日**：live 通道按自然日算 hindsight（`reflection.rs:2252-2256` 附近），ultra 10-16、short 10-19、mid 11-11、**long 落到 2027-01-12（90 自然日）**。当前 45 条 pending 全部未到期，`reflection-due-daily` 10-14 跑时 `totalPending=0`、12ms 结束——任务"成功"了，但是空转。T+N 复盘应按交易日 bar（T+2/T+5/T+28/T+90 交易日），自然日口径让长档样本成熟额外推迟约 40%，且长假后失真。
 4. **失败即终局**：约 16 条 failed 永久失败、无死信重试——4 条 LLM 上下文超限（727019/730002/629477/562181 tokens 撞 524288 窗口；根因已于 10-14 提交 c247e03e2 的三层上下文预算修复，但**旧失败行不会自动重跑**）、5 条 `ANALYSIS_SNAPSHOT_MISSING`、6 条 7 月孤儿；running 仅靠 `STALE_RUNNING_HOURS=6`（`reflection.rs:2462` 附近）回收。
-5. **兜底轮造成"反思在跑"的假象**：10-14 以来实际产出 resolved 的是 `start_batch_reflection` 的**每 6 小时系统兜底轮**（`src/init/services.rs:4032` 注释；走 `record_auxiliary_run`，`crates/runtime-core/src/cron_job.rs:653-692`，只落历史不推进档期），不是 `reflection-due-daily` 档期任务。兜底轮消费的是同一批 pending，到期口径不变，因此它无法纠正第 3 条的空转，只掩盖了"档期任务无事可做"的可见性。
+5. **兜底轮造成"反思在跑"的假象**：10-14 以来实际产出 resolved 的是 `start_batch_reflection` 的**每 6 小时系统兜底轮**（`src/init/services.rs:5416` 注释；走 `record_auxiliary_run`，`crates/runtime-core/src/cron_job.rs:653-692`，只落历史不推进档期），不是 `reflection-due-daily` 档期任务。兜底轮消费的是同一批 pending，到期口径不变，因此它无法纠正第 3 条的空转，只掩盖了"档期任务无事可做"的可见性。
 6. 与 R4 的关系：R4 讲"学习闭环读不到样本"（先验侧），R11/R12 讲"样本为什么生产不出来"（供给侧），三者合起来解释了用户感知的"整个反思机制名存实亡"。
 
 ## 三、修复方案
@@ -250,7 +250,7 @@
 - P2-d：❌ **改名为「季度」已于 2026-10-16 当日晚回退**（原记为「✅ 长期档正名『季度』」）。理由与回退面：
   - **前提错误（单位）**：`Period::default_holding_days()` 的单位是**交易日**（`holding_period.rs:309` 明示），
     90 交易日 = 18 周 ≈ **4.2 自然月 ≈ 1.5 个季度**；而 `Scale::Quarterly` 定义 **1 季 ≈ 60 交易日/bar**
-    （`astock-data/src/scale.rs:49,106`）⇒ 90 ≠ 60。`quarterly` 是**尺度名（取数/评分粒度）**，
+    （`astock-data/src/scale.rs:106,106`）⇒ 90 ≠ 60。`quarterly` 是**尺度名（取数/评分粒度）**，
     把它当**持有期档名**，等于把「持有 90 交易日」读成「持有 1 个季度」。
   - **事故形态**：① `stockAnalysis.scheduledAnalysis.reflectionScanHint` 出现同句互斥的
     「超短线 2 天 / 短线 5 天 / 中线 28 天 / **季度 90 天**」；② 后端 `HorizonAgreement.tierLabel`

@@ -78,7 +78,7 @@
 |---|---|---|
 | 单条 vs 批量 | ◐ | 一行=一股一档（`reflection.rs:1860-1888` 逐档建 pending）✓；但消费侧是**批量队列** `run_batch_reflection`（`reflection.rs:1087,2116`，默认 max_count=20，循环 `:1118/:2193`）。已有「按档窗口」裁定（J 轮 Q5）。 |
 | 输入=当前版本参数+同因子同周期错例 | ✖ | 输入含本样本硬数字（`reflection.rs:387-413,453-466,481,574,601`）+ `stock_lessons`（`:419-432`），但**无版本**、**无因子维度**：教训检索只按 code+档+时间（`crates/dao/src/repo/stock_lesson_queries.rs:33,44,66,86`）；`similar_cases` 存在但**只在分析链**且无档无因子（`stock_workflow/core.rs:2157`：code+loss+90 天）；反思链的向量库**只写索引不检索**（`reflection.rs:886-905`）；`reflection_lessons` **无因子列**（`entities/src/reflection_lessons.rs:11-45`）。 |
-| 输出定量修正 | ◐ | 已有 `{param,current_value,suggested_value,reason}` 三元组（`stock_analysis_setup/mod.rs:1716-1723`），但 param 名被限死在 28 项 catalog，解析只回 `PortfolioMgrParamSet` 少数字段（`analysis-engine/src/portfolio_formula.rs:966`）；**无「哪个因子×哪档×from→to」结构化列**。 |
+| 输出定量修正 | ◐ | 已有 `{param,current_value,suggested_value,reason}` 三元组（`stock_analysis_setup/mod.rs:1716-1723`），但 param 名被限死在 28 项 catalog，解析只回 `PortfolioMgrParamSet` 少数字段（`analysis-engine/src/portfolio_formula.rs:946`）；**无「哪个因子×哪档×from→to」结构化列**。 |
 | 规则节点/Rhai 执行写回 | ✖ | 分析决策链**完全没接**：`reflection.rs:868-875` 代码明写「只记录不实际执行」；`evolution_drift.rs:176 recalc_and_persist` 只写 history，而 `stock_workflow/**` 对 `load_current_weights`/`strategy_weight_history` **零引用**。荐股链自动生效（`reco_loop.rs:470-480,512-552`，出厂 shadow `seed_variables.rs:813-821`）但 `source_reflection_id` **恒 None**（`:474`）⇒ 不可溯源到某次反思。人工通路有：`apply_param_suggestions`（`stock_analysis.rs:5842,5969-5975`）+ 前端按钮（`src/components/stock-analysis/ReflectionPanel.tsx:1094`）。 |
 | 可调参数是否真接上 | ⚔ | 五点对账**纸面化实证**：`debate_rounds` 面板项存在（`src/components/settings/StockAnalysisConfigPanel.tsx:29,825`）但保存只让 dao `version+1`，而重种门是 `DB version >= TEMPLATE_VERSION(=122)` ⇒ **面板调轮数实际不重展图**。同类风险见 `seed_variables.rs:2533-2552` 自述「四处断链」。门禁缺位：`scripts/audit-inject-coverage.mjs` 头注自称"审计工具不是 CI 门禁"，`scripts/check-horizon-weight-parity.mjs` **不在** `scripts/ci-check.mjs`。 |
 
@@ -121,7 +121,7 @@
 
 | 手段 | 定级 | 关键事实 |
 |---|---|---|
-| 对抗压单轮 | ◐ | 轮数是模板变量（`seed_variables.rs:102-116`），但**只有建图时生效**，需升 `TEMPLATE_VERSION` 强制重种（`seed_stock_analysis.rs:2891` `resolve_debate_rounds(old_variables)`）；1 轮 = `bull-r1`+`bear-r1`+`convergence` = **3 次 LLM**（现 7 次）。风险辩论链与轮数无关、**不会跟着减**（`:3492-3509,3650,3681`）。 |
+| 对抗压单轮 | ◐ | 轮数是模板变量（`seed_variables.rs:102-116`），但**只有建图时生效**，需升 `TEMPLATE_VERSION` 强制重种（`seed_stock_analysis.rs:1643` `resolve_debate_rounds(old_variables)`）；1 轮 = `bull-r1`+`bear-r1`+`convergence` = **3 次 LLM**（现 7 次）。风险辩论链与轮数无关、**不会跟着减**（`:3492-3509,3650,3681`）。 |
 | 同分析师多轮合并为一次 | ✅ | `max_tool_rounds=2`（`a-catalyst=3`，`seed_stock_analysis.rs:2698-2702`）⇒ 每分析师最坏 3–4 次远端调用（`agent_executor.rs:1016,1443-1446`，strict 模式 VERDICT 兜底再加 1 次 `:1601-1640`）；而**上游 ToolNode 数据已经走 `context_sources` 进来了**（`:2685-2689`）⇒ 轮询属重复取数。同模板内「一次成型」先例 11 处（`tools=vec![]`+`max_tool_rounds=Some(0)`：`:3042,3080,3144,3206,3600,3692,4371,4438,5108,5209,5263`）。**改动最小、收益最大的一条。** |
 | 提并发 | ◐ | 模板变量 `max_concurrent` 种子 8 < 10（`seed_variables.rs:125-131` 注释「3→8；DB 存量 v7 实际值仍为 3」），面板兜底 12（`StockAnalysisConfigPanel.tsx:30`）⇒ **DB 现值未实证**。双重卡口：按类型限流只过滤本批（`engine/mod.rs:3012-3021`）后 `.take(options.max_concurrent)` 再砍一刀（`:3022`）⇒ tool 的 10 也救不了。**⚠ 待核**：两处证据互斥 —— `join_next()` 排空整批后才重算 ready（`:3694`，另一 agent 据此判"硬栅栏"）vs 「节点完成即补调新就绪节点」（`:4400-4444`）。必须读码定论，它决定提并发能否消长尾。 |
 | 调思考步数/换模型 | ✖（需接线） | provider 侧能力齐（`crates/providers/src/openai.rs:653-705`、`anthropic.rs:403-407`、`gemini.rs:430-452`、builder `crates/agent/src/provider_adapter.rs:194`），**工作流侧 5 处硬编码 `thinking_budget: None`**（`agent_executor.rs:1095-1097,1774-1776,2174-2176,2639-2641,2849-2851`）；`RunOptions.model_id/provider_id`（`engine/mod.rs:216-217`）在 `stock_workflow/core.rs:937-959` **未设** ⇒ 目前无法按节点换模型。股票模板统一 `temperature 0.3 / max_tokens 32768`（`seed_stock_analysis.rs:2389-2391`）。⚠ 网关侧有 4096 输出钳制 + **prefill 是延迟主因**（`risk-agg` input 115717 tokens，`.workbuddy/memory/2026-09-11.md:47`）⇒ 抬 max_tokens 无效，**压输入比压输出有效**。 |
@@ -715,7 +715,7 @@ UI 必须显示**归档起始日**（否则用户会把「那几天没数据」�
 ## 十八、P9-4 更正：涨停池**能**按日直取（§十六 的结论作废）
 
 **错因先记下来**：§十六 判「历史维度只能靠每日归档」，是因为我直接新接了东财 `push2ex/getTopicZTPool`，
-而没有先普查仓内既有取数实现 —— `src-tauri/crates/astock-data/src/vendors/ths.rs:272` 的 `get_hot_stocks()`
+而没有先普查仓内既有取数实现 —— `src-tauri/crates/astock-data/src/vendors/ths.rs:285` 的 `get_hot_stocks()`
 早就在打同花顺 `dataapi/limit_up/limit_up_pool`（同一业务名目，只是没解全字段）。
 用户据此立规（已入记忆：新增数据源前先按业务名目普查既有取数实现，判「扩字段 > 换申报 > 新建」）。
 后果不是「多写一份代码」这么简单：**重复实现选中的是能力更差的那条**（push2ex 不采纳 date，ths 采纳）。
@@ -895,7 +895,7 @@ ScreenerPage vitest 7/7；tsc / oxlint / dprint / 三道 i18n 门全绿。主 cr
 `shapes.windows(2).any(|w| w[0]!=w[1])`，把一套表抄四遍会直接红。不做绕过，如实标注。
 
 **本批剩余（按依赖序）**：① `market-analyst.md` 等专家 prompt 的逐档契约段（含 §10-4 的显式作废声明）；
-② `agent_executor.rs:4502` 的 `VERDICT_MACHINE_FIELDS` 从全局 6 键改成逐档白名单
+② `agent_executor.rs:5473` 的 `VERDICT_MACHINE_FIELDS` 从全局 6 键改成逐档白名单
 （现在是 `VERDICT_SPEC_NOT_EXHAUSTIVE` 自承认「角色特有字段无门」）；③ 四路子图 + 四份 Rhai 决策脚本
 （§十一 清单，含退役清单 `leg_mult`/`snr_confidence`/√(h/28) 同批删）；④ 缺席/条件文案键 11 语言；
 ⑤ `TEMPLATE_VERSION` bump + 重启实跑。
@@ -1886,7 +1886,7 @@ B 方案保留行 + `action:"无结论"`，视觉上仍是「这一档有结论�
 又把「扫描面漏了」报成「一片空白」）。
 
 **「整段求值」这一格其实也早有门 —— 本段的第二处错判（同批更正）**：
-`stock_workflow/rhai_registry.rs:923` 的 `portfolio_mgr_runs_with_valuation_evidence_without_degrading`
+`stock_workflow/rhai_registry.rs:1167` 的 `portfolio_mgr_runs_with_valuation_evidence_without_degrading`
 就是「整脚本真执行」门（`run_portfolio_mgr` 按 `code_executor` 同一规则造 scope，
 断言三层：没落 catch 兜底 / `decisionsByHorizon` 四档齐备且 `weightsSource=="table"` /
 估值降权只在真被下调的档留痕，末尾还带「裸引用未定义名字必红」的负控）。
@@ -2338,7 +2338,7 @@ NULL             44   2026-10-02 18:11:44
 | 位置 | 现值 | 定性 |
 |---|---|---|
 | `src-tauri/src/commands/stock_workflow/core.rs:595` | `Set(None)`（建行初值） | **中间态**：同函数的 :1165 / :1504 会补写 ⇒ 不是缺陷 |
-| `src-tauri/src/commands/stock_workflow/core.rs:1889` | `Set(None)`（`run_single_stock_analysis` 的 "running" 占位行） | **就是这里**：建行留 NULL 正确，但本通道的**落库 update 从不补写** ⇒ 现网 44 条 NULL 全来自它（本函数不经 `run_stock_workflow_inner`，原注释那句「由主路径写回」是错的）。2026-10-04 已补 `:2072` 的 `template_version: Set(Some(loaded.version))` |
+| `src-tauri/src/commands/stock_workflow/core.rs:2056` | `Set(None)`（`run_single_stock_analysis` 的 "running" 占位行） | **就是这里**：建行留 NULL 正确，但本通道的**落库 update 从不补写** ⇒ 现网 44 条 NULL 全来自它（本函数不经 `run_stock_workflow_inner`，原注释那句「由主路径写回」是错的）。2026-10-04 已补 `:2072` 的 `template_version: Set(Some(loaded.version))` |
 | `src-tauri/src/commands/stock_workflow/hooks.rs:1065` | `Set(None)` | **不是缺陷**（同日核对更正）：那是对话直执行的**建行**，`analysis_kind = "chat"`、不经 `workflow_templates` ⇒ 无版本可言；该行注释已陈明「有快照但无版本」是这类记录的正常形态 |
 | `src-tauri/crates/analysis-engine/src/trade_intent.rs:243/599/672/742/827` | `Set(None)` ×5 | 交易意图行，**不是分析结论** ⇒ 正确形态是「保持 NULL + 读侧按名目排除」，而不是给它套一个分析模板版本号（那是把两个名目焊成一个） |
 
@@ -3144,7 +3144,7 @@ cap 与 `pm_risk_veto` 一起按档。
 等价性主张补成实测 —— 记在这里，免得它继续停在「看起来会这样」：
 
 1. **K 线尾切方向**（决定 `GLOBAL_LOOKBACK=60` 切出来的是不是同一批 60 根）：
-   `get_klines_with_adj` 的缓存命中路径 `crates/astock-data/src/lib.rs:2389` 就是
+   `get_klines_with_adj` 的缓存命中路径 `crates/astock-data/src/lib.rs:2942` 就是
    `let start = klines.len().saturating_sub(limit); klines[start..]` ⇒ **升序、尾部=最新**是既有口径。
    本轮把 fetch 从 60 提到 120、再取尾 60 根喂全局三量 ⇒ 落到的仍是同批 60 根，
    `ann_vol_pct` / `max_dd_pct` / `sharpe` 与退役前逐位一致（不是「近似一致」）。
@@ -4363,9 +4363,9 @@ if let Some((found, has_summary)) = try_extract_candidates_from_text(content) {
 |---|---|
 | 判据纯函数 | `src-tauri/crates/analysis-engine/src/mover_recall.rs:118`（`mover_label_for`）+ 门测 :866 / 阈值防漂移锁 :891 |
 | 列声明（声明式对账，无 migration） | `src-tauri/crates/entities/src/stock_reflections.rs:59` |
-| 消费端（读 served vars + 盖章） | `src-tauri/src/commands/stock_workflow/reflection.rs:132`（`compute_mover_label`）、UPDATE 写列 :806、两处 INSERT 留 NULL :264 / :1990 |
+| 消费端（读 served vars + 盖章） | `src-tauri/src/commands/stock_workflow/reflection.rs:330`（`compute_mover_label`）、UPDATE 写列 :806、两处 INSERT 留 NULL :264 / :1990 |
 | 出参 | `src-tauri/src/commands/stock_analysis.rs:5528`（`list_reflections` 的 `moverLabel`） |
-| 呈现分层 | `src/lib/stock-analysis-utils.ts:1419`（`moverLabelPresentation`，与 `horizonIcAbsenceKey` 同族） |
+| 呈现分层 | `src/lib/stock-analysis-utils.ts:1971`（`moverLabelPresentation`，与 `horizonIcAbsenceKey` 同族） |
 | 面板列 | `src/components/stock-analysis/ReflectionPanel.tsx:160`（cell）/ :893（列，插在「复盘档」与「结果」之间） |
 | 导出 | 同文件 `exportReflections` 的 CSV 追加 `horizon` + `moverLabel` 两列 —— 标签是**按档**的结论，导出只带标签不带档就没法解释（顺带补上此前导出就缺的 `horizon`） |
 | i18n | 11 语言 × 7 键（`stockAnalysis.reflection.colMover/moverYes/moverNo/moverWindowIncomplete/moverNoMarketData/moverRuleUnavailable/moverNotReflected`），插在 `colHorizon` 之后保序、LF 落盘。列名取「**妖股标签（本档）**」（各语言沿用本文件已有的 `colHorizon` 档位名词，不生造术语）—— 因为展开行里四档并列显示客观判定，列名不带档限定就会被读成「四档共用一个标签」 |
@@ -4805,7 +4805,7 @@ B-2b 的剩余前置见 §八十五(4)：死配置裁定、扇出键齐备性门
 - **要改的构造点已数清**：`StepProgressEvent` 字面量构造共 **9 处**
   （`engine/mod.rs` 7 处 + `executors/agent_executor.rs` 1 处 + `harness/src/workflow_types.rs` 1 处默认构造）
   ⇒ 加字段是**编译期强制**的，不会静默漏（这正是把归属做成一等字段而不是塞进 `output` 的理由）。
-- **DTO 归属字段的选型**：`harness/src/workflow_types.rs:1992` 的 `StepProgressEvent`
+- **DTO 归属字段的选型**：`harness/src/workflow_types.rs:2029` 的 `StepProgressEvent`
   加**一个** `Option<子执行归属>`（含父 execution_id + 发起它的父节点 id），
   `#[serde(skip_serializing_if = "Option::is_none")]` ⇒ 旧消费端零影响；
   父节点 id 从 `RunOptions` 新增字段带下来（两处启动点 `engine/mod.rs:2755`/`3563` 的闭包里有 node 上下文）。
@@ -4981,7 +4981,7 @@ B-2b 的剩余前置见 §八十五(4)：死配置裁定、扇出键齐备性门
 
 | 层 | 位置 | 改了什么 |
 |---|---|---|
-| DTO | `crates/harness/src/workflow_types.rs:2010`（`SubWorkflowOrigin`，带 `rename_all = "camelCase"`）、`:2053`（`StepProgressEvent.sub_workflow_origin`，`default + skip_serializing_if`） | 新类型 + 新可选字段。顶层执行恒 `None` ⇒ 线上载荷连键都不出现，旧消费端零影响 |
+| DTO | `crates/harness/src/workflow_types.rs:2020`（`SubWorkflowOrigin`，带 `rename_all = "camelCase"`）、`:2053`（`StepProgressEvent.sub_workflow_origin`，`default + skip_serializing_if`） | 新类型 + 新可选字段。顶层执行恒 `None` ⇒ 线上载荷连键都不出现，旧消费端零影响 |
 | 引擎·选项 | `engine/mod.rs:180`（`RunOptions.sub_workflow_origin`）、`:279`（`Default`） | |
 | 引擎·传递 | `:2194`（真实 state 拷入）、`:2372`（取一次存局部）、`:3422` 与 `:4690`（两处 per-node `exec_ctx` 都赋） | 少赋一处就是半生效形态 |
 | 引擎·启动点 | `:2682`/`:3477`（`sub_origin_parent_eid` 取父真实 id）、`:2690`/`:3488`（回调第 4 形参）、`:2767`/`:3589`（`sub_workflow_origin: Some(…)`）、`:2709`/`:3510`（每次调用再 clone 一份进 `spawn_blocking`，否则 `Fn` 退化 `FnOnce`） | 两处子执行启动点同批 |
@@ -5401,7 +5401,7 @@ CI 面可自证：编译 / fmt / clippy / seed_consistency / 扇出审计 / tier
 | 同文件 `:71 / :52` | 两个共用形状：评分工具节点按 `tool_node` 闭包的**同一字段形状**构造（`retry.max_retries=2`／`timeout=None`／`description="获取数据: compute_scoring"`），终值节点 `end` 的 `output_var` 只能写**平键** `h_<档>`（`end_executor.rs:45` 是 `variables.get(var)`，不支持点分路径） |
 | 同文件 `:633 / :657 / :698` | `sibling_id_hits`（判据本体）+ 正断言 + **负控** `cross_tier_scoring_reference_is_caught` |
 | `stock_analysis_setup/mod.rs:23-24` | `#[cfg(test)] mod horizon_tier_template;` —— 步骤 1 刻意**不接播种**；先给生产可见性会撞 `dead_code`（`-D warnings`），步骤 2 去掉这个 gate |
-| `commands/stock_analysis_setup/seed_stock_analysis.rs:8454` | `fn direct_edge` → `pub(crate) fn`（复用既有边构造，不在新模块里抄第二份 `WorkflowEdge` 形状） |
+| `commands/stock_analysis_setup/seed_stock_analysis.rs:9599` | `fn direct_edge` → `pub(crate) fn`（复用既有边构造，不在新模块里抄第二份 `WorkflowEdge` 形状） |
 
 ### (2) needs 读数（= 父侧每档必须显式传的键，机器算的，不许人抄）
 
@@ -6025,7 +6025,7 @@ RSI 同族且更隐蔽：`rsi(&closes, period).unwrap_or(50.0)` ⇒ 样本不够
 ⇒ **本批形状**：子模板 = `const-scoring-period` → `t-scoring-<周期>` → `pm-h-<档>` → `end`（四节点）；
 `cls-risk-level-<档>` 仍逐档展开在**父图**，并经扇出以恒等键传进子快照。
 判据跟着换载体而没有退役：「分支读本档那一格」搬到
-`horizon_tier_template.rs:754` 的 `risk_cell_problems`（负控 `branch_reading_global_risk_cell_is_caught`），
+`horizon_tier_template.rs:1057` 的 `risk_cell_problems`（负控 `branch_reading_global_risk_cell_is_caught`），
 父侧那半（扇出是否传了本档风险节点）仍在 `mod.rs` 的 `check_horizon_scoped_risk` 里，
 其负控 ② 已改成「扇出只传全局那个 ⇒ 必须红」。
 要恢复原裁定（风险节点也进子模板）的前置 = 先给 `h_<档>` 加一个携带风险档的出口键，
@@ -6067,13 +6067,13 @@ DataTransformer，`input_var: ""`、`expression: "\"hourly\""`（逐字四份）
 
 | 位置 | 内容 |
 |---|---|
-| `seed_stock_analysis.rs:1067` | `TEMPLATE_VERSION` 134 → **135** + v135 六条变更说明（含两条数值影响） |
+| `seed_stock_analysis.rs:1643` | `TEMPLATE_VERSION` 134 → **135** + v135 六条变更说明（含两条数值影响） |
 | `seed_stock_analysis.rs`（原 `:4348-4403`） | 删四个 `t-scoring-*` `tool_node` + 三条错峰边 + 四条**无人消费**的「→ portfolio-mgr」边，换成一段说明「搬去哪、谁还在管串档」 |
 | `seed_stock_analysis.rs`（原 `:5787-6105`） | 四个 `pm-h-<档>` CodeNode 块 → 四个 `SubWorkflowNode`（id / `output_var` 不变），供给边按「父图谁被引用」逐条重算（去掉 `t-scoring-<档>`，其余沿用） |
 | `seed_stock_analysis.rs` 快速链 | `FAST_REQUIRED_NODE_IDS` 摘掉四个评分节点；`FAST_BRIEF_INPUTS` 四路 `algo_scoring_*` 改指**日线** `t-scoring` ⇒ 快速链出参逐位不变（决策点 1「不跟」） |
 | `horizon_tier_template.rs` | 四张模板改为「常量 → 评分 → 分支 → 终值」四节点；删掉 10-06 版本里的 `cls-risk-level-*` 块（回归父图） |
-| `horizon_tier_template.rs:470` | `HORIZON_TIER_TEMPLATE_VERSION` **绑到** `seed_stock_analysis::TEMPLATE_VERSION`（不是抄 135）⇒ 扇出键集与模板内容不可能分代 |
-| `horizon_tier_template.rs:493` | `seed_horizon_tier_templates()`：四行 `is_preset=true`、`is_public=false`、`visibility=SystemOnly`、无 trigger、`hooks_config=None`、走 `upsert_workflow_template`（该函数不写快照表 ⇒ 「无快照历史」由实现保证） |
+| `horizon_tier_template.rs:762` | `HORIZON_TIER_TEMPLATE_VERSION` **绑到** `seed_stock_analysis::TEMPLATE_VERSION`（不是抄 135）⇒ 扇出键集与模板内容不可能分代 |
+| `horizon_tier_template.rs:785` | `seed_horizon_tier_templates()`：四行 `is_preset=true`、`is_public=false`、`visibility=SystemOnly`、无 trigger、`hooks_config=None`、走 `upsert_workflow_template`（该函数不写快照表 ⇒ 「无快照历史」由实现保证） |
 | `stock_analysis_setup/mod.rs:24` | 去掉 `#[cfg(test)] mod horizon_tier_template;` 的 gate ⇒ builder + 播种转生产可见 |
 | `stock_analysis_setup/mod.rs:858` | 主图/快速链之后调 `seed_horizon_tier_templates`（缺一行 = 该档显式失败，日志按非致命但点名） |
 | `seed_consistency_tests.rs` | `branch_node_scope_is_exactly_the_seed_mapping` 抽映射的载体由主图种子换成 `include_str!("horizon_tier_template.rs")`（判据本体不变） |
@@ -6557,7 +6557,7 @@ v136 之后四档各自按尺度取数、按该档窗口计划出指标，但界
 | A2 = #49（验证报告代际筛样） | **已完成** | 走 join `reco_picks.reco_version` + `RECO_GENERATION_FLOOR=1`（分域），写侧不筛，登记门里该条已在 `statistics` 桶 |
 | A3 = #7 ②（错峰 vs 改拓扑） | **已被事实消解，无需再拍** | B-2b 本体把四个评分节点搬进各自子模板 ⇒ 父图不存在评分链；`scripts/check-tier-purity.mjs:174` 的 `DECLARED_SCORING_STAGGER = []` 就是「四路无评分错峰」的登记，R3 改判成「主图与档模板都不得有档间评分边」 |
 | A3 = #7 ④（档内不读他档门） | **已存在** | `check-tier-purity.mjs` 的 R2（他档 token 扫描，含「最长命中」「剥注释」两类负控） |
-| A4 = #10（妖股标签） | **已完成**（含原「待拍」那一问的自行裁定） | 列落 `crates/entities/src/stock_reflections.rs:44`（**按档**挂逐档反思行）；唯一判据 `crates/analysis-engine/src/mover_recall.rs:107` 复用 `DEFAULT_GAIN_THRESHOLDS`（没写第二份字面量）；DTO `src/commands/stock_analysis.rs:5528`；面板列 `src/components/stock-analysis/ReflectionPanel.tsx:60`；四态测试 `mover_recall.rs:863` |
+| A4 = #10（妖股标签） | **已完成**（含原「待拍」那一问的自行裁定） | 列落 `crates/entities/src/stock_reflections.rs:44`（**按档**挂逐档反思行）；唯一判据 `crates/analysis-engine/src/mover_recall.rs:44` 复用 `DEFAULT_GAIN_THRESHOLDS`（没写第二份字面量）；DTO `src/commands/stock_analysis.rs:5528`；面板列 `src/components/stock-analysis/ReflectionPanel.tsx:60`；四态测试 `mover_recall.rs:863` |
 | A5 = #8（数据质量跨轮熔断，v134） | **代码已完成**，实机核对等 C1 | 新实体 `data_quality_observations` + `dao/repo/data_quality_fuse.rs` + Switch `dqi-fuse-gate` + `DecisionTrustNotice` |
 | B #7 ① | **已实施**（真改图 SubWorkflow×4） | §一○一（v135/136），四张 `stock-horizon-<档>` 模板已播种路径与版本门齐 |
 | B #18（宏观换官方源） | **已拍板、未实施** | 现场 grep `stats.gov.cn` / 新源客户端 ⇒ 零命中；`macro_data.rs` 仍只有 CPI/PPI/PMI/GDP 四条真序列 |
@@ -7086,7 +7086,7 @@ Rhai 常数 / 节点映射里被硬编码的字面值）**必须逐条实测后�
 1. 上一轮报的「面板仍渲染 **33** 条」是按**分组条目**算的**上限**：其中 3 条（`val_ultra_short/short/long_kline_limit`）
    根本没有本地 `b()` 兜底声明，只靠后端变量表渲染。门里 `panelExposes` 同口径 ⇒ 待把输出改成「渲染面（上限）」，
    并分列「有本地兜底声明」的条数。
-2. i18n 第一遍用 `corpus.includes(camelKey)` 判引用，把 `KLineChart.tsx:72` 的 **store 字段** `klinePeriod`
+2. i18n 第一遍用 `corpus.includes(camelKey)` 判引用，把 `KLineChart.tsx:85` 的 **store 字段** `klinePeriod`
    误当成对 `configDescriptions.klinePeriod` 的引用 ⇒ 留了 1 个孤儿键。第二遍改按**完整调用形态**
    `configDescriptions.<key>` 判 ⇒ 补删，读数 `仍被引用 0`。
    ⇒ 判据：**「有没有引用」要按调用形态判，按标识符子串判必然假阳。**
@@ -7195,7 +7195,7 @@ Rhai 常数 / 节点映射里被硬编码的字面值）**必须逐条实测后�
 两种读法现在都落上了。
 
 - **现场读数（为什么这不是「没做」而是「做在另一条链上」）**：
-  `crates/harness/src/workflow_types.rs:2712` 的 `WorkflowTemplateResponse` **一直带** `pub version: i32`，
+  `crates/harness/src/workflow_types.rs:2720` 的 `WorkflowTemplateResponse` **一直带** `pub version: i32`，
   `src/components/workflow/types/workflow.types.ts:856` 的 TS 侧也**一直声明** `version: number`
   ⇒ 数据从后端一路送到前端，**唯独两个列表控件从不渲染它**（`TemplateList.tsx` 标题行只渲染
   icon/名称/预设标签/只读标签，`SystemTemplateList.tsx` 同形）。所以这不是取数缺口，是纯呈现缺口。

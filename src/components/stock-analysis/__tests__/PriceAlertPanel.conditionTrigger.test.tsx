@@ -22,7 +22,14 @@ vi.mock("react-i18next", () => ({
 }));
 
 const invokeMock = vi.fn();
+// 面板取列表已走 `invokePluginCommand`（T2 命令桥）⇒ 计数必须挂在它上面，
+// 否则「重取列表」在这条链上恒为 0，破坏样本的反证会变成恒真。
+const cmdMock = vi.fn();
 const handlers = new Map<string, (event: { payload: unknown }) => void>();
+
+vi.mock("@/lib/pluginCommand", () => ({
+  invokePluginCommand: (...args: unknown[]) => cmdMock(...args),
+}));
 
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
@@ -62,6 +69,8 @@ beforeEach(() => {
   handlers.clear();
   invokeMock.mockReset();
   invokeMock.mockResolvedValue([]);
+  cmdMock.mockReset();
+  cmdMock.mockResolvedValue([]);
 });
 
 describe("PriceAlertPanel — conditional-order-triggered 事件", () => {
@@ -112,11 +121,11 @@ describe("PriceAlertPanel — conditional-order-triggered 事件", () => {
       </App>,
     );
     const handler = await handlerOf("conditional-order-triggered");
-    const before = invokeMock.mock.calls.length;
+    const before = cmdMock.mock.calls.length;
 
     act(() => handler({ payload: triggerPayload() }));
 
-    expect(invokeMock.mock.calls.length).toBe(before);
+    expect(cmdMock.mock.calls.length).toBe(before);
   });
 
   // 破坏样本的反证：价格告警那条链收到 payload 时**必须**重取列表。
@@ -128,7 +137,7 @@ describe("PriceAlertPanel — conditional-order-triggered 事件", () => {
       </App>,
     );
     const alertHandler = await handlerOf("price-alert-triggered");
-    const before = invokeMock.mock.calls.length;
+    const before = cmdMock.mock.calls.length;
 
     act(() =>
       alertHandler({
@@ -146,6 +155,6 @@ describe("PriceAlertPanel — conditional-order-triggered 事件", () => {
       })
     );
 
-    await waitFor(() => expect(invokeMock.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(cmdMock.mock.calls.length).toBeGreaterThan(before));
   });
 });

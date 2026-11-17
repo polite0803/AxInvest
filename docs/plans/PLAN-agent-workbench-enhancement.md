@@ -434,8 +434,8 @@ App.tsx:388  <GlobalTabBar />           ← 仅 /chat **且 activeTab==="chat"**
 
 | 位置 | 触发条件 | 后果 |
 |---|---|---|
-| `ChatPage.tsx:70,86` | URL 带 `conversationId` / `prompt` / `workflow`（业务页「打开会话」跳转） | 清空后地址退回 `/chat`，`ws` 丢失 |
-| `WorkflowPage.tsx:50` | URL 带 `template` / `industry` | 同上 |
+| `ChatPage.tsx:37,86` | URL 带 `conversationId` / `prompt` / `workflow`（业务页「打开会话」跳转） | 清空后地址退回 `/chat`，`ws` 丢失 |
+| `WorkflowPage.tsx:57` | URL 带 `template` / `industry` | 同上 |
 
 画面**仍是对的**（Hub 的 store 分支不重置），但地址栏不再可寻址 —— 「Tab 可深链 / 可刷新恢复」静默失效。
 （两处都有「无相关参数则提前 return」的守卫，所以**只在带这些参数跳转时**才踩，这也是它没在阶段一被发现的原因。）

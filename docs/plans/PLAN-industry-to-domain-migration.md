@@ -979,7 +979,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 |---|---|---|---|
 | `domain_pack` 模块相关 sib | 8 | M2 拆切下沉（见 12.3） | 中（已完成方案） |
 | 两个协议常量 | 2 | **M1 已落地** | 低 |
-| `upsert_template`（`opc_workflows/mod.rs:585`） | 1 | 下沉 dao / analysis-engine | 中 |
+| `upsert_template`（`opc_workflows/mod.rs:546`） | 1 | 下沉 dao / analysis-engine | 中 |
 | `declared_kpi_thresholds`（`runtime.rs:93`） | 1 | 下沉 analysis-engine | 中 |
 | `load_analysis_config`（`opc_data.rs:17`） | 1 | 薄包装，直接引 analysis-engine | 低 |
 | `opc_execute_workflow` / `get_domain_pack_learning_config` / `load_rl_config`（`opc_capability_pack_actions.rs`） | 3 | **大函数**迁移，跨 crate 拆签名 | 高 |
@@ -1194,7 +1194,7 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 - `opc_list_industries` — `opc_capability_pack_actions.rs:2052`（Tauri 命令）+ `opc_capability_pack_bridge.rs:35 / 395`（LLM 工具名）+ `register_commands.rs:821`（**build.rs 生成物**）⇒ **跨前后端契约，改名须三处同步 + 前端 i18n**
 - `opc_list_runtime_industries` — `runtime.rs:510` + `register_commands.rs:839`
 - `list_industries` **5 个定义 / 4 种返回类型**：`capability_pack_config.rs:1078` `Vec<(String,String)>` · `src-tauri/crates/analysis-engine/src/opc/learning.rs:287` `Vec<&String>` · `domain_pack_orchestration/mod.rs:102` `Vec<&str>` · `task_context.rs:263` `Vec<String>` · `runtime.rs:401`（纯转发）
-- `LegacyIndustryPathRedirect` — `ContentArea.tsx:114` / `:304`（路由 `/opc/industry/:packId` 的兼容重定向）
+- `LegacyIndustryPathRedirect` — `ContentArea.tsx:59` / `:304`（路由 `/opc/industry/:packId` 的兼容重定向）
 
 **⑥ 重复实现债（实测）**
 - `copy_dir_recursive` **5 份独立实现 / 3 种返回类型**：`company-runtime/src/opc/capability_pack.rs:819`(`io::Result`) · `migration/migration/mod.rs:89`(`Result<(),String>`) · `tools/tools/skill/mod.rs:1695`(`Result<(),ToolError>`) · `commands/dashboard.rs:169` · `commands/skills/install.rs:1204`
@@ -1291,8 +1291,8 @@ M2 的四个目标文件（`opc_domain_pack_actions` / `opc_domain_pack_runtime`
 |---|---|---|---|---|
 | `load_analysis_config` | `opc_data.rs:17` | `pub fn` | 读 `analysis.yaml` + `serde_yaml` | **analysis-engine**（零新增依赖，与 `read_manifest` 同类） |
 | `declared_kpi_thresholds` | `runtime.rs:93` | `pub(crate) fn` | 读域包 `runtime.yaml` 声明阈值 | **analysis-engine**（须先核 runtime schema 落点） |
-| `find_repo_config_dir` | `opc_workflows/mod.rs:237` | `pub fn` | 纯 `fs` / `path` | analysis-engine 或公共 utils |
-| `upsert_template` | `opc_workflows/mod.rs:538` | `pub(crate) async fn` | **DB 写 `workflow_templates`** | **dao 层**（不宜落 analysis-engine） |
+| `find_repo_config_dir` | `opc_workflows/mod.rs:246` | `pub fn` | 纯 `fs` / `path` | analysis-engine 或公共 utils |
+| `upsert_template` | `opc_workflows/mod.rs:546` | `pub(crate) async fn` | **DB 写 `workflow_templates`** | **dao 层**（不宜落 analysis-engine） |
 | `opc_execute_workflow` | `opc_capability_pack_actions.rs:2361` | ~~`pub async fn`（**Tauri 命令**）~~ 已于 #264 刀 C 批 2 退役（该行是退役注释；内核 `execute_workflow_core` 现为 `:2248`） | 命令体 | **须抽 service**：命令变薄包装 ⇒ 属重构，非搬迁 |
 
 ⇒ 后 2 项（`upsert_template` / `opc_execute_workflow`）**超出「机械替换」范畴**，待获批后单独立项。

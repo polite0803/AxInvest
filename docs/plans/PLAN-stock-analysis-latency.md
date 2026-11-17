@@ -72,7 +72,7 @@
 ### 2.1 DAG 定义与节点注册
 
 - 模板版本：`src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs:1610`（`TEMPLATE_VERSION = 179`）。
-- 建图入口：`seed_stock_analysis.rs:1765`（`seed_stock_analysis_workflow_template`）。
+- 建图入口：`seed_stock_analysis.rs:1798`（`seed_stock_analysis_workflow_template`）。
 - 节点装配：`seed_stock_analysis.rs:3458` 起 `nodes: Vec<WorkflowNode>` / `edges: Vec<WorkflowEdge>`，
   闭包 `tool_node` / `tool_node_noarg` / `agent` / `edge` 分别负责造节点与边。
 - 分析师：`seed_stock_analysis.rs:3847-3958`，21 个 `a-*` 逐档实例，挂在装饰容器 `p-analysts`
@@ -80,7 +80,7 @@
 - 风险三视角：`seed_stock_analysis.rs:4805-4853` 的 `p-risk-assess`，三条 branch
   `risk-agg/risk-con/risk-neu`；三者之间**零依赖边**，共同出边到 `agg-risk`
   （`seed_stock_analysis.rs:5035`）。
-- 决策：`trader`（Agent，`seed_stock_analysis.rs:5878`）→ `portfolio-mgr`（Code/Rhai，
+- 决策：`trader`（Agent，`seed_stock_analysis.rs:10783`）→ `portfolio-mgr`（Code/Rhai，
   `seed_stock_analysis.rs:6037`），边 `seed_stock_analysis.rs:6446`。
 - 执行引擎：`src-tauri/crates/rt-workflow/src/work_engine/engine/mod.rs:1437`
   （`compute_ready_nodes`）与 `:3144-3191`（按类型并发上限、批量 `JoinSet::spawn`）。
@@ -141,7 +141,7 @@
   `timeout=30 s`，实测 **99 ms**。
 - 图上串行：`trader → portfolio-mgr`（`:6446`），因为公式有 **f7 腿**直接消费
   `trader.content.verdict.*`（`:6165-6181`）。
-- 事后对比：`compute_decision_agreement`（`stock_workflow/decision.rs:2313`）、
+- 事后对比：`compute_decision_agreement`（`stock_workflow/decision.rs:2328`）、
   `compute_horizon_agreements`（`:1944`）、`attribute_horizon_divergence`（`:2125`）、
   `conflict_type`（`:2503-2531`）、`f7_weight_pct`（`:2448-2467`）。
 - 结论：**“两种决策并行”不成立**——公式侧是亚秒级确定性计算，且与 LLM 侧存在语义依赖；
@@ -1074,7 +1074,7 @@ fmt 0 / 播种模块 95 条 0 / 前端 vitest 2816 条 0 / i18n 五门 / 契约�
 | # | 消费点 | 读的键 | 键缺失时的实际表现 | 严重度 |
 |---|---|---|---|---|
 | A0 | `stock_analysis.rs:200-299` `compute_what_if` | **整份 `portfolio-mgr.rhai` 重跑**（`include_str!` 同一文件）+ 28 项可调参数 | **What-If 面板整块没有对象可重跑**；同时 `decision_trail` / `technical_veto` / `simulation_gate` 三个产出一起消失 | 高 |
-| A1 | `stock_workflow/decision.rs:5559` `merge_price_fields_from_llm` | 顶层 `f7_source` | **方向翻转**：键消失 ⇒ `is_some_and(src != "trader")` 为假 ⇒ 放行 LLM 价位合并 ⇒ 公式侧 targetPrice/stopLoss 被对手方覆盖 ⇒ 假独立重新出现 | 高 |
+| A1 | `stock_workflow/decision.rs:5574` `merge_price_fields_from_llm` | 顶层 `f7_source` | **方向翻转**：键消失 ⇒ `is_some_and(src != "trader")` 为假 ⇒ 放行 LLM 价位合并 ⇒ 公式侧 targetPrice/stopLoss 被对手方覆盖 ⇒ 假独立重新出现 | 高 |
 | A2 | `stock_analysis_setup/mod.rs:1706` → `reflection-comparator.rhai:176` | `sub-analysis.portfolio-mgr.posterior` | 缺席 ⇒ `post = 0.0` ⇒ `classify_confidence_level(0.0)` = 非常低 ⇒ 反思归因文本被写成「决策置信度非常低(posterior=0.0)」—— 把「读不到」写成「非常低」 | 高 |
 | A3 | `stock_workflow/decision.rs:2462-2480` | `f7_free.{f7_weight,total_weight,posterior,action}` | `f7_free_info = None` ⇒ `f7_free_action_score = None` ⇒ 在「LLM 无视角输入」分支落到 `f7_dominant`（本应是 f7_low/moderate/high_influence）⇒ 静默改冲突分类；`f7_weight_pct` 同时变 null | 中高 |
 | A4 | `portfolio-mgr.rhai:461-464 / 2335 / 2490 / 2677 / 2695` | 四路分支全缺席时的兜底 | **因子模型是四档架构的失败兜底**：四个 `pm-h-<档>` 节点是 `continue_on_fail: true`（`seed_stock_analysis.rs:6858` 等）⇒ 任一档失败即静默容忍 ⇒ 四路全缺席 ⇒ 档位按 `effective_posterior` 阈值定、仓位走主链凯利、置信走 `final_confidence_pure` ⇒ **这条路径上因子模型确实产出结论** | 高 |

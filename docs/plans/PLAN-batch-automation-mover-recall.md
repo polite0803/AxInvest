@@ -19,10 +19,10 @@
 
 | 能力 | 位置 | 说明 |
 |---|---|---|
-| 定时任务模型 | `crates/runtime-core/src/cron_job.rs:47` | `CronJob`：cron + task_type + workflow_id + params + priority（含 `Batch` 级），持久化 `cron_jobs` 表 |
+| 定时任务模型 | `crates/runtime-core/src/cron_job.rs:55` | `CronJob`：cron + task_type + workflow_id + params + priority（含 `Batch` 级），持久化 `cron_jobs` 表 |
 | 调度器 | `src/scheduler/mod.rs:3`、`src/scheduler/queue.rs` | 不起新线程，`CronJobStore::list_due` 轮询触发，支持优先级 |
 | 执行分发 | `src/init/services.rs:2230` | 各 task_type 分支；内置交易日闸门（非交易日 skip 并 record_run 留痕） |
-| 手动执行 | `src/commands/scheduled_task.rs:343` | `trigger_now` 立即跑指定任务；内置任务白名单 `BUILTIN_TASK_TYPES`（`scheduled_task.rs:113`），新增内置 task_type 必须同步登记，否则「立即执行」报不支持 |
+| 手动执行 | `src/commands/scheduled_task.rs:343` | `trigger_now` 立即跑指定任务；内置任务白名单 `BUILTIN_TASK_TYPES`（`scheduled_task.rs:134`），新增内置 task_type 必须同步登记，否则「立即执行」报不支持 |
 | 前端管理 | **任务中心** `src/pages/TasksCenterPage/`（导航「任务中心」） | 三个 tab：概览 / 定时任务 / 全部运行。定时任务 tab 全量列 `cron_jobs`（`list_scheduled_tasks`），分组与「立即执行」可用性由 `taskGrouping.ts` 两张前端白名单判；全部运行 tab 走适配器注册表 `adapters/registry.ts`，现有三源：cron（定时运行记录）、pipeline（投资管道）、timeTravel（时间旅行批次复盘/回放扫描） |
 
 ### 2.2 五条内置每日任务（选股/分析/反思已自动化）
@@ -54,7 +54,7 @@
 
 ### 2.4 反思与优化链路现状
 
-- 批量反思：`src/commands/stock_workflow/reflection.rs:2255` `run_batch_reflection_inner`
+- 批量反思：`src/commands/stock_workflow/reflection.rs:3282` `run_batch_reflection_inner`
   消费 pending 队列，落 `stock_reflections`（verdict / lesson_summary / what_went_wrong /
   missed_signals / fix_for_future / mover_label 等）。
 - 股票进化引擎：`crates/analysis-engine/src/stock_self_evolution.rs:144` `StockSelfEvolutionEngine`，
@@ -83,7 +83,7 @@
 
 ### 3.2 当初为什么要关（理由成立，但针对的是另一条链）
 
-上游 `WorkflowEvolverImpl` 的自动触发规则（`crates/trajectory/src/workflow_adapters/evolver.rs:542`）：
+上游 `WorkflowEvolverImpl` 的自动触发规则（`crates/trajectory/src/workflow_adapters/evolver.rs:30`）：
 最近 20 次运行中 `Failed + PartiallyCompleted` 占比 ≥ 50%（`auto_trigger_success_threshold=0.5`、
 `min_usages=3`，`crates/trajectory/src/skill_evolution.rs:88`），且当次质量分 ≤ 5
 （调用点 `crates/rt-workflow/src/work_engine/engine/mod.rs:5707`），即 LLM 自动变异模板
@@ -140,7 +140,7 @@
    `src/init/stock_automation_cron_seed.rs`，同步补交易日/周末闸门判定（核查依赖收盘快照，
    周五数据周六跑；节假周末同样 skip 留痕）。
 4. **任务中心接线（强制，否则种子任务虽自动出现但分组错/不能手动跑）**：
-   - 后端 `src/commands/scheduled_task.rs:113` `BUILTIN_TASK_TYPES` 登记
+   - 后端 `src/commands/scheduled_task.rs:134` `BUILTIN_TASK_TYPES` 登记
      `mover-recall`、`evolution-proposal`（该表注释已立规：与 services.rs 执行分支一一对应）；
    - 前端 `src/pages/TasksCenterPage/taskGrouping.ts` 两处同步：`INVEST_TASK_TYPES`
      （归入「投资」组而非「自定义」组）与 `BUILTIN_EXECUTABLE_TYPES`（点亮「立即执行」火箭按钮）；

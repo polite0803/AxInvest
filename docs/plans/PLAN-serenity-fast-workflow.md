@@ -38,7 +38,7 @@
 | `a-candidate-mapper` | `stock-candidate-mapper` | 8 轮 | 600s（chunk 300s） | 候选筛选打分，prompt 硬要求「至少尝试 3 轮不同关键词搜索」 |
 
 > 关键路径 = 1 个扫描 Agent → 5 路并行拆解 Agent（各自多轮工具往返）→ 1 个 mapper Agent（多轮搜索 + 财务验证）。**LLM 往返次数**（而非并发度）决定总时长；5 路拆解即便并行，各自 8 轮工具往返也会把尾延迟拖长。
-> 关闭幻觉守卫、`model: None`（回落会话/默认模型）见 `seed_serenity.rs:563`、`:575-578`。
+> 关闭幻觉守卫、`model: None`（回落会话/默认模型）见 `seed_serenity.rs:1910`、`:575-578`。
 
 **落库与前端（复用面）**
 

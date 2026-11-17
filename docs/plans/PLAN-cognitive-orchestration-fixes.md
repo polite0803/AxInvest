@@ -261,8 +261,8 @@ trajectory 进化证据判定 3 处真实使用），删的只是 `clamp_mode_fo
 
 | 环节                       | 代码锚点                                                                                                   | 是否动索引                       |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| 启动期全量重建             | `src/init/state.rs:2122` `register_all_capabilities` → `:1687-1703` 从 `workflow_templates` 表全量收集护照 | ✅                               |
-| 启动时机                   | `src/init/state.rs:2993`（`run_deferred_init` 内，只在启动时跑一次）                                       | —                                |
+| 启动期全量重建             | `src/init/state.rs:2127` `register_all_capabilities` → `:1687-1703` 从 `workflow_templates` 表全量收集护照 | ✅                               |
+| 启动时机                   | `src/init/state.rs:2998`（`run_deferred_init` 内，只在启动时跑一次）                                       | —                                |
 | SaveAsWorkflow 工具        | `crates/tools/src/tools/save_as_workflow.rs:240-246`                                                       | ❌ 只 `create_workflow_template` |
 | save_dynamic_workflow 命令 | `src/commands/workflow_template.rs:2851-2855`                                                              | ❌ 只 `insert_workflow_template` |
 | 模板 update / delete       | `src/commands/workflow_template.rs`（全文无 `capability_indexer` 引用）                                    | ❌                               |

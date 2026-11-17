@@ -799,6 +799,11 @@ pub async fn create_app_state_with_resource_dir(
             engine.set_notification_sink(std::sync::Arc::new(
                 axagent_notification::incoming_webhook::IncomingWebhookSenderImpl,
             ));
+            // P6.0-⑥: 注入文档解析接缝 —— documentParser 节点文件路径分支走真解析
+            // （格式分派归 document-parser crate，与 search/tools 同一实现）。
+            engine.set_document_parser(std::sync::Arc::new(
+                axagent_document_parser::parser_impl::DefaultDocumentParser,
+            ));
             // 注：ToolRegistry 暂未注入到 WorkEngine。
             // 原因：local_tool_registry 是 Arc<tokio::sync::Mutex<UnifiedToolRegistry>>，
             // 而 ToolRegistry trait 方法是同步的，无法在同步方法中获取 tokio Mutex 锁。

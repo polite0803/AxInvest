@@ -61,6 +61,15 @@ pub trait SettingsSource: Send + Sync {
 /// 内部是纯文件 I/O + 解析，无需数据库句柄。
 pub trait DocumentParser: Send + Sync {
     fn extract_text(&self, file_path: &Path, mime_type: &str) -> Result<String>;
+
+    /// 按路径解析（MIME 由实现层从扩展名推断）。
+    ///
+    /// 契约：`extract_text(file_path, "")` 的实现层必须把空 MIME 解释为
+    /// 「按扩展名推断」而不是「按纯文本读」——否则 pdf/xlsx 等二进制格式
+    /// 会被误当文本读失败。默认实现直接转发空 MIME 字串。
+    fn extract_text_by_path(&self, file_path: &Path) -> Result<String> {
+        self.extract_text(file_path, "")
+    }
 }
 
 // ── 统一知识源抽象（v2）──────────────────────────────────────────

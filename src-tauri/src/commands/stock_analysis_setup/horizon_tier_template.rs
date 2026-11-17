@@ -18,7 +18,7 @@
 //! §九十一(0) 的可搬运边界把三节点都算进子模板，但普查后 `portfolio-mgr` 有**四个父侧读面**
 //! （`seed_stock_analysis.rs` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射 + 四条供给边，
 //! 消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`）。子执行只把父扇出节点的
-//! `node_id`/`output_var` 双键写回父池（`work_engine/engine/mod.rs:1850-1857`），
+//! `node_id`/`output_var` 双键写回父池（`work_engine/engine/mod.rs:1863-1870`），
 //! 于是风险节点一旦进子模板，这四条映射就变成「指向不存在的路径」⇒ `present()` 恒假 ⇒
 //! **v128 B1 的按档风险收紧整条静默退役**（正是本仓登记的「配置项空接线」族）。
 //!

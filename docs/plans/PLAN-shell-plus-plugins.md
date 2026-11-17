@@ -279,7 +279,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:837 register_vendor(&str)` + `:1646` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:266`）不单列 |
 | `search.source` | `axagent-ai/crates/agent/src/search_provider.rs:95` | `axagent-ai/crates/agent/src/search_orchestrator.rs:28`（`HashMap<SourceType, Arc<dyn SearchProvider>>`） | 4 | `rate_limit()`/计费属宿主。**2026-11-02 实测分档**：`search()` 侧结果 400–600 B × 默认 `max_results` 10 ⇒ **①，可直接走接缝**；`extract_content(url)` 返回大文本（今天 50 KB 截断）⇒ **②**，需**分页/游标**而非分块。DTO（`search_provider.rs:38-57`、`research_state.rs:416,76`）全 serde✓。前置 **D1** |
 | `image.gen` | `axagent-ai/crates/providers/src/image_gen.rs:64` | `name()` 自述键 + providers 注册面 | 2 | **2026-11-02 实测**：`url` 形态 ≈200 B ⇒ **①**；`base64` 形态 **1.3–4 MB × n** ⇒ ②（接近 `MAX_FRAME_LEN = 64 MiB` 的 `plugin-proto/src/lib.rs` 的 `pub const MAX_FRAME_LEN`，但 n 张累加会顶穿）⇒ 裁定取「只回 url / 宿主侧落盘引用」形态，**保 b64 才需要 D2 分块**。DTO（`image_gen.rs:24-36,45-54`）全 serde✓；provider 凭证 scope 留宿主 |
-| `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:533` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:61` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 1）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 1 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |
+| `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:539` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:67` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 2）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 2 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |
 | `rag.source` | `axagent-core/crates/harness/src/rag_provider.rs:7/40`（Embedding/Rerank）+ `axagent-infra/crates/search/src/rag.rs:45 RAGSource` | `search/src/rag.rs:941`（3 分支工厂） | 5（4 生产 + 1 测试替身） | **§0.6.3 未拍**；`VectorStore` 是持 `DatabaseConnection` 的 struct（`search/src/vector_store.rs:127`），sqlite-vec 进程内扩展 ⇒ 出进程即失效 |
 | `mcp.server` | `axagent-core/crates/harness/src/mcp_service.rs:54 McpClientService` + `:48 McpServerStore` | `axagent-ai/crates/mcp/src/client_service_impl.rs:155 build_*` | 1 | **订正（2026-11-02 实测）**：句柄**不过帧** ⇒ 门面 `McpClientService` 是零字段单元结构（`client_service_impl.rs:21-22`），连接池在实现侧进程内全局（`mcp_client.rs:661` / `:434` / `:2407`）；桥今天即 one-shot（`mcp_tool_bridge.rs:197-202`）⇒ **可直接走请求-响应接缝**，「会话式 op」是**延迟优化而非 K4 前置**。需另补两条生命周期 op（`evict_by_server_id` `mcp_client.rs:547`、`probe_and_evict` `mcp_health.rs:100`）⇒ 可与 `notify.channel` 同批。入参 300–800 B、每工具 500 B–2 KB ⇒ ①；`callTool`/`readResource` 返回值**无上界** ⇒ ②。拟接缝 id = `mcp.client`（`McpServerStore` 留内核：配置面不是能力面）。前置 **D1** |
 | `strategy.quant` | `axagent-core/crates/harness/src/strategy_contract.rs:440` | `src-tauri/src/commands/quant_backtest.rs:363-430`（`match strategy_type` 硬构造） | 7 | **最高**：`&mut self` + `&mut StrategyCtx` 的 bar 级热循环 ⇒ 会话式批量 op（spawn/setParam/onBarBatch/drop） |
@@ -9843,7 +9843,7 @@ harness trait `latest_analyses_for_stocks`（默认实现报错 + `default_impls
 - **harness 默认必错**：`axagent-core/crates/harness/src/stock_analysis.rs:332` / `:344` / `:357`；stub 测试 +3（`:950` 起注释）。
 - **宿主 core**：`src-tauri/src/commands/mover_recall_analysis.rs` 两条读 core（`:439` / `:468`）、`launch` 开 `pub(crate)`（`:377`）、`start_for_scheduler`（`:362`）与调度器共用不变；三条 `#[tauri::command]` wrapper 与 `#[agent_command]` 标注删除（`tauri::State` / `AppState` / `agent_command` 三导入随之零引用同批删除）。`mover_recall_analysis` 模块 `#[tauri::command]` 归零 ⇒ 审计域模块数 16→15。
 - **宿主 service（三 impl）**：`mover_recall_analysis_batch` 在 `src-tauri/src/init/stock_analysis_service.rs:788`、`mover_recall_analysis_batches` 在 `:842`、`run_mover_recall_analysis` 在 `:806`。
-- **装配说明**：`HostStockAnalysis` 新增两个字段 —— `time_travel_batch_lock`（与 `AppState` **同一把** as-of 互斥锁，`init/state.rs:1876-1878` 块外先落变量）与 `work_engine`（批次执行链走工作流引擎），`state.rs` 装配同批传入。
+- **装配说明**：`HostStockAnalysis` 新增两个字段 —— `time_travel_batch_lock`（与 `AppState` **同一把** as-of 互斥锁，`init/state.rs:1881-1883` 块外先落变量）与 `work_engine`（批次执行链走工作流引擎），`state.rs` 装配同批传入。
 - **启动钩子（接线）**：`src-tauri/src/init/services.rs:88`。
 - **启动钩子（定义）**：`start_mover_recall_batch_reclaim` 在 `src-tauri/src/init/services.rs:4708`（5s 延迟，与 `start_stale_analysis_reclaim` 同因）。
 - **worker 分派臂**：`axagent-plugins/crates/plugins/src/worker.rs:4633` / `:4647` / `:4661` 三臂；权限表 `:559` `run_mover_recall_analysis` 落 `Write`（两读不登记）；新测试 `stock_analysis_338_mover_recall_analysis_permissions`（`:15098`）。
@@ -10403,8 +10403,8 @@ mod / llm_resolve / var_filter 为辅助模块不计）。
 
 | 类 | 执行器 | 接缝/问题 |
 |---|---|---|
-| **已指到接缝（9）** | tool（`ToolRegistry`，engine/mod.rs:2569；start_workflow 真注入）、agent / llm / llm_classifier / switch（`ProviderRegistry`）、trigger（`TriggerManager`）、debate / swarm / multi_agent（`callbacks.debate_body_dispatch` 回调，内部走 dispatcher） | ✅ |
-| **死接缝（1）** | database_query：`ExecutionState.database_query_service` 字段在（execution_state.rs:260）但**全仓零赋值点**——`start_workflow`（engine/mod.rs:5244-5255）注入 tool_registry、business_rule_engine 与 notification_sink（#355 起三样）但不含 database_query_service ⇒ 恒 None ⇒ executor 恒报 `database_query_service not injected`。**形态级红灯**：与 vector_retrieve 同族的「看着存在但其实到不了」 | ⚠ 待修（接入 wiring） |
+| **已指到接缝（9）** | tool（`ToolRegistry`，engine/mod.rs:2582；start_workflow 真注入）、agent / llm / llm_classifier / switch（`ProviderRegistry`）、trigger（`TriggerManager`）、debate / swarm / multi_agent（`callbacks.debate_body_dispatch` 回调，内部走 dispatcher） | ✅ |
+| **死接缝（1）** | database_query：`ExecutionState.database_query_service` 字段在（execution_state.rs:260）但**全仓零赋值点**——`start_workflow`（engine/mod.rs:5260-5271）注入 tool_registry、business_rule_engine 与 notification_sink（#355 起三样）但不含 database_query_service ⇒ 恒 None ⇒ executor 恒报 `database_query_service not injected`。**形态级红灯**：与 vector_retrieve 同族的「看着存在但其实到不了」 | ⚠ 待修（接入 wiring） |
 | **死执行器（1）** | vector_retrieve：callback（`set_vector_retrieve_callback`）已删除，节点恒返回「not configured」（vector_retrieve_executor.rs:6,58） | ⚠ 待裁（接缝化或退役） |
 | **引擎自身职责（13）** | aggregator / condition / delay / end / fallback / loop / merge / parallel / validation / data_transformer / logging / approval（挂起+表持久化）/ code（rhai 引擎运行时——脚本执行是引擎能力本身，非外域能力） | ✅ 无需外接缝 |
 | **违规·自带领域 IO（7）** | email（lettre SMTP 173 行）、http_request（reqwest 263 行）、webhook_send（reqwest 133 行）、**notification（reqwest + 四平台 payload 构造 164 行，§964 点名）**、file_operation（std::fs 73 行）、storage（std::fs 151 行）、**document_parser（空壳假解析 58 行，§964 点名）** | ✖ 本单元主体 |
@@ -10442,3 +10442,40 @@ mod / llm_resolve / var_filter 为辅助模块不计）。
   测试替身 MockSink 按 AGENTS.md 合法例外加 mod 级 disallowed_types 豁免 + SAFETY 注释
   （先例照 code_executor.rs:115 形态）。附带修掉 config_assembly.rs 测试 mod 两处既存
   unused imports（clippy lib test target 暴露）。
+
+### 批 C 落地账（2026-11-17，document_parser 接真接缝）
+
+- **语义分路**（不伪装）：`input_var` 变量值是**现存文件路径** ⇒ 经接缝真解析全文
+  （status=parsed）；**纯文本** ⇒ 视为上游已解析内容直通（status=inline）；两者都拿不到
+  ⇒ 如实报错（`VariableNotFound` / `DOCUMENT_INPUT_NOT_STRING`），原空壳的「假 parsed 成功」退役。
+- **harness**（`search_sources.rs`）：`DocumentParser` trait 加默认方法 `extract_text_by_path`
+  ——契约「空 MIME 由实现层按扩展名推断」（不加新 trait ⇒ K1 三锚不动）。
+- **document-parser**：`extract_text` 空 MIME 分支改按 `mime_from_extension` 推断
+  （此前落「纯文本 fallback」，pdf/xlsx 会误当文本读失败）；补契约单测。
+- **rt-workflow**：ExecutionState 增 `document_parser` 字段；WorkEngine setter/注入链同
+  notification_sink 形态（start_workflow + 两处 per-node 上下文）；执行器 58→192 行
+  （内容：分路 + 全文 `content` 输出 + 六类定点测试）。
+- **wiring**：init/state.rs 装配块 `set_document_parser(DefaultDocumentParser)`——与
+  search/tools 的 parser 同一实现类型（补齐第三处注入点）。
+- **读数**：rt-workflow 355/355（本批 +6）、document-parser 5/5（+1）；clippy 三 crate
+  （harness/document-parser/rt-workflow）--all-targets --all-features -D warnings 0；
+  fmt 三 crate --check 0；主 crate check 0。
+
+### 批 C 收尾：判定档对账（2026-11-17）
+
+- **红灯**（推门禁实得）：`document.parser` 登记项一条硬失败两子项——① 证据
+  `document-parser/src/lib.rs:533` 的 token「match ext」因本批给 `extract_text` 加 6 行空 MIME
+  契约分支而位移（533 已是 `SUPPORTED_EXTENSIONS.contains`，真 `match ext` 在 **539**，
+  `match mime_type` 61→**67**）；② 机械实现者数 1→**2**（本批执行器侧新增 `MockParser`
+  内联 test 替身）。
+- **处置**（照 `rag.source` 同源先例，不放宽判据）：证据行 533→539 且 token 唯一化
+  （`match ext.to_ascii_lowercase()`）+ 补 `anchorText` 定位键（`--repin-code` 的三档判据要求
+  唯一定位，缺键一律拒写——本次先例：token「match ext」在同文件命中 3 行 [115, 539, 665]
+  ⇒ 机器不可判，必须人工唯一化）；实现者登记值 1→2 + 新增 `countTraitNote` 说明构成
+  （1 生产 `DefaultDocumentParser` + 1 内联 test 替身；§24.5 的 `implementorsTestMod`
+  只单列、不扣减）。镜像表 + PLAN:282 同行号同批订正，`planAnchorText` 同步为订正后的
+  整行逐字（它是 `--repin-plan` 的定位键，不同步会让将来重锚错位）。
+- **读数**：判定档 0（hard 37 项一致 + 锚点 23 项）；`--repin-code` 65/65 证据锚点逐行相符
+  （缺定位键 0）；判定档 `--selftest` OK（18 类 check 无空洞）；doc-refs 基线外新增 0；
+  single-source --ci 0；clippy 三 crate 0；fmt 四 workspace --all --check 0；
+  rt-workflow 355/355、document-parser 5/5。

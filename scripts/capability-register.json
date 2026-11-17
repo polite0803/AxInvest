@@ -1248,7 +1248,7 @@
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省（原文另注明 K3 今天不成立）。⚠ **本条按 §24.2 改判：准入 = K1 成立（外部实现者 1）+ K3 成立；K2 检测器不命中，属漏检族第 4 例（见 `countRule.k2Caveat` 第 (4) 条）⇒ 不许因 ⑧ 不命中而降桶**（§19.4 已立「登记表不跟着检测器走」的同方向禁令）。",
       "trait": "DocumentParser",
       "expect": {
-        "implementors": 1,
+        "implementors": 2,
         "seam": "待建",
         "remote": false,
         "reading": null
@@ -1268,11 +1268,12 @@
           "role": "契约"
         },
         {
-          "ref": "axagent-infra/crates/document-parser/src/lib.rs:533",
+          "ref": "axagent-infra/crates/document-parser/src/lib.rs:539",
           "file": "axagent-infra/crates/document-parser/src/lib.rs",
-          "line": 533,
-          "token": "match ext",
-          "role": "ext→MIME 字符串映射表（§14.4 + §24.2 裁定：**不是键控分发点** —— 块内不构造实现类型；真正的行为选择点是同文件 `lib.rs:61` 的 `match mime_type`，同样无构造分支 ⇒ ⑧ 在结构上不命中，见 `countRule.k2Caveat` 第 (4) 条）"
+          "line": 539,
+          "token": "match ext.to_ascii_lowercase()",
+          "role": "ext→MIME 字符串映射表（§14.4 + §24.2 裁定：**不是键控分发点** —— 块内不构造实现类型；真正的行为选择点是同文件 `lib.rs:67` 的 `match mime_type`，同样无构造分支 ⇒ ⑧ 在结构上不命中，见 `countRule.k2Caveat` 第 (4) 条）",
+          "anchorText": "    match ext.to_ascii_lowercase().as_str() {"
         },
         {
           "ref": "axagent-infra/crates/search/src/sources.rs:22",
@@ -1296,9 +1297,10 @@
           "role": "硬编码绕过"
         }
       ],
-      "note": "原文「37 分支是编译期穷举 ⇒ K3 今天要改主壳」+ 两套 OnceLock 全局 + 一处硬编码绕过，四处旁路全部锚定。",
-      "planAnchorText": "| `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:533` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:61` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 1）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 1 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |",
-      "planLine": 282
+      "note": "原文「37 分支是编译期穷举 ⇒ K3 今天要改主壳」+ 两套 OnceLock 全局 + 一处硬编码绕过，四处旁路全部锚定。 **2026-11-17 #355 批 C（P6.0-⑥）**：document_parser_executor 接真接缝（§211 批 C）⇒ 执行器侧新增 `MockParser` 测试替身（内联 test mod）⇒ 机械实现者数 1→2；同批 `document-parser/src/lib.rs` 的 `extract_text` 加 6 行空 MIME 契约分支 ⇒ ext→MIME 映射表行号 533→539、`match mime_type` 行号 61→67（本条 evidence 与 PLAN:282 同行号同批订正）。",
+      "planAnchorText": "| `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:539` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:67` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 2）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 2 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |",
+      "planLine": 282,
+      "countTraitNote": "登记值 2 = 1 个生产实现者（document-parser crate 的 `DefaultDocumentParser`）+ 1 个 `#[cfg(test)]` 内联测试替身（#355 批 C 的 `MockParser`，rt-workflow document_parser_executor.rs）。本门实现者读数的机械口径包含内联 test mod（#54 §24.5 的 implementorsTestMod 只单列、不扣减，rag.source 同源）⇒ 镜像表按 2 登记。"
     },
     {
       "seamId": "rag.source",

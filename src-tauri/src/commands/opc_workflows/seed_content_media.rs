@@ -858,7 +858,7 @@ fn build_ip_building() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>, String, String,
 /// 为什么按 `lc-assemble.content` 而不用节点 id：两条互斥创作路径
 /// （novel 的 `lc-assemble` / 非 novel 的 `lc-assemble-single`）**故意共用同一个
 /// output_var 名 `lc-assemble`**（见 lc-assemble-single 处的注释），
-/// engine/mod.rs:1850-1857 把结果同时写进 node_id 与 output_var 两个 key，
+/// engine/mod.rs:1863-1870 把结果同时写进 node_id 与 output_var 两个 key，
 /// 故按 output_var 名读天然覆盖两条路径。
 ///
 /// 失败语义：**显式 throw**，绝不回退成整段 JSON 或空字符串。

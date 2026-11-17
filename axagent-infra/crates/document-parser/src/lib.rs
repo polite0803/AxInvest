@@ -58,6 +58,12 @@ pub fn parser_options() -> &'static ParserOptions {
 
 /// Extract plain text from a document file based on its MIME type.
 pub fn extract_text(file_path: &Path, mime_type: &str) -> Result<String> {
+    // 空 MIME 契约（harness DocumentParser::extract_text_by_path）：按扩展名推断。
+    let mime_type = if mime_type.is_empty() {
+        mime_from_extension(file_path)
+    } else {
+        mime_type
+    };
     match mime_type {
         // Plain text files
         "text/plain" | "text/markdown" | "text/csv" | "text/html" | "text/xml"
@@ -1283,5 +1289,16 @@ mod tests {
         }
         assert_eq!(mime_from_extension(std::path::Path::new("a.mp4")), "video/mp4");
         assert_eq!(mime_from_extension(std::path::Path::new("a.wav")), "audio/wav");
+    }
+
+    #[test]
+    fn empty_mime_infers_from_extension() {
+        // harness DocumentParser::extract_text_by_path 的空 MIME 契约：
+        // "" ⇒ 按扩展名推断（text/markdown 分支），而不是走「纯文本 fallback」。
+        let tmp = std::env::temp_dir().join(format!("axagent-dp-mime-{}.md", std::process::id()));
+        std::fs::write(&tmp, "# 标题\n正文").unwrap();
+        let text = extract_text(&tmp, "").unwrap();
+        assert_eq!(text, "# 标题\n正文");
+        let _ = std::fs::remove_file(&tmp);
     }
 }

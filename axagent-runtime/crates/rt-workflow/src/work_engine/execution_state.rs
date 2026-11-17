@@ -265,6 +265,10 @@ pub struct ExecutionState {
     /// P6.0-⑥：渠道 payload 格式与 HTTP 发送归通知能力层，executor 只传三元组。
     #[serde(skip, default)]
     pub notification_sink: Option<Arc<dyn axagent_harness::IncomingWebhookSender>>,
+    /// 文档解析接缝（可选，None = documentParser 节点在文件路径分支报
+    /// DOCUMENT_PARSER_NOT_INJECTED）。P6.0-⑥：解析实现归 document-parser crate。
+    #[serde(skip, default)]
+    pub document_parser: Option<Arc<dyn axagent_harness::DocumentParser>>,
     /// partial_result 流式事件广播通道。LoopExecutor 在每次迭代完成后 send。
     /// 接收端由 WorkEngine.subscribe_partial_results 暴露给外部。
     #[serde(skip, default)]
@@ -345,6 +349,7 @@ impl ExecutionState {
             business_rule_engine: None,
             tool_registry: None,
             notification_sink: None,
+            document_parser: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(
@@ -388,6 +393,7 @@ impl ExecutionState {
             business_rule_engine: None,
             tool_registry: None,
             notification_sink: None,
+            document_parser: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(

@@ -10530,4 +10530,4 @@ mod / llm_resolve / var_filter 为辅助模块不计）。
 - **门禁**：clippy harness/rt-workflow/主 crate 0；fmt 三 workspace 0；判定档 0（hard 37 一致）；
   doc-refs 基线外新增 0（10 处行号回正 + Cargo.toml:55→46）；single-source 0（双键写
   1863-1870→1932-1939 等 9 处回正）。⚠ `docs/features/build-ci.md:112` 的
-  `rt-workflow/Cargo.toml:55` 引用随依赖删除降到 :46，已同批订正。
+  `rt-workflow/Cargo.toml` 的 `[lints]` 行号随依赖删除由 55 降到 46（build-ci.md 引用已同批订正）。

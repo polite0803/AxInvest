@@ -40,10 +40,7 @@ mod tests {
         // 双维度类型：展示分类与引擎分类不同（引擎=Tool，展示=Container）。
         let aggregator = list.iter().find(|d| d.type_name == "aggregator").unwrap();
         assert_eq!(aggregator.kind, axagent_harness::workflow_types::NodeKind::Tool);
-        assert_eq!(
-            aggregator.display_kind,
-            axagent_harness::workflow_types::NodeKind::Container
-        );
+        assert_eq!(aggregator.display_kind, axagent_harness::workflow_types::NodeKind::Container);
         assert!(aggregator.is_container);
     }
 }

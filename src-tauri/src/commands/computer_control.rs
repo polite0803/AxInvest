@@ -90,10 +90,7 @@ pub async fn perform_ui_element_action(
     action: UiActionKind,
     scroll_intent: Option<UiScrollIntent>,
 ) -> Result<(), String> {
-    ui_tree_provider()
-        .perform(&id, action, scroll_intent)
-        .await
-        .map_err(map_ui_error)
+    ui_tree_provider().perform(&id, action, scroll_intent).await.map_err(map_ui_error)
 }
 
 /// 纯键盘注入（无坐标）：按键 + 修饰键 + 可选文本。
@@ -104,8 +101,5 @@ pub async fn press_key(
     modifiers: Vec<UiKeyModifier>,
     text: Option<String>,
 ) -> Result<(), String> {
-    ui_tree_provider()
-        .press_key(&key, &modifiers, text.as_deref())
-        .await
-        .map_err(map_ui_error)
+    ui_tree_provider().press_key(&key, &modifiers, text.as_deref()).await.map_err(map_ui_error)
 }

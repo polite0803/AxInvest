@@ -21,9 +21,7 @@ use std::sync::Arc;
 
 use axagent_harness::registry::ProviderRegistry;
 
-use super::executors::{
-    AgentExecutor, ProviderCache, ProfileCache,
-};
+use super::executors::{AgentExecutor, ProfileCache, ProviderCache};
 use super::node_executor_trait::NodeExecutorTrait;
 
 /// 带依赖 executor 的构造上下文（sync 构造期快照，不跨 await）。
@@ -168,12 +166,12 @@ pub fn register_builtin_factories() {
 ///
 /// - `ctx = None`：只返回 Simple 工厂产物（供 `init_builtin` 轻量路径）；
 /// - `ctx = Some`：返回全部 32 个（供 `WorkEngine::init_dispatcher`）。
-pub fn build_all(ctx: Option<&ExecutorFactoryCtx>) -> Vec<(&'static str, Arc<dyn NodeExecutorTrait>)> {
+pub fn build_all(
+    ctx: Option<&ExecutorFactoryCtx>,
+) -> Vec<(&'static str, Arc<dyn NodeExecutorTrait>)> {
     register_builtin_factories();
     let map = factories().read();
-    map.iter()
-        .filter_map(|(key, f)| f.build(ctx).map(|exec| (*key, exec)))
-        .collect()
+    map.iter().filter_map(|(key, f)| f.build(ctx).map(|exec| (*key, exec))).collect()
 }
 
 #[cfg(test)]
@@ -211,7 +209,10 @@ mod tests {
                 &self,
                 _node: &axagent_harness::workflow_types::WorkflowNode,
                 _context: &super::super::execution_state::ExecutionState,
-            ) -> Result<super::super::node_executor_trait::NodeOutput, super::super::node_executor_trait::NodeError> {
+            ) -> Result<
+                super::super::node_executor_trait::NodeOutput,
+                super::super::node_executor_trait::NodeError,
+            > {
                 Ok(super::super::node_executor_trait::NodeOutput {
                     output: serde_json::json!({"ok": true}),
                     output_var: None,

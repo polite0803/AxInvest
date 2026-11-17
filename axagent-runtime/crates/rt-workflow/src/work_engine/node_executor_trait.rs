@@ -234,7 +234,9 @@ pub trait NodeExecutorTrait: Send + Sync {
 /// 共存期 enum 仍是权威，但 descriptor 的 type_name/kind 与原 match 逐字同集
 /// （阶段2 测试 `registry_and_match_arms_cover_same_types` 已锁），故查表等价。
 /// 未注册类型在此 panic 而非静默降级——enum 变体全覆盖，正常路径不可达。
-fn descriptor_of(node: &WorkflowNode) -> std::sync::Arc<dyn axagent_harness::workflow_node_dyn::WorkflowNodeDescriptor> {
+fn descriptor_of(
+    node: &WorkflowNode,
+) -> std::sync::Arc<dyn axagent_harness::workflow_node_dyn::WorkflowNodeDescriptor> {
     axagent_harness::workflow_node_descriptors::descriptor_for_node(node)
         .expect("WorkflowNode 类型必须已注册 descriptor（阶段3 不应静默降级）")
 }

@@ -255,7 +255,7 @@ fn value_to_string(value: &Value) -> String {
 // ── 通用模板拼装 API（领域无感知） ──
 //
 // 这一层是"如何把若干文本块按 slot 顺序拼成一个完整 system_prompt"，
-// 本身不包含任何 stock/finance/research 之类的领域字符串。
+// 本身不包含任何领域字符串。
 //
 // 领域（domain）通过 `DomainConstraintsFn` 在 binary setup 阶段注入
 // 自己的硬约束（head/tail），调用方决定要不要约束、约束什么内容。
@@ -302,7 +302,7 @@ impl ConstraintBlocks {
 
 /// 领域约束注入回调：上游不知道领域存在。
 ///
-/// 参数是 role name（如 "stock-analyst"），由领域自行决定给哪些角色
+/// 参数是 role name，由领域自行决定给哪些角色
 /// 注入哪些约束。返回的 `ConstraintBlocks` 中为 None 的字段将被忽略。
 ///
 /// 由调用方（主 binary）在 setup 时注册：

@@ -29,14 +29,14 @@ enum SlotOutcome {
 /// - **dispatcher 侧**（本函数，走 Rhai）：只认 `{{ $vars.x }}` / `{{ $node["id"].y }}`；
 ///   裸名在 Rhai 里是「变量未定义」，带连字符的路径（`a-catalyst.content`）更是被
 ///   解析成**减法**。
-/// - **agent prompt 侧**（`prompt_template::render_prompt`，走点路径）：认 `{{stock_code}}`
+/// - **agent prompt 侧**（`prompt_template::render_prompt`，走点路径）：认 `{{code}}`
 ///   / `{{a-catalyst.content.action}}`，且被大量写进 `agency_experts/*.md` 与 seed 的
 ///   `system_prompt`。
 ///
 /// 而 dispatcher 在节点执行**之前**就会对整个节点 JSON（含 `config.system_prompt`）
 /// 递归扫描 ⇒ prompt 里的裸路径必然抛错 ⇒ `resolve_value_templates` 整体失败 ⇒
 /// **整个节点回退**，同节点里合法的 `{{ $vars.x }}` 也跟着一起失去解析机会。
-/// 2026-10-23 运行日志实证：8 次 `Variable not found: stock_code` + 整节点回退；
+/// 2026-10-23 运行日志实证：8 次 `Variable not found: code` + 整节点回退；
 /// 另有 65 处 `{{input}}` 同型（`input` 同样不在 Rhai scope 里）。
 ///
 /// ## 合并后的唯一规则
@@ -78,7 +78,7 @@ fn resolve_slot(expr: &str, ctx: &ExpressionContext) -> SlotOutcome {
 /// 示例:
 ///   "Hello {{ $vars.name }}, total: {{ $vars.qty * $vars.price }}"
 ///   → 扫描到两个表达式，逐个求值后拼接
-///   "股票 {{stock_code}}" → 按路径取变量表中的 `stock_code`（见 `resolve_slot`）
+///   "目标 {{code}}" → 按路径取变量表中的 `code`（见 `resolve_slot`）
 pub fn resolve_template(template: &str, ctx: &ExpressionContext) -> Result<String, TemplateError> {
     let re = Regex::new(r"\{\{(.+?)\}\}").map_err(|e| TemplateError::ParseError(e.to_string()))?;
     let mut result = String::new();

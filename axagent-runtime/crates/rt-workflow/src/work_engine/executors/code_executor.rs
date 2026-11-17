@@ -81,7 +81,7 @@ pub fn shared_rhai_engine() -> &'static Engine {
         engine.set_max_expr_depths(1024, 1024);
         register_common_functions(&mut engine);
         // P1-D10 修复: 调用 wiring 层注册的额外初始化函数（如 pm_* 函数）。
-        // rt-workflow 是 hybrid 层，不能依赖 stock-analysis（AxInvest 专属 implementor），
+        // rt-workflow 是 hybrid 层，不能依赖宿主专属的领域实现 crate，
         // 但 wiring 层（src/init/）可以同时依赖两者，通过此回调在 Engine 初始化时
         // 注入 portfolio-mgr.rhai 依赖的 pm_evidence_scale / pm_kelly_position 等函数。
         // 修复前：DAG 主路径未注册 pm_*，导致 portfolio-mgr.rhai 的 pm_* 调用失败
@@ -156,8 +156,8 @@ pub enum RegisterInitializerError {
 ///
 /// # 用途
 ///
-/// rt-workflow（hybrid 层）不能依赖 AxInvest 专属 crate（如 stock-analysis），
-/// 但 portfolio-mgr.rhai 调用了 `pm_evidence_scale` 等 5 个由 stock-analysis
+/// rt-workflow（hybrid 层）不能依赖宿主专属 crate，
+/// 但领域脚本调用了 `pm_evidence_scale` 等 5 个由宿主领域包
 /// 提供的 Rust 函数。wiring 层通过此回调在 Engine 初始化时注册这些函数，
 /// 使 DAG 主路径执行 portfolio-mgr.rhai 时 pm_* 调用能正确解析。
 #[must_use = "注册失败（Engine 已冻结）会让脚本函数缺失，必须显式处理"]

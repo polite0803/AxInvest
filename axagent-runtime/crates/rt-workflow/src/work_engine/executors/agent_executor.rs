@@ -322,8 +322,8 @@ impl AgentExecutor {
     /// - 注册后 → 后续 PR 可在 4a/4f 处消费 `self.domain_constraints`
     ///   自行决定是否调用、何时调用（primacy head 在 4a 之前、recency tail 在 4f 之后）
     ///
-    /// 纯 API 扩展点，不修改现有 4a-4f 段拼装逻辑。stock-analysis 等领域
-    /// 后续 PR 自行迁移 STOCK_HARD_CONSTRAINTS / STOCK_COLLAB_REMINDER 常量。
+    /// 纯 API 扩展点，不修改现有 4a-4f 段拼装逻辑。领域包
+    /// 后续 PR 自行迁移各自的领域硬约束常量。
     pub fn set_domain_constraints(&self, f: DomainConstraintsFn) {
         *self.domain_constraints.lock() = Some(f);
     }
@@ -735,7 +735,7 @@ impl NodeExecutorTrait for AgentExecutor {
                     "⚠️ 以下上游数据源未获取到数据: {}。\n\
 ——你仍然必须完成指定的分析任务，基于现有数据（行情、K线、财务数据）给出分析结论。\n\
 ——即使部分数据缺失，也要基于可用信息给出明确的看多/看空/中性判断，不要输出占位文本。\n\
-——该股票的基本面信息（代码、名称、行业）已在上下文中给出，请充分利用。\n\
+——该标的的基本面信息（代码、名称、行业）已在上下文中给出，请充分利用。\n\
 ——绝不允许输出'数据缺失'、'无法获取'、'工具失败'、'抱歉'等拒绝句式。\n\n",
                     missing_sources.join(", ")
                 );
@@ -1108,7 +1108,12 @@ impl NodeExecutorTrait for AgentExecutor {
             // 通过 var_filter::collect_data_vars 过滤掉 100+ 模板变量（scoring_trend /
             // fscore_roe_min 等），避免把它们全部硬灌到 LLM user_prompt 里。
             // （input/user_message 已在上方注入，过滤避免重复）
-            for (k, v) in super::var_filter::collect_data_vars(&context.variables) {
+            let input_keys: Vec<String> = context
+                .input_params
+                .as_object()
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
+            for (k, v) in super::var_filter::collect_data_vars(&context.variables, &input_keys) {
                 if k == super::USER_INPUT_VAR || k == super::USER_MESSAGE_VAR {
                     continue;
                 }
@@ -2013,7 +2018,7 @@ impl NodeExecutorTrait for AgentExecutor {
                         )
                     } else {
                         format!(
-                            "你是一位股票分析师。请基于以上工具数据和被截断的报告，\
+                            "你是一位分析师。请基于以上工具数据和被截断的报告，\
                              重新生成一份**完整的**分析报告。\
                              \n报告正文控制在 800 字以内，重点突出关键指标解读和风险评估。\
                              \n报告末尾必须另起一行追加 VERDICT 机读标签：{VERDICT_TAG_SPEC}{spec_note}"
@@ -2841,7 +2846,7 @@ impl NodeExecutorTrait for AgentExecutor {
             } else if needs_empty_verdict_merge {
                 // 分支 C（2026-10-23）: `verdict` 空壳 + 业务字段在顶层 ⇒ 合并进 verdict。
                 // 顶层字段**不删**：`ValueAssessmentPanel.flattenVerdictReport` /
-                // `stock-analysis-export` 仍按顶层读，删了就是拆东墙补西墙。
+                // 导出节点仍按顶层读，删了就是拆东墙补西墙。
                 if let Some(merged) = parsed_opt
                     .as_ref()
                     .and_then(axagent_harness::verdict_shape::merge_flat_into_verdict)
@@ -4284,8 +4289,8 @@ fn format_debate_context_source(
     format_context_source(source, value)
 }
 
-/// 工具固定序列预取的白名单：只收录参数可由 `stock_code`/无参确定的工具。
-/// `search_stock` / `search_news` / `get_cls_flash` 依赖模型临时构造查询，不预取。
+/// 工具固定序列预取的清单：只收录参数可由模板变量/无参确定的工具。
+/// 依赖模型临时构造查询的工具不预取（清单由模板声明）。
 /// P0-B 开关：只有显式 `fixed_prefetch` 才走程序化预取；`auto` 保持旧行为。
 fn should_prefetch_tools(mode: &str) -> bool {
     mode == "fixed_prefetch"
@@ -4322,13 +4327,13 @@ fn tool_call_budget_exhausted(executed: usize, max: usize) -> bool {
     max > 0 && executed >= max
 }
 
-/// P0-B：从节点工具集里挑出可被程序化预取的子集（白名单 + 参数可由 stock_code 确定）。
+/// P0-B：从节点工具集里挑出可被程序化预取的子集（清单 + 参数模板由模板声明）。
 /// 预取规格（引擎去域化）：由工作流模板变量声明，引擎不出现任何域工具名。
 ///
 /// - `prefetch_tools`: `["tool", ...]`——只预取清单内的工具；
 /// - `prefetch_args`: `{"tool": { ... }}`——实参模板；值内 `{{var:NAME}}` 引用运行期变量：
 ///   整串即占位 ⇒ 原样克隆变量值（保 JSON 类型），内嵌占位 ⇒ 字符串化替换；
-///   任一变量缺失 ⇒ 该工具不预取（与旧「无股票代码则不预取」同判）。
+///   任一变量缺失 ⇒ 该工具不预取（保守：拿不到输入就不预取）。
 #[derive(Debug, Clone, Default)]
 struct PrefetchSpec {
     tools: Vec<String>,
@@ -4835,7 +4840,7 @@ fn try_extract_json_fragment(text: &str) -> Option<String> {
 }
 
 /// 轻量级 JSON 修复：处理 LLM 高频语法错误（尾逗号、nulll 等）。
-/// 注：stock_workflow.rs 中有完整版 repair_json，此处是同步的简化版。
+/// 注：宿主侧有完整版 repair_json，此处是同步的简化版。
 fn repair_json(s: &str) -> String {
     let mut result = s.to_string();
     // 常见 LLM 输出错误修复

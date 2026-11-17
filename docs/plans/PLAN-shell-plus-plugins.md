@@ -10362,4 +10362,8 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 - **验证**：rt-workflow `cargo test --lib` **344/344**；主 crate seed_* 测试 **80/80**（TEMPLATE_VERSION/变量表门禁）；`cargo check --all-targets` 0；
   rt-workflow 与 axagent 两 crate `clippy --all-targets --all-features -D warnings` 0；8 根 `cargo fmt --all --check` 0；
   doc-refs 0（修 1 条行号漂移）；single-source --ci 0；判定档 0；`ci-check.mjs --quick` **EXIT=0（121.5s）**。
-- **未做**：`agent_executor.rs` 生产区其余股票词（属性/字段注释）本轮只清了预取链；全量 `grep -i stock` 归零属 ⑤ 的收尾面，列下一步。
+- **生产区股票词归零（同日补齐）**：`rt-workflow/src` 生产区（首 `#[cfg(test)]` 之前）实测 **30 → 0**。
+  除预取链外，另清：`var_filter::USER_INPUT_KEYS`（恒为 `["stock_code","stock_name"]`）改为从
+  `ExecutionState.input_params` 对象键派生（调用方 `agent_executor` 传入，零内置领域键名）；
+  两处内嵌提示词（“该股票的基本面信息”→ “该标的…”；“你是一位股票分析师”→ “你是一位分析师”）；
+  其余 20+ 处注释/示例统一去域化。cargo test 344/344、clippy 0、fmt 0、doc-refs 0、ci-check --quick 0。

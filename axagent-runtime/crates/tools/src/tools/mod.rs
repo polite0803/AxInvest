@@ -18,7 +18,7 @@ pub mod capability_pack_defs;
 pub mod capability_shared;
 pub mod capability_view;
 pub mod ci;
-#[cfg(feature = "computer-use")]
+#[cfg(feature = "ui-automation")]
 pub mod computer_use;
 pub mod context;
 pub mod cron;
@@ -167,7 +167,7 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
         // ── 人格系统 ──
         std::sync::Arc::new(personality::PersonalityTool),
         // ── 桌面控制 ──
-        #[cfg(feature = "computer-use")]
+        #[cfg(feature = "ui-automation")]
         std::sync::Arc::new(computer_use::ComputerUseTool),
         // ── 浏览器 ──
         std::sync::Arc::new(browser::BrowserNavigateTool),

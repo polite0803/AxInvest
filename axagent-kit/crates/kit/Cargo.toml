@@ -8,11 +8,9 @@ publish = false
 anyhow = { workspace = true }
 async-trait = "0.1"
 axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
-base64 = "0.22"
 chrono = { workspace = true }
 dirs = "6"
 enigo = { workspace = true, optional = true }
-image = { workspace = true }
 keyring = "4"
 libc = "0.2"
 parking_lot = "0.12"
@@ -28,7 +26,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["process"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
-xcap = { workspace = true, features = ["wgc"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -47,4 +44,4 @@ windows = { version = "0.62", default-features = false, features = [
 atspi = "0.30.0"
 
 [features]
-computer-use = ["dep:enigo", "dep:xcap"]
+ui-automation = ["dep:enigo"]

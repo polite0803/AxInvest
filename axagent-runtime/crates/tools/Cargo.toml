@@ -51,9 +51,9 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 tempfile = "3"
 
 [features]
-default = ["computer-use"]
-# 桌面控制（ComputerUseTool）：真实 enigo/xcap 实现，由 axagent-kit 提供
-computer-use = ["axagent-kit/computer-use"]
+default = ["ui-automation"]
+# 桌面控制（ComputerUseTool）：无障碍树语义实现，由 axagent-kit 提供
+ui-automation = ["axagent-kit/ui-automation"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -75,4 +75,4 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("computer-use"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("ui-automation"))'] }

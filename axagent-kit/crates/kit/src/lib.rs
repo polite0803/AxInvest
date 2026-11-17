@@ -8,8 +8,6 @@
 pub mod approval_rules;
 pub mod browser_automation;
 pub mod command_validator;
-#[cfg(feature = "computer-use")]
-pub mod computer_control;
 pub mod git_tools;
 pub mod html_cleaner;
 pub mod model_knowledge;
@@ -21,16 +19,12 @@ pub mod prompt_template;
 pub mod resource_limits;
 pub mod sandbox_runner;
 pub mod schema_validator;
-pub mod screen_capture;
 pub mod service_container;
 pub mod shell_parser;
 pub mod token_budget;
 pub mod token_counter;
 pub mod unified_config;
 pub mod utils;
-
-#[cfg(feature = "computer-use")]
-pub mod ui_automation;
 
 /// 无障碍树语义化实现（Windows UIA / macOS AX / Linux AT-SPI2）。
 pub mod ui_tree;
@@ -47,7 +41,6 @@ pub mod permission;
 pub use axagent_harness::plan_compiler;
 pub mod preset_templates;
 pub mod prompts;
-pub mod screen_vision;
 pub mod secure_store;
 pub mod skill_dirs;
 pub mod slash_command;

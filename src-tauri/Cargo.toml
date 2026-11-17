@@ -57,7 +57,6 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
-xcap = "0.9.8"
 
 # 统一 lint 基线（铁律：cargo clippy -- -D warnings）
 # 各子 crate 通过 [lints] workspace = true 继承此配置
@@ -77,10 +76,10 @@ license = "AGPL-3.0-only"
 description = "AxInvest - AI Desktop Client"
 
 [features]
-default = ["notification", "computer-use"]
+default = ["notification", "ui-automation"]
 notification = ["dep:tauri-plugin-notification"]
 browser-use = []
-computer-use = ["axagent-kit/computer-use", "axagent-providers/computer-use"]
+ui-automation = ["axagent-kit/ui-automation", "axagent-providers/ui-automation"]
 channel-platforms = []
 server = []
 # devtools 仅开发时启用，release 构建不带（减小体积、避免暴露内部信息）

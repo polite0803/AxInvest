@@ -141,7 +141,7 @@ pub(crate) fn filter_tree(nodes: &mut Vec<UiNode>, query: &UiTreeQuery) {
 /// 保留 enigo 是为了 Q1「保留纯键盘注入」裁定；这里绝不调用坐标相关 API，
 /// 也不读取屏幕像素，因此不会引入 xcap / pipewire 依赖链。
 ///
-/// enigo 是 `computer-use` feature 下的 optional 依赖：feature 关闭时明确报
+/// enigo 是 `ui-automation` feature 下的 optional 依赖：feature 关闭时明确报
 /// `Unsupported`，而不是编译失败或静默吞掉按键。
 pub(crate) mod enigo_keyboard {
     use axagent_harness::ui_tree::{UiAutomationError, UiKeyModifier};
@@ -151,7 +151,7 @@ pub(crate) mod enigo_keyboard {
         modifiers: &[UiKeyModifier],
         text: Option<&str>,
     ) -> Result<(), UiAutomationError> {
-        #[cfg(not(feature = "computer-use"))]
+        #[cfg(not(feature = "ui-automation"))]
         {
             let _ = (key, modifiers, text);
             Err(UiAutomationError::Unsupported(
@@ -159,7 +159,7 @@ pub(crate) mod enigo_keyboard {
             ))
         }
 
-        #[cfg(feature = "computer-use")]
+        #[cfg(feature = "ui-automation")]
         {
             use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
@@ -199,8 +199,9 @@ pub(crate) mod enigo_keyboard {
         }
     }
 
-    #[cfg(feature = "computer-use")]
-    fn map_key(key: &str) -> Key {
+    #[cfg(feature = "ui-automation")]
+    fn map_key(key: &str) -> enigo::Key {
+        use enigo::Key;
         match key.to_ascii_lowercase().as_str() {
             "enter" | "return" => Key::Return,
             "tab" => Key::Tab,

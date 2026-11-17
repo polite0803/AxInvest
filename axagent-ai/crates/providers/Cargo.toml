@@ -21,4 +21,4 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [features]
-computer-use = ["axagent-kit/computer-use"]
+ui-automation = ["axagent-kit/ui-automation"]

@@ -29,8 +29,10 @@
 
 ## 1. 为什么要改：现状的结构性缺陷
 
-1. **`find_ui_elements` 名不副实**：Windows 起 PowerShell 拼 `UIAutomationClient` 脚本（`axagent-kit/crates/kit/src/ui_automation.rs:235`）；macOS `osascript` 只列顶层窗口（`axagent-kit/crates/kit/src/ui_automation.rs:341`）；Linux `wmctrl` 列窗口（`axagent-kit/crates/kit/src/ui_automation.rs:397`），AT-SPI2 分支只是 gdbus 探测后返回占位元素 `Accessible desktop`（`axagent-kit/crates/kit/src/ui_automation.rs:460`）。查到元素后仍只取 bounds 转坐标交 Enigo 点击。
-2. **xcap 拖入 pipewire/libclang 链**：xcap 在 Linux 只用于 `Monitor::all()` 查 `scale_factor`（`ui_automation.rs:67`），却引入 `pipewire → libspa-sys → bindgen → libclang`，导致本机 WSL 宿主 crate 无法编译；而 Linux 截图实际走 ImageMagick `import`（`screen_capture.rs:370-395`）。
+> 以下 §1 各条引用的 `ui_automation.rs` / `screen_capture.rs` 均为**改造前历史文件**（阶段 5「截图链清退」已整文件删除），行号记录的是当时快照，不再作为当前代码的可定位引用。
+
+1. **`find_ui_elements` 名不副实**：Windows 起 PowerShell 拼 `UIAutomationClient` 脚本（历史 `ui_automation.rs`）；macOS `osascript` 只列顶层窗口（同上）；Linux `wmctrl` 列窗口（同上），AT-SPI2 分支只是 gdbus 探测后返回占位元素 `Accessible desktop`（同上）。查到元素后仍只取 bounds 转坐标交 Enigo 点击。
+2. **xcap 拖入 pipewire/libclang 链**：xcap 在 Linux 只用于 `Monitor::all()` 查 `scale_factor`（历史 `ui_automation.rs`），却引入 `pipewire → libspa-sys → bindgen → libclang`，导致本机 WSL 宿主 crate 无法编译；而 Linux 截图实际走 ImageMagick `import`（历史 `screen_capture.rs`）。
 3. **AI 工具以截图为核心观察手段**：`computer_use.rs:76-87` 把 `data:image/png;base64` 喂给 LLM，6 个 action（screenshot/click/type/key/scroll/move）全是坐标范式。
 4. **类型双写**：`ui_automation::UIElement` 与 `screen_vision::UIElementInfo` 并存，harness 中零 computer-use 契约（违反「共享类型权威在 harness」铁律）。
 

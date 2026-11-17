@@ -20,7 +20,7 @@ license = "AGPL-3.0-only"
 # 统一第三方依赖版本：与 src-tauri/Cargo.toml 逐字同源，避免两个 workspace 解析出不同版本。
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
-# computer-use 特性所需（kit 的 enigo / image / xcap 以 workspace = true 继承）。
+# ui-automation 特性所需（kit 的 enigo 以 workspace = true 继承；image 由 tools 继承）。
 enigo = "0.6"
 hex = "0.4"
 image = { version = "0.25", features = ["png"] }
@@ -37,7 +37,6 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-xcap = "0.9.8"
 
 # 统一 lint 基线（与 src-tauri 保持一致）。
 [workspace.lints.clippy]

@@ -109,7 +109,7 @@
 
 - **依赖方向铁律**：`组件 → harness ← 实现`。consumer（`agent` / `orchestrator` / `runtime-core` / `gateway` / `quant` / `market-sim` / `notification`）只依赖 `axagent-harness`；implementor 可依赖 `harness + entities + 兄弟 implementor`；hybrid（`tools` / `rt-messaging` / `rt-workflow`）禁依赖 consumer 与 entities；wiring（`runtime` / `src/commands/` / `src/init/`）可用全部但必须经 harness trait 传递能力。
 - **角色登记**：`AGENTS.md` 末尾的「附：新增 crate 角色登记（追加区）」是唯一台账；新增 crate 必须在此登记角色。
-- **已知缺口**：41 个 crate 中仅 7 个真正继承 `[lints] workspace = true`（`plugins` / `plugin-proto` / `rt-messaging` / `rt-theme` / `rt-webhook` / `runtime` / `telemetry`）；其余 34 个未继承，其中 3 个是**假继承**（`axagent-runtime/crates/notification/Cargo.toml:20-21` 的 `workspace = true` 被注释掉、`axagent-runtime/crates/rt-workflow/Cargo.toml:55` 与 `axagent-runtime/crates/runtime-core/Cargo.toml:29` 的 `[lints]` 段为空表）。后果：`module_name_repetitions = "allow"` 在这些 crate 里丢失，`-D warnings` 可能把既存 warn 变成 error。
+- **已知缺口**：41 个 crate 中仅 7 个真正继承 `[lints] workspace = true`（`plugins` / `plugin-proto` / `rt-messaging` / `rt-theme` / `rt-webhook` / `runtime` / `telemetry`）；其余 34 个未继承，其中 3 个是**假继承**（`axagent-runtime/crates/notification/Cargo.toml:20-21` 的 `workspace = true` 被注释掉、`axagent-runtime/crates/rt-workflow/Cargo.toml:46` 与 `axagent-runtime/crates/runtime-core/Cargo.toml:29` 的 `[lints]` 段为空表）。后果：`module_name_repetitions = "allow"` 在这些 crate 里丢失，`-D warnings` 可能把既存 warn 变成 error。
 
 （对应版本：当前实现）
 

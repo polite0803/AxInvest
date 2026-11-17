@@ -772,64 +772,70 @@ pub async fn create_app_state_with_resource_dir(
     let database_query_service: Arc<dyn axagent_harness::DatabaseQueryService> =
         Arc::new(crate::database_query_impl::SqlxDatabaseQueryService);
 
-    let work_engine: Arc<axagent_runtime::work_engine::WorkEngine> =
-        {
-            // 反思 / 进化 / 优化 / 业务规则统一经能力接缝分发（下方注册），
-            // WorkEngine 在消费点读接缝，不再注入副本。
-            let engine = Arc::new(axagent_runtime::work_engine::WorkEngine::new(
+    let work_engine: Arc<axagent_runtime::work_engine::WorkEngine> = {
+        // 反思 / 进化 / 优化 / 业务规则统一经能力接缝分发（下方注册），
+        // WorkEngine 在消费点读接缝，不再注入副本。
+        let engine = Arc::new(axagent_runtime::work_engine::WorkEngine::new(
+            master_key,
+            harness_registry.clone(),
+        ));
+        // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
+        engine.inject_into_agent_executor(engine.clone()).await;
+        // 注册领域约束：所有角色走通用 DomainConstraints::by_role
+        engine
+            .set_domain_constraints(Arc::new(|role_name: &str| {
+                axagent_rt_workflow::work_engine::domain_constraints::DomainConstraints::by_role(
+                    role_name,
+                )
+            }))
+            .await;
+        // P0-3: 初始化 dispatcher — 注册所有内置 executor（Trigger/Fallback/Tool/...）
+        // 及 pending 中的 Llm/Condition/LlmClassifier。缺此调用会导致 dispatch 时
+        // panic("FallbackExecutor must be registered")。
+        engine.init_dispatcher().await;
+        // 2.7 P1:初始化 TriggerManager — 注入 WorkEngine 引用,
+        // 使 Schedule/Webhook/Event 触发器在触发时能调用 run_workflow。
+        // 缺此调用会导致 TriggerManager.engine 一直为 None,
+        // register_schedule 返回 "引擎未就绪" 错误。
+        engine.init_trigger_manager().await;
+        // ApprovalNode HITL: 注入数据库连接供 ApprovalOps 回调使用
+        engine.set_db(sea_db.clone());
+        // P6.0-⑥: 注入通知直推通道 —— notification_executor 经接缝发送，
+        // 渠道 payload 格式与 HTTP 发送归通知能力层（executor 不自带实现）。
+        engine.set_notification_sink(std::sync::Arc::new(
+            axagent_notification::incoming_webhook::IncomingWebhookSenderImpl,
+        ));
+        // P6.0-⑥: 注入文档解析接缝 —— documentParser 节点文件路径分支走真解析
+        // （格式分派归 document-parser crate，与 search/tools 同一实现）。
+        engine.set_document_parser(std::sync::Arc::new(
+            axagent_document_parser::parser_impl::DefaultDocumentParser,
+        ));
+        // P6.0-⑥ 批 D: 注入通用 SQL 查询接缝 —— databaseQuery 节点此前
+        // 「契约 + 宿主实现齐备但零注入点」⇒ 恒报 DATABASE_SERVICE_UNAVAILABLE。
+        engine.set_database_query_service(database_query_service.clone());
+        // P6.0-⑥ 批 D: 注入知识库检索接缝 —— vectorRetrieve 节点此前恒返回
+        // not_configured 假成功；实现转调既有检索全链（embedding + 向量库 +
+        // 混合检索都在 indexing::search_knowledge，不新造第二套检索）。
+        engine.set_vector_search(std::sync::Arc::new(
+            crate::capability_vector_search::HostVectorSearch::new(
+                sea_db.clone(),
                 master_key,
-                harness_registry.clone(),
-            ));
-            // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
-            engine.inject_into_agent_executor(engine.clone()).await;
-            // 注册领域约束：所有角色走通用 DomainConstraints::by_role
-            engine.set_domain_constraints(Arc::new(|role_name: &str| {
-            axagent_rt_workflow::work_engine::domain_constraints::DomainConstraints::by_role(
-                role_name,
-            )
-        })).await;
-            // P0-3: 初始化 dispatcher — 注册所有内置 executor（Trigger/Fallback/Tool/...）
-            // 及 pending 中的 Llm/Condition/LlmClassifier。缺此调用会导致 dispatch 时
-            // panic("FallbackExecutor must be registered")。
-            engine.init_dispatcher().await;
-            // 2.7 P1:初始化 TriggerManager — 注入 WorkEngine 引用,
-            // 使 Schedule/Webhook/Event 触发器在触发时能调用 run_workflow。
-            // 缺此调用会导致 TriggerManager.engine 一直为 None,
-            // register_schedule 返回 "引擎未就绪" 错误。
-            engine.init_trigger_manager().await;
-            // ApprovalNode HITL: 注入数据库连接供 ApprovalOps 回调使用
-            engine.set_db(sea_db.clone());
-            // P6.0-⑥: 注入通知直推通道 —— notification_executor 经接缝发送，
-            // 渠道 payload 格式与 HTTP 发送归通知能力层（executor 不自带实现）。
-            engine.set_notification_sink(std::sync::Arc::new(
-                axagent_notification::incoming_webhook::IncomingWebhookSenderImpl,
-            ));
-            // P6.0-⑥: 注入文档解析接缝 —— documentParser 节点文件路径分支走真解析
-            // （格式分派归 document-parser crate，与 search/tools 同一实现）。
-            engine.set_document_parser(std::sync::Arc::new(
-                axagent_document_parser::parser_impl::DefaultDocumentParser,
-            ));
-            // P6.0-⑥ 批 D: 注入通用 SQL 查询接缝 —— databaseQuery 节点此前
-            // 「契约 + 宿主实现齐备但零注入点」⇒ 恒报 DATABASE_SERVICE_UNAVAILABLE。
-            engine.set_database_query_service(database_query_service.clone());
-            // P6.0-⑥ 批 D: 注入知识库检索接缝 —— vectorRetrieve 节点此前恒返回
-            // not_configured 假成功；实现转调既有检索全链（embedding + 向量库 +
-            // 混合检索都在 indexing::search_knowledge，不新造第二套检索）。
-            engine.set_vector_search(std::sync::Arc::new(
-                crate::capability_vector_search::HostVectorSearch::new(
-                    sea_db.clone(),
-                    master_key,
-                    vector_store_arc.clone(),
-                ),
-            ));
-            // 注：ToolRegistry 暂未注入到 WorkEngine。
-            // 原因：local_tool_registry 是 Arc<tokio::sync::Mutex<UnifiedToolRegistry>>，
-            // 而 ToolRegistry trait 方法是同步的，无法在同步方法中获取 tokio Mutex 锁。
-            // 当前工具通过 ToolResolver 回调路径执行（services.rs 中注入），
-            // tool_executor.rs 已支持 ToolRegistry find 不到工具时 fallback 到回调路径。
-            // 未来注入需要重构为 parking_lot::Mutex 或创建异步适配器。
-            engine
-        };
+                vector_store_arc.clone(),
+            ),
+        ));
+        // P6.0-⑥ 批 E: 注入工作流节点外部 IO 接缝 —— 五个执行器不再自带
+        // reqwest / std::fs / lettre（策略留执行器，协议归本实现层）。
+        engine.set_http_client(std::sync::Arc::new(crate::capability_workflow_io::HostHttpClient));
+        engine.set_file_io(std::sync::Arc::new(crate::capability_workflow_io::HostFileIo));
+        engine.set_smtp_sender(std::sync::Arc::new(crate::capability_workflow_io::HostSmtpSender));
+        // 注：ToolRegistry 暂未注入到 WorkEngine。
+        // 原因：local_tool_registry 是 Arc<tokio::sync::Mutex<UnifiedToolRegistry>>，
+        // 而 ToolRegistry trait 方法是同步的，无法在同步方法中获取 tokio Mutex 锁。
+        // 当前工具通过 ToolResolver 回调路径执行（services.rs 中注入），
+        // tool_executor.rs 已支持 ToolRegistry find 不到工具时 fallback 到回调路径。
+        // 未来注入需要重构为 parking_lot::Mutex 或创建异步适配器。
+        engine
+    };
 
     // ── P1 agent-loop 接缝：注入 SessionManager 适配器 ─────────────────────
     // wiring 层把 `WorkflowAgentTurnRunner` 同时：

@@ -278,6 +278,18 @@ pub struct ExecutionState {
     /// 实现层，执行器只传「知识库 id + 查询文本 + top_k + 阈值」。
     #[serde(skip, default)]
     pub vector_search: Option<Arc<dyn axagent_harness::VectorSearchSeam>>,
+    /// HTTP 出站接缝（可选，None = httpRequest / webhookSend 节点报
+    /// WORKFLOW_HTTP_NOT_INJECTED）。P6.0-⑥ 批 E：reqwest 归实现层。
+    #[serde(skip, default)]
+    pub http_client: Option<Arc<dyn axagent_harness::WorkflowHttpClient>>,
+    /// 本地文件 IO 接缝（可选，None = fileOperation / storage(fileSystem) 报
+    /// WORKFLOW_FILE_IO_NOT_INJECTED）。P6.0-⑥ 批 E：std::fs 归实现层。
+    #[serde(skip, default)]
+    pub file_io: Option<Arc<dyn axagent_harness::WorkflowFileIo>>,
+    /// SMTP 发信接缝（可选，None = email 节点报 WORKFLOW_SMTP_NOT_INJECTED）。
+    /// P6.0-⑥ 批 E：lettre 归实现层（凭据解析仍在执行器）。
+    #[serde(skip, default)]
+    pub smtp_sender: Option<Arc<dyn axagent_harness::WorkflowSmtpSender>>,
     /// partial_result 流式事件广播通道。LoopExecutor 在每次迭代完成后 send。
     /// 接收端由 WorkEngine.subscribe_partial_results 暴露给外部。
     #[serde(skip, default)]
@@ -360,6 +372,9 @@ impl ExecutionState {
             notification_sink: None,
             document_parser: None,
             vector_search: None,
+            http_client: None,
+            file_io: None,
+            smtp_sender: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(
@@ -405,6 +420,9 @@ impl ExecutionState {
             notification_sink: None,
             document_parser: None,
             vector_search: None,
+            http_client: None,
+            file_io: None,
+            smtp_sender: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(

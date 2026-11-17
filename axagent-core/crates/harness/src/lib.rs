@@ -828,6 +828,13 @@ pub use vector_store::{
     VectorSearchSeam, VectorWriter,
 };
 
+// ── 工作流节点外部 IO 契约（P6.0-⑥ 批 E：executor 只留策略，协议实现归 wiring）──
+pub mod workflow_io;
+pub use workflow_io::{
+    WorkflowFileIo, WorkflowHttpClient, WorkflowHttpRequest, WorkflowHttpResponse,
+    WorkflowSmtpRequest, WorkflowSmtpSender,
+};
+
 // ── 能力发现契约（Capability Discovery Pipeline） ──
 pub mod capability;
 pub use capability::{

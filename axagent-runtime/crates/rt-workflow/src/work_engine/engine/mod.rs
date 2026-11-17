@@ -628,6 +628,12 @@ pub struct WorkEngine {
         Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::DatabaseQueryService>>>>,
     /// 知识库文本检索接缝（可选，P6.0-⑥ 批 D：vectorRetrieve 节点此前恒返回 not_configured）
     vector_search: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::VectorSearchSeam>>>>,
+    /// HTTP 出站接缝（可选，P6.0-⑥ 批 E：httpRequest / webhookSend 不再自带 reqwest）
+    http_client: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowHttpClient>>>>,
+    /// 本地文件 IO 接缝（可选，P6.0-⑥ 批 E：fileOperation / storage 不再自带 std::fs）
+    file_io: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowFileIo>>>>,
+    /// SMTP 发信接缝（可选，P6.0-⑥ 批 E：email 不再自带 lettre）
+    smtp_sender: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowSmtpSender>>>>,
     /// per-execution partial_result 广播器。LoopExecutor 通过 ExecutionState.partial_result_tx
     /// 拿到 sender，每次迭代完成时 broadcast 一个 PartialResultEvent。
     /// 外部通过 `subscribe_partial_results(execution_id)` 拿到 Receiver 实时观察进度。
@@ -1032,6 +1038,36 @@ impl WorkEngine {
         self.vector_search.lock().clone()
     }
 
+    /// 注册 HTTP 出站接缝（P6.0-⑥ 批 E）
+    pub fn set_http_client(&self, client: Arc<dyn axagent_harness::WorkflowHttpClient>) {
+        *self.http_client.lock() = Some(client);
+    }
+
+    /// 取出 HTTP 出站接缝
+    fn http_client(&self) -> Option<Arc<dyn axagent_harness::WorkflowHttpClient>> {
+        self.http_client.lock().clone()
+    }
+
+    /// 注册本地文件 IO 接缝（P6.0-⑥ 批 E）
+    pub fn set_file_io(&self, file_io: Arc<dyn axagent_harness::WorkflowFileIo>) {
+        *self.file_io.lock() = Some(file_io);
+    }
+
+    /// 取出本地文件 IO 接缝
+    fn file_io(&self) -> Option<Arc<dyn axagent_harness::WorkflowFileIo>> {
+        self.file_io.lock().clone()
+    }
+
+    /// 注册 SMTP 发信接缝（P6.0-⑥ 批 E）
+    pub fn set_smtp_sender(&self, sender: Arc<dyn axagent_harness::WorkflowSmtpSender>) {
+        *self.smtp_sender.lock() = Some(sender);
+    }
+
+    /// 取出 SMTP 发信接缝
+    fn smtp_sender(&self) -> Option<Arc<dyn axagent_harness::WorkflowSmtpSender>> {
+        self.smtp_sender.lock().clone()
+    }
+
     /// 取出当前注册的工具注册表（用于在执行节点时注入到 ExecutionState）
     fn tool_registry(&self) -> Option<Arc<dyn axagent_harness::ToolRegistry>> {
         self.tool_registry.lock().clone()
@@ -1111,6 +1147,9 @@ impl WorkEngine {
             document_parser: Arc::new(parking_lot::Mutex::new(None)),
             database_query_service: Arc::new(parking_lot::Mutex::new(None)),
             vector_search: Arc::new(parking_lot::Mutex::new(None)),
+            http_client: Arc::new(parking_lot::Mutex::new(None)),
+            file_io: Arc::new(parking_lot::Mutex::new(None)),
+            smtp_sender: Arc::new(parking_lot::Mutex::new(None)),
             loop_partial_txs: Arc::new(Mutex::new(HashMap::new())),
             loop_interrupt_signals: Arc::new(Mutex::new(HashMap::new())),
             in_flight_nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -3554,6 +3593,10 @@ impl WorkEngine {
                 exec_ctx.database_query_service = self.database_query_service();
                 // 注入知识库检索接缝（可选），vectorRetrieve 节点走 trait 路径
                 exec_ctx.vector_search = self.vector_search();
+                // 注入外部 IO 接缝（可选），httpRequest/webhookSend/fileOperation/storage/email
+                exec_ctx.http_client = self.http_client();
+                exec_ctx.file_io = self.file_io();
+                exec_ctx.smtp_sender = self.smtp_sender();
                 // 注入真实工作流 execution_id，供容器执行器（debate/swarm）内部
                 // build_debate_body_dispatch 正确查找 execution_workflows。
                 // per-node exec_ctx.execution_id 是随机 UUID（format!("node_{uuid})），
@@ -4826,6 +4869,9 @@ impl WorkEngine {
                         exec_ctx.document_parser = self.document_parser();
                         exec_ctx.database_query_service = self.database_query_service();
                         exec_ctx.vector_search = self.vector_search();
+                        exec_ctx.http_client = self.http_client();
+                        exec_ctx.file_io = self.file_io();
+                        exec_ctx.smtp_sender = self.smtp_sender();
                         exec_ctx.cancel_token = Some(cancel_token.clone());
                         exec_ctx.dry_run = options.dry_run;
                         exec_ctx.business_rule_engine = seam_business_rule();
@@ -5308,6 +5354,9 @@ impl WorkEngine {
         state.document_parser = self.document_parser();
         state.database_query_service = self.database_query_service();
         state.vector_search = self.vector_search();
+        state.http_client = self.http_client();
+        state.file_io = self.file_io();
+        state.smtp_sender = self.smtp_sender();
         let input_params = serde_json::to_string(&input).ok();
         workflow_execution_repository()
             .create_workflow_execution(&execution_id, workflow_id, input_params.as_deref())

@@ -47,7 +47,7 @@ mod payloads;
 pub use payloads::*;
 
 pub mod pricing;
-// lib.rs startup 异步初始化块经 `commands::agent::init_pricing_config` 调用（src/lib.rs:602）
+// lib.rs startup 异步初始化块经 `commands::agent::init_pricing_config` 调用（src/lib.rs:604）
 pub use pricing::init_pricing_config;
 // 供本模块内其他函数调用（pricing.rs 中为 pub(super)，对本模块可见）
 use pricing::{check_token_budget, estimate_cost_usd};

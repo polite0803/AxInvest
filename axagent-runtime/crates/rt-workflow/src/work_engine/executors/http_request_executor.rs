@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use axagent_harness::workflow_types::WorkflowNode;
@@ -177,76 +176,63 @@ impl NodeExecutorTrait for HttpRequestExecutor {
         // P0-4: SSRF 校验必须在发请求前做（IP 解析后再发，避免 DNS rebinding）
         assert_url_safe(&config.url).await?;
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs.clamp(5, 300)))
-            // P0-4: 禁止跟随重定向 —— 攻击者可重定向到内网绕过校验
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| {
-                NodeError::exec_failed("http_error", format!("Failed to create HTTP client: {e}"))
-            })?;
-
-        let mut req = match config.method.to_uppercase().as_str() {
-            "GET" => client.get(&config.url),
-            "POST" => {
-                let mut r = client.post(&config.url);
-                if let Some(ref body) = config.body {
-                    r = match config.body_type.as_str() {
-                        "json" => r.json(
-                            &serde_json::from_str::<serde_json::Value>(body)
-                                .unwrap_or(serde_json::Value::String(body.clone())),
-                        ),
-                        "form" => r
-                            .header("content-type", "application/x-www-form-urlencoded")
-                            .body(body.clone()),
-                        _ => r.body(body.clone()),
-                    };
-                }
-                r
-            },
-            "PUT" => {
-                let mut r = client.put(&config.url);
-                if let Some(ref body) = config.body {
-                    r = r.body(body.clone());
-                }
-                r
-            },
-            "PATCH" => {
-                let mut r = client.patch(&config.url);
-                if let Some(ref body) = config.body {
-                    r = r.body(body.clone());
-                }
-                r
-            },
-            "DELETE" => client.delete(&config.url),
-            "HEAD" => client.head(&config.url),
-            "OPTIONS" => client.request(reqwest::Method::OPTIONS, &config.url),
-            _ => {
-                return Err(NodeError::exec_failed(
-                    "http_error",
-                    format!("Unsupported HTTP method: {}", config.method),
-                ));
-            },
-        };
-
-        for (key, value) in &config.headers {
-            req = req.header(key, value);
-        }
-
-        let response = req.send().await.map_err(|e| {
-            NodeError::exec_failed("http_error", format!("HTTP request failed: {e}"))
+        // P6.0-⑥ 批 E：协议细节（reqwest / 超时 / 重定向策略）归实现层；
+        // 本执行器保留的是**策略**——方法白名单、body_type 语义、SSRF 校验与输出包装。
+        let seam = context.http_client.as_ref().ok_or_else(|| {
+            NodeError::exec_failed(
+                "WORKFLOW_HTTP_NOT_INJECTED",
+                "workflow http client not injected into ExecutionState",
+            )
         })?;
 
-        let status = response.status().as_u16();
-        let headers = response.headers().clone();
-        let body_text =
-            response.text().await.unwrap_or_else(|e| format!("Failed to read response body: {e}"));
+        let method = config.method.to_uppercase();
+        if !matches!(
+            method.as_str(),
+            "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+        ) {
+            return Err(NodeError::exec_failed(
+                "http_error",
+                format!("Unsupported HTTP method: {}", config.method),
+            ));
+        }
 
+        let mut headers = config.headers.clone();
+        let body = config.body.clone();
+        let mut body_is_json = false;
+        // body_type 只在 POST 上生效（与原语义一致）；PUT / PATCH 按原文发送
+        if method == "POST" && body.is_some() {
+            match config.body_type.as_str() {
+                "json" => body_is_json = true,
+                "form" => {
+                    headers.insert(
+                        "content-type".to_string(),
+                        "application/x-www-form-urlencoded".to_string(),
+                    );
+                },
+                _ => {},
+            }
+        }
+
+        let response = seam
+            .send(axagent_harness::WorkflowHttpRequest {
+                method,
+                url: config.url.clone(),
+                headers,
+                body,
+                body_is_json,
+                timeout_secs: config.timeout_secs,
+                // P0-4: 禁止跟随重定向 —— 攻击者可重定向到内网绕过校验
+                follow_redirects: false,
+            })
+            .await
+            .map_err(|e| NodeError::exec_failed("http_error", e.to_string()))?;
+
+        let status = response.status;
         let output = serde_json::json!({
             "status": status,
             "status_text": if (200..300).contains(&status) { "success" } else { "error" },
-            "headers": headers.iter().map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string())).collect::<std::collections::HashMap<_, _>>(),
-            "body": body_text,
+            "headers": response.headers,
+            "body": response.body,
             "node_id": node.base_id(),
         });
 
@@ -259,5 +245,148 @@ impl NodeExecutorTrait for HttpRequestExecutor {
             },
             control: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // SAFETY: 测试替身的 std::sync::Mutex 不跨 await 使用（push 后即释放，
+    // 锁持有不跨越 await 点），临界区仅同步操作；整 mod 的用点同型，故 mod 级豁免。
+    #![allow(clippy::disallowed_types)]
+    use super::*;
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+
+    /// 测试替身：记录请求并回投固定响应。
+    struct MockHttp {
+        calls: StdMutex<Vec<axagent_harness::WorkflowHttpRequest>>,
+        status: u16,
+        body: String,
+    }
+
+    #[async_trait]
+    impl axagent_harness::WorkflowHttpClient for MockHttp {
+        async fn send(
+            &self,
+            request: axagent_harness::WorkflowHttpRequest,
+        ) -> Result<axagent_harness::WorkflowHttpResponse, String> {
+            self.calls.lock().unwrap().push(request);
+            Ok(axagent_harness::WorkflowHttpResponse {
+                status: self.status,
+                headers: std::collections::HashMap::new(),
+                body: self.body.clone(),
+            })
+        }
+    }
+
+    fn node_with(method: &str, body_type: &str, body: Option<&str>) -> WorkflowNode {
+        serde_json::from_value(json!({
+            "type": "httpRequest",
+            "id": "h1",
+            "title": "HTTP",
+            "position": {"x": 0.0, "y": 0.0},
+            "retry": {"enabled": false, "maxRetries": 0, "backoffType": "Fixed", "baseDelayMs": 1000, "maxDelayMs": 1000},
+            "enabled": true,
+            "config": {
+                "url": "https://example.com/api",
+                "method": method,
+                "body_type": body_type,
+                "body": body,
+                "headers": {"x-k": "v"},
+                "timeout_secs": 20,
+                "output_var": "h_out"
+            }
+        }))
+        .unwrap()
+    }
+
+    fn ctx_with(client: Option<Arc<dyn axagent_harness::WorkflowHttpClient>>) -> ExecutionState {
+        let mut ctx = ExecutionState::new("e1".into(), "w1".into(), json!({}));
+        ctx.http_client = client;
+        ctx
+    }
+
+    #[tokio::test]
+    async fn missing_seam_reports_not_injected() {
+        let ctx = ctx_with(None);
+        let err =
+            HttpRequestExecutor.execute(&node_with("GET", "json", None), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => {
+                assert_eq!(code, "WORKFLOW_HTTP_NOT_INJECTED")
+            },
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn seam_receives_request_and_output_contract_holds() {
+        let client = Arc::new(MockHttp {
+            calls: StdMutex::new(vec![]),
+            status: 201,
+            body: "{\"ok\":true}".to_string(),
+        });
+        let ctx = ctx_with(Some(client.clone()));
+        let out = HttpRequestExecutor
+            .execute(&node_with("post", "json", Some("{\"a\":1}")), &ctx)
+            .await
+            .unwrap();
+        let calls = client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].method, "POST");
+        assert_eq!(calls[0].url, "https://example.com/api");
+        assert!(calls[0].body_is_json, "POST + body_type=json ⇒ body_is_json");
+        assert_eq!(calls[0].headers.get("x-k").map(String::as_str), Some("v"));
+        assert!(!calls[0].follow_redirects, "SSRF 策略：禁止跟随重定向");
+        assert_eq!(calls[0].timeout_secs, 20);
+        drop(calls);
+        assert_eq!(out.output["status"], 201);
+        assert_eq!(out.output["status_text"], "success");
+        assert_eq!(out.output["body"], "{\"ok\":true}");
+        assert_eq!(out.output_var, Some("h_out".to_string()));
+    }
+
+    #[tokio::test]
+    async fn form_body_type_sets_content_type() {
+        let client = Arc::new(MockHttp {
+            calls: StdMutex::new(vec![]),
+            status: 200,
+            body: "ok".to_string(),
+        });
+        let ctx = ctx_with(Some(client.clone()));
+        HttpRequestExecutor
+            .execute(&node_with("POST", "form", Some("a=1&b=2")), &ctx)
+            .await
+            .unwrap();
+        let calls = client.calls.lock().unwrap();
+        assert_eq!(
+            calls[0].headers.get("content-type").map(String::as_str),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert!(!calls[0].body_is_json);
+    }
+
+    #[tokio::test]
+    async fn unsupported_method_rejected_before_seam() {
+        let client =
+            Arc::new(MockHttp { calls: StdMutex::new(vec![]), status: 200, body: String::new() });
+        let ctx = ctx_with(Some(client.clone()));
+        let err =
+            HttpRequestExecutor.execute(&node_with("TRACE", "raw", None), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => assert_eq!(code, "http_error"),
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
+        assert_eq!(client.calls.lock().unwrap().len(), 0, "白名单拒绝不得触达接缝");
+    }
+
+    #[tokio::test]
+    async fn dry_run_short_circuits_without_seam() {
+        let mut ctx = ctx_with(None);
+        ctx.dry_run = true;
+        let out = HttpRequestExecutor.execute(&node_with("GET", "raw", None), &ctx).await.unwrap();
+        assert_eq!(out.output["dry_run"], true);
+        assert_eq!(out.output["status"], 200);
     }
 }

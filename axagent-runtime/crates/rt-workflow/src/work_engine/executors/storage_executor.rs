@@ -90,29 +90,30 @@ impl NodeExecutorTrait for StorageExecutor {
                 (1, format!("vectorDb_{mode}"))
             },
             "fileSystem" => {
-                // FileSystem 后端：写入文件
+                // P6.0-⑥ 批 E：std::fs 归实现层；append 语义（先读后拼再写）留在执行器。
+                let io = context.file_io.as_ref().ok_or_else(|| {
+                    NodeError::exec_failed(
+                        "WORKFLOW_FILE_IO_NOT_INJECTED",
+                        "workflow file io not injected into ExecutionState",
+                    )
+                })?;
                 match c.operation.as_str() {
                     "append" => {
-                        let existing = std::fs::read_to_string(&c.collection).unwrap_or_default();
+                        let existing = io.read_to_string(&c.collection).unwrap_or_default();
                         let content = input_data.to_string();
-                        std::fs::write(&c.collection, format!("{}{}", existing, content)).map_err(
-                            |e| {
+                        io.write(&c.collection, &format!("{}{}", existing, content), false)
+                            .map_err(|e| {
                                 NodeError::exec_failed(
                                     error_code::IO_ERROR,
                                     format!("Storage write failed: {e}"),
                                 )
-                            },
-                        )?;
+                            })?;
                         (1, "fileSystem_append".to_string())
                     },
                     _ => {
-                        // insert / upsert → 覆盖写
+                        // insert / upsert → 覆盖写（父目录由实现层按需建）
                         let content = input_data.to_string();
-                        // 确保父目录存在
-                        if let Some(parent) = std::path::Path::new(&c.collection).parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        std::fs::write(&c.collection, content).map_err(|e| {
+                        io.write(&c.collection, &content, true).map_err(|e| {
                             NodeError::exec_failed(
                                 error_code::IO_ERROR,
                                 format!("Storage write failed: {e}"),
@@ -147,5 +148,121 @@ impl NodeExecutorTrait for StorageExecutor {
             },
             control: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // SAFETY: 测试替身的 std::sync::Mutex 不跨 await 使用（push 后即释放，
+    // 锁持有不跨越 await 点），临界区仅同步操作；整 mod 的用点同型，故 mod 级豁免。
+    #![allow(clippy::disallowed_types)]
+    use super::*;
+    use axagent_harness::WorkflowFileIo;
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+
+    struct MemFileIo {
+        files: StdMutex<std::collections::HashMap<String, String>>,
+        write_parent_flags: StdMutex<Vec<bool>>,
+    }
+
+    impl axagent_harness::WorkflowFileIo for MemFileIo {
+        fn read_to_string(&self, path: &str) -> Result<String, String> {
+            self.files.lock().unwrap().get(path).cloned().ok_or_else(|| format!("不存在: {path}"))
+        }
+        fn write(&self, path: &str, content: &str, create_parent_dirs: bool) -> Result<(), String> {
+            self.write_parent_flags.lock().unwrap().push(create_parent_dirs);
+            self.files.lock().unwrap().insert(path.to_string(), content.to_string());
+            Ok(())
+        }
+        fn delete(&self, path: &str) -> Result<(), String> {
+            self.files.lock().unwrap().remove(path).map(|_| ()).ok_or_else(|| "不存在".to_string())
+        }
+        fn exists(&self, path: &str) -> bool {
+            self.files.lock().unwrap().contains_key(path)
+        }
+    }
+
+    fn node_with(backend: &str, op: &str) -> WorkflowNode {
+        serde_json::from_value(json!({
+            "type": "storage",
+            "id": "s1",
+            "title": "存储",
+            "position": {"x": 0.0, "y": 0.0},
+            "retry": {"enabled": false, "maxRetries": 0, "backoffType": "Fixed", "baseDelayMs": 1000, "maxDelayMs": 1000},
+            "enabled": true,
+            "config": {
+                "backend": backend,
+                "operation": op,
+                "collection": "/data/coll.json",
+                "input_var": "v",
+                "output_var": "s_out"
+            }
+        }))
+        .unwrap()
+    }
+
+    fn ctx_with(io: Option<Arc<dyn axagent_harness::WorkflowFileIo>>) -> ExecutionState {
+        let mut ctx = ExecutionState::new("e1".into(), "w1".into(), json!({"v": {"a": 1}}));
+        ctx.variables.insert("v".to_string(), json!({"a": 1}));
+        ctx.file_io = io;
+        ctx
+    }
+
+    #[tokio::test]
+    async fn file_system_without_seam_reports_not_injected() {
+        let ctx = ctx_with(None);
+        let err =
+            StorageExecutor.execute(&node_with("fileSystem", "insert"), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => {
+                assert_eq!(code, "WORKFLOW_FILE_IO_NOT_INJECTED")
+            },
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_writes_with_parent_dirs() {
+        let io = Arc::new(MemFileIo {
+            files: StdMutex::new(std::collections::HashMap::new()),
+            write_parent_flags: StdMutex::new(vec![]),
+        });
+        let ctx = ctx_with(Some(io.clone()));
+        let out = StorageExecutor.execute(&node_with("fileSystem", "insert"), &ctx).await.unwrap();
+        assert_eq!(out.output["status"], "fileSystem_write");
+        assert_eq!(io.write_parent_flags.lock().unwrap().as_slice(), &[true]);
+    }
+
+    #[tokio::test]
+    async fn append_preserves_existing_content() {
+        let io = Arc::new(MemFileIo {
+            files: StdMutex::new(std::collections::HashMap::new()),
+            write_parent_flags: StdMutex::new(vec![]),
+        });
+        io.write("/data/coll.json", "HEAD;", false).unwrap();
+        let ctx = ctx_with(Some(io.clone()));
+        let out = StorageExecutor.execute(&node_with("fileSystem", "append"), &ctx).await.unwrap();
+        assert_eq!(out.output["status"], "fileSystem_append");
+        let stored = io.read_to_string("/data/coll.json").unwrap();
+        assert!(stored.starts_with("HEAD;"), "append 必须保留已有内容");
+        assert!(stored.contains("\"a\":1"), "append 必须追加新内容");
+    }
+
+    #[tokio::test]
+    async fn unknown_backend_still_rejected() {
+        let io = Arc::new(MemFileIo {
+            files: StdMutex::new(std::collections::HashMap::new()),
+            write_parent_flags: StdMutex::new(vec![]),
+        });
+        let ctx = ctx_with(Some(io));
+        let err = StorageExecutor.execute(&node_with("redis", "insert"), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => {
+                assert_eq!(code, error_code::VALIDATION_FAILED)
+            },
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
     }
 }

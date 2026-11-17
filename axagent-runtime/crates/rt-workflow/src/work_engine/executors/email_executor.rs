@@ -7,10 +7,6 @@
 
 use async_trait::async_trait;
 use axagent_harness::workflow_types::WorkflowNode;
-use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::Mailbox,
-    transport::smtp::authentication::Credentials,
-};
 
 use crate::work_engine::execution_state::ExecutionState;
 use crate::work_engine::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};
@@ -111,49 +107,29 @@ impl NodeExecutorTrait for EmailExecutor {
             "EmailExecutor: sending email"
         );
 
-        let from: Mailbox = smtp.user.parse().map_err(|e| {
-            NodeError::exec_failed("EMAIL_PARSE_FAILED", format!("invalid from address: {e}"))
+        // P6.0-⑥ 批 E：lettre（构建/传输/投递）归实现层；本执行器保留
+        // 凭据解析策略（credential_id 优先、内联字段回退）与输出包装。
+        let seam = ctx.smtp_sender.as_ref().ok_or_else(|| {
+            NodeError::exec_failed(
+                "WORKFLOW_SMTP_NOT_INJECTED",
+                "workflow smtp sender not injected into ExecutionState",
+            )
         })?;
 
-        let mut msg_builder = Message::builder().from(from.clone()).subject(&c.subject);
-
-        // Add recipients
-        for addr in &c.to {
-            let mbox: Mailbox = addr.parse().map_err(|e| {
-                NodeError::exec_failed(
-                    "EMAIL_PARSE_FAILED",
-                    format!("invalid 'to' address '{addr}': {e}"),
-                )
-            })?;
-            msg_builder = msg_builder.to(mbox);
-        }
-
-        let email_msg = msg_builder
-            .header(lettre::message::header::ContentType::TEXT_PLAIN)
-            .body(c.body.clone())
-            .map_err(|e| NodeError::exec_failed("EMAIL_BUILD_FAILED", e.to_string()))?;
-
-        let creds = Credentials::new(smtp.user.clone(), smtp.pass.clone());
-
-        let mailer = if smtp.tls {
-            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp.host)
-        } else {
-            Ok(AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&smtp.host))
-        }
-        .map_err(|e| NodeError::exec_failed("EMAIL_TRANSPORT_FAILED", e.to_string()))?
-        .port(smtp.port)
-        .credentials(creds)
-        .build();
-
-        match mailer.send(email_msg).await {
-            Ok(_) => {
-                tracing::info!("EmailExecutor: sent successfully");
-            },
-            Err(e) => {
-                tracing::error!(%e, "EmailExecutor: send failed");
-                return Err(NodeError::exec_failed("EMAIL_SEND_FAILED", e.to_string()));
-            },
-        }
+        seam.send(axagent_harness::WorkflowSmtpRequest {
+            host: smtp.host.clone(),
+            port: smtp.port,
+            user: smtp.user.clone(),
+            pass: smtp.pass.clone(),
+            tls: smtp.tls,
+            from: smtp.user.clone(),
+            to: c.to.clone(),
+            subject: c.subject.clone(),
+            body: c.body.clone(),
+        })
+        .await
+        .map_err(|e| NodeError::exec_failed("EMAIL_SEND_FAILED", e))?;
+        tracing::info!("EmailExecutor: sent successfully");
 
         Ok(NodeOutput {
             output: serde_json::json!({
@@ -169,5 +145,99 @@ impl NodeExecutorTrait for EmailExecutor {
             },
             control: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // SAFETY: 测试替身的 std::sync::Mutex 不跨 await 使用（push 后即释放，
+    // 锁持有不跨越 await 点），临界区仅同步操作；整 mod 的用点同型，故 mod 级豁免。
+    #![allow(clippy::disallowed_types)]
+    use super::*;
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+
+    struct MockSmtp {
+        calls: StdMutex<Vec<axagent_harness::WorkflowSmtpRequest>>,
+    }
+
+    #[async_trait]
+    impl axagent_harness::WorkflowSmtpSender for MockSmtp {
+        async fn send(&self, request: axagent_harness::WorkflowSmtpRequest) -> Result<(), String> {
+            self.calls.lock().unwrap().push(request);
+            Ok(())
+        }
+    }
+
+    fn node_with() -> WorkflowNode {
+        serde_json::from_value(json!({
+            "type": "email",
+            "id": "m1",
+            "title": "邮件",
+            "position": {"x": 0.0, "y": 0.0},
+            "retry": {"enabled": false, "maxRetries": 0, "backoffType": "Fixed", "baseDelayMs": 1000, "maxDelayMs": 1000},
+            "enabled": true,
+            "config": {
+                "to": ["a@example.com", "b@example.com"],
+                "subject": "测试",
+                "body": "正文",
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 587,
+                "smtp_user": "me@example.com",
+                "smtp_pass": "secret",
+                "output_var": "mail_out"
+            }
+        }))
+        .unwrap()
+    }
+
+    fn ctx_with(sender: Option<Arc<dyn axagent_harness::WorkflowSmtpSender>>) -> ExecutionState {
+        let mut ctx = ExecutionState::new("e1".into(), "w1".into(), json!({}));
+        ctx.smtp_sender = sender;
+        ctx
+    }
+
+    #[tokio::test]
+    async fn missing_seam_reports_not_injected() {
+        let ctx = ctx_with(None);
+        let err = EmailExecutor.execute(&node_with(), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => {
+                assert_eq!(code, "WORKFLOW_SMTP_NOT_INJECTED")
+            },
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn inline_smtp_config_goes_through_seam() {
+        let sender = Arc::new(MockSmtp { calls: StdMutex::new(vec![]) });
+        let ctx = ctx_with(Some(sender.clone()));
+        let out = EmailExecutor.execute(&node_with(), &ctx).await.unwrap();
+        let calls = sender.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].host, "smtp.example.com");
+        assert_eq!(calls[0].port, 587);
+        assert!(calls[0].tls, "587 ⇒ STARTTLS（原语义）");
+        assert_eq!(calls[0].from, "me@example.com");
+        assert_eq!(calls[0].to.len(), 2);
+        assert_eq!(calls[0].subject, "测试");
+        drop(calls);
+        assert_eq!(out.output["sent"], true);
+        assert_eq!(out.output_var, Some("mail_out".to_string()));
+    }
+
+    #[tokio::test]
+    async fn non_587_port_defaults_to_plain() {
+        let sender = Arc::new(MockSmtp { calls: StdMutex::new(vec![]) });
+        let ctx = ctx_with(Some(sender.clone()));
+        let mut node = node_with();
+        if let WorkflowNode::Email(ref mut n) = node {
+            n.config.smtp_port = Some(25);
+        }
+        EmailExecutor.execute(&node, &ctx).await.unwrap();
+        let calls = sender.calls.lock().unwrap();
+        assert!(!calls[0].tls, "非 587 ⇒ 明文（原语义）");
     }
 }

@@ -13,6 +13,8 @@ mod android_utils;
 mod capability_embedding;
 // P6.0-⑥ 批 D：知识库文本检索接缝的宿主实现（vectorRetrieve 节点的真检索出口）。
 mod capability_vector_search;
+// P6.0-⑥ 批 E：工作流节点外部 IO 接缝的宿主实现（HTTP / 文件 / SMTP）。
+mod capability_workflow_io;
 mod commands;
 mod context_manager;
 mod database_query_impl;

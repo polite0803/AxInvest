@@ -175,6 +175,15 @@ hex = { workspace = true }
 hostname = "0.4"
 inventory = "0.3"
 lazy_static = { workspace = true }
+# P6.0-⑥ 批 E：SMTP 发信接缝的宿主实现（email 执行器不再自带 lettre）
+lettre = { version = "0.11", default-features = false, features = [
+  "builder",
+  "hostname",
+  "smtp-transport",
+  "tokio1",
+  "tokio1-rustls",
+  "rustls-tls",
+] }
 notify = "9.0.0-rc.4"
 open = "5"
 parking_lot = "0.12"

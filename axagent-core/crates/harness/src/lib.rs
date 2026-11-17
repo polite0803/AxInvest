@@ -837,6 +837,13 @@ pub use workflow_io::{
     WorkflowSmtpRequest, WorkflowSmtpSender, WorkflowVectorWriter,
 };
 
+// ── 无障碍树契约（computer-use 语义化：观察走树、操作走语义动作，零坐标）──
+pub mod ui_tree;
+pub use ui_tree::{
+    UiActionKind, UiAutomationError, UiBounds, UiKeyModifier, UiNode, UiNodeId, UiScrollIntent,
+    UiTreeProvider, UiTreeQuery, UiTreeSnapshot,
+};
+
 // ── 能力发现契约（Capability Discovery Pipeline） ──
 pub mod capability;
 pub use capability::{

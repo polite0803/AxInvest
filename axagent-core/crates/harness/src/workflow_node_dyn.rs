@@ -310,10 +310,7 @@ mod tests {
             // 动态外壳的 Deserialize 不解析 config 内容，故可用同一最小 payload
             // 覆盖全部 32 个 type 标签，逐个验证平坦化后字段无损。
             let mut envelope = serde_json::to_value(sample_base()).unwrap();
-            envelope
-                .as_object_mut()
-                .unwrap()
-                .insert("type".into(), Value::String(name.clone()));
+            envelope.as_object_mut().unwrap().insert("type".into(), Value::String(name.clone()));
             envelope
                 .as_object_mut()
                 .unwrap()

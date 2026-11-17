@@ -136,6 +136,14 @@ use crate::ToolMetricsSnapshot;
 use crate::TrainingEpisode;
 use crate::TrainingReport;
 use crate::TrajectoryService;
+use crate::UiActionKind;
+use crate::UiAutomationError;
+use crate::UiKeyModifier;
+use crate::UiNodeId;
+use crate::UiScrollIntent;
+use crate::UiTreeProvider;
+use crate::UiTreeQuery;
+use crate::UiTreeSnapshot;
 use crate::UrlSafety;
 use crate::UserProfile;
 use crate::UserProfileService;
@@ -2037,4 +2045,166 @@ impl crate::SessionStateStore for MemorySessionStateStore {
         guard.retain(|_, (_, exp)| !exp.is_some_and(|e| e <= now));
         Ok(before - guard.len())
     }
+}
+
+// ── 无障碍树 mock（computer-use 语义化的三平台共同语义基线）──
+
+/// 内存无障碍树状态：快照 + 调用记录 + 待注入错误。
+#[derive(Debug, Default)]
+pub struct MockUiTreeState {
+    /// 当前快照（query 返回；每次 query 会把其中所有 `session_gen` 更新为当前代次）。
+    pub snapshot: Option<UiTreeSnapshot>,
+    /// 当前查询代次（每次 query 递增）。
+    pub session_gen: u64,
+    /// 已执行的语义动作记录（动作名 + 节点 raw_id + 可选参数）。
+    pub calls: Vec<(String, String, Option<String>)>,
+    /// 若设置，下一次任意动作返回该错误的 display 文本。
+    pub next_error: Option<String>,
+}
+
+/// 无障碍树 provider 的测试替身，覆盖「查询 → 按 id 操作 → 错误传播」全链路。
+///
+/// 不依赖任何实现层 crate（AGENTS.md 铁律 5）；所有锁操作限制在同步块内，guard 不跨 await。
+#[derive(Debug, Default)]
+pub struct MockUiTreeProvider {
+    state: parking_lot::Mutex<MockUiTreeState>,
+}
+
+impl MockUiTreeProvider {
+    pub fn new(snapshot: UiTreeSnapshot) -> Self {
+        Self {
+            state: parking_lot::Mutex::new(MockUiTreeState {
+                snapshot: Some(snapshot),
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// 注入下一次动作错误（用于断言错误传播）。
+    pub fn set_next_error(&self, message: impl Into<String>) {
+        self.state.lock().next_error = Some(message.into());
+    }
+
+    /// 读取已执行的动作记录。
+    pub fn calls(&self) -> Vec<(String, String, Option<String>)> {
+        self.state.lock().calls.clone()
+    }
+
+    /// 读取当前查询代次。
+    pub fn session_gen(&self) -> u64 {
+        self.state.lock().session_gen
+    }
+
+    fn take_error(&self) -> Option<UiAutomationError> {
+        let mut guard = self.state.lock();
+        guard.next_error.take().map(UiAutomationError::Platform)
+    }
+
+    fn record(&self, action: &str, id: &UiNodeId, arg: Option<String>) {
+        let mut guard = self.state.lock();
+        guard.calls.push((action.to_string(), id.raw_id.clone(), arg));
+    }
+
+    fn check_handle(&self, id: &UiNodeId) -> std::result::Result<(), UiAutomationError> {
+        let generation = self.state.lock().session_gen;
+        if id.session_gen != generation {
+            return Err(UiAutomationError::StaleHandle(format!(
+                "句柄代次 {} 已过期（当前 {generation}）",
+                id.session_gen
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl UiTreeProvider for MockUiTreeProvider {
+    async fn query(
+        &self,
+        _query: UiTreeQuery,
+    ) -> std::result::Result<UiTreeSnapshot, UiAutomationError> {
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+        let mut guard = self.state.lock();
+        guard.session_gen += 1;
+        let generation = guard.session_gen;
+        let mut snapshot = guard
+            .snapshot
+            .clone()
+            .ok_or_else(|| UiAutomationError::Platform("未预置快照".into()))?;
+        // 逐节点刷新代次；节点的 children 在 sample 中为空，嵌套场景由实现层负责。
+        for node in &mut snapshot.nodes {
+            node.id.session_gen = generation;
+        }
+        for root in &mut snapshot.roots {
+            root.session_gen = generation;
+        }
+        Ok(snapshot)
+    }
+
+    async fn invoke(&self, id: &UiNodeId) -> std::result::Result<(), UiAutomationError> {
+        self.check_handle(id)?;
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+        self.record("invoke", id, None);
+        Ok(())
+    }
+
+    async fn set_value(
+        &self,
+        id: &UiNodeId,
+        value: &str,
+    ) -> std::result::Result<(), UiAutomationError> {
+        self.check_handle(id)?;
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+        self.record("set_value", id, Some(value.to_string()));
+        Ok(())
+    }
+
+    async fn focus(&self, id: &UiNodeId) -> std::result::Result<(), UiAutomationError> {
+        self.check_handle(id)?;
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+        self.record("focus", id, None);
+        Ok(())
+    }
+
+    async fn perform(
+        &self,
+        id: &UiNodeId,
+        action: UiActionKind,
+        _scroll_intent: Option<UiScrollIntent>,
+    ) -> std::result::Result<(), UiAutomationError> {
+        self.check_handle(id)?;
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+        self.record("perform", id, Some(format!("{action:?}")));
+        Ok(())
+    }
+
+    async fn press_key(
+        &self,
+        key: &str,
+        modifiers: &[UiKeyModifier],
+        text: Option<&str>,
+    ) -> std::result::Result<(), UiAutomationError> {
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+        let id = UiNodeId { backend: "mock".into(), raw_id: "keyboard".into(), session_gen: 0 };
+        let mods = modifiers.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>().join("+");
+        self.record("press_key", &id, Some(format!("{mods}{key}/{:?}", text)));
+        Ok(())
+    }
+}
+
+/// 构造一个 `Arc<dyn UiTreeProvider>` 测试替身（供 consumer crate 测试注入）。
+pub fn mock_ui_tree_provider(snapshot: UiTreeSnapshot) -> std::sync::Arc<dyn UiTreeProvider> {
+    std::sync::Arc::new(MockUiTreeProvider::new(snapshot))
 }

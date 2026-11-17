@@ -10531,3 +10531,13 @@ mod / llm_resolve / var_filter 为辅助模块不计）。
   doc-refs 基线外新增 0（10 处行号回正 + Cargo.toml:55→46）；single-source 0（双键写
   1863-1870→1932-1939 等 9 处回正）。⚠ `docs/features/build-ci.md:112` 的
   `rt-workflow/Cargo.toml` 的 `[lints]` 行号随依赖删除由 55 降到 46（build-ci.md 引用已同批订正）。
+
+### 指向：computer-use 无障碍树语义化迁移（2026-11-17）
+
+- **提案**：`PROPOSAL-computer-use-a11y-semantic.md`（已批准）—— computer-use 从
+  「截图喂视觉模型 + 坐标点击」迁移到「读系统无障碍树 + 对语义节点发动作」，
+  三平台（Windows UIA / macOS AX / Linux AT-SPI2）齐做，彻底清除 xcap 引入的
+  pipewire/libclang 链；保留 `press_key` 纯键盘注入（无坐标）。
+- **执行**：分 7 阶段（0–6）；阶段内定点验证，全量门禁只在阶段 6 跑一次；
+  三锚以 `--dump-readings` 实测为准，命令表由 build.rs 生成不手改。
+- **本节不登记任何数字锚**：各阶段落地时按实测同批回写判定档三锚与镜像表。

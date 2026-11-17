@@ -29,7 +29,7 @@
 | `paper-portfolio` | 模拟持仓与交易桥 | 含模拟持仓、组合管理器、风控门、交易桥与订单；不含回测仿真（归量化回测）。 | `src-tauri/src/commands/paper_portfolio.rs`<br>`src-tauri/src/commands/portfolio-mgr*.rhai`<br>`src-tauri/src/commands/portfolio-risk-gate.rhai` | v3.0.0 | 暂无（仅说明书） | 0 | 有 |
 | `plugin-system` | 插件体系 | 含插件清单/worker 帧协议、L1-L2 通信与环检测、动态 UI 装载、生命周期与能力面；不含 OPC 业务能力包（归 OPC 能力包）。 | `axagent-plugins/crates/plugins/`<br>`axagent-core/crates/plugin-proto/`<br>`src-tauri/src/commands/plugin.rs`<br>`src/components/plugin/` | v3.0.0 | 20 | 5 | 有 |
 | `data-quality-gates` | 数据质量与门禁 | 含 DQI 分级熔断、权重坍缩三档、字段级校验、数据修复与静态门禁口径；不含 CI 构建门（归构建与 CI）。 | `axagent-quant/crates/astock-data/src/scoring.rs`<br>`src-tauri/src/commands/stock_pipeline/`<br>`scripts/check-*.mjs`<br>`src-tauri/src/commands/stock_workflow/decision.rs` | v3.0.0 | 4 | 1 | 有 |
-| `agent-runtime` | 运行时与智能体 | 含智能体引擎、工具/审批/沙箱、上下文与知识库、工作流引擎/节点、技能与 MCP；不含模型供应商适配（归模型提供商与流式）。 | `axagent-ai/crates/agent/`<br>`axagent-runtime/crates/runtime-core/`<br>`axagent-runtime/crates/tools/`<br>`src-tauri/src/commands/` | v3.0.0 | 43 | 29 | 有 |
+| `agent-runtime` | 运行时与智能体 | 含智能体引擎、工具/审批/沙箱、上下文与知识库、工作流引擎/节点、技能与 MCP；不含模型供应商适配（归模型提供商与流式）。 | `axagent-ai/crates/agent/`<br>`axagent-runtime/crates/runtime-core/`<br>`axagent-runtime/crates/tools/`<br>`src-tauri/src/commands/` | v3.0.0 | 44 | 29 | 有 |
 | `provider-models` | 模型提供商与流式 | 含 LLM 提供商适配、流式输出、采样参数与 token 计量；不含智能体编排（归运行时与智能体）。 | `axagent-ai/crates/providers/`<br>`src/stores/feature/providerStore.ts`<br>`src/components/settings/` | v3.0.0 | 8 | 6 | 有 |
 | `storage-migration` | 存储与数据库迁移 | 含实体/DAO/迁移、SQLite/PG 方言、缓存、CRDT 与知识图谱存储；不含业务查询语义。 | `axagent-infra/crates/storage/`<br>`axagent-infra/crates/migration/`<br>`axagent-infra/crates/dao/`<br>`axagent-core/crates/entities/` | v3.0.0 | 9 | 1 | 有 |
 | `ui-shell` | 前端外壳 | 含前端外壳/路由/布局/信息架构、i18n、组件规范、滚动与主题；不含后端业务命令。 | `src/components/layout/`<br>`src/i18n/locales/`<br>`src/pages/`<br>`src/components/` | v3.0.0 | 13 | 6 | 有 |
@@ -291,11 +291,12 @@
 
 ### 运行时与智能体（`agent-runtime`）
 
-- 摘要：文档 43 篇（本地 14 / 导入 29）｜ 最新版本 v3.0.0 ｜ 最近变更 2026-11-04
+- 摘要：文档 44 篇（本地 15 / 导入 29）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-17
 - 说明书：`docs/features/agent-runtime.md`
 
 | 文件名 | 类型 | 一句话用途 | 状态 | 日期 | 对应版本 | 来源 |
 |---|---|---|---|---|---|---|
+| `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
 | `AUDIT-run-warnings-2026-10-23.md` | 审计 | 输入：C:\Users\polit\Documents\PowerShell.txt（1238 行，单次运行 10:25:15 ~ 10:35:xx，含多个 execution） | active | 2026-10-23 | v2.9.9 | 本地原创 |
@@ -441,6 +442,7 @@
 |---|---|---|---|---|---|---|---|---|
 | `PROPOSAL-stock-decision-four-horizon.md` | PROPOSAL：股票分析决策的四周期化（超短线 / 短线 / 中期 / 长期） | 把股票分析决策从「单决策 + 单 timeHorizon」升级为「四周期独立决策能力」： | done | 2026-09-23 | v2.9.9 | 股票决策链 | 本地原创 | `AUDIT-stock-data-horizons-2026-09-23.md` `PLAN-decision-action-convergence.md` `PLAN-stock-decision-hitrate-validation.md` `PLAN-llm-horizon-decision-and-parity.md` |
 | `PROPOSAL-EXEC-OBSERVABILITY.md` | PROPOSAL — 执行可观测性与超时治理（T-1 立项书） | 不是「分析慢」，而是「长跑不可观测 + 卡死不自愈」： | active | 2026-09-12 | v2.9.7 | 运行时与智能体 | 本地原创 | `PLAN-VALUATION-CONFIG-WIRING.md` |
+| `PROPOSAL-computer-use-a11y-semantic.md` | PROPOSAL：computer-use 从「截图+坐标」迁移到「无障碍树语义化」 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `PROPOSAL-workflow-node-open-registry.md` | PROPOSAL：WorkflowNode 开放化 —— 从封闭 enum 到动态注册模型（P6.0-①） | 把强类型 enum 改成类型字符串 + 契约声明 + 运行期注册表，新增节点类型不改主壳；含 18 处位点清单与 7 阶段迁移路径。 | draft | 2026-11-17 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `PROPOSAL-workflow-optimizer-design.md` | WorkflowOptimizer 算法方案 | WorkflowOptimizer（trajectory crate）的算法方案与阶段进度。 | 进行中 | 2026-08-31 | v2.9.7 | 运行时与智能体 | 导入 |  |
 | `PROPOSAL-unified-capability-model.md` | 统一能力建模（Unified Capability Model） | 统一能力建模：让 LLM、编排器与开发者一致地发现与执行能力。 | 已实施 | 2026-08-30 | v2.9.7 | OPC 能力包 | 导入 |  |

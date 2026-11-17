@@ -183,8 +183,8 @@
               ]
             },
             {
-              "startLine": 3255,
-              "endLine": 3280,
+              "startLine": 3260,
+              "endLine": 3282,
               "mustContain": [
                 "B2 开工前的现况读数",
                 "结论写死，不给后人留乐观数",
@@ -371,8 +371,8 @@
               ]
             },
             {
-              "startLine": 3255,
-              "endLine": 3278,
+              "startLine": 3260,
+              "endLine": 3280,
               "mustContain": [
                 "B2 开工前的现况读数",
                 "结论写死，不给后人留乐观数",
@@ -389,16 +389,16 @@
               ]
             },
             {
-              "startLine": 1227,
-              "endLine": 1227,
+              "startLine": 1229,
+              "endLine": 1229,
               "mustContain": [
                 "桶3 必须留内核 175",
                 "构造期选择"
               ]
             },
             {
-              "startLine": 1335,
-              "endLine": 1335,
+              "startLine": 1337,
+              "endLine": 1337,
               "mustContain": [
                 "pub struct ToolContext",
                 "generated_tool.rs"
@@ -431,8 +431,8 @@
               ]
             },
             {
-              "startLine": 8373,
-              "endLine": 8377,
+              "startLine": 8379,
+              "endLine": 8379,
               "mustContain": [
                 "reconcile/expected.rs:106-134",
                 "两份真源拒绝静默覆盖",
@@ -598,7 +598,7 @@
       "planMustAppear": true,
       "planPinned": [
         {
-          "line": 8952,
+          "line": 8954,
           "mustContain": [
             "标注总数",
             "1177",
@@ -966,7 +966,7 @@
         }
       ],
       "note": "备注「同上（worker.rs:4448–:4496 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。⚠ 原登记 `:3890`–`:3938` 是**既存腐烂**（HEAD 上实测 `:4358`–`:4406`）⇒ 与 `workflow.reflector` 同批按盘上重抄。**2026-11-06 对账批**：`3fe49c950` 给 `worker.rs` 净加 165 行 ⇒ 两端点各 +61（`:4387`→`:4448`、`:4435`→`:4496`；⚠ 只按 token 找会让 `set_llm_provider` 那类同名调用冒充端点，故两端都用整行 `anchorText` 复核）；`planLine` 由 266 重锚到 269。**2026-11-06 第二轮对账**：`a9e68621a`（`opc.store` 写 op 批）给 `worker.rs` 净加 217 行 ⇒ 三端点各 +30（`:4356`→`:4386`、`:4448`→`:4478`、`:4496`→`:4526`，`--repin-code --apply` 回写，token / file / anchorText 一字未动，逐字节备份 `.tmp/capability-register.20261105T231325.bak.json`）；该模式明确不改正文，故 PLAN:268 / :269 两行的**文字**引用（`:4380`、`:4448`–`:4496`）与表内两处 `planAnchorText` 由本批人工同批改指，行号仍 268/269 不变。**2026-11-08 #36 批 1**：`worker.rs` 净加 175 行（八条 `opc.store` 只读分派臂）⇒ 两端点各 +175（`:4478`→`:4653`、`:4526`→`:4701`），PLAN:269 文字同步改指，`planLine` 仍 269。**2026-11-08 #36 批 2**：再净加 95 行 ⇒ 两端点各 +95（`:4653`→`:4748`、`:4701`→`:4796`，`--repin-code --apply` 回写，两端整行 `anchorText` 复核），PLAN:269 文字同步改指，`planLine` 仍 269。**2026-11-08 #36 批 3**：再净加 163 行 ⇒ 两端点各 +163（`:4748`→`:4911`、`:4796`→`:4959`，`--repin-code --apply` 回写，两端整行 `anchorText` 复核），PLAN:269 与 planAnchorText 文字同批改指，`planLine` 仍 269。**2026-11-11 #264 批 5**：`worker.rs` 净加 145 行（交付面六 seam op，同 `workflow.reflector`）⇒ 两端点各 +145（`:5780`→`:5925`、`:5828`→`:5973`，`grep -n` 实测重锚，两端整行 `anchorText` 复核），PLAN:269 与 planAnchorText 文字同批改指，`planLine` 仍 269。**2026-11-11 #264 批 7 刀 A**：同 `workflow.reflector`（`worker.rs` 净 +207，锚点前两处 hunk 合计 +193）⇒ 两端点各 +193（`:6004`→`:6197`、`:6052`→`:6245`，`grep -n 'remote_method_not_supported(\"workflow.evolver\"'` 实测重锚，两端整行 `anchorText` 复核），PLAN:269 与 planAnchorText 文字同批改指，`planLine` 仍 269。**2026-11-12 #264 刀 C 批 1**：同 `workflow.reflector`（`worker.rs` 净 +105，锚点之前那一处 hunk `@@ -5029,0 +5030,99` = 五条 `opc.store` 只读分派臂 +99；`mod tests` 那处 +6 在锚点之后）⇒ 两端点各 +99（`:6832`→`:6931`、`:6880`→`:6979`，`--repin-code --apply` 回写，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动，同一份逐字节备份 `.tmp/capability-register.20261112T054438.bak.json`），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269；正文首句「备注『同上（worker.rs:4448–:4496 …）』」是逐字引用 PLAN 当年备注原文，不改。**2026-11-12 #264 刀 C 批 2**：同 `workflow.reflector`（锚点之前那处 hunk `@@ -5128,0 +5129,25 @@` = `execute_analysis` 读 op 分派臂 +25；`mod tests` 那处 +2 在锚点之后）⇒ 两端点各 +25（`:6931`→`:6956`、`:6979`→`:7004`，`--repin-code --apply` 回写，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动，同一份逐字节备份 `.tmp/capability-register.20261112T064228.bak.json`），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269。**2026-11-12 #264 刀 C 批 3**：同 `workflow.reflector`（`worker.rs` 净 +195，锚点之前那一处 hunk `@@ -5153,0 +5154,185 @@` = 学习面七条 `opc.store` 分派臂 +185；`mod tests` 两处 +10 在锚点之后）；同批 `cargo fmt` 收敛 −3 ⇒ 两端点各 +182（`:6956`→`:7138`、`:7004`→`:7186`，`--repin-code --apply` 回写，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269；正文首句「备注『同上（worker.rs:4448–:4496 …）』」是逐字引用 PLAN 当年备注原文，不改。**2026-11-13 #304 C3**：同 `workflow.reflector`（`worker.rs` 净 +16，三处 hunk 全在锚点之前）⇒ 两端点各 +16（`:7378`→`:7394`、`:7426`→`:7442`，`grep -n` 实测重锚，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269。",
-      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:9246`–`:9294` 一批 `remote_method_not_supported`） |",
+      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:9452`–`:9481` 一批 `remote_method_not_supported`） |",
       "planLine": 269
     },
     {
@@ -1591,7 +1591,7 @@
         }
       ],
       "note": "原文「与 D4 同域：ToolCallContext 走白名单投影后才可拆；否则等于把守卫钩子外置成哑铃」。机械读数 3（impl 站点）一并印出但无登记值可比。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `plugin.hook` | `axagent-core/crates/harness/src/plugin_hook.rs:159` | 14 方法（`pre_tool_call`/`post_tool_call`/`on_session_*`） | **与 D4 无关（2026-11-02 订正）**：`ToolCallContext` 的真实位置是 `plugin_hook.rs:14-19`，**本就是 4 字段纯 serde DTO**；D4 丢弃的是宿主可执行上下文 `ToolContext`（`harness/src/tool.rs:159`；**tools 侧只是 re-export 同一份，不是第二份定义** ⇒ 它与 `ToolCallContext` 是**近名不同物**，不构成铁律 4 违规，`#50` 实测订正）⇒ **不需要等白名单投影改造**。真阻塞是**频率**（每工具调用 + 每出站请求 ⇒ 一轮数十~数百次）与守卫语义外置 ⇒ 一格拆三：`on_session_*` 今天即可直连、`pre_*` 留内核待 **D1 + 权限模型**、`post_*`/`transform_*`（体量 = 工具输出/HTTP body，②）需**批量帧**（「一次帧多条事件」即可，不强制绑 D2 的 token 流语义）。DTO 面 `:14-156` 已全 serde✓ |",
+      "planAnchorText": "| `plugin.hook` | `axagent-core/crates/harness/src/plugin_hook.rs:169` | 14 方法（`pre_tool_call`/`post_tool_call`/`on_session_*`） | **与 D4 无关（2026-11-02 订正）**：`ToolCallContext` 的真实位置是 `plugin_hook.rs:14-19`，**本就是 4 字段纯 serde DTO**；D4 丢弃的是宿主可执行上下文 `ToolContext`（`harness/src/tool.rs:159`；**tools 侧只是 re-export 同一份，不是第二份定义** ⇒ 它与 `ToolCallContext` 是**近名不同物**，不构成铁律 4 违规，`#50` 实测订正）⇒ **不需要等白名单投影改造**。真阻塞是**频率**（每工具调用 + 每出站请求 ⇒ 一轮数十~数百次）与守卫语义外置 ⇒ 一格拆三：`on_session_*` 今天即可直连、`pre_*` 留内核待 **D1 + 权限模型**、`post_*`/`transform_*`（体量 = 工具输出/HTTP body，②）需**批量帧**（「一次帧多条事件」即可，不强制绑 D2 的 token 流语义）。DTO 面 `:14-156` 已全 serde✓ |",
       "planLine": 294
     },
     {
@@ -1749,7 +1749,7 @@
       ],
       "planAnchorTextRange": [
         "### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）",
-        "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:991`**（`pub fn execute_plugin_command(`，`--repin-code --apply` 定锚）。行号链：`:708` → `:738`（#75 加 `list_plugin_pages`）→ `:755` → `:787`（B10-1 前插 `agent_command_specs`）→ `:838`（B8-1b 在其前插 `list_plugin_task_sources` 一族）→ `:875`（#149 第 2 步在 `build_plugin_manifest` 一处加 `load_declared_ui_keys` 与两条 membership 校验，`manager.rs` 净增 37 行）→ `:878`（lane H `d87ad676c` 的 #171 在 `agent_command_specs` 投影里补 `input_schema` 一行 + 两行注释 ⇒ 派发口随之下移 3 行）→ `:991`（派发口前新增 `discover_plugins` / `aggregated_hooks` / `aggregated_tools` 三个聚合投影方法共 113 行；2026-11-08 盘上实测、`--repin-code` 重锚）。⚠ 本句原先停在 `:738`，而镜像表登记已随 B10-1 重锚到 `:787` ⇒ **散文引用与镜像表各说一套、两边都不红**（散文不受 evidence 判据管辖），这一条是本批撞出来的既存缺陷，不是新引入的漂移。"
+        "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:1008`**（`pub fn execute_plugin_command(`，`--repin-code --apply` 定锚）。行号链：`:708` → `:738`（#75 加 `list_plugin_pages`）→ `:755` → `:787`（B10-1 前插 `agent_command_specs`）→ `:838`（B8-1b 在其前插 `list_plugin_task_sources` 一族）→ `:875`（#149 第 2 步在 `build_plugin_manifest` 一处加 `load_declared_ui_keys` 与两条 membership 校验，`manager.rs` 净增 37 行）→ `:878`（lane H `d87ad676c` 的 #171 在 `agent_command_specs` 投影里补 `input_schema` 一行 + 两行注释 ⇒ 派发口随之下移 3 行）→ `:923`（派发口前新增 `discover_plugins` / `aggregated_hooks` / `aggregated_tools` 三个聚合投影方法共 113 行；2026-11-08 盘上实测、`--repin-code` 重锚）。⚠ 本句原先停在 `:738`，而镜像表登记已随 B10-1 重锚到 `:787` ⇒ **散文引用与镜像表各说一套、两边都不红**（散文不受 evidence 判据管辖），这一条是本批撞出来的既存缺陷，不是新引入的漂移。"
       ]
     },
     {

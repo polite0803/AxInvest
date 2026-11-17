@@ -290,6 +290,14 @@ pub struct ExecutionState {
     /// P6.0-⑥ 批 E：lettre 归实现层（凭据解析仍在执行器）。
     #[serde(skip, default)]
     pub smtp_sender: Option<Arc<dyn axagent_harness::WorkflowSmtpSender>>,
+    /// 通用键值写口（可选，None = storage(sqlite) 报 WORKFLOW_KV_STORE_NOT_INJECTED）。
+    /// P6.0-⑥ storage 接真：替代恒返回模拟值的骨架。
+    #[serde(skip, default)]
+    pub kv_store: Option<Arc<dyn axagent_harness::WorkflowKvStore>>,
+    /// 向量库文本写口（可选，None = storage(vectorDb) 报
+    /// WORKFLOW_VECTOR_WRITER_NOT_INJECTED）。P6.0-⑥ storage 接真。
+    #[serde(skip, default)]
+    pub vector_writer: Option<Arc<dyn axagent_harness::WorkflowVectorWriter>>,
     /// partial_result 流式事件广播通道。LoopExecutor 在每次迭代完成后 send。
     /// 接收端由 WorkEngine.subscribe_partial_results 暴露给外部。
     #[serde(skip, default)]
@@ -375,6 +383,8 @@ impl ExecutionState {
             http_client: None,
             file_io: None,
             smtp_sender: None,
+            kv_store: None,
+            vector_writer: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(
@@ -423,6 +433,8 @@ impl ExecutionState {
             http_client: None,
             file_io: None,
             smtp_sender: None,
+            kv_store: None,
+            vector_writer: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(

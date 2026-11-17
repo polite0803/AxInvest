@@ -828,6 +828,14 @@ pub async fn create_app_state_with_resource_dir(
         engine.set_http_client(std::sync::Arc::new(crate::capability_workflow_io::HostHttpClient));
         engine.set_file_io(std::sync::Arc::new(crate::capability_workflow_io::HostFileIo));
         engine.set_smtp_sender(std::sync::Arc::new(crate::capability_workflow_io::HostSmtpSender));
+        // P6.0-⑥ storage 接真：sqlite 后端走宿主 settings 表 KV 写口，
+        // vectorDb 后端走宿主 VectorStore 的元数据文本写口（均无则如实报错）。
+        engine.set_kv_store(std::sync::Arc::new(crate::capability_workflow_io::HostKvStore::new(
+            sea_db.clone(),
+        )));
+        engine.set_vector_writer(std::sync::Arc::new(
+            crate::capability_workflow_io::HostVectorWriter::new(vector_store_arc.clone()),
+        ));
         // 注：ToolRegistry 暂未注入到 WorkEngine。
         // 原因：local_tool_registry 是 Arc<tokio::sync::Mutex<UnifiedToolRegistry>>，
         // 而 ToolRegistry trait 方法是同步的，无法在同步方法中获取 tokio Mutex 锁。

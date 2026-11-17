@@ -93,7 +93,9 @@ pub mod url_utils;
 pub mod util_fns;
 pub mod verdict_shape;
 pub mod workflow_lifecycle;
+pub mod workflow_node_descriptors;
 pub mod workflow_node_deserializer;
+pub mod workflow_node_dyn;
 pub mod workflow_types;
 
 // ── 工作流 DAG 端口公理（C1）──
@@ -831,8 +833,8 @@ pub use vector_store::{
 // ── 工作流节点外部 IO 契约（P6.0-⑥ 批 E：executor 只留策略，协议实现归 wiring）──
 pub mod workflow_io;
 pub use workflow_io::{
-    WorkflowFileIo, WorkflowHttpClient, WorkflowHttpRequest, WorkflowHttpResponse,
-    WorkflowSmtpRequest, WorkflowSmtpSender,
+    WorkflowFileIo, WorkflowHttpClient, WorkflowHttpRequest, WorkflowHttpResponse, WorkflowKvStore,
+    WorkflowSmtpRequest, WorkflowSmtpSender, WorkflowVectorWriter,
 };
 
 // ── 能力发现契约（Capability Discovery Pipeline） ──

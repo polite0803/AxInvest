@@ -70,23 +70,53 @@ impl NodeExecutorTrait for StorageExecutor {
         // 3. 根据后端和操作模式执行存储
         let (rows_affected, status_msg) = match c.backend.as_str() {
             "sqlite" => {
-                // SQLite 后端：写入 JSON 到 kv_store 表
-                // 实际环境需注入 DatabaseConnection
-                // 当前为骨架实现，返回模拟结果
+                // SQLite 后端：经 WorkflowKvStore 接缝真写入宿主 KV 存储。
+                // 无接缝时如实报错（不再返回假成功）。
+                let kv = context.kv_store.as_ref().ok_or_else(|| {
+                    NodeError::exec_failed(
+                        "WORKFLOW_KV_STORE_NOT_INJECTED",
+                        "workflow kv store not injected into ExecutionState",
+                    )
+                })?;
                 let mode = match c.operation.as_str() {
                     "upsert" => "upsert",
                     "append" => "append",
                     _ => "insert",
                 };
+                let key = key.as_ref().and_then(|v| v.as_str()).unwrap_or(&c.collection);
+                let content =
+                    serde_json::to_string(&input_data).unwrap_or_else(|_| input_data.to_string());
+                kv.write(&c.collection, key, &content, mode).await.map_err(|e| {
+                    NodeError::exec_failed(
+                        error_code::IO_ERROR,
+                        format!("Storage kv write failed: {e}"),
+                    )
+                })?;
                 (1, format!("sqlite_{mode}"))
             },
             "vectorDb" => {
-                // VectorDB 后端：写入/kb/{collection}
-                // 当前为骨架实现
+                // VectorDB 后端：经 WorkflowVectorWriter 接缝真写入向量库元数据文本。
+                // storage 节点输入无 embedding 生成环节，故只落文本（复用宿主
+                // insert_metadata_only_chunk 语义），不伪造向量；无接缝如实报错。
+                let writer = context.vector_writer.as_ref().ok_or_else(|| {
+                    NodeError::exec_failed(
+                        "WORKFLOW_VECTOR_WRITER_NOT_INJECTED",
+                        "workflow vector writer not injected into ExecutionState",
+                    )
+                })?;
                 let mode = match c.operation.as_str() {
                     "upsert" => "upsert",
                     _ => "insert",
                 };
+                let key = key.as_ref().and_then(|v| v.as_str()).unwrap_or(&c.collection);
+                let content =
+                    serde_json::to_string(&input_data).unwrap_or_else(|_| input_data.to_string());
+                writer.insert_text(&c.collection, key, &content, mode).await.map_err(|e| {
+                    NodeError::exec_failed(
+                        error_code::IO_ERROR,
+                        format!("Storage vector write failed: {e}"),
+                    )
+                })?;
                 (1, format!("vectorDb_{mode}"))
             },
             "fileSystem" => {
@@ -210,6 +240,51 @@ mod tests {
         ctx
     }
 
+    /// 同时实现两个新写口的内存替身，记录每次写入的 (collection, key, content, mode)。
+    #[derive(Default)]
+    struct MemWrites {
+        kv: StdMutex<Vec<(String, String, String, String)>>,
+        vec: StdMutex<Vec<(String, String, String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl axagent_harness::WorkflowKvStore for MemWrites {
+        async fn write(
+            &self,
+            collection: &str,
+            key: &str,
+            value: &str,
+            mode: &str,
+        ) -> Result<(), String> {
+            self.kv.lock().unwrap().push((
+                collection.to_string(),
+                key.to_string(),
+                value.to_string(),
+                mode.to_string(),
+            ));
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl axagent_harness::WorkflowVectorWriter for MemWrites {
+        async fn insert_text(
+            &self,
+            collection: &str,
+            key: &str,
+            content: &str,
+            mode: &str,
+        ) -> Result<(), String> {
+            self.vec.lock().unwrap().push((
+                collection.to_string(),
+                key.to_string(),
+                content.to_string(),
+                mode.to_string(),
+            ));
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn file_system_without_seam_reports_not_injected() {
         let ctx = ctx_with(None);
@@ -264,5 +339,69 @@ mod tests {
             },
             other => panic!("期望 ExecutionFailed，实际 {other:?}"),
         }
+    }
+
+    // ---- sqlite / vectorDb 接真（替代骨架假成功）----
+
+    #[tokio::test]
+    async fn sqlite_without_kv_seam_reports_not_injected() {
+        let ctx = ctx_with(None);
+        let err = StorageExecutor.execute(&node_with("sqlite", "upsert"), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => {
+                assert_eq!(code, "WORKFLOW_KV_STORE_NOT_INJECTED")
+            },
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_writes_through_kv_seam() {
+        let writes = Arc::new(MemWrites::default());
+        let mut ctx = ctx_with(None);
+        ctx.kv_store = Some(writes.clone());
+        let out = StorageExecutor.execute(&node_with("sqlite", "upsert"), &ctx).await.unwrap();
+        assert_eq!(out.output["status"], "sqlite_upsert");
+        let calls = writes.kv.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let (collection, key, content, mode) = &calls[0];
+        assert_eq!(collection, "/data/coll.json");
+        // key_var 未配置 ⇒ 回退到 collection 作为键
+        assert_eq!(key, "/data/coll.json");
+        assert_eq!(mode, "upsert");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(content).unwrap(), json!({"a": 1}));
+        drop(calls);
+        // 关键：无接缝时不再假成功
+        let bare = ctx_with(None);
+        assert!(StorageExecutor.execute(&node_with("sqlite", "upsert"), &bare).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn vector_db_without_writer_seam_reports_not_injected() {
+        let ctx = ctx_with(None);
+        let err =
+            StorageExecutor.execute(&node_with("vectorDb", "insert"), &ctx).await.unwrap_err();
+        match err {
+            NodeError::ExecutionFailed { code, .. } => {
+                assert_eq!(code, "WORKFLOW_VECTOR_WRITER_NOT_INJECTED")
+            },
+            other => panic!("期望 ExecutionFailed，实际 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn vector_db_writes_through_writer_seam() {
+        let writes = Arc::new(MemWrites::default());
+        let mut ctx = ctx_with(None);
+        ctx.vector_writer = Some(writes.clone());
+        let out = StorageExecutor.execute(&node_with("vectorDb", "insert"), &ctx).await.unwrap();
+        assert_eq!(out.output["status"], "vectorDb_insert");
+        let calls = writes.vec.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let (collection, key, content, mode) = &calls[0];
+        assert_eq!(collection, "/data/coll.json");
+        assert_eq!(key, "/data/coll.json");
+        assert_eq!(mode, "insert");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(content).unwrap(), json!({"a": 1}));
     }
 }

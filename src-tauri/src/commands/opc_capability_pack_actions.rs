@@ -2100,7 +2100,7 @@ pub(crate) async fn run_template_via_engine(
     // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:833-836）：
     // `create_workflow` 内部转调 `create_workflow_with_hooks(..., None)`，
     // 模板声明的 post_exec 会被静默丢弃 —— 引擎只在内存 Workflow 对象上读声明
-    // （rt-workflow engine/mod.rs:1064-1069），为 None 时直接 return，连日志都不打。
+    // （rt-workflow engine/mod.rs 的 hooks 声明读取处），为 None 时直接 return，连日志都不打。
     // 后果实证（2026-09-15）：`workflow-cm-literary-creation` 的
     // `post_exec: ["content-media-kpi-persist"]` 永不执行 ⇒ opc_kpi_records 永不落库
     // ⇒ 仪表盘创作类 KPI 恒为「暂无数据」。
@@ -2162,9 +2162,9 @@ pub(crate) async fn run_template_via_engine(
     //
     // 为什么这条通道可行（三处都已核实，无一处需要改 harness/引擎）：
     // - 引擎把 `options.input` 透传进 `HookExecContext.input`
-    //   （post_exec 见 `rt-workflow engine/mod.rs:1104-1107`，pre_exec 见 `:2325-2330`）；
+    //   （post_exec 见 `rt-workflow engine/mod.rs` 的 post_exec 段，pre_exec 见同文件的 pre_exec 段）；
     // - 该模板没有 `input_schema`（RunOptions 用 `..Default::default()`，命令层也不传），
-    //   故引擎 `:2135-2139` 的 input_schema 校验分支不执行，多一个键不会被拒；
+    //   故引擎的 input_schema 校验分支不执行，多一个键不会被拒；
     // - 生产先例：股票管线用同一机制传业务键（`src/commands/stock_workflow/core.rs:799-814`
     //   的 `input: Some(json!({"stock_code": …}))`），实测已落进
     //   `workflow_executions.input_params`。

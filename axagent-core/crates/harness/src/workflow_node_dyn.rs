@@ -1,0 +1,217 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! 工作流节点的动态外壳与类型注册模型（P6.0-① 阶段1）。
+//!
+//! 与封闭 enum `WorkflowNode` **共存**：本模块不替换 enum，而是提供一条并行的
+//! 「类型字符串 + 契约声明 + 运行期注册表」通道。阶段 2–6 再逐步把各消费点
+//! 从 enum 迁到本模型，最终删除 enum。
+//!
+//! 设计约束（见 `PROPOSAL-workflow-node-open-registry.md` §3）：
+//! - 序列化形状必须与 enum 逐字一致：`{"type":"<tag>", ...base, "config":{...}}`；
+//! - 强类型 config 在 descriptor 边界解析（`parse_config`），执行器内部仍是强类型；
+//! - 新增节点类型 = 实现 descriptor + 调用 `register`，主壳零改。
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::workflow_types::{NodeKind, WorkflowNode, WorkflowNodeBase};
+
+/// 工作流节点的运行期统一表示（动态外壳）。
+///
+/// `type` 取原 enum 的 serde tag（camelCase，如 `agent` / `httpRequest`）；
+/// `base` 以 `#[serde(flatten)]` 展开，保持与 envelope 同层；
+/// `config` 保留类型专属 JSON，布局/持久化时无损透传。
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowNodeDyn {
+    /// 节点类型字符串；对应原 enum 的 serde tag。
+    pub node_type: String,
+    /// 节点通用字段（id / title / position / retry / enabled …）。
+    #[serde(flatten)]
+    pub base: WorkflowNodeBase,
+    /// 类型专属配置原始 JSON（无损保留原 config 结构体的 JSON 形状）。
+    pub config: Value,
+}
+
+/// 一个节点类型的契约声明：类型标识 + 分类 + config 解析 + 输出变量定位。
+///
+/// 新增节点类型时实现本 trait 并注册即可，无需改 `WorkflowNode` enum
+/// 或任何穷举 match（阶段 2–6 完成后成立）。
+pub trait WorkflowNodeDescriptor: Send + Sync {
+    /// 类型字符串，与序列化 tag 一致（如 `agent` / `httpRequest`）。
+    fn type_name(&self) -> &'static str;
+
+    /// 节点高级分类（供引擎调度与前端配色）。
+    fn kind(&self) -> NodeKind;
+
+    /// 校验/解析 config：成功返回 `()`，失败返回可读错误。
+    /// 执行器在 `execute()` 入口用同一 config 类型 `from_value` 还原强类型。
+    fn parse_config(&self, raw: &Value) -> Result<(), String>;
+
+    /// config 的 JSON Schema（供 schema_validator 与前端表单生成）。
+    /// 默认空对象，由具体 descriptor 覆盖。
+    fn config_schema(&self) -> Value {
+        serde_json::json!({})
+    }
+
+    /// 从 config 中提取 output_var（统一返回 owned String，规避生命周期差异）。
+    /// 无 output_var 字段的节点类型返回 `None`。
+    fn output_var(&self, raw: &Value) -> Option<String>;
+}
+
+/// 节点类型契约注册表（foundation 层，零 axagent 依赖）。
+///
+/// 用 `std::sync::RwLock` 持有 map：注册发生在启动期，读取是高频但只读，
+/// 且临界区不跨 await（ trait 方法均同步）⇒ 同步锁语义正确。
+pub struct NodeDescriptorRegistry {
+    entries: std::sync::RwLock<HashMap<String, Arc<dyn WorkflowNodeDescriptor>>>,
+}
+
+impl Default for NodeDescriptorRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NodeDescriptorRegistry {
+    pub fn new() -> Self {
+        Self { entries: std::sync::RwLock::new(HashMap::new()) }
+    }
+
+    /// 注册一个节点类型契约；同名重复注册会被忽略（保留先注册者）。
+    pub fn register<D: WorkflowNodeDescriptor + 'static>(&self, descriptor: D) {
+        let mut map = self.entries.write().expect("NodeDescriptorRegistry 写锁被毒化");
+        map.entry(descriptor.type_name().to_string()).or_insert_with(|| Arc::new(descriptor));
+    }
+
+    /// 注册一个共享 Arc（供框架侧预置 descriptor）。
+    pub fn register_arc(&self, descriptor: Arc<dyn WorkflowNodeDescriptor>) {
+        let mut map = self.entries.write().expect("NodeDescriptorRegistry 写锁被毒化");
+        map.entry(descriptor.type_name().to_string()).or_insert(descriptor);
+    }
+
+    /// 按类型名查询契约。
+    pub fn get(&self, type_name: &str) -> Option<Arc<dyn WorkflowNodeDescriptor>> {
+        self.entries.read().expect("NodeDescriptorRegistry 读锁被毒化").get(type_name).cloned()
+    }
+
+    /// 已注册类型名列表（顺序不保证，供 dispatcher 枚举）。
+    pub fn type_names(&self) -> Vec<String> {
+        self.entries.read().expect("NodeDescriptorRegistry 读锁被毒化").keys().cloned().collect()
+    }
+
+    /// 已注册 descriptor 列表（供遍历自动注册 executor）。
+    pub fn descriptors(&self) -> Vec<Arc<dyn WorkflowNodeDescriptor>> {
+        self.entries.read().expect("NodeDescriptorRegistry 读锁被毒化").values().cloned().collect()
+    }
+}
+
+impl WorkflowNodeDyn {
+    /// 从动态外壳的 config 还原成强类型 config（执行器入口用）。
+    pub fn parse_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+        serde_json::from_value(self.config.clone())
+            .map_err(|e| format!("节点类型 `{}` 的 config 解析失败: {e}", self.node_type))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 与封闭 enum 的互转（共存期桥接，阶段 6 删除 enum 时一并移除）
+// ---------------------------------------------------------------------------
+
+impl TryFrom<&WorkflowNode> for WorkflowNodeDyn {
+    type Error = String;
+
+    fn try_from(node: &WorkflowNode) -> Result<Self, Self::Error> {
+        let value = serde_json::to_value(node).map_err(|e| e.to_string())?;
+        let node_type = value
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "WorkflowNode 缺少 type 字段".to_string())?
+            .to_string();
+        let config = value.get("config").cloned().unwrap_or_else(|| serde_json::json!({}));
+        // base = envelope 去掉 type/config 后的剩余字段
+        let mut base_value = value.clone();
+        if let Some(obj) = base_value.as_object_mut() {
+            obj.remove("type");
+            obj.remove("config");
+        }
+        let base: WorkflowNodeBase = serde_json::from_value(base_value)
+            .map_err(|e| format!("WorkflowNodeBase 还原失败: {e}"))?;
+        Ok(Self { node_type, base, config })
+    }
+}
+
+/// 将动态外壳转回封闭 enum（共存期用；未知类型如实报错）。
+impl TryFrom<&WorkflowNodeDyn> for WorkflowNode {
+    type Error = String;
+
+    fn try_from(dyn_node: &WorkflowNodeDyn) -> Result<Self, Self::Error> {
+        let mut envelope = serde_json::to_value(&dyn_node.base).map_err(|e| e.to_string())?;
+        let obj = envelope
+            .as_object_mut()
+            .ok_or_else(|| "WorkflowNodeBase 序列化结果不是对象".to_string())?;
+        obj.insert("type".to_string(), Value::String(dyn_node.node_type.clone()));
+        obj.insert("config".to_string(), dyn_node.config.clone());
+        serde_json::from_value(envelope)
+            .map_err(|e| format!("未知或非法节点类型 `{}`: {e}", dyn_node.node_type))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow_types::*;
+
+    fn sample_base() -> WorkflowNodeBase {
+        serde_json::from_value(serde_json::json!({
+            "id": "n1", "title": "节点", "position": {"x": 0, "y": 0},
+            "retry": {"enabled": false, "maxRetries": 0, "backoffType": "Fixed", "baseDelayMs": 1000, "maxDelayMs": 1000},
+            "enabled": true
+        }))
+        .unwrap()
+    }
+
+    /// 共存桥接：enum → 动态外壳 → enum 往返后，序列化字节必须逐字不变。
+    #[test]
+    fn enum_dyn_roundtrip_preserves_json() {
+        let node: WorkflowNode = serde_json::from_value(serde_json::json!({
+            "type": "storage", "id": "s1", "title": "存储",
+            "position": {"x": 0, "y": 0},
+            "retry": {"enabled": false, "maxRetries": 0, "backoffType": "Fixed", "baseDelayMs": 1000, "maxDelayMs": 1000},
+            "enabled": true,
+            "config": {"backend": "sqlite", "operation": "upsert", "input_var": "v", "collection": "c"}
+        }))
+        .unwrap();
+        let original = serde_json::to_value(&node).unwrap();
+        let dyn_node = WorkflowNodeDyn::try_from(&node).unwrap();
+        let back = WorkflowNode::try_from(&dyn_node).unwrap();
+        assert_eq!(serde_json::to_value(&back).unwrap(), original);
+    }
+
+    #[test]
+    fn dyn_parse_config_restores_strong_type() {
+        let dyn_node = WorkflowNodeDyn {
+            node_type: "storage".to_string(),
+            base: sample_base(),
+            config: serde_json::json!({
+                "backend": "sqlite", "operation": "upsert", "input_var": "v", "collection": "c"
+            }),
+        };
+        let cfg: StorageNodeConfig = dyn_node.parse_config().unwrap();
+        assert_eq!(cfg.backend, "sqlite");
+        assert_eq!(cfg.collection, "c");
+    }
+
+    #[test]
+    fn unknown_type_roundtrip_error_is_explicit() {
+        let dyn_node = WorkflowNodeDyn {
+            node_type: "brandNewThirdPartyType".to_string(),
+            base: sample_base(),
+            config: serde_json::json!({}),
+        };
+        assert!(WorkflowNode::try_from(&dyn_node).is_err());
+    }
+}

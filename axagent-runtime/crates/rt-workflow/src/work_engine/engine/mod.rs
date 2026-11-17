@@ -634,6 +634,10 @@ pub struct WorkEngine {
     file_io: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowFileIo>>>>,
     /// SMTP 发信接缝（可选，P6.0-⑥ 批 E：email 不再自带 lettre）
     smtp_sender: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowSmtpSender>>>>,
+    /// 通用键值写口（可选，P6.0-⑥ storage(sqlite) 接真）
+    kv_store: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowKvStore>>>>,
+    /// 向量库文本写口（可选，P6.0-⑥ storage(vectorDb) 接真）
+    vector_writer: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::WorkflowVectorWriter>>>>,
     /// per-execution partial_result 广播器。LoopExecutor 通过 ExecutionState.partial_result_tx
     /// 拿到 sender，每次迭代完成时 broadcast 一个 PartialResultEvent。
     /// 外部通过 `subscribe_partial_results(execution_id)` 拿到 Receiver 实时观察进度。
@@ -1068,6 +1072,26 @@ impl WorkEngine {
         self.smtp_sender.lock().clone()
     }
 
+    /// 注册通用键值写口（P6.0-⑥ storage(sqlite) 接真）
+    pub fn set_kv_store(&self, kv_store: Arc<dyn axagent_harness::WorkflowKvStore>) {
+        *self.kv_store.lock() = Some(kv_store);
+    }
+
+    /// 取出通用键值写口
+    fn kv_store(&self) -> Option<Arc<dyn axagent_harness::WorkflowKvStore>> {
+        self.kv_store.lock().clone()
+    }
+
+    /// 注册向量库文本写口（P6.0-⑥ storage(vectorDb) 接真）
+    pub fn set_vector_writer(&self, writer: Arc<dyn axagent_harness::WorkflowVectorWriter>) {
+        *self.vector_writer.lock() = Some(writer);
+    }
+
+    /// 取出向量库文本写口
+    fn vector_writer(&self) -> Option<Arc<dyn axagent_harness::WorkflowVectorWriter>> {
+        self.vector_writer.lock().clone()
+    }
+
     /// 取出当前注册的工具注册表（用于在执行节点时注入到 ExecutionState）
     fn tool_registry(&self) -> Option<Arc<dyn axagent_harness::ToolRegistry>> {
         self.tool_registry.lock().clone()
@@ -1150,6 +1174,8 @@ impl WorkEngine {
             http_client: Arc::new(parking_lot::Mutex::new(None)),
             file_io: Arc::new(parking_lot::Mutex::new(None)),
             smtp_sender: Arc::new(parking_lot::Mutex::new(None)),
+            kv_store: Arc::new(parking_lot::Mutex::new(None)),
+            vector_writer: Arc::new(parking_lot::Mutex::new(None)),
             loop_partial_txs: Arc::new(Mutex::new(HashMap::new())),
             loop_interrupt_signals: Arc::new(Mutex::new(HashMap::new())),
             in_flight_nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -3597,6 +3623,8 @@ impl WorkEngine {
                 exec_ctx.http_client = self.http_client();
                 exec_ctx.file_io = self.file_io();
                 exec_ctx.smtp_sender = self.smtp_sender();
+                exec_ctx.kv_store = self.kv_store();
+                exec_ctx.vector_writer = self.vector_writer();
                 // 注入真实工作流 execution_id，供容器执行器（debate/swarm）内部
                 // build_debate_body_dispatch 正确查找 execution_workflows。
                 // per-node exec_ctx.execution_id 是随机 UUID（format!("node_{uuid})），
@@ -4872,6 +4900,8 @@ impl WorkEngine {
                         exec_ctx.http_client = self.http_client();
                         exec_ctx.file_io = self.file_io();
                         exec_ctx.smtp_sender = self.smtp_sender();
+                        exec_ctx.kv_store = self.kv_store();
+                        exec_ctx.vector_writer = self.vector_writer();
                         exec_ctx.cancel_token = Some(cancel_token.clone());
                         exec_ctx.dry_run = options.dry_run;
                         exec_ctx.business_rule_engine = seam_business_rule();
@@ -5357,6 +5387,8 @@ impl WorkEngine {
         state.http_client = self.http_client();
         state.file_io = self.file_io();
         state.smtp_sender = self.smtp_sender();
+        state.kv_store = self.kv_store();
+        state.vector_writer = self.vector_writer();
         let input_params = serde_json::to_string(&input).ok();
         workflow_execution_repository()
             .create_workflow_execution(&execution_id, workflow_id, input_params.as_deref())

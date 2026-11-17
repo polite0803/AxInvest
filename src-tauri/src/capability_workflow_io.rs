@@ -11,13 +11,15 @@
 //! output 包装），协议细节一律经由本模块。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use axagent_harness::workflow_io::{
-    WorkflowFileIo, WorkflowHttpClient, WorkflowHttpRequest, WorkflowHttpResponse,
-    WorkflowSmtpRequest, WorkflowSmtpSender,
+    WorkflowFileIo, WorkflowHttpClient, WorkflowHttpRequest, WorkflowHttpResponse, WorkflowKvStore,
+    WorkflowSmtpRequest, WorkflowSmtpSender, WorkflowVectorWriter,
 };
+use sea_orm::DatabaseConnection;
 
 /// reqwest 实现（按请求参数构建客户端，与 http_request 执行器原有语义一致）。
 pub struct HostHttpClient;
@@ -123,5 +125,75 @@ impl WorkflowSmtpSender for HostSmtpSender {
 
         mailer.send(msg).await.map_err(|e| format!("发送邮件失败: {e}"))?;
         Ok(())
+    }
+}
+
+/// 通用 KV 写口实现（P6.0-⑥ storage(sqlite) 接真）：复用宿主 settings 表。
+///
+/// `collection` 作为命名空间前缀拼进 key（`wfkv:{collection}:{key}`），避免与宿主自身
+/// settings key 冲突。`upsert` / `insert` 都走 `set_setting`（on conflict update 幂等）；
+/// `append` 先读旧值再拼接。DB 失败如实返回 `Err`，不再假成功。
+pub struct HostKvStore {
+    db: DatabaseConnection,
+}
+
+impl HostKvStore {
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self { db }
+    }
+}
+
+#[async_trait]
+impl WorkflowKvStore for HostKvStore {
+    async fn write(
+        &self,
+        collection: &str,
+        key: &str,
+        value: &str,
+        mode: &str,
+    ) -> Result<(), String> {
+        let full_key = format!("wfkv:{collection}:{key}");
+        let final_value = if mode == "append" {
+            let old = axagent_dao::repo::settings::get_setting(&self.db, &full_key)
+                .await
+                .map_err(|e| format!("读取 KV 旧值失败: {e}"))?
+                .unwrap_or_default();
+            format!("{old}{value}")
+        } else {
+            value.to_string()
+        };
+        axagent_dao::repo::settings::set_setting(&self.db, &full_key, &final_value)
+            .await
+            .map_err(|e| format!("写入 KV 失败: {e}"))
+    }
+}
+
+/// 向量库文本写口实现（P6.0-⑥ storage(vectorDb) 接真）：复用宿主 `VectorStore` 的
+/// `insert_metadata_only_chunk`（无 embedding 的元数据文本写入，幂等 upsert）。
+pub struct HostVectorWriter {
+    store: Arc<axagent_search::vector_store::VectorStore>,
+}
+
+impl HostVectorWriter {
+    pub fn new(store: Arc<axagent_search::vector_store::VectorStore>) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl WorkflowVectorWriter for HostVectorWriter {
+    async fn insert_text(
+        &self,
+        collection: &str,
+        key: &str,
+        content: &str,
+        _mode: &str,
+    ) -> Result<(), String> {
+        // insert_metadata_only_chunk 自身即幂等 upsert（先删同名 id 再插），
+        // 故 insert / upsert 两种 mode 语义一致。
+        self.store
+            .insert_metadata_only_chunk(collection, key, key, content)
+            .await
+            .map_err(|e| format!("写入向量库文本失败: {e}"))
     }
 }

@@ -80,3 +80,37 @@ pub trait WorkflowSmtpSender: Send + Sync {
     /// 发送一封纯文本邮件。构建/传输/投递失败均返回 `Err`。
     async fn send(&self, request: WorkflowSmtpRequest) -> Result<(), String>;
 }
+
+/// 通用键值写口（P6.0-⑥ storage 节点 `sqlite` 后端接真，替代恒返回模拟值的骨架）。
+///
+/// 异步语义与宿主 DAO 对齐（settings 表的 set_setting 是 async）；`collection` 为逻辑
+/// 命名空间（映射到宿主的表/桶），`key` 为记录键，`value` 为任意 JSON。
+#[async_trait::async_trait]
+pub trait WorkflowKvStore: Send + Sync {
+    /// `mode` = `insert` / `upsert` / `append`：`upsert` 幂等覆盖，`append` 拼接到同名键旧值。
+    async fn write(
+        &self,
+        collection: &str,
+        key: &str,
+        value: &str,
+        mode: &str,
+    ) -> Result<(), String>;
+}
+
+/// 向量库文本写口（P6.0-⑥ storage 节点 `vectorDb` 后端接真）。
+///
+/// 复用宿主 `VectorWriter::insert_metadata_only_chunk` 的「无 embedding 元数据文本
+/// 写入」语义：storage 节点输入是任意 JSON，没有生成 embedding 的环节，故只落文本
+/// 与 key，不伪造向量。异步签名与 `VectorWriter` 一致。
+#[async_trait::async_trait]
+pub trait WorkflowVectorWriter: Send + Sync {
+    /// `collection` = 向量集合名，`key` = chunk id，`content` = 写入文本。
+    /// `mode` = `insert` / `upsert`（`upsert` 幂等覆盖同名 chunk）。
+    async fn insert_text(
+        &self,
+        collection: &str,
+        key: &str,
+        content: &str,
+        mode: &str,
+    ) -> Result<(), String>;
+}

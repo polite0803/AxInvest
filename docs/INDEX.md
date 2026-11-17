@@ -257,7 +257,7 @@
 
 ### 插件体系（`plugin-system`）
 
-- 摘要：文档 20 篇（本地 15 / 导入 5）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-04
+- 摘要：文档 22 篇（本地 17 / 导入 5）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-17
 - 说明书：`docs/features/plugin-system.md`
 
 | 文件名 | 类型 | 一句话用途 | 状态 | 日期 | 对应版本 | 来源 |
@@ -271,6 +271,8 @@
 | `AUDIT-l1-blockers-2026-11-03-1632.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `AUDIT-l1-blockers-2026-11-03.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-shell-plus-plugins.md` | 计划 | 对齐性自检：口径 1 与既有 §1.1 的主路径（独立二进制 + 长驻 worker + 长度前缀 JSON 帧）同形， | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `PROPOSAL-workflow-node-open-registry.md` | 方案 | 把 WorkflowNode 从 32 变体封闭 enum 改为「类型字符串 + 契约声明 + 运行期注册表」模型，使新增节点类型不改主壳（P6.0-①）。 | draft | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `AUDIT-workflow-node-open-baseline-2026-11-17.md` | 审计 | WorkflowNode 开放化阶段0：18 处位点实读复核 + 32 变体 type 标签/wrapper/config 字段序列化基线冻结。 | active | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN-shared-primitives-neutrality.md` | 计划 | 51 处前端反向阻塞逐符号判定：真中性只有 2 处、判据误报 7 处、域内错位 20 处、宿主内联域逻辑 22 处；「20 处共享基元」原判据不成立。 | proposed | 2026-11-05 | v3.0.0+（未定版） | 本地原创 |
 | `AUDIT-l1-blockers-2026-11-02.md` | 审计 | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-02 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `AUDIT-capability-inventory-2026-11-01.md` | 审计 | 「跨面共享消费方」= 同一个前端文件（组件目录 / 页面 / store）既 invoke 了本域的某个命令，又 invoke 了别的域的命令。 | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 本地原创 |
@@ -448,6 +450,7 @@
 |---|---|---|---|---|---|---|---|---|
 | `PROPOSAL-stock-decision-four-horizon.md` | PROPOSAL：股票分析决策的四周期化（超短线 / 短线 / 中期 / 长期） | 把股票分析决策从「单决策 + 单 timeHorizon」升级为「四周期独立决策能力」： | done | 2026-09-23 | v2.9.9 | 股票决策链 | 本地原创 | `AUDIT-stock-data-horizons-2026-09-23.md` `PLAN-decision-action-convergence.md` `PLAN-stock-decision-hitrate-validation.md` `PLAN-llm-horizon-decision-and-parity.md` |
 | `PROPOSAL-EXEC-OBSERVABILITY.md` | PROPOSAL — 执行可观测性与超时治理（T-1 立项书） | 不是「分析慢」，而是「长跑不可观测 + 卡死不自愈」： | active | 2026-09-12 | v2.9.7 | 运行时与智能体 | 本地原创 | `PLAN-VALUATION-CONFIG-WIRING.md` |
+| `PROPOSAL-workflow-node-open-registry.md` | PROPOSAL：WorkflowNode 开放化 —— 从封闭 enum 到动态注册模型（P6.0-①） | 把强类型 enum 改成类型字符串 + 契约声明 + 运行期注册表，新增节点类型不改主壳；含 18 处位点清单与 7 阶段迁移路径。 | draft | 2026-11-17 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `PROPOSAL-workflow-optimizer-design.md` | WorkflowOptimizer 算法方案 | WorkflowOptimizer（trajectory crate）的算法方案与阶段进度。 | 进行中 | 2026-08-31 | v2.9.7 | 运行时与智能体 | 导入 |  |
 | `PROPOSAL-unified-capability-model.md` | 统一能力建模（Unified Capability Model） | 统一能力建模：让 LLM、编排器与开发者一致地发现与执行能力。 | 已实施 | 2026-08-30 | v2.9.7 | OPC 能力包 | 导入 |  |
 | `PROPOSAL-type-driven-design.md` | AxAgent 类型驱动设计（Type-Driven Design）长期实施计划 | 类型驱动设计的长期实施计划（以类型约束替代隐式状态机与魔法字符串）。 | 计划中 | 2026-08-19 | v2.9.5 | 构建与 CI | 导入 |  |
@@ -597,6 +600,7 @@
 
 | 文件名 | 标题 | 一句话用途 | 状态 | 日期 | 对应版本 | 功能点 | 来源 | 关联 |
 |---|---|---|---|---|---|---|---|---|
+| `AUDIT-workflow-node-open-baseline-2026-11-17.md` | AUDIT — WorkflowNode 开放化阶段0：位点复核与序列化基线冻结（2026-11-17） | 18 处位点实读复核 + 32 变体 type 标签/wrapper/config 字段序列化基线，作为改造行为不变的回归依据。 | active | 2026-11-17 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PROPOSAL-workflow-node-open-registry.md` |
 | `AUDIT-l1-blockers-2026-11-04-0322.md` | L1 功能包拆分阻塞面实测（2026-11-04-0322） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-04 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
 | `AUDIT-l1-blockers-2026-11-06.md` | L1 功能包拆分阻塞面实测（2026-11-06） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。**本轮两处读数值得注意**：前端反向阻塞股票侧 = **56 处 / 43 文件**、OPC 侧 = **29 处 / 11 文件**（本索引原登记的 47/34 与 28/11 是 11-05 21:52 快照的读数，差额已按提交逐条归因，见 PLAN §125.7）；而 `docs/audits/` 下 2026-11-05 的 **18 份同族快照没有登记进本索引**（脚本每次跑都无条件落一份带时间戳的文档 ⇒ 本轮验证复跑又落了一份 `…-1257.md`，内容与本行逐字相同，已删）⇒ 见任务 #207。 | active | 2026-11-06 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
 | `AUDIT-l1-blockers-2026-11-04-0422.md` | L1 功能包拆分阻塞面实测（2026-11-04-0422） | 本文件由 node scripts/audit-l1-blockers.mjs 生成，是 PLAN §0.10 的数字来源。改判据请改脚本，不要手抄。 | superseded | 2026-11-04 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |

@@ -31,8 +31,12 @@
 pub mod channels;
 pub mod config_assembly;
 pub mod dispatcher;
+pub mod incoming_webhook;
 
 pub use dispatcher::{LogChannel, NotificationDispatcher};
+
+// P6.0-⑥：工作流 notification 节点直推通道（接缝实现层）
+pub use incoming_webhook::{IncomingWebhookSenderImpl, build_incoming_payload};
 
 // DSA 特有渠道 re-export
 pub use channels::{

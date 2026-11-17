@@ -100,11 +100,8 @@ pub async fn apply_channel_configs(
 mod tests {
     use super::*;
     use axagent_harness::types::NotificationChannelConfig;
-    use axagent_harness::{
-        AlertPayload, AlertSeverity, NotificationDispatchSummary, NotificationPolicy, ReportPayload,
-    };
+    use axagent_harness::{AlertPayload, AlertSeverity, NotificationPolicy};
     use chrono::Utc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn cfg(
         id: &str,

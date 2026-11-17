@@ -794,6 +794,11 @@ pub async fn create_app_state_with_resource_dir(
             engine.init_trigger_manager().await;
             // ApprovalNode HITL: 注入数据库连接供 ApprovalOps 回调使用
             engine.set_db(sea_db.clone());
+            // P6.0-⑥: 注入通知直推通道 —— notification_executor 经接缝发送，
+            // 渠道 payload 格式与 HTTP 发送归通知能力层（executor 不自带实现）。
+            engine.set_notification_sink(std::sync::Arc::new(
+                axagent_notification::incoming_webhook::IncomingWebhookSenderImpl,
+            ));
             // 注：ToolRegistry 暂未注入到 WorkEngine。
             // 原因：local_tool_registry 是 Arc<tokio::sync::Mutex<UnifiedToolRegistry>>，
             // 而 ToolRegistry trait 方法是同步的，无法在同步方法中获取 tokio Mutex 锁。

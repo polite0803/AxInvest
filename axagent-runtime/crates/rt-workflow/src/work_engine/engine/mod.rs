@@ -618,6 +618,9 @@ pub struct WorkEngine {
     // 消费点在读时取接缝，不再各自持有一份注入副本。
     /// 工具注册表（可选，设置后 tool_executor 优先通过 ToolRegistry.execute_tool() 执行工具）
     tool_registry: Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::ToolRegistry>>>>,
+    /// 通知直推通道（可选，P6.0-⑥：notification_executor 经此接缝发送，不再自带 reqwest/payload）
+    notification_sink:
+        Arc<parking_lot::Mutex<Option<Arc<dyn axagent_harness::IncomingWebhookSender>>>>,
     /// per-execution partial_result 广播器。LoopExecutor 通过 ExecutionState.partial_result_tx
     /// 拿到 sender，每次迭代完成时 broadcast 一个 PartialResultEvent。
     /// 外部通过 `subscribe_partial_results(execution_id)` 拿到 Receiver 实时观察进度。
@@ -979,6 +982,16 @@ impl WorkEngine {
         *self.tool_registry.lock() = Some(registry);
     }
 
+    /// 注册通知直推通道（可选，P6.0-⑥：设置后 notification_executor 经接缝发送）
+    pub fn set_notification_sink(&self, sink: Arc<dyn axagent_harness::IncomingWebhookSender>) {
+        *self.notification_sink.lock() = Some(sink);
+    }
+
+    /// 取出当前注册的通知直推通道（用于在执行节点时注入到 ExecutionState）
+    fn notification_sink(&self) -> Option<Arc<dyn axagent_harness::IncomingWebhookSender>> {
+        self.notification_sink.lock().clone()
+    }
+
     /// 取出当前注册的工具注册表（用于在执行节点时注入到 ExecutionState）
     fn tool_registry(&self) -> Option<Arc<dyn axagent_harness::ToolRegistry>> {
         self.tool_registry.lock().clone()
@@ -1054,6 +1067,7 @@ impl WorkEngine {
             trigger_manager: Arc::new(crate::trigger::TriggerManager::new()),
             audit_recorder: Arc::new(parking_lot::Mutex::new(None)),
             tool_registry: Arc::new(parking_lot::Mutex::new(None)),
+            notification_sink: Arc::new(parking_lot::Mutex::new(None)),
             loop_partial_txs: Arc::new(Mutex::new(HashMap::new())),
             loop_interrupt_signals: Arc::new(Mutex::new(HashMap::new())),
             in_flight_nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -3489,6 +3503,8 @@ impl WorkEngine {
                 exec_ctx.business_rule_engine = seam_business_rule();
                 // 注入工具注册表（可选），tool_executor 优先走中心化路径
                 exec_ctx.tool_registry = self.tool_registry();
+                // 注入通知直推通道（可选），notification_executor 经接缝发送
+                exec_ctx.notification_sink = self.notification_sink();
                 // 注入真实工作流 execution_id，供容器执行器（debate/swarm）内部
                 // build_debate_body_dispatch 正确查找 execution_workflows。
                 // per-node exec_ctx.execution_id 是随机 UUID（format!("node_{uuid})），
@@ -4757,6 +4773,7 @@ impl WorkEngine {
                         }
                         exec_ctx.variables = merged_vars;
                         exec_ctx.tool_registry = self.tool_registry();
+                        exec_ctx.notification_sink = self.notification_sink();
                         exec_ctx.cancel_token = Some(cancel_token.clone());
                         exec_ctx.dry_run = options.dry_run;
                         exec_ctx.business_rule_engine = seam_business_rule();
@@ -5235,6 +5252,7 @@ impl WorkEngine {
             ExecutionState::new(execution_id.clone(), workflow_id.to_string(), input.clone());
         state.business_rule_engine = seam_business_rule();
         state.tool_registry = self.tool_registry();
+        state.notification_sink = self.notification_sink();
         let input_params = serde_json::to_string(&input).ok();
         workflow_execution_repository()
             .create_workflow_execution(&execution_id, workflow_id, input_params.as_deref())

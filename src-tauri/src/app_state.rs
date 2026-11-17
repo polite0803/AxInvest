@@ -333,6 +333,9 @@ pub struct AppState {
             >,
         >,
     >,
+    /// 工作流引擎（P6.0-② 角色定性：**底座**——AppState 直接持 Arc 供全命令层复用；
+    /// 依赖方向「域 → 引擎」已核实（§0.8.3-2），引擎不携带领域知识，
+    /// 领域能力经 harness 接缝注入（P6.0-⑥ 分类账见 PLAN §211））。
     pub work_engine: Arc<axagent_runtime::work_engine::WorkEngine>,
     /// 夜间长时任务的成本门控状态（max_budget / spent / tripped）。
     /// 内存态，重启后由运维经 `set_budget` 重新配置；供 Scheduler gate 判定。

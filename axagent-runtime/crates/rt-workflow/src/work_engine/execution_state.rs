@@ -261,6 +261,10 @@ pub struct ExecutionState {
     /// 工具注册表（可选，设置后 tool_executor 优先通过 ToolRegistry.execute_tool() 执行工具）
     #[serde(skip, default)]
     pub tool_registry: Option<Arc<dyn axagent_harness::ToolRegistry>>,
+    /// 通知直推通道（可选，None = notification 节点报 NOTIFICATION_SINK_NOT_INJECTED）。
+    /// P6.0-⑥：渠道 payload 格式与 HTTP 发送归通知能力层，executor 只传三元组。
+    #[serde(skip, default)]
+    pub notification_sink: Option<Arc<dyn axagent_harness::IncomingWebhookSender>>,
     /// partial_result 流式事件广播通道。LoopExecutor 在每次迭代完成后 send。
     /// 接收端由 WorkEngine.subscribe_partial_results 暴露给外部。
     #[serde(skip, default)]
@@ -340,6 +344,7 @@ impl ExecutionState {
             tool_permissions: None,
             business_rule_engine: None,
             tool_registry: None,
+            notification_sink: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(
@@ -382,6 +387,7 @@ impl ExecutionState {
             tool_permissions: None,
             business_rule_engine: None,
             tool_registry: None,
+            notification_sink: None,
             partial_result_tx: None,
             interrupt_signal: None,
             child_executions: Some(std::sync::Arc::new(std::sync::Mutex::new(

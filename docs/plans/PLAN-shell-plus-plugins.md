@@ -10392,3 +10392,53 @@ weights `{trend_mid,capital_long}`）断言三条级联入参逐字等于源值 
 **读数**：tsc 0；esbuild 重建 bundle（14.0kb）；verify 两场景 **38 项全 PASS**（EXIT=0）；
 `build-plugin-bundle.mjs --plugin stock --check` 3✅（describe 握手 + shutdown 回执 +
 sha256 一致）；dprint check 0。提交 `fix(stock): #354`。
+
+## §211 P6.0-⑥ 执行器与接缝单轨化：分类账 + 批次方案（2026-11-17，开工）
+
+**判据**（§964 原文）：executor 只能是接缝薄壳、禁止自带实现；**每个节点执行器都能指到一条接缝**。
+本节把「32 个执行器 0 个走注册表」的立项读数重测为逐执行器分类账（31 个生产执行器，
+mod / llm_resolve / var_filter 为辅助模块不计）。
+
+### 分类账（2026-11-17 实测）
+
+| 类 | 执行器 | 接缝/问题 |
+|---|---|---|
+| **已指到接缝（9）** | agent / llm / llm_classifier / switch（`ProviderRegistry`）、tool（`ToolRegistry`，engine/mod.rs:5237 真注入）、trigger（`TriggerManager`）、debate / swarm / multi_agent（`callbacks.debate_body_dispatch` 回调，内部走 dispatcher） | ✅ |
+| **死接缝（1）** | database_query：`ExecutionState.database_query_service` 字段在（execution_state.rs:260）但**全仓零赋值点**——`start_workflow`（engine/mod.rs:5235-5237）只注入 tool_registry 与 business_rule_engine ⇒ 恒 None ⇒ executor 恒报 `database_query_service not injected`。**形态级红灯**：与 vector_retrieve 同族的「看着存在但其实到不了」 | ⚠ 待修（接入 wiring） |
+| **死执行器（1）** | vector_retrieve：callback（`set_vector_retrieve_callback`）已删除，节点恒返回「not configured」（vector_retrieve_executor.rs:6,58） | ⚠ 待裁（接缝化或退役） |
+| **引擎自身职责（13）** | aggregator / condition / delay / end / fallback / loop / merge / parallel / validation / data_transformer / logging / approval（挂起+表持久化）/ code（rhai 引擎运行时——脚本执行是引擎能力本身，非外域能力） | ✅ 无需外接缝 |
+| **违规·自带领域 IO（7）** | email（lettre SMTP 173 行）、http_request（reqwest 263 行）、webhook_send（reqwest 133 行）、**notification（reqwest + 四平台 payload 构造 164 行，§964 点名）**、file_operation（std::fs 73 行）、storage（std::fs 151 行）、**document_parser（空壳假解析 58 行，§964 点名）** | ✖ 本单元主体 |
+
+### 批次（每批独立验收；trait 与实现归位、执行器薄壳化、测试三层同批）
+
+- **批 A（本批）**：P6.0-② WorkEngine 角色定性补账（app_state.rs:336 字段说明，1 人日欠账）。
+- **批 B（本批）**：notification_executor 并入通知渠道——harness 新 trait `IncomingWebhookSender`
+  （渠道格式知识归实现层），notification crate 新模块 `incoming_webhook` 承接 build_payload
+  四平台 + reqwest POST，wiring 注入，执行器薄壳化（NodeOutput 契约不变）。
+- **批 C**：document_parser_executor 接真接缝（harness `DocumentParser` trait 已存在，
+  search_sources.rs:62——ExecutionState 注入 + 真解析替换假回显）。
+- **批 D**：database_query 死接缝接通 wiring（start_workflow 注入链）+ vector_retrieve 处置裁定。
+- **批 E**：email / http_request / webhook_send / file_operation / storage 五执行器接缝化
+  （各自 trait + 实现归位；webhook_send 与 http_request 指到同一条 HTTP 接缝）。
+
+### 批 B 落地账（2026-11-17）
+
+- **harness**（`notification_channel.rs` 追加）：`IncomingWebhookSender` trait
+  （`send(channel, webhook_url, message) -> IncomingWebhookReceipt{sent,status,responseBody}`）
+  ——渠道 payload 形状知识（slack/wecom/dingtalk/feishu + 中文别名）全部归实现层，
+  执行器只传三元组。
+- **notification crate**（新模块 `incoming_webhook.rs`）：`IncomingWebhookSenderImpl`
+  承接 build_payload 四平台构造 + reqwest POST（15s 超时，与原执行器一致）；
+  payload 构造纯函数带四渠道形状单测。
+- **rt-workflow**：ExecutionState 增 `notification_sink: Option<Arc<dyn IncomingWebhookSender>>`；
+  WorkEngine 增 setter（与 tool_registry 同型）；start_workflow 与两处子执行上下文注入；
+  notification_executor 删 reqwest/Duration/build_payload（−58 行自带实现），改调 sink，
+  system 通道短路与 NOTIFICATION_CONFIG_INVALID 判据保持，NodeOutput 形状逐字段不变。
+- **wiring**：init/state.rs:784 WorkEngine 装配块 set（engine.set_db 之后，与 notification_dispatcher 同源；
+  离线 bin 走同一 create_app_state 路径同享）。
+- **读数**：cargo check 主 crate 0（7m35s）；clippy 三 crate（harness/notification/rt-workflow）
+  --all-targets --all-features -D warnings 0；fmt 两 workspace --check 0；
+  测试 rt-workflow 349/349、notification 41/41（含 incoming_webhook 5 新增）、harness 8/8。
+  测试替身 MockSink 按 AGENTS.md 合法例外加 mod 级 disallowed_types 豁免 + SAFETY 注释
+  （先例照 code_executor.rs:115 形态）。附带修掉 config_assembly.rs 测试 mod 两处既存
+  unused imports（clippy lib test target 暴露）。

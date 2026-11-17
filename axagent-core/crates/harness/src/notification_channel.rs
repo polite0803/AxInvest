@@ -285,6 +285,34 @@ impl NotificationDispatchSummary {
     }
 }
 
+// ── 工作流通知节点直推通道（P6.0-⑥）──────────────────────────
+
+/// 单条直推回执（字段与 notification_executor 的 NodeOutput.output 契约对齐）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingWebhookReceipt {
+    pub sent: bool,
+    pub status: u16,
+    pub response_body: String,
+}
+
+/// 通用 incoming webhook 直推通道。
+///
+/// 渠道格式知识（slack / wecom / dingtalk / feishu 的 payload 形状与中文别名）
+/// 归实现层（notification crate），工作流节点执行器只传三元组 —— executor 只能是
+/// 接缝薄壳、禁止自带实现（PLAN §0.8.4 P6.0-⑥ / §211 分类账）。
+#[async_trait]
+pub trait IncomingWebhookSender: Send + Sync {
+    /// 按渠道名构造 payload 并 POST 到 webhook_url。
+    /// 失败返回 Err（网络层错误）；非 2xx 返回 Ok(receipt.sent=false)。
+    async fn send(
+        &self,
+        channel: &str,
+        webhook_url: &str,
+        message: &str,
+    ) -> Result<IncomingWebhookReceipt, String>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

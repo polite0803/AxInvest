@@ -42,9 +42,9 @@ pub mod channel_adapter;
 pub mod narrative;
 pub mod notification_channel;
 pub use notification_channel::{
-    AlertPayload, AlertSeverity, NotificationChannel, NotificationDispatchResult,
-    NotificationDispatchSummary, NotificationPolicy, NotificationRoute, ReportPayload,
-    ReportStockSummary, RouteConfig,
+    AlertPayload, AlertSeverity, IncomingWebhookReceipt, IncomingWebhookSender,
+    NotificationChannel, NotificationDispatchResult, NotificationDispatchSummary,
+    NotificationPolicy, NotificationRoute, ReportPayload, ReportStockSummary, RouteConfig,
 };
 pub mod constants;
 pub mod contracts;

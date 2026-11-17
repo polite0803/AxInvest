@@ -14,10 +14,7 @@
     "tool:OpcGetFinancialReport",
     "tool:OpcRecordKpi"
   ],
-  "commands": [
-    "opc_search_wiki",
-    "opc_record_kpi"
-  ],
+  "commands": [],
   "calls": [
     "opc.store"
   ]

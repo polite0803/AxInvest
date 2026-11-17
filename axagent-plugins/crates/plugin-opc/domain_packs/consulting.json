@@ -13,10 +13,7 @@
     "tool:OpcCreateContentAsset",
     "tool:FileWrite"
   ],
-  "commands": [
-    "opc_search_wiki",
-    "opc_create_content_asset"
-  ],
+  "commands": [],
   "calls": [
     "opc.store"
   ]

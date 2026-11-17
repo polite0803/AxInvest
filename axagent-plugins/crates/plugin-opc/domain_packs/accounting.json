@@ -17,8 +17,6 @@
   "commands": [
     "opc_list_invoices",
     "opc_create_invoice",
-    "opc_list_customers",
-    "opc_record_kpi",
     "opc_transition_invoice"
   ],
   "calls": [

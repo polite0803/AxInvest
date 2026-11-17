@@ -14,9 +14,7 @@
     "tool:Bash",
     "tool:FileWrite"
   ],
-  "commands": [
-    "opc_search_wiki"
-  ],
+  "commands": [],
   "calls": [
     "opc.store"
   ]

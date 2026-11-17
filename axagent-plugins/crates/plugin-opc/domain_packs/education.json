@@ -12,10 +12,7 @@
     "tool:OpcCreateLandingPage",
     "tool:FileWrite"
   ],
-  "commands": [
-    "opc_create_content_asset",
-    "opc_create_landing_page"
-  ],
+  "commands": [],
   "calls": [
     "opc.store"
   ]

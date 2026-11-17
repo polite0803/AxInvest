@@ -170,6 +170,10 @@ const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
 const webRoot = spec.webDir ? path.join(workspaceRoot, spec.webDir) : null;
 const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) : null;
+const domainPackSource = pluginName === "opc"
+  ? path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs")
+  : null;
+const DOMAIN_PACK_DIR = "domain_packs";
 
 function fail(message) {
   console.error(`[plugin-bundle] ${message}`);
@@ -262,6 +266,25 @@ if (uiSchemaSource) {
   uiSchemaKeyCount = uiSchemaKeys.size;
 }
 
+// 3.7) OPC 域包 logical manifest：一域一插件边界随产物走。
+//      当前 transport 仍由 plugin-opc-common 承接，所以这些文件不是独立 worker 清单；
+//      但它们必须随包分发，供安装/运行期按 domainPackId 做 ACL 与启停判定。
+let domainPackCount = 0;
+if (domainPackSource) {
+  if (!fs.existsSync(domainPackSource)) { fail(`域包清单目录不存在：${domainPackSource}`); }
+  const target = path.join(outRoot, DOMAIN_PACK_DIR);
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(target, { recursive: true });
+  const files = fs.readdirSync(domainPackSource).filter((f) => f.endsWith(".json")).sort();
+  if (files.length === 0) { fail(`域包清单目录为空：${domainPackSource}`); }
+  for (const file of files) {
+    const raw = fs.readFileSync(path.join(domainPackSource, file), "utf8");
+    try { JSON.parse(raw); } catch (error) { fail(`域包清单不是合法 JSON（${file}）：${error.message}`); }
+    fs.writeFileSync(path.join(target, file), raw.endsWith("\n") ? raw : `${raw}\n`);
+  }
+  domainPackCount = files.length;
+}
+
 // 4) 清单：形状归 `PLUGIN_SPECS[*].manifest`，此处只递随产物变化的三个量。
 const manifest = spec.manifest({ version: workerPackage.version, binaryName, sha256 });
 const manifestPath = path.join(outRoot, "plugin.json");
@@ -271,6 +294,7 @@ console.log(`[plugin-bundle] 产物目录：${outRoot}`);
 console.log(`[plugin-bundle] worker   ：${stagedBinary}`);
 if (webRoot) { console.log(`[plugin-bundle] 前端资产 ：${webFileCount} 个文件（页面入口 ${PAGE_ENTRY}）`); }
 if (uiSchemaSource) { console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeyCount} 个 schema key）`); }
+if (domainPackSource) { console.log(`[plugin-bundle] 域包清单 ：${domainPackCount} 份（${DOMAIN_PACK_DIR}/）`); }
 console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
 console.log(`[plugin-bundle] sha256   ：${sha256}`);
 
@@ -288,6 +312,7 @@ async function checkStagedBundle(declared, root) {
     fail("--check：本插件未声明前端源（webDir=null），清单不得声明 pages[]");
   }
   checkDeclaredTaskSources(declared, root);
+  if (domainPackSource) { checkDeclaredDomainPacks(root); }
 
   const program = path.join(root, declared.worker.program);
   if (!fs.existsSync(program)) { fail(`--check：清单声明的 worker 不存在：${program}`); }
@@ -414,6 +439,36 @@ function checkDeclaredPages(declared, root) {
   }
   if (bundlePages === 0) { fail("--check：pages[] 里没有任何 bundle 页，通道未被验证"); }
   console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
+}
+
+/** 域包清单自检：产物里必须有 14 份合法 JSON，且 pluginId 一域一值、命令不跨域重复。 */
+function checkDeclaredDomainPacks(root) {
+  const dir = path.join(root, DOMAIN_PACK_DIR);
+  if (!fs.existsSync(dir)) { fail(`--check：域包清单目录不存在：${dir}`); }
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+  if (files.length !== 14) { fail(`--check：域包清单应为 14 份，实得 ${files.length}`); }
+  const seenIds = new Set();
+  const seenPluginIds = new Set();
+  const commandOwners = new Map();
+  for (const file of files) {
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8")); }
+    catch (error) { fail(`--check：域包清单不是合法 JSON（${file}）：${error.message}`); }
+    if (!manifest.id || !manifest.pluginId || manifest.transportOwner !== "plugin-opc-common") {
+      fail(`--check：域包清单 ${file} 缺 id/pluginId 或 transportOwner 不是 plugin-opc-common`);
+    }
+    if (seenIds.has(manifest.id)) { fail(`--check：域包 id 重复：${manifest.id}`); }
+    if (seenPluginIds.has(manifest.pluginId)) { fail(`--check：域包 pluginId 重复：${manifest.pluginId}`); }
+    seenIds.add(manifest.id);
+    seenPluginIds.add(manifest.pluginId);
+    for (const command of manifest.commands ?? []) {
+      if (commandOwners.has(command) && commandOwners.get(command) !== manifest.id) {
+        fail(`--check：命令 ${command} 被 ${manifest.id} 与 ${commandOwners.get(command)} 同时声明`);
+      }
+      commandOwners.set(command, manifest.id);
+    }
+  }
+  console.log(`[plugin-bundle] --check ✅ ${files.length} 个域包逻辑清单齐全，pluginId/commands 无跨域重复`);
 }
 
 /** 递归列出目录下的所有文件（保持不排序；调用方只按相对路径逐个处理）。 */

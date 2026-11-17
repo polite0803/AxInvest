@@ -43,8 +43,6 @@
       "get_dashboard",
       "list_projects",
       "get_financial_report",
-      "create_invoice",
-      "transition_invoice",
       "opc_list_projects",
       "opc_get_dashboard",
       "opc_list_kpis",

@@ -17,9 +17,6 @@
   ],
   "commands": [
     "opc_create_customer",
-    "opc_list_customers",
-    "opc_create_landing_page",
-    "opc_create_publish_schedule",
     "opc_list_landing_pages",
     "opc_list_contacts"
   ],

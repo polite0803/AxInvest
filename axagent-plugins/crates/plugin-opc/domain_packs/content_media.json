@@ -24,9 +24,7 @@
   "commands": [
     "opc_list_blog_posts",
     "opc_create_blog_post",
-    "opc_create_publish_schedule",
     "opc_list_publish_schedules",
-    "opc_create_content_asset",
     "opc_list_content_assets",
     "opc_update_content_asset",
     "opc_delete_content_asset",

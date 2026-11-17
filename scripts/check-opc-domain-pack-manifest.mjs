@@ -23,7 +23,7 @@ const MANIFEST_DIR = "axagent-plugins/crates/plugin-opc/domain_packs";
 
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 
-export function validateManifest(m, expected) {
+export function validateManifest(m, expected, options = {}) {
   const problems = [];
   if (m.id !== expected.id) problems.push(`id=${m.id}，期望 ${expected.id}`);
   if (m.pluginId !== expected.pluginId) problems.push(`pluginId=${m.pluginId}，期望 ${expected.pluginId}`);
@@ -32,9 +32,21 @@ export function validateManifest(m, expected) {
   const own = [...new Set(m.capabilities ?? [])].sort();
   const want = [...new Set(expected.capabilities)].sort();
   if (own.join("|") !== want.join("|")) problems.push(`capabilities 不一致：manifest=${own.join(",")} / 底册=${want.join(",")}`);
-  const hasOpcCommand = expected.capabilities.some((c) => c.startsWith("tool:Opc"));
-  if (hasOpcCommand && (m.commands ?? []).length === 0) problems.push("commands 为空");
-  if (!hasOpcCommand && (m.commands ?? []).length !== 0) problems.push("无 tool:Opc 能力时 commands 必须为空");
+  const shared = options.sharedCommands ?? new Set();
+  const sharedCommandsWithPrefix = new Set(
+    [...shared].flatMap((name) => [name, name.startsWith("opc_") ? name : `opc_${name}`])
+  );
+  const hasOpcCommand = expected.capabilities.some(
+    (c) => c.startsWith("tool:Opc") && !sharedCommandsWithPrefix.has(commandName(c))
+  );
+  const expectedCommands = (expected.capabilities ?? [])
+    .map((c) => commandName(c))
+    .filter((c) => c && !sharedCommandsWithPrefix.has(c));
+  const ownCommands = [...new Set(m.commands ?? [])].sort();
+  const wantCommands = [...new Set(expectedCommands)].sort();
+  if (ownCommands.join("|") !== wantCommands.join("|")) {
+    problems.push(`commands 不一致：manifest=${ownCommands.join(",") || "空"} / 期望=${wantCommands.join(",") || "空"}`);
+  }
   if (!m.calls?.includes("opc.store")) problems.push("calls 缺 opc.store");
   return problems;
 }
@@ -64,6 +76,7 @@ function main() {
   if (SELFTEST) selftest();
   const registry = JSON.parse(read(REGISTRY_REL));
   const slices = new Map((registry.policy?.verticalSlices ?? []).map((s) => [s.domainPackId, s]));
+  const sharedCommands = new Set(registry.policy?.sharedCommands ?? []);
   const problems = [];
   const manifests = [];
   if (!existsSync(join(ROOT, MANIFEST_DIR))) {
@@ -78,7 +91,7 @@ function main() {
       continue;
     }
     const expected = { ...pack, pluginId: slices.get(pack.id)?.pluginId ?? pack.pluginId };
-    problems.push(...validateManifest(m, expected).map((p) => `${file}: ${p}`));
+    problems.push(...validateManifest(m, expected, { sharedCommands }).map((p) => `${file}: ${p}`));
     manifests.push({ id: m.id, pluginId: m.pluginId, commands: m.commands.length, transportOwner: m.transportOwner });
   }
   const expectedIds = registry.packs.map((p) => p.id).sort();

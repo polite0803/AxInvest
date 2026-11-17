@@ -13,10 +13,7 @@
     "tool:WebSearch",
     "tool:OpcAddMilestone"
   ],
-  "commands": [
-    "opc_create_project",
-    "opc_add_milestone"
-  ],
+  "commands": [],
   "calls": [
     "opc.store"
   ]

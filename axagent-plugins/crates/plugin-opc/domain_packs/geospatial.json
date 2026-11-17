@@ -13,11 +13,7 @@
     "tool:OpcCreateProject",
     "tool:FileWrite"
   ],
-  "commands": [
-    "opc_search_wiki",
-    "opc_create_content_asset",
-    "opc_create_project"
-  ],
+  "commands": [],
   "calls": [
     "opc.store"
   ]

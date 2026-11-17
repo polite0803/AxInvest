@@ -80,7 +80,7 @@
 ## 5. 风险与人工验收
 
 - WSL 无 GUI、macOS 无 CI runner：语义靠 mock 测试，平台实现靠 cross-target `cargo check`，真机语义靠下列人工验收。
-- Windows UIA 需 STA、macOS AX 需主线程：平台实现内部用专用线程 + channel，trait async 只发消息 await。
+- 三平台实现形态（阶段2落地口径）：Windows 用 PowerShell/.NET `UIAutomationClient` 脚本读 UIA 树并执行 Pattern 动作（PowerShell 进程天然 STA），macOS 用 `osascript` 驱动 System Events 的 AX 树（`entire contents` + 语义动作），Linux 用 `atspi` crate 直连 AT-SPI2 总线；三者都不在 Rust 侧管理 COM apartment / 主线程 channel，也不读屏幕像素、不发送坐标点击。
 - 远程真机人工验收（发布前）：
   1. Windows：UIA 查询并激活记事本按钮；
   2. macOS：AX 查询并设值 Safari 地址栏（含首次授权弹窗）；

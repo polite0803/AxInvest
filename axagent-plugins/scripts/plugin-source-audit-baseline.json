@@ -40,7 +40,7 @@
   },
   "plugin-testkit": {
     "path_dependency": [
-      16
+      17
     ]
   },
   "plugins": {

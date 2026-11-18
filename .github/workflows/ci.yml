@@ -1104,6 +1104,12 @@ jobs:
       - name: Check plugin source audit (path/git deps ratchet)
         run: node axagent-plugins/scripts/check-plugin-source-audit.mjs
 
+      - name: Check SDK package surface selftest
+        run: node scripts/check-sdk-package-surface.mjs --selftest
+
+      - name: Check SDK package surface (Cargo.toml / src/lib.rs / no target)
+        run: node scripts/check-sdk-package-surface.mjs
+
       - name: Verify OPC plugin SDK standalone tree
         run: node scripts/verify-opc-plugin-sdk.mjs
 

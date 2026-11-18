@@ -319,6 +319,8 @@ if (canRunFrontend) {
   step("插件 workspace 跨根 path 依赖（基线只减不增）", "node scripts/check-workspace-boundary.mjs");
   step("插件源码审计自检（正负对照）", "node axagent-plugins/scripts/check-plugin-source-audit.mjs --selftest");
   step("插件源码 path/git 依赖（基线只减不增）", "node axagent-plugins/scripts/check-plugin-source-audit.mjs");
+  step("SDK 发布物包表面自检（正负对照）", "node scripts/check-sdk-package-surface.mjs --selftest");
+  step("SDK 发布物包表面（Cargo.toml / src/lib.rs / 无 target）", "node scripts/check-sdk-package-surface.mjs");
   step("OPC 插件 SDK 独立树验收", "node scripts/verify-opc-plugin-sdk.mjs");
   step("全插件 SDK 独立树验收（含 stock 依赖链）", "node scripts/verify-opc-plugin-sdk.mjs --full");
 

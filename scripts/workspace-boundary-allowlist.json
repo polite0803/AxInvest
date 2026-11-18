@@ -19,6 +19,9 @@
     "axagent-astock-data",
     "axagent-plugin-proto"
   ],
+  "plugin-testkit": [
+    "axagent-plugin-proto"
+  ],
   "plugins": [
     "axagent-harness",
     "axagent-plugin-proto"

@@ -256,16 +256,14 @@ const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
 const webRoot = spec.webDir ? path.join(workspaceRoot, spec.webDir) : null;
 const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) : null;
-const domainPackSourceByPlugin = {
-  opc: path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs"),
-  "opc-accounting": path.join(workspaceRoot, "crates", "plugin-opc-accounting", "domain_packs"),
-  "opc-security": path.join(workspaceRoot, "crates", "plugin-opc-security", "domain_packs"),
-  "opc-game-dev": path.join(workspaceRoot, "crates", "plugin-opc-game-dev", "domain_packs"),
-  "opc-ai-research": path.join(workspaceRoot, "crates", "plugin-opc-ai-research", "domain_packs"),
-};
-const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
 const registryPath = path.join(workspaceRoot, "..", "scripts", "opc-domain-pack-plugins.json");
 const ownershipRegistry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+const domainPackSourceByPlugin = Object.fromEntries(
+  ownershipRegistry.packs
+    .filter((p) => p.pluginId !== "plugin-opc")
+    .map((p) => [p.pluginId.replace(/^plugin-/, ""), path.join(workspaceRoot, "crates", p.pluginId, "domain_packs")]),
+);
+const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
 const ownedDomainPackIds = new Set(
   (ownershipRegistry.policy?.verticalSlices ?? [])
     .filter((slice) => slice.pluginId !== "plugin-opc")
@@ -278,14 +276,13 @@ const expectedDomainPackIds = pluginName === "opc"
     .map((p) => p.id);
 const DOMAIN_PACK_DIR = "domain_packs";
 
-/** 各插件 logical manifest 的合法 owner（公共底座 vs 独立 worker）。 */
-const DOMAIN_PACK_OWNER = {
-  opc: "plugin-opc-common",
-  "opc-accounting": "opc-accounting",
-  "opc-security": "plugin-opc-common",
-  "opc-game-dev": "plugin-opc-common",
-  "opc-ai-research": "plugin-opc-common",
-};
+/** 各插件 logical manifest 的合法 owner：由底册 verticalSlices 唯一权威。 */
+function domainPackOwnerFor(pluginName) {
+  const slice = ownershipRegistry.policy?.verticalSlices?.find(
+    (s) => s.pluginId === `plugin-${pluginName}`,
+  );
+  return slice?.transportOwner ?? "plugin-opc-common";
+}
 
 function fail(message) {
   console.error(`[plugin-bundle] ${message}`);
@@ -592,7 +589,7 @@ function checkDeclaredDomainPacks(root) {
   if (expectedDomainPackIds.length > 0 && files.length !== expectedDomainPackIds.length) {
     fail(`--check：域包清单应为 ${expectedDomainPackIds.length} 份，实得 ${files.length}`);
   }
-  const expectedOwner = DOMAIN_PACK_OWNER[pluginName];
+  const expectedOwner = domainPackOwnerFor(pluginName);
   const seenIds = new Set();
   const seenPluginIds = new Set();
   for (const file of files) {

@@ -173,6 +173,22 @@ if (mode === "nextest" && !listOnly) {
     "plugins",
     "opc-accounting",
   );
+  const sales = spawnSync(
+    "node",
+    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-sales-growth", "--check"],
+    { cwd: repoRoot, stdio: "inherit", env: process.env },
+  );
+  if (sales.status !== 0) {
+    console.error(`[cargo ${mode}] staging opc-sales-growth bundle 失败`);
+    process.exit(sales.status ?? 1);
+  }
+  process.env.AXAGENT_SALES_BUNDLE_DIR = path.join(
+    repoRoot,
+    "axagent-plugins",
+    "dist",
+    "plugins",
+    "opc-sales-growth",
+  );
 }
 
 for (const root of roots) {

@@ -16693,6 +16693,59 @@ mod tests {
                 created_at: 1_700_000_000,
             })
         }
+
+        // ── P6.2：sales_growth 域三条命令的 e2e 替身 ──
+        async fn create_customer(
+            &self,
+            _input: axagent_harness::CreateCustomerRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::CustomerSummaryView> {
+            Ok(axagent_harness::CustomerSummaryView {
+                id: "cust-new".into(),
+                name: "张三".into(),
+                email: "z@example.com".into(),
+                phone: None,
+                company: None,
+                customer_type: "business".into(),
+                country: None,
+                region: None,
+                city: None,
+                address: None,
+                latitude: None,
+                longitude: None,
+                source: None,
+                notes: String::new(),
+                status: "lead".into(),
+                total_revenue: 0.0,
+                invoice_count: 0,
+                created_at: 1_700_000_000,
+            })
+        }
+
+        async fn list_landing_pages(
+            &self,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::LandingPageSummaryView>>
+        {
+            Ok(vec![axagent_harness::LandingPageSummaryView {
+                id: "lp-1".into(),
+                title: "落地页".into(),
+                slug: "lp-slug".into(),
+                published: false,
+                created_at: 1_700_000_000,
+            }])
+        }
+
+        async fn list_contacts(
+            &self,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::ContactSummaryView>> {
+            Ok(vec![axagent_harness::ContactSummaryView {
+                id: "contact-1".into(),
+                name: "李四".into(),
+                email: "l@example.com".into(),
+                source: "form".into(),
+                read: false,
+                created_at: 1_700_000_000,
+            }])
+        }
     }
 
     /// 一个方法都不覆盖：`list_blog_posts` 吃 trait 默认 `Err(Provider("…未实现…"))`

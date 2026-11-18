@@ -8,8 +8,10 @@ use std::io::{BufReader, BufWriter};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use axagent_plugin_proto::{
-    AXAGENT_PLUGIN_PROTO_VERSION, CommandFrame, FrameRequest, FrameResponse, PluginDeclaration,
-    ResponseKind, error_codes, ops, read_inbound, write_json_frame,
+    FrameRequest, FrameResponse, ResponseKind, error_codes, ops, read_inbound, write_json_frame,
+};
+use axagent_plugin_testkit::{
+    assert_command_value, command_frame, declaration_of, describe_frame, shutdown_frame,
 };
 
 const PLUGIN_ID: &str = "opc-accounting@bundled";
@@ -59,7 +61,7 @@ impl Worker {
     }
 
     fn shutdown(&mut self) {
-        self.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+        self.send(&shutdown_frame());
         assert_eq!(self.recv_response().kind, ResponseKind::Success);
         drop(self.stdin.take());
         assert!(self.child.wait().expect("等待 worker 退出").success());
@@ -67,24 +69,16 @@ impl Worker {
 }
 
 fn command(plugin_id: &str, name: &str, input: serde_json::Value) -> FrameRequest {
-    CommandFrame::new(plugin_id, name, input, 5_000).to_frame_request().expect("命令帧应能编成请求")
+    command_frame(plugin_id, name, input, 5_000)
 }
 
 #[test]
 fn describe_and_identity_are_scoped_to_accounting() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
-    worker.send(
-        &FrameRequest::new(
-            ops::DESCRIBE,
-            serde_json::json!({ "proto_version": AXAGENT_PLUGIN_PROTO_VERSION }),
-        )
-        .with_id("req-describe"),
-    );
+    worker.send(&describe_frame().with_id("req-describe"));
     let response = worker.recv_response();
-    assert_eq!(response.kind, ResponseKind::Success);
-    let declaration: PluginDeclaration =
-        serde_json::from_value(response.value.expect("成功帧带值")).expect("合法声明");
-    declaration.validate().expect("声明应通过宿主协议校验");
+    assert_eq!(response.request_id.as_deref(), Some("req-describe"));
+    let declaration = declaration_of(&response);
     assert_eq!(declaration.calls, vec!["opc.store".to_string()]);
 
     // 外部安装形态也必须是本 worker 的合法身份。
@@ -129,8 +123,7 @@ fn accounting_commands_go_through_host_seam() {
             .with_id(call.request_id.expect("出站请求带 request_id")),
     );
     let response = worker.recv_response();
-    assert_eq!(response.kind, ResponseKind::Success);
-    assert_eq!(response.value.expect("回执")["value"], serde_json::json!([]));
+    assert_command_value(&response, &serde_json::json!([]));
 
     // ② 创建发票：camelCase 入参 + 嵌 request；行金额由宿主现算。
     worker.send(&command(

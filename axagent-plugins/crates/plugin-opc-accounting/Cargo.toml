@@ -18,5 +18,8 @@ axagent-plugin-opc-core = { version = "3.0.0", path = "../plugin-opc-core" }
 axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
 serde_json = "1"
 
+[dev-dependencies]
+axagent-plugin-testkit = { version = "3.0.0", path = "../plugin-testkit" }
+
 [lints]
 workspace = true

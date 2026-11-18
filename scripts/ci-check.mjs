@@ -313,6 +313,11 @@ if (canRunFrontend) {
   step("多 workspace 构建配置同源自检（8 条正负对照）", "node scripts/check-workspace-config-parity.mjs --selftest");
   step("多 workspace 构建配置逐字同源（profile / lints / clippy.toml / rustfmt / toolchain）", "node scripts/check-workspace-config-parity.mjs");
 
+  // 插件 workspace 跨根 path 依赖边界（PLAN-repo-split §12.4 L4）：拷出独立仓前必须把 debt
+  // 显式化并锁死只减不增；命令与 ci.yml 的 workspace-config-parity job 逐字同源。
+  step("插件 workspace 边界自检（正负对照）", "node scripts/check-workspace-boundary.mjs --selftest");
+  step("插件 workspace 跨根 path 依赖（基线只减不增）", "node scripts/check-workspace-boundary.mjs");
+
   // ── 能力域单一真相源门禁（权威枚举 ↔ 前端 / prompt / i18n 副本）──
   // 为什么需要：`CapabilityDomain`（`harness/src/capability.rs`）是唯一权威，
   //   但下游有 6 类**手抄副本**（TS 联合类型 / 前端域元数据 / 协议顺序 /

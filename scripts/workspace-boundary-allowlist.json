@@ -1,0 +1,29 @@
+{
+  "plugin-opc": [
+    "axagent-plugin-proto"
+  ],
+  "plugin-opc-accounting": [
+    "axagent-plugin-proto"
+  ],
+  "plugin-opc-content-media": [
+    "axagent-plugin-proto"
+  ],
+  "plugin-opc-core": [
+    "axagent-plugin-proto"
+  ],
+  "plugin-opc-sales-growth": [
+    "axagent-plugin-proto"
+  ],
+  "plugin-stock": [
+    "axagent-analysis-engine",
+    "axagent-astock-data",
+    "axagent-plugin-proto"
+  ],
+  "plugins": [
+    "axagent-harness",
+    "axagent-plugin-proto"
+  ],
+  "schema-gen": [
+    "axagent-harness"
+  ]
+}

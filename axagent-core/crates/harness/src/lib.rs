@@ -1137,3 +1137,10 @@ pub use text_clean::clean_output;
 
 // ── 类型驱动设计：DTO 尺寸锁定（编译时断言） ──
 pub mod dto_locks;
+
+// 股票域纯函数权威（2026-11-18 从插件内 `stock-core` 上收）：只依赖 serde / 标准库，
+// 宿主与插件链接同一份定义，避免宿主为三个纯函数反向依赖插件 foundation crate。
+pub mod stock_costs;
+pub mod stock_factors;
+pub mod stock_hit_outcome;
+pub mod stock_intent_parser;

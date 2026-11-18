@@ -44,8 +44,8 @@ pub use axagent_astock_data::daily_snapshot as stock_daily_snapshot;
 pub use axagent_astock_data::health_check as stock_health_check;
 pub use axagent_astock_data::realtime_quote as stock_realtime_quote;
 pub use axagent_market_sim as stock_market_sim;
-pub use axagent_stock_core::{
-    costs as stock_costs, factors as stock_factors, hit_outcome as stock_hit_outcome,
+pub use axagent_harness::{
+    stock_costs, stock_factors, stock_hit_outcome,
 };
 
 /// 股票域运行时状态。

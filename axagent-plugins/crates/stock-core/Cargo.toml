@@ -17,6 +17,7 @@ publish = false
 description = "股票域纯逻辑（意图解析等）：零 axagent 依赖，插件与宿主过渡期共用"
 
 [dependencies]
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
 serde = { version = "1", features = ["derive"] }
 
 [lints]

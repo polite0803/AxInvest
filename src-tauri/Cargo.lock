@@ -861,7 +861,6 @@ dependencies = [
  "axagent-runtime",
  "axagent-runtime-core",
  "axagent-search",
- "axagent-stock-core",
  "axagent-storage",
  "axagent-telemetry",
  "axagent-tools",
@@ -1672,6 +1671,7 @@ dependencies = [
 name = "axagent-stock-core"
 version = "3.0.0"
 dependencies = [
+ "axagent-harness",
  "serde",
 ]
 

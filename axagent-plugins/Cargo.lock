@@ -767,6 +767,7 @@ dependencies = [
 name = "axagent-stock-core"
 version = "3.0.0"
 dependencies = [
+ "axagent-harness",
  "serde",
 ]
 

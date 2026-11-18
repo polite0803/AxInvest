@@ -29,6 +29,14 @@
         "transportOwner": "plugin-opc-common",
         "manifestStrategy": "declarative-only",
         "reason": "manifest 三条能力均为宿主共享 Tool（OpcSearchWiki/WebSearch/FileWrite），无 OPC worker 命令；独立插件贡献域包清单与页面资产，不复制公共底座"
+      },
+      {
+        "phase": 3,
+        "domainPackId": "game_dev",
+        "pluginId": "plugin-opc-game-dev",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 三条能力均为宿主通用 Tool，无 OPC worker 命令；验证声明式插件模板可连续复制"
       }
     ],
     "sharedCommands": [

@@ -26,16 +26,18 @@ const SELFTEST = process.argv.includes("--selftest");
 const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
 // YAML manifest 权威目录（id / domain / capabilities 的唯一来源）。
 const MANIFEST_DIR = "config/opc/domain_packs";
-// P6.2 logical manifest 按插件归属分区：公共 12 份 + accounting 独立 1 份 + security 声明式独立 1 份。
+// P6.2 logical manifest 按插件归属分区：公共 11 份 + accounting 独立 1 份 + security / game_dev 声明式独立各 1 份。
 const MANIFEST_DIRS = new Map([
   ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
   ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
   ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
+  ["plugin-opc-game-dev", "axagent-plugins/crates/plugin-opc-game-dev/domain_packs"],
 ]);
 const EXPECTED_COUNTS = new Map([
-  ["plugin-opc", 12],
+  ["plugin-opc", 11],
   ["plugin-opc-accounting", 1],
   ["plugin-opc-security", 1],
+  ["plugin-opc-game-dev", 1],
 ]);
 const CONFIG_REL = "axagent-quant/crates/company-runtime/src/opc/capability_pack_config.rs";
 const MAPPING_REL = "src-tauri/src/commands/opc_workflows/mod.rs";
@@ -99,7 +101,7 @@ function selftest() {
   t("OPC 映射解析", parseOpcDomainMapping('const OPC_CAPABILITY_PACK_DOMAIN: &[(&str, &str)] = &[("accounting", "finance")];').get("accounting") === "finance");
   t("集合比较判缺值", !equalSet(["a"], ["a", "b"]));
   t("集合比较判等", equalSet(["a", "b"], ["b", "a"]));
-  t("12 + 1 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 12 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1 && EXPECTED_COUNTS.get("plugin-opc-security") === 1);
+  t("11 + 1 + 1 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 11 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1 && EXPECTED_COUNTS.get("plugin-opc-security") === 1 && EXPECTED_COUNTS.get("plugin-opc-game-dev") === 1);
   t("独立 owner 合法", parseVerticalOwner({ transportOwner: "opc-accounting" }, "accounting") === "opc-accounting");
   t("错误 owner 被拦", (() => {
     try {

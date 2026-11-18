@@ -63,6 +63,12 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: opcSecurityManifest,
   },
+  "opc-game-dev": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-game-dev", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-game-dev", "游戏开发", "game_dev"),
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -188,13 +194,21 @@ const domainPackSourceByPlugin = {
   opc: path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs"),
   "opc-accounting": path.join(workspaceRoot, "crates", "plugin-opc-accounting", "domain_packs"),
   "opc-security": path.join(workspaceRoot, "crates", "plugin-opc-security", "domain_packs"),
+  "opc-game-dev": path.join(workspaceRoot, "crates", "plugin-opc-game-dev", "domain_packs"),
 };
 const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
-const expectedDomainPackCount = pluginName === "opc"
-  ? 12
-  : ["opc-accounting", "opc-security"].includes(pluginName)
-  ? 1
-  : null;
+const registryPath = path.join(workspaceRoot, "..", "scripts", "opc-domain-pack-plugins.json");
+const ownershipRegistry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+const ownedDomainPackIds = new Set(
+  (ownershipRegistry.policy?.verticalSlices ?? [])
+    .filter((slice) => slice.pluginId !== "plugin-opc")
+    .map((slice) => slice.domainPackId),
+);
+const expectedDomainPackIds = pluginName === "opc"
+  ? ownershipRegistry.packs.map((p) => p.id).filter((id) => !ownedDomainPackIds.has(id))
+  : ownershipRegistry.packs
+    .filter((p) => p.pluginId === `plugin-${pluginName}` && ownedDomainPackIds.has(p.id))
+    .map((p) => p.id);
 const DOMAIN_PACK_DIR = "domain_packs";
 
 /** 各插件 logical manifest 的合法 owner（公共底座 vs 独立 worker）。 */
@@ -202,6 +216,7 @@ const DOMAIN_PACK_OWNER = {
   opc: "plugin-opc-common",
   "opc-accounting": "opc-accounting",
   "opc-security": "plugin-opc-common",
+  "opc-game-dev": "plugin-opc-common",
 };
 
 function fail(message) {
@@ -310,8 +325,8 @@ if (domainPackSource) {
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(target, { recursive: true });
   const files = fs.readdirSync(domainPackSource).filter((f) => f.endsWith(".json")).sort();
-  if (expectedDomainPackCount !== null && files.length !== expectedDomainPackCount) {
-    fail(`域包清单份数应为 ${expectedDomainPackCount}，实得 ${files.length}：${domainPackSource}`);
+  if (expectedDomainPackIds.length > 0 && files.length !== expectedDomainPackIds.length) {
+    fail(`域包清单份数应为 ${expectedDomainPackIds.length}，实得 ${files.length}：${domainPackSource}`);
   }
   for (const file of files) {
     const raw = fs.readFileSync(path.join(domainPackSource, file), "utf8");
@@ -506,8 +521,8 @@ function checkDeclaredDomainPacks(root) {
   const dir = path.join(root, DOMAIN_PACK_DIR);
   if (!fs.existsSync(dir)) { fail(`--check：域包清单目录不存在：${dir}`); }
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
-  if (expectedDomainPackCount !== null && files.length !== expectedDomainPackCount) {
-    fail(`--check：域包清单应为 ${expectedDomainPackCount} 份，实得 ${files.length}`);
+  if (expectedDomainPackIds.length > 0 && files.length !== expectedDomainPackIds.length) {
+    fail(`--check：域包清单应为 ${expectedDomainPackIds.length} 份，实得 ${files.length}`);
   }
   const expectedOwner = DOMAIN_PACK_OWNER[pluginName];
   const seenIds = new Set();
@@ -5331,6 +5346,23 @@ function opcAccountingManifest({ version, binaryName, sha256 }) {
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };
+}
+
+/** 通用声明式域包清单工厂：只贡献页面 + logical manifest，不声明 worker / 命令。 */
+function declarativeOpcManifest(name, title, pack) {
+  return () => ({
+    name,
+    version: "1.0.0",
+    description: `OPC ${title}域包：声明式插件（共享 Tool / 公共能力仍归公共底座）`,
+    permissions: [],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    defaultEnabled: true,
+    pages: [{ id: name, title, entry: PAGE_ENTRY, loading: "bundle" }],
+    domainPacks: [path.posix.join(DOMAIN_PACK_DIR, `${pack}.json`)],
+    commands: [],
+  });
 }
 
 /** security 域包独立清单：声明式插件，无 worker / 无命令，三条能力仍由宿主 Tool 承接。 */

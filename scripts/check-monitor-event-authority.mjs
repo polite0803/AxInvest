@@ -204,9 +204,27 @@ export function rustStructSerdeAttrs(src, structName) {
  * 惰性跨字符类会从**第一个** `invoke<` 一路吞到目标命令，把中间所有接口的键都抽进来
  * （实测 2026-11-03：那样抽出的键集合是 150+ 个，判据当场失去意义）。
  * 代价是「内联类型里再嵌一层对象」抽不到 —— 那种形态出现时本条报「判据没电」而不是误判对齐。
+ *
+ * ⚠ **两种调用通道都要认**（2026-11-18）：`fetchT0Config` 已从宿主 IPC 的
+ * `invoke<{…}>("get_t0_config")` 迁到**插件命令通道**的
+ * `invokePluginCommand<{…}>("stock_get_t0_config")`（插件名 `stock` 前缀）⇒ 只认 `invoke`
+ * 会让本条判「判据没电」而红 —— 那是通道迁移的正常态，不是缺陷。
+ * 故抽取器按「`invoke` / `invokePluginCommand` 两种调用名 + 目标命令名」双向匹配。
  */
 export function tsInvokeShapeKeys(src, command) {
-  const m = new RegExp(`invoke<\\s*\\{\\s*([^{}]*?)\\s*\\}>\\s*\\(\\s*"${command}"`).exec(src);
+  // ① 宿主 IPC 通道；② 插件命令通道（命令名可能带 `stock_` 之类的插件名前缀）。
+  //    两条都试，取**先命中**的那条 ⇒ 同一文件里两种形态并存时也不漏。
+  const patterns = [
+    new RegExp(`\\binvoke<\\s*\\{\\s*([^{}]*?)\\s*\\}>\\s*\\(\\s*"${command}"`),
+    new RegExp(
+      `\\binvokePluginCommand<\\s*\\{\\s*([^{}]*?)\\s*\\}>\\s*\\(\\s*"[^"]*${command}"`,
+    ),
+  ];
+  let m = null;
+  for (const re of patterns) {
+    m = re.exec(src);
+    if (m) { break; }
+  }
   if (!m) { return null; }
   const keys = [];
   for (const line of m[1].split("\n")) {
@@ -1186,6 +1204,29 @@ function selftest() {
     tsInvokeShapeKeys(ts, "get_t0_config"),
   );
   push("正控 R18 齐备", tzero(OK_TZERO_RS, OK_TZERO_TS), true);
+  // 插件命令通道形态（2026-11-18：`fetchT0Config` 已从宿主 IPC 迁到
+  // `invokePluginCommand<{…}>("stock_get_t0_config")`）⇒ 抽取器必须同样认得。
+  push(
+    "正控 R18 插件命令通道形态（invokePluginCommand + 插件名前缀命令名）⇒ 同样认得",
+    tzero(
+      OK_TZERO_RS,
+      OK_TZERO_TS
+        .replace("invoke<", "invokePluginCommand<")
+        .replace('"get_t0_config"', '"stock_get_t0_config"'),
+    ),
+    true,
+  );
+  push(
+    "负控 R18 插件通道下前端读 snake_case ⇒ 仍须判红",
+    tzero(
+      OK_TZERO_RS,
+      OK_TZERO_TS
+        .replace("invoke<", "invokePluginCommand<")
+        .replace('"get_t0_config"', '"stock_get_t0_config"')
+        .replace("  changePctThreshold: number | null;", "  change_pct_threshold: number | null;"),
+    ),
+    false,
+  );
   push(
     "正控 R18 前序还有别的 invoke<{…}>(…) ⇒ 只许抽目标那一条（惰性跨字符类会吞进整文件的键）",
     tzero(OK_TZERO_RS, 'const a = await invoke<{ notT0Key: string }>("other_cmd");\n' + OK_TZERO_TS),

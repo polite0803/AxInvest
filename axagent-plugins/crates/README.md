@@ -14,6 +14,7 @@
 | `plugin-opc-accounting`    | **插件侧可执行**                          | `axagent-plugin-proto` + `axagent-plugin-opc-core` | accounting 域包 worker，只承接 `opc_list_invoices` / `opc_create_invoice` / `opc_transition_invoice`                                                                             |
 | `plugin-opc-sales-growth`  | **插件侧可执行**                          | `axagent-plugin-proto` + `axagent-plugin-opc-core` | sales_growth 域包 worker，只承接客户创建 / 落地页列表 / 联系人列表三条命令                                                                                                       |
 | `plugin-opc-content-media` | **插件侧可执行**                          | `axagent-plugin-proto` + `axagent-plugin-opc-core` | content_media 域包 worker，承接博客 / 内容资产 / 发布计划命令                                                                                                                    |
+| `plugin-testkit`           | **SDK 发布物 / foundation**               | `axagent-plugin-proto` + `serde_json`              | 插件作者侧契约快照与测试夹具：构造 describe / shutdown / command 帧，解码声明并断言命令回执；不启动进程、不依赖宿主运行时                                                          |
 | `schema-gen`               | 构建期工具                                | harness                                            | IPC 类型生成器；无运行时消费方                                                                                                                                                   |
 
 `plugin-proto` 本体在 `axagent-core/crates/plugin-proto`（foundation，零 `axagent-*` 依赖），

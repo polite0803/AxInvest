@@ -733,6 +733,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axagent-plugin-testkit"
+version = "3.0.0"
+dependencies = [
+ "axagent-plugin-proto",
+ "serde_json",
+]
+
+[[package]]
 name = "axagent-plugins"
 version = "3.0.0"
 dependencies = [

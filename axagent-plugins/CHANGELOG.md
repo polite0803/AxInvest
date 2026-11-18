@@ -24,6 +24,8 @@
 - `plugin-stock`：股票域 worker —— 41 条命令；仍依赖 `axagent-analysis-engine`（path
   依赖，独立仓判据① 未闭合，stock 分析逻辑权威实现仍在其中）。
 - `stock-core`：foundation —— 股票域纯函数（意图解析等），零 `axagent-*` 依赖。
+- `plugin-testkit`：SDK 发布物 —— 插件作者侧契约快照与测试夹具（describe / shutdown /
+  command 帧构造、声明解码、命令回执断言），只依赖 `axagent-plugin-proto`，不启动进程。
 - `schema-gen`：构建期 IPC 类型生成器，无运行时消费方。
 - 协议 crate `axagent-plugin-proto` 在 `axagent-core` workspace；2026-11-13 内联化改造后
   （version/edition/thiserror/lints 不再继承 workspace 根），其版本权威为自身 `Cargo.toml`

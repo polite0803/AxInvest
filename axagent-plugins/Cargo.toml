@@ -13,6 +13,7 @@ members = [
   "crates/plugin-opc-content-media",
   "crates/plugin-opc-core",
   "crates/plugin-opc-sales-growth",
+  "crates/plugin-testkit",
   "crates/plugin-stock",
   "crates/plugins",
   "crates/schema-gen",

@@ -104,6 +104,7 @@ const packages = [
   "axagent-plugin-opc-sales-growth",
   "axagent-plugin-opc-content-media",
   "axagent-plugin-opc",
+  "axagent-plugin-testkit",
   "axagent-plugins",
 ];
 OUT.packages = packages;

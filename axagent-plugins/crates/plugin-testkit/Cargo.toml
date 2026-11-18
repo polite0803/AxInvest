@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# 插件 SDK 的契约快照与测试夹具（plugin-testkit）。
+#
+# 角色：SDK 发布物之一。只依赖协议 crate 与 serde_json；不得依赖宿主运行时、
+# dao/entities 或任何业务实现层。插件作者与宿主 CI 两侧用同一份夹具验证契约。
+
+[package]
+name = "axagent-plugin-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "AxAgent 插件 SDK 测试夹具：协议帧构造、契约快照与断言助手"
+
+[dependencies]
+axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
+serde_json = "1"
+
+[lints]
+workspace = true

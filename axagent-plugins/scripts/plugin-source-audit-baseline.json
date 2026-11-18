@@ -35,6 +35,11 @@
       27
     ]
   },
+  "plugin-testkit": {
+    "path_dependency": [
+      16
+    ]
+  },
   "plugins": {
     "path_dependency": [
       10,

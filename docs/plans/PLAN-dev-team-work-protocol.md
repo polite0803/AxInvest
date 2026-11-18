@@ -238,7 +238,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));   // 块注释
 ```
 
-`ContentArea.tsx:319` 的 `` path={`${BUILTIN_PAGE_PATH.settings}/*`} `` —— **splat 通配 `/*` 落在模板串内**，
+`ContentArea.tsx:307` 的 `` path={`${BUILTIN_PAGE_PATH.settings}/*`} `` —— **splat 通配 `/*` 落在模板串内**，
 被块注释正则当作起点，配到文件后面最近的「块注释结束符」，**吞掉其间全部内容**：
 
 | 后果（实测） | 证据 |

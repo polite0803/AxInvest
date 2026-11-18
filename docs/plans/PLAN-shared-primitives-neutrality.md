@@ -99,7 +99,7 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| D1 | `src/components/layout/ContentArea.tsx:354` | `InvestPage`（lazy） | 域特定 | 宿主路由表的投资中心入口；同文件 `:361` 注释「2026-10-28：股票旧路由已全部删除，统一走 `/invest`」 | 中（插件 `pages[]`） | B8-2 |
+| D1 | `src/components/layout/ContentArea.tsx:367` | `InvestPage`（历史注释） | **已收口（2026-11-18 复核）** | 投资主页装载权已交 `src/pages/invest/routes.tsx` 的域声明；宿主只剩 `/invest/replay` 子路由与这行历史注释，已无 `InvestPage` lazy import/路由 | — | 已收口 |
 | D2 | ~~`src/pages/ScreenerPage.tsx`~~ **已注销** | `stock-analysis/ScreenerPage` | **已收口（2026-11-08）** | 5 行纯转发薄壳已删除，改由 `src/components/invest/InvestHub.tsx:15` 直取域组件（无行为变化）⇒ 该处反向 import 归零；文件名不含 `feRe` 词，删除不动 `frontendFileCaliber` | — | 已收口 |
 | D3 | ~~`src/pages/ScreenshotDiagnosisPage.tsx`~~ **已注销** | `ScreenshotDiagnosisDashboard` | **已收口（2026-11-08）** | 同上：薄壳已删除，`src/components/invest/InvestHub.tsx:22` 直取域组件 | — | 已收口 |
 | D4 | `src/pages/TasksCenterPage/OverviewTab.tsx:3` | `EvolutionApprovalDrawer` | 域特定 | 任务中心概览内联**股票进化审批**抽屉 | 中 | B8-2 |

@@ -1,0 +1,49 @@
+{
+  "plugin-opc": {
+    "path_dependency": [
+      25
+    ]
+  },
+  "plugin-opc-accounting": {
+    "path_dependency": [
+      17,
+      18
+    ]
+  },
+  "plugin-opc-content-media": {
+    "path_dependency": [
+      15,
+      16
+    ]
+  },
+  "plugin-opc-core": {
+    "path_dependency": [
+      17
+    ]
+  },
+  "plugin-opc-sales-growth": {
+    "path_dependency": [
+      17,
+      18
+    ]
+  },
+  "plugin-stock": {
+    "path_dependency": [
+      24,
+      25,
+      26,
+      27
+    ]
+  },
+  "plugins": {
+    "path_dependency": [
+      10,
+      11
+    ]
+  },
+  "schema-gen": {
+    "path_dependency": [
+      8
+    ]
+  }
+}

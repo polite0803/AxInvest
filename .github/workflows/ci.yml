@@ -1098,6 +1098,12 @@ jobs:
       - name: Check workspace boundary (plugin path deps ratchet)
         run: node scripts/check-workspace-boundary.mjs
 
+      - name: Check plugin source audit selftest
+        run: node axagent-plugins/scripts/check-plugin-source-audit.mjs --selftest
+
+      - name: Check plugin source audit (path/git deps ratchet)
+        run: node axagent-plugins/scripts/check-plugin-source-audit.mjs
+
       - name: Verify OPC plugin SDK standalone tree
         run: node scripts/verify-opc-plugin-sdk.mjs
 

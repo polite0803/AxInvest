@@ -3655,12 +3655,16 @@ function opcManifest({ version, binaryName, sha256 }) {
     .filter((f) => f.endsWith(".json"))
     .sort()
     .map((f) => path.posix.join(DOMAIN_PACK_DIR, f));
-  // P6.2 批 1：这三条命令的 owner 已迁 `plugin-opc-accounting`，公共包不得继续声明。
-  const migratedAccountingCommands = new Set([
-    "opc_list_invoices",
-    "opc_create_invoice",
-    "opc_transition_invoice",
-  ]);
+  // P6.2 终局：公共包只声明真正跨域共享的命令；已迁域包命令由各独立插件声明。
+  const migratedCommands = new Set(
+    ownershipRegistry.packs
+      .filter((pack) => pack.pluginId !== "plugin-opc")
+      .flatMap((pack) => {
+        const file = path.join(workspaceRoot, "crates", pack.pluginId, DOMAIN_PACK_DIR, `${pack.id}.json`);
+        if (!fs.existsSync(file)) return [];
+        return JSON.parse(fs.readFileSync(file, "utf8")).commands ?? [];
+      }),
+  );
   return {
     name: "opc",
     version,
@@ -5329,7 +5333,7 @@ function opcManifest({ version, binaryName, sha256 }) {
           properties: {},
         },
       },
-    ]).filter((command) => !migratedAccountingCommands.has(command.name)),
+    ]).filter((command) => !migratedCommands.has(command.name)),
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

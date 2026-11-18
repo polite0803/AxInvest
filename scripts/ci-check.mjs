@@ -318,6 +318,7 @@ if (canRunFrontend) {
   step("插件 workspace 边界自检（正负对照）", "node scripts/check-workspace-boundary.mjs --selftest");
   step("插件 workspace 跨根 path 依赖（基线只减不增）", "node scripts/check-workspace-boundary.mjs");
   step("OPC 插件 SDK 独立树验收", "node scripts/verify-opc-plugin-sdk.mjs");
+  step("全插件 SDK 独立树验收（含 stock 依赖链）", "node scripts/verify-opc-plugin-sdk.mjs --full");
 
   // ── 能力域单一真相源门禁（权威枚举 ↔ 前端 / prompt / i18n 副本）──
   // 为什么需要：`CapabilityDomain`（`harness/src/capability.rs`）是唯一权威，

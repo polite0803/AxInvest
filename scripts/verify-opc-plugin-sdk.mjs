@@ -7,7 +7,8 @@
  * 到临时目录后，OPC 六个 crate 仍可 cargo check / clippy / test 全绿。
  * 该脚本不修改主仓源码，只用于连续验证独立仓形态；退出码 0 = 独立树验收通过。
  *
- * 用法：node scripts/verify-opc-plugin-sdk.mjs [--keep]
+ * 用法：node scripts/verify-opc-plugin-sdk.mjs [--keep] [--full]
+ *  --full：拷出全部插件 workspace（含 quant/ai/infra/kit 最小依赖）并跑 cargo check --workspace。
  */
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
@@ -17,6 +18,7 @@ import { tmpdir } from "node:os";
 const REPO = resolve(import.meta.dirname, "..");
 const argv = process.argv.slice(2);
 const KEEP = argv.includes("--keep");
+const FULL = argv.includes("--full");
 const TEMP_ROOT = mkdtempSync(join(tmpdir(), "axagent-sdk-opc-"));
 const OUT = {
   tempRoot: TEMP_ROOT,
@@ -48,7 +50,7 @@ cpSync(join(REPO, "axagent-plugins"), sdkRoot, { recursive: true, verbatimSymlin
 for (const f of ["clippy.toml", "rustfmt.toml", "rust-toolchain.toml", "Cargo.toml"]) {
   copyFileSync(join(REPO, "axagent-core", f), join(coreRoot, f));
 }
-for (const c of ["harness", "plugin-proto"]) {
+for (const c of FULL ? ["harness", "plugin-proto", "entities"] : ["harness", "plugin-proto"]) {
   cpSync(join(REPO, "axagent-core", "crates", c), join(coreRoot, "crates", c), { recursive: true, verbatimSymlinks: true });
 }
 
@@ -64,10 +66,37 @@ const narrowedCore =
 writeFileSync(coreManifest, narrowedCore);
 
 const pluginManifest = join(sdkRoot, "Cargo.toml");
-writeFileSync(
-  pluginManifest,
-  readFileSync(pluginManifest, "utf8").replace(/  "crates\/plugin-stock",\n/, ""),
-);
+if (!FULL) {
+  writeFileSync(
+    pluginManifest,
+    readFileSync(pluginManifest, "utf8").replace(/  "crates\/plugin-stock",\n/, ""),
+  );
+}
+if (FULL) {
+  // 全插件树需要 stock 依赖链拉出的四个最小 workspace。按最小成员拷出。
+  const extraRoots = [
+    ["axagent-quant", ["analysis-engine", "astock-data"]],
+    ["axagent-ai", ["trajectory"]],
+    ["axagent-infra", ["dao"]],
+    ["axagent-kit", ["kit"]],
+  ];
+  for (const [rootName, crates] of extraRoots) {
+    const rootDir = join(TEMP_ROOT, rootName);
+    mkdirSync(rootDir, { recursive: true });
+    for (const f of ["clippy.toml", "rustfmt.toml", "rust-toolchain.toml", "Cargo.toml"]) {
+      copyFileSync(join(REPO, rootName, f), join(rootDir, f));
+    }
+    for (const c of crates) {
+      cpSync(join(REPO, rootName, "crates", c), join(rootDir, "crates", c), { recursive: true, verbatimSymlinks: true });
+    }
+    const manifest = join(rootDir, "Cargo.toml");
+    const text = readFileSync(manifest, "utf8");
+    const start = text.indexOf("[workspace]");
+    const end = text.indexOf("[workspace.package]");
+    const members = crates.map((c) => `  "crates/${c}",`).join("\n");
+    writeFileSync(manifest, `${text.slice(0, start)}[workspace]\nresolver = "2"\nmembers = [\n${members}\n]\n\n${text.slice(end)}`);
+  }
+}
 
 const packages = [
   "axagent-plugin-opc-core",
@@ -81,6 +110,9 @@ OUT.packages = packages;
 
 // 3) 独立树里跑定点验证。不跑全量，按 AGENTS 分层检查策略逐 crate 定点。
 run("cargo", ["metadata", "--no-deps", "--format-version", "1"], sdkRoot, "独立树 cargo metadata");
+if (FULL) {
+  run("cargo", ["check", "--workspace"], sdkRoot, "全插件树 cargo check --workspace");
+}
 for (const pkg of packages) {
   run("cargo", ["check", "-p", pkg], sdkRoot, `独立树 cargo check ${pkg}`);
 }

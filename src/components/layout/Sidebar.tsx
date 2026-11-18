@@ -9,13 +9,14 @@ import { invoke, logIpcError } from "@/lib/invoke";
 import { NAV_GROUPS } from "@/lib/navGroups";
 import { getNavItems, type NavItem, navItemFromContribution } from "@/lib/navRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
+import { pluginPageNavItem, usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
 import { useAgentPanelStore, useOnboardingStore, useSettingsStore, useUIStore, useUserProfileStore } from "@/stores";
 import type { AppSettings, PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar } from "antd";
-import { Globe, Moon, Pin, PinOff, RotateCcw, Sun, User } from "lucide-react";
+import { Globe, Moon, Pin, PinOff, Puzzle, RotateCcw, Sun, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -260,6 +261,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const activePage = pathToPageKey(location.pathname);
+  const pluginPages = usePluginPageRoutes();
   const profile = useUserProfileStore((s) => s.profile);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const resolvedAvatarSrc = useResolvedAvatarSrc(
@@ -280,6 +282,10 @@ export function Sidebar() {
     // 2026-11-10（#36）：域贡献项按自身 `group` 归组，宿主本表只留产品组骨架。
     const byKey = new Map(getNavItems().map((item) => [item.key, item]));
     const contributed = getContributedNavItems();
+    const pluginItems = pluginPages.map((entry) => ({
+      ...pluginPageNavItem(entry),
+      icon: <Puzzle size={17} />,
+    }));
     return NAV_GROUPS.map((group) => {
       const hostItems = group.itemKeys
         .map((key) => byKey.get(key))
@@ -288,7 +294,9 @@ export function Sidebar() {
         .filter((entry) => entry.group === group.key)
         .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0))
         .map(navItemFromContribution);
-      const items = [...hostItems, ...domainItems];
+      const items = group.key === "packs"
+        ? [...hostItems, ...domainItems, ...pluginItems]
+        : [...hostItems, ...domainItems];
       return {
         key: group.key,
         labelKey: group.labelKey,
@@ -298,7 +306,7 @@ export function Sidebar() {
         items,
       };
     }).filter((section) => section.items.length > 0);
-  }, []);
+  }, [pluginPages]);
 
   // 动态固定页面已移至设置/扩展分组管理，不再在侧栏加载和渲染
 

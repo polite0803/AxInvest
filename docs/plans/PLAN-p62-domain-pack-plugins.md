@@ -113,6 +113,7 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 - **独立 worker 域的真实页面已落地**：accounting、sales_growth、content_media 均改为插件内自足的 `src-web/main.ts` + `web/pages/bundle.js`，只经 SDK `executeCommand` 访问本插件命令；页面覆盖 loading / empty / error 与真实写操作。`build-plugin-bundle.mjs --check` 会执行各域 `src-web/__verify__/verify-bundle.mjs`，worker 页面退回说明文案或改用 `client.invoke("opc_*")` 时门禁直接失败。
 - **页面与命令声明对齐补漏**：content_media 页面所需的 `opc_create_content_asset` / `opc_create_publish_schedule` 原先只存在于公共 worker 与逻辑清单，未进独立 bundle 清单和 content_media worker 分派；本批把实现上收到 `plugin-opc-core`、补齐独立 worker 分派、manifest 命令与协议测试，并由真 bundle E2E 覆盖创建 / 删除 / 排期 / 取消全链。sales_growth 与 content_media E2E 同时断言页面入口必须加载 `./bundle.js`。
 - **11 个声明式域页面已升级为域包浏览页**：`scripts/generate-declarative-opc-pages.mjs` 从主仓权威 YAML 生成每个插件的 `web/pages/domain-data.js`，随插件源码提交；页面读取随包数据并展示真实能力、KPI、工作流步骤、数据源与验收标准。生成物的 `--check` 已接入本地与 GitHub CI，YAML 改动而未重生成会直接变红。独立 SDK 树实测 `opc-security` 与 `opc-software-dev` 打包分别显示 `3 能力 / 2 KPI / 4 步骤` 与 `5 能力 / 16 KPI / 30 步骤`，说明页面不依赖主仓 `config/` 路径。
+- **插件域页已有动态导航投影**：`src/lib/pluginDomainPageRoutes.ts` 把启用的域插件 bundle 页解析到 `/plugins/<plugin-slug>/<page-id>`，`pluginRouteRegistry` 在启动、插件 store 启停和设置页直连启停后刷新；投影失败会清空旧快照，禁用/卸载后入口与路由一起消失。它当前是**附加路由**，没有接管主壳已有 `/opc/domain/*` 业务组件，因此不把这条进展写成页面等价迁移完成。
 
 - **2026-11-18 已建立可复跑验收链**：`scripts/verify-opc-plugin-sdk.mjs` 会拷出 OPC 插件 SDK 最小独立树（axagent-plugins + axagent-core 根配置 + harness/plugin-proto），在其中完成 `cargo metadata` / `cargo check` / `cargo clippy` / `cargo test` 全绿；`scripts/check-workspace-boundary.mjs` 把插件 workspace 对外部 workspace 的 path 依赖量化为 12 条并按基线只减不增锁定。`scripts/check-sdk-package-surface.mjs` 再对 proto / harness / testkit 三件套逐包运行 `cargo package --list --allow-dirty`，校验包内必含 `Cargo.toml` 与 `src/lib.rs`、不得混入 `target/` 或越界路径。三道门均已接入 `scripts/ci-check.mjs` 与 `.github/workflows/ci.yml`。
 - **持续验证**：SDK 三件套已齐：协议 crate `axagent-plugin-proto` + `axagent-plugin-testkit`（契约快照与测试夹具）+ harness。OPC 六个 crate 在独立树中 `check / clippy / test` 全部通过；`--full` 模式另验全插件树 `cargo check --workspace`。域包底册已迁入 SDK workspace（`axagent-plugins/scripts/opc-domain-pack-plugins.json`），独立树内 `build-plugin-bundle.mjs --plugin opc-accounting/opc-security/opc-software-dev --check` 均通过，bundle 生成链不再假设主仓布局。2026-11-18 非 `--full` 独立树实测：296 个 `axagent-plugins` 单测全绿，OPC 各 crate 测试全绿，accounting 安装链 e2e 全绿。独立树打包出的 accounting bundle 已进一步走 `PluginManager` 安装 → 启用 → 命令 → 禁用 → 恢复全链 e2e，证明独立树产物可被宿主装载并执行。
@@ -125,5 +126,5 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 ### 7.5 尚未闭合
 
 - 物理拆仓（把插件 workspace 独立成 git 仓库）尚未执行；当前证据是“可拷出独立树构建”而非“仓库已独立”。
-- 11 个声明式域已具备真实域包浏览页，但主壳 `src/pages/opc/domains/DomainPages.tsx` 仍保留各域专属业务组件；插件页是否等价替代这些主壳页面尚未逐域验收。
+- 11 个声明式域已具备真实域包浏览页与 `/plugins/*` 动态入口，但主壳 `src/pages/opc/domains/DomainPages.tsx` 仍保留各域专属业务组件；插件页是否等价替代这些主壳页面尚未逐域验收。
 - 真机 GUI 内的页面点击链路与升级前数据逐表对比尚未做；当前证据是静态 bundle 验证、真 bundle 安装 / 启停 / 命令 e2e 与 schema 未变证明。

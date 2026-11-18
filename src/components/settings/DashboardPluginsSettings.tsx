@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { refreshPluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { message } from "@/lib/toast";
 import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -83,6 +84,7 @@ export function DashboardPluginsSettings() {
       }
       await invoke("plugin_install", { source: selected });
       await loadPlugins();
+      await refreshPluginPageRoutes().catch(() => undefined);
       message.success(t("settings.dashboardPlugins.enabled"));
     } catch (error) {
       message.error(t("settings.plugins.installFailed", { error }));
@@ -108,6 +110,7 @@ export function DashboardPluginsSettings() {
         await invoke("plugin_disable", { pluginId });
       }
       setPlugins((prev) => prev.map((p) => (p.id === pluginId ? { ...p, enabled } : p)));
+      await refreshPluginPageRoutes().catch(() => undefined);
       message.success(
         enabled
           ? t("settings.dashboardPlugins.enabled")
@@ -123,6 +126,7 @@ export function DashboardPluginsSettings() {
     try {
       await invoke("plugin_uninstall", { pluginId });
       setPlugins((prev) => prev.filter((p) => p.id !== pluginId));
+      await refreshPluginPageRoutes().catch(() => undefined);
       message.success(t("settings.dashboardPlugins.unloaded"));
     } catch (error) {
       message.error(t("settings.plugins.unloadFailed", { error }));

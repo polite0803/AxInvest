@@ -45,6 +45,7 @@ import { useUpdateChecker } from "@/hooks/useUpdateChecker";
 import { setDefaultNavigate } from "@/lib/actionRouter";
 import { invoke, isTauri, listen } from "@/lib/invoke";
 import { addNotification } from "@/lib/notification";
+import { bindPluginRouteStore, refreshPluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { message, setMessageInstance } from "@/lib/toast";
 import {
   initAnimationPreference,
@@ -171,6 +172,10 @@ function AppInner() {
   useEffect(() => {
     setDefaultNavigate(navigate);
   }, [navigate]);
+  useEffect(() => {
+    void refreshPluginPageRoutes();
+    return bindPluginRouteStore();
+  }, []);
   const handleCloseCmdPalette = useCallback(() => setCmdOpen(false), [setCmdOpen]);
   const isInSettings = location.pathname === "/settings"
     || location.pathname.startsWith("/settings/");

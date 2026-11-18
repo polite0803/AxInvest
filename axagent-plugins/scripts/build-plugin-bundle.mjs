@@ -69,6 +69,60 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: declarativeOpcManifest("opc-game-dev", "游戏开发", "game_dev"),
   },
+  "opc-ai-research": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-ai-research", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-ai-research", "AI 研究", "ai_research"),
+  },
+  "opc-consulting": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-consulting", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-consulting", "咨询", "consulting"),
+  },
+  "opc-design": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-design", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-design", "设计", "design"),
+  },
+  "opc-ecommerce": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-ecommerce", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-ecommerce", "电商", "ecommerce"),
+  },
+  "opc-education": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-education", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-education", "教育", "education"),
+  },
+  "opc-finance-invest": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-finance-invest", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-finance-invest", "金融投资", "finance_invest"),
+  },
+  "opc-geospatial": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-geospatial", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-geospatial", "地理信息", "geospatial"),
+  },
+  "opc-project-management": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-project-management", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-project-management", "项目管理", "project_management"),
+  },
+  "opc-software-dev": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-software-dev", "web"),
+    uiSchema: null,
+    manifest: declarativeOpcManifest("opc-software-dev", "软件开发", "software_dev"),
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -195,6 +249,7 @@ const domainPackSourceByPlugin = {
   "opc-accounting": path.join(workspaceRoot, "crates", "plugin-opc-accounting", "domain_packs"),
   "opc-security": path.join(workspaceRoot, "crates", "plugin-opc-security", "domain_packs"),
   "opc-game-dev": path.join(workspaceRoot, "crates", "plugin-opc-game-dev", "domain_packs"),
+  "opc-ai-research": path.join(workspaceRoot, "crates", "plugin-opc-ai-research", "domain_packs"),
 };
 const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
 const registryPath = path.join(workspaceRoot, "..", "scripts", "opc-domain-pack-plugins.json");
@@ -217,6 +272,7 @@ const DOMAIN_PACK_OWNER = {
   "opc-accounting": "opc-accounting",
   "opc-security": "plugin-opc-common",
   "opc-game-dev": "plugin-opc-common",
+  "opc-ai-research": "plugin-opc-common",
 };
 
 function fail(message) {

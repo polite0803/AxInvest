@@ -37,6 +37,78 @@
         "transportOwner": "plugin-opc-common",
         "manifestStrategy": "declarative-only",
         "reason": "manifest 三条能力均为宿主通用 Tool，无 OPC worker 命令；验证声明式插件模板可连续复制"
+      },
+      {
+        "phase": 4,
+        "domainPackId": "ai_research",
+        "pluginId": "plugin-opc-ai-research",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 5,
+        "domainPackId": "consulting",
+        "pluginId": "plugin-opc-consulting",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 6,
+        "domainPackId": "design",
+        "pluginId": "plugin-opc-design",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 7,
+        "domainPackId": "ecommerce",
+        "pluginId": "plugin-opc-ecommerce",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 8,
+        "domainPackId": "education",
+        "pluginId": "plugin-opc-education",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 9,
+        "domainPackId": "finance_invest",
+        "pluginId": "plugin-opc-finance-invest",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 10,
+        "domainPackId": "geospatial",
+        "pluginId": "plugin-opc-geospatial",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 11,
+        "domainPackId": "project_management",
+        "pluginId": "plugin-opc-project-management",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 12,
+        "domainPackId": "software_dev",
+        "pluginId": "plugin-opc-software-dev",
+        "transportOwner": "plugin-opc-common",
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
       }
     ],
     "sharedCommands": [

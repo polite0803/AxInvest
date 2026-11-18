@@ -154,6 +154,27 @@ function buildArgs(modeName, root, extraArgs) {
     : [...base.slice(0, sep), ...manifest, ...base.slice(sep)];
 }
 
+if (mode === "nextest" && !listOnly) {
+  // accounting 真 bundle 端到端测试需要 staged 产物；没有产物时该测试会打印 SKIP。
+  // CI 里必须真跑，不能靠 SKIP 假绿，故在测试前串行构建产物。
+  const r = spawnSync(
+    "node",
+    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-accounting", "--check"],
+    { cwd: repoRoot, stdio: "inherit", env: process.env },
+  );
+  if (r.status !== 0) {
+    console.error(`[cargo ${mode}] staging opc-accounting bundle 失败`);
+    process.exit(r.status ?? 1);
+  }
+  process.env.AXAGENT_ACCOUNTING_BUNDLE_DIR = path.join(
+    repoRoot,
+    "axagent-plugins",
+    "dist",
+    "plugins",
+    "opc-accounting",
+  );
+}
+
 for (const root of roots) {
   const relRoot = repoRel(repoRoot, root);
   const args = buildArgs(mode, root, extra);

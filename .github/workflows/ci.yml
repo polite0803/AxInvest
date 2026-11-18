@@ -758,6 +758,7 @@ jobs:
 
       # L2 拆分后 8 个 workspace 各有自己的测试面；只跑 src-tauri 会漏掉其余 34 个 crate
       # （与 fmt / clippy / check 同一种假绿形态）。
+      # nextest 模式前串行 staging accounting bundle，保证其禁用/恢复 e2e 真跑，不靠 SKIP。
       - name: Run Rust tests (all workspaces)
         run: node scripts/cargo-all-workspaces.mjs nextest
 

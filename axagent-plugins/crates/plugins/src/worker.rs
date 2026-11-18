@@ -16658,6 +16658,41 @@ mod tests {
             self.contact_read_calls.lock().push(id);
             Ok(())
         }
+
+        // ── P6.2：accounting 域三条命令的 e2e 替身 ──
+        // 行视图与 `InvoiceSummaryView` 的既有形态一致，供安装级测试锁「三条命令经
+        // opc.store 到 worker 回执」整链；不测 DB，provider 侧数据语义另有宿主测试。
+        async fn list_invoices(
+            &self,
+            _query: axagent_harness::InvoiceListQuery,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::InvoiceSummaryView>> {
+            Ok(vec![axagent_harness::InvoiceSummaryView {
+                id: "inv-1".into(),
+                customer_id: "cust-1".into(),
+                invoice_number: "INV-001".into(),
+                status: "draft".into(),
+                total: 100.0,
+                currency: "CNY".into(),
+                due_at: None,
+                created_at: 1_700_000_000,
+            }])
+        }
+
+        async fn create_invoice(
+            &self,
+            _input: axagent_harness::CreateInvoiceRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::InvoiceSummaryView> {
+            Ok(axagent_harness::InvoiceSummaryView {
+                id: "inv-new".into(),
+                customer_id: "cust-1".into(),
+                invoice_number: "INV-002".into(),
+                status: "draft".into(),
+                total: 120.0,
+                currency: "CNY".into(),
+                due_at: None,
+                created_at: 1_700_000_000,
+            })
+        }
     }
 
     /// 一个方法都不覆盖：`list_blog_posts` 吃 trait 默认 `Err(Provider("…未实现…"))`

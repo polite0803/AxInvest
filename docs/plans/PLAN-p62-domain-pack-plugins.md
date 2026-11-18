@@ -109,6 +109,8 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 
 ### 7.3 独立仓验收进展
 
+- **真 bundle 禁用/恢复端到端已验收**：`e2e_opc_accounting_disable_test` 使用真实打包产物，覆盖安装 → 启用 → 三条命令执行 → 禁用 → 断言命令链不可用且域包投影消失 → 恢复启用 → 再执行。CI 会在 `cargo nextest` 前串行 staging 该 bundle，避免空跑 SKIP 假绿。
+
 - **2026-11-18 已建立可复跑验收链**：`scripts/verify-opc-plugin-sdk.mjs` 会拷出 OPC 插件 SDK 最小独立树（axagent-plugins + axagent-core 根配置 + harness/plugin-proto），在其中完成 `cargo metadata` / `cargo check` / `cargo clippy` / `cargo test` 全绿；`scripts/check-workspace-boundary.mjs` 把插件 workspace 对外部 workspace 的 path 依赖量化为 11 条并按基线只减不增锁定。两道门均已接入 `scripts/ci-check.mjs` 与 `.github/workflows/ci.yml`。
 - **持续验证**：OPC 六个 crate（plugin-opc-core / accounting / sales-growth / content-media / plugin-opc / plugins）在独立树中 `check / clippy / test` 全部通过；这意味着 OPC 插件域的 Rust 构建面已具备脱离主仓的形态。
 - **剩余 debt**：`workspace-boundary-allowlist.json` 当前登记 11 条跨根 path 依赖，核心缺口仍是 plugin-stock 对 `analysis-engine` / `astock-data` 的业务实现依赖，以及 `plugins` / `schema-gen` 对 harness 的实现依赖。终局仍需把 SDK crate 发布成可解析版本，或提供私有 registry。

@@ -223,7 +223,16 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 font-kit = "0.14"
-tauri-plugin-mcp-bridge = "0.12"
+# ⚠ 版本下限锁 0.13（2026-11-18，Windows 构建修复）：
+# 0.12.0 固定依赖 `webview2-com 0.38.2` + `windows 0.61.x`，而 tauri 2.12 生态已升到
+# `webview2-com 0.39.1` + `windows 0.62.2` ⇒ 同一依赖图里出现**两个 windows-core 版本**
+# （0.61.2 与 0.62.2）⇒ `webview2_com` 的 `IStream` 与 `windows_core` 的
+# `Interface` trait 不匹配 ⇒ E0277，**仅 Windows 目标编译失败**
+# （Linux/macOS 不编译该段代码 ⇒ 本地与其它 CI job 全绿，属「只有 Windows 红」的盲区）。
+# 0.13 起该插件改用 `webview2-com ^0.39.1` + `windows ^0.62.2`，与 tauri 2.12 对齐。
+# 升级安全性：项目侧仅一处调用 `tauri_plugin_mcp_bridge::init()`，
+# 两版签名同为 `init<R: Runtime>() -> TauriPlugin<R>` ⇒ 源码兼容。
+tauri-plugin-mcp-bridge = "0.13"
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", features = ["relax-sign-encoding"] }

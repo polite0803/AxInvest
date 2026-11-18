@@ -5446,6 +5446,17 @@ function wikiManifest({ version, binaryName, sha256 }) {
     worker: { program: path.posix.join("bin", binaryName) },
     commands: [
       {
+        name: "wiki_get_note",
+        description: "按 id 读取一条 Wiki 笔记（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_get_note",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "宿主侧笔记 id" } },
+          required: ["id"],
+        },
+      },
+      {
         name: "wiki_sync_note_to_knowledge_base",
         description: "把一条 Wiki 笔记同步进知识库（经宿主 wiki.store 写面）",
         command: "worker://wiki_sync_note_to_knowledge_base",

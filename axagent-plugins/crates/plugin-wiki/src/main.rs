@@ -20,6 +20,7 @@ type WorkerPeer = Peer<StdinLock<'static>, StdoutLock<'static>>;
 
 const PLUGIN_NAME: &str = "wiki";
 const COMMAND_SYNC_NOTE: &str = "wiki_sync_note_to_knowledge_base";
+const COMMAND_GET_NOTE: &str = "wiki_get_note";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -80,6 +81,42 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
     }
 
     let outcome = match frame.command.as_str() {
+        COMMAND_GET_NOTE => {
+            let id = match require_str(&frame.input, "id") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            match peer.call_seam(
+                WIKI_STORE_SEAM,
+                "get_note",
+                json!({ "id": id }),
+                request.call_chain.clone(),
+            ) {
+                Ok(reply) => match reply.kind {
+                    axagent_plugin_proto::ResponseKind::Success => CommandOutcome::Reply(
+                        CommandReply::for_frame(&frame, reply.value.unwrap_or(Value::Null)),
+                    ),
+                    axagent_plugin_proto::ResponseKind::Error => {
+                        CommandOutcome::Fault(CommandFault::for_frame(
+                            &frame,
+                            reply
+                                .code
+                                .unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+                            reply.message.unwrap_or_else(|| {
+                                "宿主 wiki.store 接缝返回错误但未说明".to_string()
+                            }),
+                        ))
+                    },
+                },
+                Err(e) => CommandOutcome::Fault(CommandFault::for_frame(
+                    &frame,
+                    error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+                    format!("wiki.store 接缝调用失败：{e}"),
+                )),
+            }
+        },
         COMMAND_SYNC_NOTE => {
             let note_id = match require_str(&frame.input, "noteId") {
                 Ok(value) => value,

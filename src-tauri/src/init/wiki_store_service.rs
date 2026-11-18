@@ -113,6 +113,16 @@ impl HostWikiStore {
 
 #[async_trait]
 impl WikiStoreProvider for HostWikiStore {
+    async fn get_note(&self, id: String) -> Result<axagent_harness::note_dtos::Note> {
+        if id.trim().is_empty() {
+            return Err(AxAgentError::Validation("wiki.store::get_note 需要非空 id".into()));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::note::get_note(state.harness.db(), &id)
+            .await
+            .map_err(to_provider_error)
+    }
+
     async fn sync_note_to_knowledge_base(
         &self,
         request: SyncNoteToKnowledgeBaseRequest,

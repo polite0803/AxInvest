@@ -27,6 +27,34 @@ struct FixedWikiStore;
 
 #[async_trait::async_trait]
 impl WikiStoreProvider for FixedWikiStore {
+    async fn get_note(
+        &self,
+        id: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        Ok(axagent_harness::note_dtos::Note {
+            id,
+            vault_id: "v1".into(),
+            title: "测试笔记".into(),
+            file_path: "a.md".into(),
+            content: "# hi".into(),
+            content_hash: "h".into(),
+            author: "u".into(),
+            page_type: None,
+            tags: Vec::new(),
+            source_refs: None,
+            related_pages: None,
+            quality_score: None,
+            last_linted_at: None,
+            last_compiled_at: None,
+            compiled_source_hash: None,
+            user_edited: false,
+            user_edited_at: None,
+            created_at: 1,
+            updated_at: 2,
+            is_deleted: false,
+        })
+    }
+
     async fn sync_note_to_knowledge_base(
         &self,
         request: SyncNoteToKnowledgeBaseRequest,
@@ -100,6 +128,14 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         .expect("恢复后 wiki 同步命令应可执行");
     let parsed: Value = serde_json::from_str(&output).expect("恢复输出应是 JSON 文本");
     assert_eq!(parsed["documentId"], "doc-for-note-2");
+
+    // ④ 第二条只读命令：同一真 bundle 的 `wiki_get_note` 经 wiki.store::get_note。
+    let note = manager
+        .execute_plugin_command(&outcome.plugin_id, "wiki_get_note", &json!({ "id": "note-9" }))
+        .expect("启用后 wiki 读取命令应可执行");
+    let note: Value = serde_json::from_str(&note).expect("读取输出应是 JSON 文本");
+    assert_eq!(note["id"], "note-9");
+    assert_eq!(note["title"], "测试笔记");
 
     drop(manager);
     handle.undo();

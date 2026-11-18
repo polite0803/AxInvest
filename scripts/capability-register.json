@@ -910,9 +910,9 @@
           "role": "契约"
         },
         {
-          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9386",
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9404",
           "file": "axagent-plugins/crates/plugins/src/worker.rs",
-          "line": 9386,
+          "line": 9404,
           "token": "fn remote_method_not_supported",
           "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {",
           "role": "拆分阻塞 D2 证据"
@@ -950,17 +950,17 @@
           "role": "契约"
         },
         {
-          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9478",
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9496",
           "file": "axagent-plugins/crates/plugins/src/worker.rs",
-          "line": 9478,
+          "line": 9496,
           "token": "remote_method_not_supported",
           "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))",
           "role": "拆分阻塞 D2 证据（区间起点）"
         },
         {
-          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9526",
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9544",
           "file": "axagent-plugins/crates/plugins/src/worker.rs",
-          "line": 9526,
+          "line": 9544,
           "token": "remote_method_not_supported",
           "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))",
           "role": "拆分阻塞 D2 证据（区间止点）"

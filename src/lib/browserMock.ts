@@ -7469,7 +7469,8 @@ async function executeCommand<T>(
       const vaultId = String(args?.vault_id ?? "");
       return seedWikiNotes(vaultId) as unknown as T;
     }
-    case "wiki_notes_get": {
+    case "wiki_notes_get":
+    case "wiki_get_note": {
       const id = String(args?.id ?? "");
       const note = getWikiNotes().find((n) => n.id === id);
       if (!note) { throw new Error(`Note ${id} not found`); }

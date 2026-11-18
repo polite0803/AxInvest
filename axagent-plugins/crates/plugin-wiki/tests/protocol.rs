@@ -157,6 +157,48 @@ fn missing_ids_are_rejected_before_calling_the_host() {
 }
 
 #[test]
+fn get_note_reads_via_the_host_seam_without_write_permission() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_get_note", serde_json::json!({ "id": "note-9" })));
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "get_note");
+    // 标量键（无 request 外壳），与 get_collection_info 同形态。
+    assert_eq!(call.args["args"]["id"], "note-9");
+
+    let note = serde_json::json!({
+        "id": "note-9",
+        "vaultId": "v1",
+        "title": "测试笔记",
+        "filePath": "a.md",
+        "content": "# hi",
+        "contentHash": "h",
+        "author": "u",
+        "pageType": null,
+        "tags": [],
+        "sourceRefs": null,
+        "relatedPages": null,
+        "qualityScore": null,
+        "lastLintedAt": null,
+        "lastCompiledAt": null,
+        "compiledSourceHash": null,
+        "userEdited": false,
+        "userEditedAt": null,
+        "createdAt": 1,
+        "updatedAt": 2,
+        "isDeleted": false,
+    });
+    worker.send_response(
+        &FrameResponse::success(note.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &note);
+    worker.shutdown();
+}
+
+#[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
     worker.send(&command(PLUGIN_ID, "wiki_not_a_command", serde_json::json!({})));

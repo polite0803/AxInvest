@@ -2896,6 +2896,24 @@ impl HostPeer {
                 }
             },
             // ── wiki.store 接缝：宿主把「笔记 → 知识库文档」同步写面暴露给插件 ──
+            "wiki.store" if op == "get_note" => {
+                // 标量键：id 与 trait 形参同名，无 request 外壳（与 knowledge.vector
+                // 的 get_collection_info 同形态）。读 op ⇒ 不设权限闸。
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_note(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(note) => to_value("Note", &note),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // 一个写 op；`write` 权限闸由 `dispatch_seam` 开头统一把关。
             // 入参是**嵌一层**的 `{"request": {noteId, knowledgeBaseId}}`（契约 DTO
             // `SyncNoteToKnowledgeBaseRequest`，camelCase）—— 与 `knowledge.vector` 的

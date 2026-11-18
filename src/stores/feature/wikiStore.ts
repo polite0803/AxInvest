@@ -4,6 +4,7 @@ import i18n from "@/i18n";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { addNotification } from "@/lib/notification";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
   BacklinkInfo,
   CreateNoteInput,
@@ -120,7 +121,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   getNote: async (id) => {
     try {
-      return await invoke<Note>("wiki_notes_get", { id });
+      return await invokePluginCommand<Note>("wiki_get_note", { id });
     } catch (e) {
       set({ error: translateBackendError(e) });
       return null;

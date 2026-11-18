@@ -9,6 +9,7 @@
 //!
 //! 写面权限：`sync_note_to_knowledge_base` 会落文档行并可能触发 embedding 计费，
 //! 要求插件声明 `write`；权限检查在 worker 分派层完成，本 trait 不重复校验。
+//! 读面 `get_note` 只回宿主裁剪前的笔记视图（`Note` DTO 已在 harness），不设权限闸。
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,15 @@ pub struct SyncNoteToKnowledgeBaseOutcome {
 /// Wiki 写接缝的宿主 provider。
 #[async_trait]
 pub trait WikiStoreProvider: Send + Sync {
+    /// 按 id 读取一条 Wiki 笔记；不存在由实现方返回 `NotFound`。
+    ///
+    /// 返回 `crate::note_dtos::Note`（harness 权威 DTO），插件不接触 `notes::Model`。
+    async fn get_note(&self, _id: String) -> Result<crate::note_dtos::Note> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_note 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 把一条宿主笔记同步进知识库；不存在 / 非法 id 由实现方返回 `Validation`。
     async fn sync_note_to_knowledge_base(
         &self,

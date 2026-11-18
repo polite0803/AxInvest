@@ -55,6 +55,14 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: opcAccountingManifest,
   },
+  // security 域包没有 worker 命令：三条能力都是宿主 Tool。插件只贡献域包清单与页面资产，
+  // 故 packageName/webDir 都走声明式形态，不构建也不 spawn worker。
+  "opc-security": {
+    packageName: null,
+    webDir: path.join("crates", "plugin-opc-security", "web"),
+    uiSchema: null,
+    manifest: opcSecurityManifest,
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -179,15 +187,21 @@ const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) :
 const domainPackSourceByPlugin = {
   opc: path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs"),
   "opc-accounting": path.join(workspaceRoot, "crates", "plugin-opc-accounting", "domain_packs"),
+  "opc-security": path.join(workspaceRoot, "crates", "plugin-opc-security", "domain_packs"),
 };
 const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
-const expectedDomainPackCount = pluginName === "opc" ? 13 : pluginName === "opc-accounting" ? 1 : null;
+const expectedDomainPackCount = pluginName === "opc"
+  ? 12
+  : ["opc-accounting", "opc-security"].includes(pluginName)
+  ? 1
+  : null;
 const DOMAIN_PACK_DIR = "domain_packs";
 
 /** 各插件 logical manifest 的合法 owner（公共底座 vs 独立 worker）。 */
 const DOMAIN_PACK_OWNER = {
   opc: "plugin-opc-common",
   "opc-accounting": "opc-accounting",
+  "opc-security": "plugin-opc-common",
 };
 
 function fail(message) {
@@ -202,39 +216,44 @@ function run(command, args, options = {}) {
   return result;
 }
 
-// 1) 构建 worker（宿主与打包用同一份源码，不另存产物）
-run("cargo", ["build", "-p", spec.packageName, ...(release ? ["--release"] : [])], {
-  cwd: workspaceRoot,
-});
+// 1) 构建 worker（宿主与打包用同一份源码，不另存产物）；声明式插件没有 worker。
+let sha256 = null;
+let binaryName = null;
+let workerVersion = "1.0.0";
+if (spec.packageName) {
+  run("cargo", ["build", "-p", spec.packageName, ...(release ? ["--release"] : [])], {
+    cwd: workspaceRoot,
+  });
 
-// 2) 从 cargo 自己的视角取 target 目录与版本号 —— 不猜 `target/` 的位置
-//    （本机把 CARGO_TARGET_DIR 指到了 `~/.cargo/target-axagent`）。
-const metadataRaw = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
-  cwd: workspaceRoot,
-  encoding: "utf8",
-  windowsHide: true,
-});
-if (metadataRaw.status !== 0) {
-  fail(`cargo metadata 退出码 ${metadataRaw.status}：${metadataRaw.stderr.trim()}`);
+  // 2) 从 cargo 自己的视角取 target 目录与版本号 —— 不猜 `target/` 的位置
+  //    （本机把 CARGO_TARGET_DIR 指到了 `~/.cargo/target-axagent`）。
+  const metadataRaw = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: workspaceRoot,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (metadataRaw.status !== 0) {
+    fail(`cargo metadata 退出码 ${metadataRaw.status}：${metadataRaw.stderr.trim()}`);
+  }
+  const metadata = JSON.parse(metadataRaw.stdout);
+  const workerPackage = metadata.packages.find((p) => p.name === spec.packageName);
+  if (!workerPackage) { fail(`cargo metadata 里找不到 ${spec.packageName}`); }
+  workerVersion = workerPackage.version;
+
+  const targetDir = metadata.target_directory;
+  const profileDir = release ? "release" : "debug";
+  binaryName = process.platform === "win32" ? `${spec.packageName}.exe` : spec.packageName;
+  const builtBinary = path.join(targetDir, profileDir, binaryName);
+  if (!fs.existsSync(builtBinary)) { fail(`构建产物不存在：${builtBinary}`); }
+
+  // 3) 摆放插件目录：worker 路径**必须**相对安装目录（宿主 resolve_worker_program 会拒绝
+  //    绝对路径与 `..` 逃逸），所以这里用 `bin/<name>` 而不是复制到根。
+  const binDir = path.join(outRoot, "bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const stagedBinary = path.join(binDir, binaryName);
+  fs.copyFileSync(builtBinary, stagedBinary);
+  sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest("hex");
 }
-const metadata = JSON.parse(metadataRaw.stdout);
-const workerPackage = metadata.packages.find((p) => p.name === spec.packageName);
-if (!workerPackage) { fail(`cargo metadata 里找不到 ${spec.packageName}`); }
-
-const targetDir = metadata.target_directory;
-const profileDir = release ? "release" : "debug";
-const binaryName = process.platform === "win32" ? `${spec.packageName}.exe` : spec.packageName;
-const builtBinary = path.join(targetDir, profileDir, binaryName);
-if (!fs.existsSync(builtBinary)) { fail(`构建产物不存在：${builtBinary}`); }
-
-// 3) 摆放插件目录：worker 路径**必须**相对安装目录（宿主 resolve_worker_program 会拒绝
-//    绝对路径与 `..` 逃逸），所以这里用 `bin/<name>` 而不是复制到根。
-const binDir = path.join(outRoot, "bin");
-fs.mkdirSync(binDir, { recursive: true });
-const stagedBinary = path.join(binDir, binaryName);
-fs.copyFileSync(builtBinary, stagedBinary);
-
-const sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest("hex");
 
 // 3.5) 前端资产：源目录整树拷进安装根。
 //      先按源目录的**顶层子目录**清一遍同名目录 —— 否则源里删掉的页面会作为孤儿留在产物里，
@@ -307,17 +326,17 @@ if (domainPackSource) {
 }
 
 // 4) 清单：形状归 `PLUGIN_SPECS[*].manifest`，此处只递随产物变化的三个量。
-const manifest = spec.manifest({ version: workerPackage.version, binaryName, sha256 });
+const manifest = spec.manifest({ version: workerVersion, binaryName, sha256 });
 const manifestPath = path.join(outRoot, "plugin.json");
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`[plugin-bundle] 产物目录：${outRoot}`);
-console.log(`[plugin-bundle] worker   ：${stagedBinary}`);
+if (spec.packageName) { console.log(`[plugin-bundle] worker   ：${path.join(outRoot, "bin", binaryName)}`); }
 if (webRoot) { console.log(`[plugin-bundle] 前端资产 ：${webFileCount} 个文件（页面入口 ${PAGE_ENTRY}）`); }
 if (uiSchemaSource) { console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeyCount} 个 schema key）`); }
 if (domainPackSource) { console.log(`[plugin-bundle] 域包清单 ：${domainPackCount} 份（${DOMAIN_PACK_DIR}/）`); }
 console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
-console.log(`[plugin-bundle] sha256   ：${sha256}`);
+if (sha256) { console.log(`[plugin-bundle] sha256   ：${sha256}`); }
 
 if (check) {
   await checkStagedBundle(manifest, outRoot);
@@ -335,11 +354,18 @@ async function checkStagedBundle(declared, root) {
   checkDeclaredTaskSources(declared, root);
   if (domainPackSource) { checkDeclaredDomainPacks(root); }
 
+  if (!declared.worker) {
+    console.log("[plugin-bundle] --check ✅ 声明式插件无 worker，跳过帧握手");
+    return;
+  }
+  if (!spec.packageName) {
+    fail("--check：清单声明了 worker，但插件规格没有可构建的包名");
+  }
   const program = path.join(root, declared.worker.program);
   if (!fs.existsSync(program)) { fail(`--check：清单声明的 worker 不存在：${program}`); }
   const onDisk = createHash("sha256").update(fs.readFileSync(program)).digest("hex");
-  if (onDisk !== declared.integrity.hash) {
-    fail(`--check：integrity 不匹配（清单 ${declared.integrity.hash} / 盘上 ${onDisk}）`);
+  if (!declared.integrity || onDisk !== declared.integrity.hash) {
+    fail(`--check：integrity 不匹配（清单 ${declared.integrity?.hash ?? "缺失"} / 盘上 ${onDisk}）`);
   }
 
   const child = spawn(program, [], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
@@ -5304,5 +5330,22 @@ function opcAccountingManifest({ version, binaryName, sha256 }) {
       },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
+  };
+}
+
+/** security 域包独立清单：声明式插件，无 worker / 无命令，三条能力仍由宿主 Tool 承接。 */
+function opcSecurityManifest({ version }) {
+  return {
+    name: "opc-security",
+    version: version ?? "1.0.0",
+    description: "OPC security 域包：安全审计声明式插件（共享 Tool 仍归公共底座）",
+    permissions: [],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    defaultEnabled: true,
+    pages: [{ id: "opc-security", title: "安全合规", entry: PAGE_ENTRY, loading: "bundle" }],
+    domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "security.json")],
+    commands: [],
   };
 }

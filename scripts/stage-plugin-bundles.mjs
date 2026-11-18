@@ -66,7 +66,7 @@ if (isMobile) {
 // 暂存的插件清单：**顺序即构建顺序**（串行转调，避免多个 cargo 同时抢锁）。
 // stock 必须排在第一位 —— 它今天的产物形状与单插件版逐字一致，先跑它能让「已存在」
 // 的那份产物在任何新增插件失败时保持有效。
-const PLUGINS = ["stock", "opc", "opc-accounting"];
+const PLUGINS = ["stock", "opc", "opc-accounting", "opc-security"];
 
 // `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。手工直跑要 debug 档
 // 用 `--debug`（`npm run plugin:bundle:stage|:dev` 走的就是这条）。

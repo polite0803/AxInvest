@@ -26,14 +26,16 @@ const SELFTEST = process.argv.includes("--selftest");
 const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
 // YAML manifest 权威目录（id / domain / capabilities 的唯一来源）。
 const MANIFEST_DIR = "config/opc/domain_packs";
-// P6.2 logical manifest 按插件归属分区：公共 13 份 + accounting 独立 1 份。
+// P6.2 logical manifest 按插件归属分区：公共 12 份 + accounting 独立 1 份 + security 声明式独立 1 份。
 const MANIFEST_DIRS = new Map([
   ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
   ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
+  ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
 ]);
 const EXPECTED_COUNTS = new Map([
-  ["plugin-opc", 13],
+  ["plugin-opc", 12],
   ["plugin-opc-accounting", 1],
+  ["plugin-opc-security", 1],
 ]);
 const CONFIG_REL = "axagent-quant/crates/company-runtime/src/opc/capability_pack_config.rs";
 const MAPPING_REL = "src-tauri/src/commands/opc_workflows/mod.rs";
@@ -65,11 +67,14 @@ export function parseOpcDomainMapping(text) {
   );
 }
 
-/** vertical slice 的 owner：accounting 必须是独立 worker，旧公共 owner 一律拒绝。 */
+/** vertical slice 的 owner：accounting 必须独立 worker，security 必须保持共享底座。 */
 export function parseVerticalOwner(slice, id) {
   const owner = slice?.transportOwner;
   if (id === "accounting" && owner !== "opc-accounting") {
     throw new Error(`accounting: transportOwner=${owner}，期望 opc-accounting`);
+  }
+  if (id === "security" && owner !== "plugin-opc-common") {
+    throw new Error(`security: transportOwner=${owner}，期望 plugin-opc-common`);
   }
   return owner;
 }
@@ -94,11 +99,20 @@ function selftest() {
   t("OPC 映射解析", parseOpcDomainMapping('const OPC_CAPABILITY_PACK_DOMAIN: &[(&str, &str)] = &[("accounting", "finance")];').get("accounting") === "finance");
   t("集合比较判缺值", !equalSet(["a"], ["a", "b"]));
   t("集合比较判等", equalSet(["a", "b"], ["b", "a"]));
-  t("13 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 13 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1);
+  t("12 + 1 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 12 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1 && EXPECTED_COUNTS.get("plugin-opc-security") === 1);
   t("独立 owner 合法", parseVerticalOwner({ transportOwner: "opc-accounting" }, "accounting") === "opc-accounting");
   t("错误 owner 被拦", (() => {
     try {
       parseVerticalOwner({ transportOwner: "plugin-opc-common" }, "accounting");
+      return false;
+    } catch {
+      return true;
+    }
+  })());
+  t("security 共享 owner 合法", parseVerticalOwner({ transportOwner: "plugin-opc-common" }, "security") === "plugin-opc-common");
+  t("security 错误 owner 被拦", (() => {
+    try {
+      parseVerticalOwner({ transportOwner: "opc-security" }, "security");
       return false;
     } catch {
       return true;

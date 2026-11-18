@@ -27,8 +27,8 @@
         "domainPackId": "security",
         "pluginId": "plugin-opc-security",
         "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "logical-manifest",
-        "reason": "manifest 仅 3 条通用工具，适合验证跨域共享命令只归公共底座、不复制进领域插件"
+        "manifestStrategy": "declarative-only",
+        "reason": "manifest 三条能力均为宿主共享 Tool（OpcSearchWiki/WebSearch/FileWrite），无 OPC worker 命令；独立插件贡献域包清单与页面资产，不复制公共底座"
       }
     ],
     "sharedCommands": [

@@ -827,6 +827,12 @@ impl PluginManager {
     ) -> Result<Vec<crate::types::PluginDomainPacksInfo>, PluginError> {
         let mut out = Vec::new();
         for summary in self.list_plugins()? {
+            // P6.2 批 2：禁用插件不应继续贡献域包页面 / 能力声明。
+            // 这里与页面资产、命名命令的启停闸对齐（未启用即不可见），否则用户关掉
+            // security 后域包页面仍出现在只读投影里，禁用语义只剩注释。
+            if !summary.enabled {
+                continue;
+            }
             let Some(root) = summary.metadata.root.as_deref() else { continue };
             let Ok(manifest) = load_plugin_from_directory(root) else { continue };
             if manifest.domain_packs.is_empty() {
@@ -4492,17 +4498,14 @@ mod tests {
             .expect("唯一 owner 应解析为完整注册表 id");
         assert_eq!(resolved, installed.plugin_id);
 
-        // 零 owner：命令名不存在。
         let err = manager.resolve_command_owner("opc", "opc_not_declared").unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)), "期望 NotFound，实际 {err:?}");
 
-        // disabled owner 不算命中：关掉后同一命令应变成零 owner。
         manager.write_enabled_state(&installed.plugin_id, Some(false)).expect("禁用");
         manager.config.enabled_plugins.insert(installed.plugin_id.clone(), false);
         let err = manager.resolve_command_owner("opc", "opc_list_invoices").unwrap_err();
         assert!(matches!(err, PluginError::NotFound(_)), "禁用后应零 owner，实际 {err:?}");
 
-        // 多 owner：再装一个同样声明该命令的插件并启用，必须报冲突而不是取第一个。
         let conflict_source = temp.join("conflict");
         write_command_plugin_source(
             &conflict_source,
@@ -4522,16 +4525,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp);
     }
 
-    /// 测试专用配置：把 bundled 根**钉到一个空目录**。
-    ///
-    /// 为什么必须钉：生产缺省的 bundled 根就是 `env!("CARGO_MANIFEST_DIR")/bundled`
-    /// （见 [`PluginManager::bundled_root`]，`PluginManagerConfig::resolve_bundled_root(None)` 与它同源），
-    /// 而本机 `npm run plugin:bundle:dev` 会把 stock/opc 的 dev 产物暂存进同一个目录
-    /// （宿主 dev 模式正从这里装载）⇒ 不钉住，任何「投影条数 / 名单集合」断言都随盘上暂存产物涨落。
-    /// 实测：暂存在位时 `agent_command_specs` 从 1 条读成 7 条、任务源投影从 1 变 2，三条用例红，
-    /// 而产品代码零改动 —— 红的是测试对环境的耦合，不是插件运行器的缺陷。
-    ///
-    /// 空目录落在 `config_home` 之下，随各用例既有的 cleanup 一并删除，不额外留残渣。
     fn demo_manifest_with_capabilities() -> PluginManifest {
         PluginManifest {
             name: "demo".into(),
@@ -6956,5 +6949,64 @@ mod bundled_root_tests {
         drop(manager);
         let _ = std::fs::remove_dir_all(&config_home);
         let _ = std::fs::remove_dir_all(&source);
+    }
+}
+
+#[cfg(test)]
+mod domain_pack_tests {
+    use super::*;
+    use crate::manager::test_support::isolated_config;
+    use std::path::PathBuf;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("plugins-{label}-{nanos}"))
+    }
+
+    /// P6.2 批 2：声明式域包插件禁用后，只移除该插件的域包投影，其它插件不受影响。
+    #[test]
+    fn domain_pack_disabling_is_scoped_to_its_plugin() {
+        let temp = temp_dir("domain-pack-disable");
+        let install_pack = |name: &str, pack: &str| {
+            let source = temp.join(format!("{name}-source"));
+            std::fs::create_dir_all(&source).expect("manifest 目录");
+            std::fs::write(
+                source.join("plugin.json"),
+                format!(
+                    r#"{{"name":"{name}","version":"1.0.0","description":"{name}","defaultEnabled":true,"permissions":[],"commands":[],"pages":[],"domainPacks":["domain_packs/{pack}.json"]}}"#
+                ),
+            )
+            .expect("写清单");
+            let packs = source.join("domain_packs");
+            std::fs::create_dir_all(&packs).expect("域包目录");
+            std::fs::write(
+                packs.join(format!("{pack}.json")),
+                format!(
+                    r#"{{"id":"{pack}","pluginId":"plugin-opc-{pack}","transportOwner":"plugin-opc-common","page":{{"id":"page-{pack}","path":"/opc/domain/{pack}"}},"capabilities":[],"commands":[],"calls":[]}}"#
+                ),
+            )
+            .expect("写域包清单");
+            let mut manager =
+                PluginManager::new(isolated_config(temp.join(format!("{name}-home"))));
+            let outcome = manager.install(source.to_str().expect("utf8")).expect("install 成功");
+            manager.write_enabled_state(&outcome.plugin_id, Some(true)).expect("启用");
+            manager.config.enabled_plugins.insert(outcome.plugin_id.clone(), true);
+            (manager, outcome.plugin_id)
+        };
+
+        let (mut security, security_id) = install_pack("opc-security", "security");
+        let (accounting, _accounting_id) = install_pack("opc-accounting", "accounting");
+        assert_eq!(security.list_plugin_domain_packs().expect("投影").len(), 1);
+        assert_eq!(accounting.list_plugin_domain_packs().expect("投影").len(), 1);
+
+        security.write_enabled_state(&security_id, Some(false)).expect("禁用 security");
+        security.config.enabled_plugins.insert(security_id.clone(), false);
+        assert!(security.list_plugin_domain_packs().expect("禁用后投影").is_empty());
+        assert_eq!(accounting.list_plugin_domain_packs().expect("其它插件不受影响").len(), 1);
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }

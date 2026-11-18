@@ -23,10 +23,12 @@ const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
 const MANIFEST_DIRS = new Map([
   ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
   ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
+  ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
 ]);
 const EXPECTED_COUNTS = new Map([
-  ["plugin-opc", 13],
+  ["plugin-opc", 12],
   ["plugin-opc-accounting", 1],
+  ["plugin-opc-security", 1],
 ]);
 
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -81,7 +83,7 @@ function selftest() {
     independent,
   ).length === 0);
   t("独立 owner 漂移被拦", validateManifest({ ...good, transportOwner: "opc-accounting" }, expected).length > 0);
-  t("13 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 13 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1);
+  t("12 + 1 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 12 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1 && EXPECTED_COUNTS.get("plugin-opc-security") === 1);
   t("commandName 小写转 snake", commandName("tool:OpcGetFinancialReport") === "opc_get_financial_report");
   t("非 OPC 能力无命令名", commandName("tool:WebSearch") === null);
   const failed = checks.filter((c) => !c.ok);
@@ -146,7 +148,7 @@ function main() {
   } else if (problems.length) {
     for (const p of problems) console.error(`FAIL: ${p}`);
   } else {
-    console.log(`PASS: ${manifests.length} 个域包 logical manifest 一致（13 + 1 分区 / 一域一 owner / 页面 / capabilities / 命令 / 接缝）`);
+    console.log(`PASS: ${manifests.length} 个域包 logical manifest 一致（12 + 1 + 1 分区 / 一域一 owner / 页面 / capabilities / 命令 / 接缝）`);
   }
   process.exit(problems.length === 0 ? 0 : 1);
 }

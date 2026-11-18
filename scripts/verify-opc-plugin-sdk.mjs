@@ -138,6 +138,17 @@ run(
   "独立树 bundle opc-security",
 );
 
+// 5) 独立树产物 → 宿主安装链 e2e：用 SDK 树打包出的 accounting bundle 走
+//    PluginManager install → enable → 命令 → disable → 恢复，证明独立树产物
+//    不只是「编译得过」，还能被宿主装载并执行。
+process.env.AXAGENT_ACCOUNTING_BUNDLE_DIR = join(sdkRoot, "dist", "plugins", "opc-accounting");
+run(
+  "cargo",
+  ["test", "-p", "axagent-plugins", "--test", "e2e_opc_accounting_disable_test", "--all-features"],
+  sdkRoot,
+  "独立树产物安装链 e2e（accounting）",
+);
+
 if (!KEEP) rmSync(TEMP_ROOT, { recursive: true, force: true });
 console.log(JSON.stringify(OUT, null, 2));
 console.log("SDK_VERIFY_OK");

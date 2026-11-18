@@ -103,7 +103,7 @@
 1. 内置 sandbox 从两张表被撤销
 2. 插件只往 `inner` 写一份 descriptor
 3. `contains("workflow.sandbox") == true` 但 `get_sandbox() == None` —— **接缝变死**
-4. 禁用插件时 `unregister_plugin_capabilities`（`plugins/src/manager.rs:1545`）只 undo 外部句柄，
+4. 禁用插件时 `unregister_plugin_capabilities`（`plugins/src/manager.rs:1598`）只 undo 外部句柄，
    **内置永不复活**
 5. `list_with_details()` 仍报「该接缝由插件 X 提供」⇒ **UI 显示有提供者，运行时该接缝已死**
 

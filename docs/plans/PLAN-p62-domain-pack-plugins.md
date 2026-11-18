@@ -107,7 +107,13 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 - `PluginManager` 按命令名解析唯一启用 owner：0 owner 报 NotFound、多 owner 报冲突、disabled 不算命中；域包禁用投影只影响该插件。
 - 数据保留：本批未改任何 `opc_*` entity / migration / schema 文件，升级前后表结构同源，数据不因插件归属变化而迁移或删除；真机升级后的数据重载仍列入独立端到端验收。
 
-### 7.3 尚未闭合
+### 7.3 独立仓验收进展
 
-- 独立仓形态（拷出 SDK 仓后独立跑测试/bundle）不在本批完成范围。
+- **2026-11-18 已建立可复跑验收链**：`scripts/verify-opc-plugin-sdk.mjs` 会拷出 OPC 插件 SDK 最小独立树（axagent-plugins + axagent-core 根配置 + harness/plugin-proto），在其中完成 `cargo metadata` / `cargo check` / `cargo clippy` / `cargo test` 全绿；`scripts/check-workspace-boundary.mjs` 把插件 workspace 对外部 workspace 的 path 依赖量化为 11 条并按基线只减不增锁定。两道门均已接入 `scripts/ci-check.mjs` 与 `.github/workflows/ci.yml`。
+- **持续验证**：OPC 六个 crate（plugin-opc-core / accounting / sales-growth / content-media / plugin-opc / plugins）在独立树中 `check / clippy / test` 全部通过；这意味着 OPC 插件域的 Rust 构建面已具备脱离主仓的形态。
+- **剩余 debt**：`workspace-boundary-allowlist.json` 当前登记 11 条跨根 path 依赖，核心缺口仍是 plugin-stock 对 `analysis-engine` / `astock-data` 的业务实现依赖，以及 `plugins` / `schema-gen` 对 harness 的实现依赖。终局仍需把 SDK crate 发布成可解析版本，或提供私有 registry。
+
+### 7.4 尚未闭合
+
+- 物理拆仓（把插件 workspace 独立成 git 仓库）尚未执行；当前证据是“可拷出独立树构建”而非“仓库已独立”。
 - 真机禁用/启用插件后的页面端到端点击链路与升级前数据逐表对比尚未做；当前证据是插件边界门禁、禁用投影单测与 schema 未变证明。

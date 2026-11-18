@@ -138,6 +138,12 @@ run(
   sdkRoot,
   "独立树 bundle opc-security",
 );
+run(
+  "node",
+  ["scripts/build-plugin-bundle.mjs", "--plugin", "opc-software-dev", "--check"],
+  sdkRoot,
+  "独立树 bundle opc-software-dev",
+);
 
 // 5) 独立树产物 → 宿主安装链 e2e：用 SDK 树打包出的 accounting bundle 走
 //    PluginManager install → enable → 命令 → disable → 恢复，证明独立树产物

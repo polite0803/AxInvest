@@ -1104,6 +1104,9 @@ jobs:
       - name: Check plugin source audit (path/git deps ratchet)
         run: node axagent-plugins/scripts/check-plugin-source-audit.mjs
 
+      - name: Check declarative OPC page data (generated from YAML)
+        run: node scripts/generate-declarative-opc-pages.mjs --check
+
       - name: Check SDK package surface selftest
         run: node scripts/check-sdk-package-surface.mjs --selftest
 

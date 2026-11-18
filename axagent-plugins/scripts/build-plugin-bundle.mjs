@@ -275,6 +275,9 @@ const expectedDomainPackIds = pluginName === "opc"
     .filter((p) => p.pluginId === `plugin-${pluginName}` && ownedDomainPackIds.has(p.id))
     .map((p) => p.id);
 const DOMAIN_PACK_DIR = "domain_packs";
+const declarativeDomainPackId = ownershipRegistry.policy?.verticalSlices?.find(
+  (slice) => slice.pluginId === `plugin-${pluginName}` && slice.manifestStrategy === "declarative-only",
+)?.domainPackId ?? null;
 
 /** 各插件 logical manifest 的合法 owner：由底册 verticalSlices 唯一权威。 */
 function domainPackOwnerFor(pluginName) {
@@ -454,6 +457,9 @@ async function checkStagedBundle(declared, root) {
   } else if ((declared.pages ?? []).length > 0) {
     fail("--check：本插件未声明前端源（webDir=null），清单不得声明 pages[]");
   }
+  if (declarativeDomainPackId) {
+    checkDeclarativePage(root, declarativeDomainPackId);
+  }
   checkDeclaredTaskSources(declared, root);
   if (domainPackSource) { checkDeclaredDomainPacks(root); }
 
@@ -589,6 +595,41 @@ function checkDeclaredPages(declared, root) {
   }
   if (bundlePages === 0) { fail("--check：pages[] 里没有任何 bundle 页，通道未被验证"); }
   console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
+}
+
+/** 声明式域包页面的安装产物自检：只读随包静态数据，不依赖主机源码树。 */
+function checkDeclarativePage(root, expectedId) {
+  const pageDir = path.join(root, "pages");
+  const pagePath = path.join(pageDir, "index.html");
+  const dataPath = path.join(pageDir, "domain-data.js");
+  if (!fs.existsSync(pagePath) || !fs.existsSync(dataPath)) {
+    fail(`--check：声明式页面产物缺失：${pageDir}`);
+  }
+  const html = fs.readFileSync(pagePath, "utf8");
+  if (!html.includes('src="./domain-data.js"')) {
+    fail("--check：声明式页面没有加载 domain-data.js");
+  }
+  for (const selector of ["#capabilities", "#kpis", "#workflow-steps", "#data-sources", "#acceptance"]) {
+    if (!html.includes(selector)) { fail(`--check：声明式页面缺少渲染区 ${selector}`); }
+  }
+  const raw = fs.readFileSync(dataPath, "utf8");
+  const match = /^globalThis\.AX_OPC_DOMAIN_DATA\s*=\s*([\s\S]*);\s*$/.exec(raw);
+  if (!match) { fail("--check：domain-data.js 不是纯数据赋值"); }
+  let parsed;
+  try {
+    parsed = JSON.parse(match[1]);
+  } catch (error) {
+    fail(`--check：domain-data.js 数据不是合法 JSON：${error.message}`);
+  }
+  if (parsed.id !== expectedId) {
+    fail(`--check：domain-data.js id=${parsed.id}，期望 ${expectedId}`);
+  }
+  if (!Array.isArray(parsed.capabilities) || parsed.capabilities.length === 0) {
+    fail("--check：声明式域包至少需要展示一条 capability");
+  }
+  console.log(
+    `[plugin-bundle] --check ✅ 声明式页面数据完整（${parsed.id}：${parsed.capabilities.length} 能力 / ${parsed.kpis.length} KPI / ${parsed.workflowSteps.length} 步骤）`,
+  );
 }
 
 /** 域包清单自检：本插件预期份数（公共 13 / accounting 1），owner 与命令不跨域重复。 */

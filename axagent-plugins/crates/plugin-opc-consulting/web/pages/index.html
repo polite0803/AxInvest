@@ -1,5 +1,62 @@
 <!doctype html>
 <html lang="zh">
-  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>OPC 咨询</title><style>:root{color-scheme:light dark;font-family:system-ui,sans-serif}body{margin:0;padding:16px;font-size:13px;line-height:1.6}h1{font-size:16px;margin:0 0 12px}</style></head>
-  <body><h1>OPC 咨询</h1><p>本插件提供 咨询域包的独立边界。共享命令与工具仍由公共底座承接，禁用本插件不会影响其他 OPC 域。</p></body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OPC 域包</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; padding: 16px; font-size: 13px; line-height: 1.6; }
+      h1 { font-size: 16px; margin: 0 0 4px; }
+      h2 { font-size: 14px; margin: 18px 0 8px; }
+      .muted { color: #888; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+      section { padding: 12px; border: 1px solid #8884; border-radius: 6px; }
+      ul, ol { margin: 0; padding-left: 20px; }
+      li { margin: 3px 0; }
+      .critical { color: #d4380d; }
+    </style>
+  </head>
+  <body>
+    <h1 id="title">OPC 域包</h1>
+    <p id="description" class="muted"></p>
+    <div class="grid">
+      <section><h2>能力</h2><ul id="capabilities"></ul></section>
+      <section><h2>KPI</h2><ul id="kpis"></ul></section>
+      <section><h2>工作流步骤</h2><ol id="workflow-steps"></ol></section>
+      <section><h2>数据源</h2><ul id="data-sources"></ul></section>
+      <section><h2>验收标准</h2><ul id="acceptance"></ul></section>
+    </div>
+    <script src="./domain-data.js"></script>
+    <script>
+      const data = globalThis.AX_OPC_DOMAIN_DATA;
+      if (!data) {
+        document.body.insertAdjacentHTML("beforeend", '<p class="critical">页面数据加载失败</p>');
+      } else {
+        document.title = "OPC " + data.name;
+        document.querySelector("#title").textContent = "OPC " + data.name;
+        document.querySelector("#description").textContent = data.description;
+        const list = (selector, rows, render) => {
+          const root = document.querySelector(selector);
+          if (!rows.length) {
+            const empty = document.createElement("li");
+            empty.className = "muted";
+            empty.textContent = "未声明";
+            root.append(empty);
+            return;
+          }
+          for (const row of rows) {
+            const item = document.createElement(root.tagName === "OL" ? "li" : "li");
+            item.textContent = render(row);
+            root.append(item);
+          }
+        };
+        list("#capabilities", data.capabilities, (x) => x);
+        list("#kpis", data.kpis, (x) => x.name + " (" + x.key + ")" + (x.unit ? " · " + x.unit : ""));
+        list("#workflow-steps", data.workflowSteps, (x) => x.name + (x.description ? " · " + x.description : ""));
+        list("#data-sources", data.dataSources, (x) => x.id + (x.chain.length ? " · " + x.chain.join(" → ") : ""));
+        list("#acceptance", data.acceptanceCriteria, (x) => x.name + (x.critical ? " · 关键" : ""));
+      }
+    </script>
+  </body>
 </html>

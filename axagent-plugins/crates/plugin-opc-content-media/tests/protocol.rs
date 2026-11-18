@@ -13,6 +13,7 @@ use axagent_plugin_proto::{
     CommandFrame, FrameRequest, FrameResponse, ResponseKind, error_codes, ops, read_inbound,
     write_json_frame,
 };
+use axagent_plugin_testkit::{command_frame, shutdown_frame};
 
 // 宿主 spawn 内置包时注入的**真实**身份形态：`{小写 name}@{marketplace}`
 // （`plugins/src/manager.rs` 的 `plugin_id()`，`BUNDLED_MARKETPLACE = "bundled"`）。
@@ -185,7 +186,7 @@ fn command_frame_lists_opc_blog_posts_via_host_seam() {
         );
     }
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -235,7 +236,7 @@ fn explicit_pagination_is_forwarded_verbatim_and_stops_at_one_page() {
         .clone();
     assert_eq!(rows.len(), 1, "显式分页只交一页：{rows:?}");
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -268,7 +269,7 @@ fn seam_error_is_propagated_as_command_failure() {
     assert_eq!(response.code.as_deref(), Some("TEST_OPC_STORE_UNAVAILABLE"), "错误码原样透传");
     assert_eq!(response.request_id.as_deref(), Some("req-error"));
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -400,7 +401,7 @@ fn command_frame_publishes_a_blog_post_via_host_seam() {
     );
     assert_eq!(response.request_id.as_deref(), Some("req-no-id"));
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -534,7 +535,7 @@ fn command_frame_deletes_a_blog_post_via_host_seam() {
     );
     assert_eq!(response.request_id.as_deref(), Some("req-delete-no-id"));
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -684,7 +685,7 @@ fn command_frame_creates_a_blog_post_via_host_seam() {
     assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
     assert_eq!(response.request_id.as_deref(), Some("req-create-over-budget"));
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -900,7 +901,7 @@ fn command_frame_batch2_writes_go_through_host_seam() {
         );
     }
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
@@ -918,11 +919,7 @@ fn batch3_roundtrip(
     expected_op: &str,
     reply: serde_json::Value,
 ) -> serde_json::Map<String, serde_json::Value> {
-    worker.send(
-        &CommandFrame::new(PLUGIN_ID, command, input, 5_000)
-            .to_frame_request()
-            .expect("命令帧应能编成请求"),
-    );
+    worker.send(&command_frame(PLUGIN_ID, command, input, 5_000));
     let call = worker.recv_request();
     assert_eq!(call.op, ops::CALL_SEAM, "{command} 必须经 call_seam 出站");
     assert_eq!(call.args["seam"], "opc.store");
@@ -954,7 +951,7 @@ fn command_frame_batch3_creates_go_through_host_seam() {
     );
     assert!(args.is_empty(), "无入参 op 的出站 args 必须是空对象：{args:?}");
 
-    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    worker.send(&shutdown_frame());
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());

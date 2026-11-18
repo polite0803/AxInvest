@@ -693,6 +693,7 @@ version = "3.0.0"
 dependencies = [
  "axagent-plugin-opc-core",
  "axagent-plugin-proto",
+ "axagent-plugin-testkit",
  "serde_json",
 ]
 
@@ -710,6 +711,7 @@ version = "3.0.0"
 dependencies = [
  "axagent-plugin-opc-core",
  "axagent-plugin-proto",
+ "axagent-plugin-testkit",
  "serde_json",
 ]
 

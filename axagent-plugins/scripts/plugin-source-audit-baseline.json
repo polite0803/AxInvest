@@ -14,7 +14,8 @@
   "plugin-opc-content-media": {
     "path_dependency": [
       15,
-      16
+      16,
+      23
     ]
   },
   "plugin-opc-core": {
@@ -25,7 +26,8 @@
   "plugin-opc-sales-growth": {
     "path_dependency": [
       17,
-      18
+      18,
+      25
     ]
   },
   "plugin-stock": {

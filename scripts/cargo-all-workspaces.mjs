@@ -205,20 +205,38 @@ if (mode === "nextest" && !listOnly) {
     "plugins",
     "opc-content-media",
   );
-  const security = spawnSync(
-    "node",
-    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-security", "--check"],
-    { cwd: repoRoot, stdio: "inherit", env: process.env },
-  );
-  if (security.status !== 0) {
-    console.error(`[cargo ${mode}] staging opc-security bundle 失败`);
-    process.exit(security.status ?? 1);
+  const declarative = [
+    "opc-ai-research",
+    "opc-consulting",
+    "opc-design",
+    "opc-ecommerce",
+    "opc-education",
+    "opc-finance-invest",
+    "opc-game-dev",
+    "opc-geospatial",
+    "opc-project-management",
+    "opc-security",
+    "opc-software-dev",
+  ];
+  for (const plugin of declarative) {
+    const staged = spawnSync(
+      "node",
+      ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--check"],
+      { cwd: repoRoot, stdio: "inherit", env: process.env },
+    );
+    if (staged.status !== 0) {
+      console.error(`[cargo ${mode}] staging ${plugin} bundle 失败`);
+      process.exit(staged.status ?? 1);
+    }
   }
-  process.env.AXAGENT_SECURITY_BUNDLE_DIR = path.join(
+  process.env.AXAGENT_DECLARATIVE_BUNDLE_ROOT = path.join(
     repoRoot,
     "axagent-plugins",
     "dist",
     "plugins",
+  );
+  process.env.AXAGENT_SECURITY_BUNDLE_DIR = path.join(
+    process.env.AXAGENT_DECLARATIVE_BUNDLE_ROOT,
     "opc-security",
   );
 }

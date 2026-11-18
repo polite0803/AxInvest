@@ -109,7 +109,7 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 
 ### 7.3 独立仓验收进展
 
-- **真 bundle 启停端到端已验收**：三个独立 worker 域（accounting / sales_growth / content_media）覆盖命令安装 → 启用 → 执行 → 禁用 → 命令链不可用且域包投影消失 → 恢复启用 → 再执行；声明式插件以 security（零命令、零 worker）为代表完成页面资产与域包投影的启停端到端。CI 会在 `cargo nextest` 前串行 staging 这四个 bundle，避免空跑 SKIP 假绿。
+- **真 bundle 启停端到端已验收**：三个独立 worker 域（accounting / sales_growth / content_media）覆盖命令安装 → 启用 → 执行 → 禁用 → 命令链不可用且域包投影消失 → 恢复启用 → 再执行；11 个声明式域由 `e2e_opc_declarative_domains_test.rs` 逐个覆盖安装 → 页面解析 → 域包投影 → 禁用 → 恢复，且每域断言未复制命令 owner。CI 会在 `cargo nextest` 前串行 staging 全部 11 个声明式 bundle，避免空跑 SKIP 假绿。
 - **独立 worker 域的真实页面已落地**：accounting、sales_growth、content_media 均改为插件内自足的 `src-web/main.ts` + `web/pages/bundle.js`，只经 SDK `executeCommand` 访问本插件命令；页面覆盖 loading / empty / error 与真实写操作。`build-plugin-bundle.mjs --check` 会执行各域 `src-web/__verify__/verify-bundle.mjs`，worker 页面退回说明文案或改用 `client.invoke("opc_*")` 时门禁直接失败。
 - **页面与命令声明对齐补漏**：content_media 页面所需的 `opc_create_content_asset` / `opc_create_publish_schedule` 原先只存在于公共 worker 与逻辑清单，未进独立 bundle 清单和 content_media worker 分派；本批把实现上收到 `plugin-opc-core`、补齐独立 worker 分派、manifest 命令与协议测试，并由真 bundle E2E 覆盖创建 / 删除 / 排期 / 取消全链。sales_growth 与 content_media E2E 同时断言页面入口必须加载 `./bundle.js`。
 - **11 个声明式域页面已升级为域包浏览页**：`scripts/generate-declarative-opc-pages.mjs` 从主仓权威 YAML 生成每个插件的 `web/pages/domain-data.js`，随插件源码提交；页面读取随包数据并展示真实能力、KPI、工作流步骤、数据源与验收标准。生成物的 `--check` 已接入本地与 GitHub CI，YAML 改动而未重生成会直接变红。独立 SDK 树实测 `opc-security` 与 `opc-software-dev` 打包分别显示 `3 能力 / 2 KPI / 4 步骤` 与 `5 能力 / 16 KPI / 30 步骤`，说明页面不依赖主仓 `config/` 路径。

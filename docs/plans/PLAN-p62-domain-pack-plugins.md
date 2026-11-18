@@ -88,3 +88,26 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 - 不跑全量门禁；阶段内只用定点脚本与 `cargo check -p <crate>` / 定点 clippy。
 - 形态级红灯当场上报；底册或门禁出现“域包串包”时不得继续 bundle。
 - 所有新文档放 `docs/`，跨文档引用用纯文件名；本文件已登记 `docs/INDEX.md`。
+
+
+## 七、实施结果（2026-11-18）
+
+### 7.1 已落地的 14 域插件边界
+
+底册 `opc-domain-pack-plugins.json` 的 14 条 `verticalSlices` 与盘上插件产物一一对应：
+
+- 独立 worker：accounting（`opc-accounting`）、sales_growth（`opc-sales-growth`）、content_media（`opc-content-media`）。
+- 声明式独立插件：ai_research、consulting、design、ecommerce、education、finance_invest、game_dev、geospatial、project_management、security、software_dev。这 11 域的 manifest 能力均为宿主共享 Tool / 公共 OPC 命令，按“共享能力只归公共底座”的裁定不复制 worker 命令；插件贡献独立逻辑清单与页面资产。
+- 公共 `plugin-opc` 的 `domainPacks` 已归零，仅保留跨包共享命名命令与 `opc.store` 接缝；已迁命令从源清单删除，由构建脚本门禁阻止公共包与域包双 owner。
+
+### 7.2 门禁与验证
+
+- `check-opc-domain-pack-plugins.mjs` / `check-opc-domain-pack-manifest.mjs`：14 域清单一致，独立 owner 合法，公共包与域包命令不交叉；selftest 覆盖 14 独立 + 0 公共计数、错误 owner 拦截、重复命令检测。
+- `build-plugin-bundle.mjs --check`：13 个域插件产物加公共包全部通过，页面入口白名单、worker 握手/停机、sha256 一致；声明式插件明确跳过 worker 帧握手。
+- `PluginManager` 按命令名解析唯一启用 owner：0 owner 报 NotFound、多 owner 报冲突、disabled 不算命中；域包禁用投影只影响该插件。
+- 数据保留：本批未改任何 `opc_*` entity / migration / schema 文件，升级前后表结构同源，数据不因插件归属变化而迁移或删除；真机升级后的数据重载仍列入独立端到端验收。
+
+### 7.3 尚未闭合
+
+- 独立仓形态（拷出 SDK 仓后独立跑测试/bundle）不在本批完成范围。
+- 真机禁用/启用插件后的页面端到端点击链路与升级前数据逐表对比尚未做；当前证据是插件边界门禁、禁用投影单测与 schema 未变证明。

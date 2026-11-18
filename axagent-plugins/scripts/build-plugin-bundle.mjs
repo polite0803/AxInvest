@@ -3655,16 +3655,6 @@ function opcManifest({ version, binaryName, sha256 }) {
     .filter((f) => f.endsWith(".json"))
     .sort()
     .map((f) => path.posix.join(DOMAIN_PACK_DIR, f));
-  // P6.2 终局：公共包只声明真正跨域共享的命令；已迁域包命令由各独立插件声明。
-  const migratedCommands = new Set(
-    ownershipRegistry.packs
-      .filter((pack) => pack.pluginId !== "plugin-opc")
-      .flatMap((pack) => {
-        const file = path.join(workspaceRoot, "crates", pack.pluginId, DOMAIN_PACK_DIR, `${pack.id}.json`);
-        if (!fs.existsSync(file)) return [];
-        return JSON.parse(fs.readFileSync(file, "utf8")).commands ?? [];
-      }),
-  );
   return {
     name: "opc",
     version,
@@ -3691,18 +3681,6 @@ function opcManifest({ version, binaryName, sha256 }) {
     // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
     // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` / `COMMAND_PUBLISH_BLOG_POST` 逐字一致。
     commands: withRequiredPermission([
-      {
-        name: "opc_list_blog_posts",
-        description: "列出 OPC 博客文章（经宿主 opc.store 接缝取数，不含正文；不传分页则取尽整表）",
-        command: "worker://opc_list_blog_posts",
-        inputSchema: {
-          type: "object",
-          properties: {
-            limit: { type: "number", description: "单页条数（越界由宿主按契约区间拒收）" },
-            offset: { type: "number", description: "分页偏移；与 limit 都缺省 = 取尽整表" },
-          },
-        },
-      },
       {
         // 先例 #144 的双声明已在 #36 blog 刀收口：宿主 `commands/opc.rs` 的同名 Tauri 命令
         // 已删，本条是发布博客的唯一通道，回宿主的两态枚举串。
@@ -3731,147 +3709,13 @@ function opcManifest({ version, binaryName, sha256 }) {
           required: ["id"],
         },
       },
-      {
-        // 新建：入参按清单 `inputSchema` 收平铺五字段（形状判在 worker 命令层，非空 /
-        // 字节预算判在宿主 provider）；出参 = 创建行的列裁剪视图（含 id 句柄）。
-        name: "opc_create_blog_post",
-        description: "新建一篇 OPC 博客（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
-        command: "worker://opc_create_blog_post",
-        inputSchema: {
-          type: "object",
-          properties: {
-            title: { type: "string", description: "标题" },
-            slug: { type: "string", description: "URL 标识（唯一性由宿主 provider 判）" },
-            excerpt: { type: "string", description: "摘要" },
-            content: { type: "string", description: "正文（字节预算由宿主按契约常量判）" },
-            tags: { type: "array", items: { type: "string" }, description: "标签" },
-          },
-          required: ["title", "slug", "excerpt", "content", "tags"],
-        },
-      },
       // ── #36 批 2：4 条写命令（全部走 opc.store 写面 ⇒ 宿主 requireWrite 闸）──
       // 出参一律是契约的外部标记枚举（`{"transitioned"…}` / `{"updated"…}` / `"removed"` /
       // `"not_found"`）；「缺行」是正常读数，前端按取值翻提示，不按错误码分派。
-      {
-        name: "opc_transition_invoice",
-        description: "变更 OPC 发票状态（经宿主 opc.store 写面；回 transitioned / not_found 两态）",
-        command: "worker://opc_transition_invoice",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "string", description: "发票 id（接缝主键；空值由宿主 provider 拒收）" },
-            status: {
-              type: "string",
-              enum: ["draft", "sent", "paid", "overdue", "cancelled", "refunded"],
-              description: "目标状态（合法性由宿主 provider 判）",
-            },
-          },
-          required: ["id", "status"],
-        },
-      },
-      {
-        name: "opc_update_content_asset",
-        description: "更新 OPC 内容资产（经宿主 opc.store 写面；回 updated / not_found 两态）",
-        command: "worker://opc_update_content_asset",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "string", description: "内容资产 id（接缝主键；空值由宿主 provider 拒收）" },
-            title: { type: "string", description: "新标题（缺省 = 该列不动）" },
-            contentType: { type: "string", description: "新内容类型（缺省 = 该列不动）" },
-            body: { type: "string", description: "新正文（缺省 = 该列不动）" },
-            tags: { type: "array", items: { type: "string" }, description: "新标签（缺省 = 该列不动）" },
-            status: { type: "string", description: "新状态（缺省 = 该列不动）" },
-          },
-          required: ["id"],
-        },
-      },
-      {
-        name: "opc_delete_content_asset",
-        description: "删除 OPC 内容资产（经宿主 opc.store 写面；回 removed / not_found 两态）",
-        command: "worker://opc_delete_content_asset",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "string", description: "内容资产 id（接缝主键；空值由宿主 provider 拒收）" },
-          },
-          required: ["id"],
-        },
-      },
-      {
-        name: "opc_cancel_publish_schedule",
-        description: "取消/删除 OPC 发布计划（硬删；经宿主 opc.store 写面，回 removed / not_found 两态）",
-        command: "worker://opc_cancel_publish_schedule",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: { type: "string", description: "发布计划 id（接缝主键；空值由宿主 provider 拒收）" },
-          },
-          required: ["id"],
-        },
-      },
       // ── #36 批 3：8 条写命令 + 1 条财务报表查询（前 8 条走 opc.store 写面 ⇒ 宿主
       //    requireWrite 闸；`opc_get_financial_report` 是读 op，与八个 list op 同档无闸）──
       // 入参一律 camelCase（与契约 `*Request` DTO 的 serde 键逐字一致，禁区 13）；
       // 数组元素内部字段类型的错由宿主 serde 拒收，命令层只判「是不是对象数组」。
-      {
-        name: "opc_create_invoice",
-        description: "创建 OPC 发票（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
-        command: "worker://opc_create_invoice",
-        inputSchema: {
-          type: "object",
-          properties: {
-            customerId: { type: "string", description: "客户 id" },
-            lineItems: {
-              type: "array",
-              description: "行项目；行金额由宿主按 quantity×unitPrice×(1+taxRate) 现算",
-              items: {
-                type: "object",
-                properties: {
-                  description: { type: "string", description: "项目描述" },
-                  quantity: { type: "number", description: "数量（缺省 1）" },
-                  unitPrice: { type: "number", description: "单价（缺省 0）" },
-                  taxRate: { type: "number", description: "税率，如 0.13（缺省 0）" },
-                },
-              },
-            },
-            currency: { type: "string", description: "货币代码（缺省 CNY）" },
-            dueAt: { type: "number", description: "到期时间戳（epoch 秒）" },
-            notes: { type: "string", description: "备注" },
-          },
-          required: ["customerId", "lineItems"],
-        },
-      },
-      {
-        name: "opc_create_customer",
-        description: "创建 OPC 客户（经宿主 opc.store 写面；回创建行的列裁剪视图，含 id）",
-        command: "worker://opc_create_customer",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "客户姓名" },
-            email: { type: "string", description: "客户邮箱" },
-            phone: { type: "string", description: "电话（可选）" },
-            company: { type: "string", description: "公司（可选）" },
-            customerType: {
-              type: "string",
-              description: "客户类型（consumer / business；其余值由宿主落 Unknown）",
-            },
-            country: { type: "string", description: "国家（可选）" },
-            region: { type: "string", description: "地区（可选）" },
-            city: { type: "string", description: "城市（可选）" },
-            address: { type: "string", description: "地址（可选）" },
-            latitude: { type: "number", description: "纬度（可选）" },
-            longitude: { type: "number", description: "经度（可选）" },
-            source: {
-              type: "string",
-              description: "来源（Referral / Website / SocialMedia / Marketplace / Direct；其余值由宿主落 Other）",
-            },
-            notes: { type: "string", description: "备注（可选）" },
-          },
-          required: ["name", "email"],
-        },
-      },
       // ── #32 批 A：三条写命令（客户更新/客户删除/发票删除，均走 opc.store 写面 ⇒
       //    宿主 requireWrite 闸）。update 出参 = 更新后的列裁剪视图；删除出参 = 无载荷。
       //    可选字段「缺省 = 该列不动」；⚠ 清空在本命令线格式上不可表达（与宿主同名
@@ -4110,30 +3954,9 @@ function opcManifest({ version, binaryName, sha256 }) {
           required: ["contentRefType", "contentRefId", "scheduledAt"],
         },
       },
-      {
-        name: "opc_process_due_schedules",
-        description: "处理全部到期的 OPC 发布计划（写 op；回本次处理过的行视图数组，空数组 = 无到期计划）",
-        command: "worker://opc_process_due_schedules",
-        inputSchema: { type: "object", properties: {} },
-      },
       // ── #36 批 1：8 条只读查询 + 1 条看板（全部走 opc.store 只读 op，无必填字段）──
       // 属性名一律 camelCase（与契约 `*ListQuery` 的 serde 键逐字一致）；不写 `required`：
       // 缺键即「不过滤 / 宿主取缺省」，不是错误。
-      {
-        name: "opc_list_invoices",
-        description: "列出 OPC 发票（经宿主 opc.store 只读接缝取数）",
-        command: "worker://opc_list_invoices",
-        inputSchema: {
-          type: "object",
-          properties: {
-            status: { type: "string", description: "状态过滤（非法值按不过滤处理）" },
-            customerId: { type: "string", description: "所属客户 id" },
-            dateFrom: { type: "number", description: "开票时间下界（epoch 秒）" },
-            dateTo: { type: "number", description: "开票时间上界（epoch 秒）" },
-            limit: { type: "number", description: "返回条数上限" },
-          },
-        },
-      },
       {
         name: "opc_list_customers",
         description: "列出 OPC 客户（经宿主 opc.store 只读接缝取数）",
@@ -4163,18 +3986,6 @@ function opcManifest({ version, binaryName, sha256 }) {
         },
       },
       {
-        name: "opc_list_landing_pages",
-        description: "列出 OPC 落地页（经宿主 opc.store 只读接缝取数）",
-        command: "worker://opc_list_landing_pages",
-        inputSchema: { type: "object", properties: {} },
-      },
-      {
-        name: "opc_list_contacts",
-        description: "列出 OPC 联系表单提交（经宿主 opc.store 只读接缝取数）",
-        command: "worker://opc_list_contacts",
-        inputSchema: { type: "object", properties: {} },
-      },
-      {
         name: "opc_list_kpis",
         description: "列出 OPC KPI 记录（经宿主 opc.store 只读接缝取数）",
         command: "worker://opc_list_kpis",
@@ -4185,18 +3996,6 @@ function opcManifest({ version, binaryName, sha256 }) {
             limit: { type: "number", description: "返回条数上限" },
           },
         },
-      },
-      {
-        name: "opc_list_content_assets",
-        description: "列出 OPC 内容资产（经宿主 opc.store 只读接缝取数，不含正文）",
-        command: "worker://opc_list_content_assets",
-        inputSchema: { type: "object", properties: {} },
-      },
-      {
-        name: "opc_list_publish_schedules",
-        description: "列出 OPC 发布计划（经宿主 opc.store 只读接缝取数）",
-        command: "worker://opc_list_publish_schedules",
-        inputSchema: { type: "object", properties: {} },
       },
       {
         // 看板：宿主没有聚合 op，由插件进程组合三次列表查询现算六项读数。
@@ -5333,7 +5132,7 @@ function opcManifest({ version, binaryName, sha256 }) {
           properties: {},
         },
       },
-    ]).filter((command) => !migratedCommands.has(command.name)),
+    ]),
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

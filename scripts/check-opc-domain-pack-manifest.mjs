@@ -157,6 +157,21 @@ function main() {
       }
     }
   }
+  // P6.2 终局：公共包命令与域包命令不得双 owner。公共包的实际命令集合来自构建脚本的
+  // 权威命令表；这里只校验「所有独立域声明的命令都不在公共包里」，避免 filter 漂移。
+  const publicCommandsFile = "axagent-plugins/scripts/build-plugin-bundle.mjs";
+  const publicSource = read(publicCommandsFile);
+  const opcManifestStart = publicSource.indexOf("function opcManifest(");
+  const opcManifestEnd = publicSource.indexOf("function opcAccountingManifest(", opcManifestStart);
+  const publicManifestSource = publicSource.slice(opcManifestStart, opcManifestEnd);
+  const publicCommandNames = new Set(
+    [...publicManifestSource.matchAll(/name: "(opc_[a-z0-9_]+)",/g)].map((m) => m[1]),
+  );
+  for (const [command, owner] of commandOwners) {
+    if (publicCommandNames.has(command)) {
+      problems.push(`命令 ${command} 被域包 ${owner} 与公共 plugin-opc 同时声明（构建脚本仍有 owner）`);
+    }
+  }
   const expectedIds = registry.packs.map((p) => p.id).sort();
   const foundIds = manifests.map((m) => m.id).sort();
   if (expectedIds.join("|") !== foundIds.join("|")) {

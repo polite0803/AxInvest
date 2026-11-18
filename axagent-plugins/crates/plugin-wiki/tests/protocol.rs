@@ -240,6 +240,34 @@ fn list_and_get_by_path_are_read_only_seam_calls() {
     assert_command_value(&response, &note);
     worker.shutdown();
 }
+
+#[test]
+fn create_note_is_a_write_seam_call_with_camel_case_input() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    let input = serde_json::json!({
+        "vaultId": "v1",
+        "title": "新笔记",
+        "filePath": "new.md",
+        "content": "# body",
+        "author": "u",
+    });
+    worker.send(&command(PLUGIN_ID, "wiki_create_note", serde_json::json!({ "input": input })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "create_note");
+    assert_eq!(call.args["args"]["input"]["vaultId"], "v1");
+    assert_eq!(call.args["args"]["input"]["filePath"], "new.md");
+    assert_eq!(call.args["args"]["input"]["content"], "# body");
+
+    let note = sample_note("note-new");
+    worker.send_response(
+        &FrameResponse::success(note.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &note);
+    worker.shutdown();
+}
 #[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);

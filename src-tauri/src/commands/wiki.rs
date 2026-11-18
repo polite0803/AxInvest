@@ -10,6 +10,7 @@ use axagent_dao::repo::wiki::{
     self, CreateWikiTemplateInput, NoteVersion, UpdateWikiTemplateInput, WikiTemplate,
 };
 use axagent_harness::IpcEventName;
+use axagent_harness::WikiStoreProvider;
 use axagent_harness::graph_dtos::{GraphEdge, LinkGraph};
 use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::NoteSearchResult;
@@ -253,48 +254,12 @@ pub async fn wiki_notes_get_by_path(
 #[tauri::command]
 pub async fn wiki_notes_create(
     app: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     input: CreateNoteInput,
 ) -> Result<Note, String> {
-    let note =
-        axagent_dao::repo::note::create_note(state.harness.db(), input).await.map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-
-    // 失效图谱缓存（notes 表有写入）
-    let _ =
-        axagent_dao::repo::wiki_graph_cache::invalidate_cache(state.harness.db(), &note.vault_id)
-            .await;
-
-    // 写入反馈数据湖
-    if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
-        let record = axagent_harness::WikiEditRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            conversation_id: None,
-            wiki_id: note.vault_id.clone(),
-            note_id: note.id.clone(),
-            operation: "create".to_string(),
-            before_snippet: None,
-            // 按字节截取需对齐 UTF-8 字符边界，否则中文内容 panic（每字 3 字节）
-            after_snippet: Some(
-                axagent_harness::util_fns::truncate_to_char_boundary(&note.content, 500)
-                    .to_string(),
-            ),
-            reason: None,
-            quality_score: None,
-            created_at: chrono::Utc::now().timestamp_millis(),
-        };
-        if let Err(e) = lake.insert_wiki_edit(record).await {
-            tracing::warn!("Wiki 编辑反馈写入失败 note_id={}: {}", note.id, e);
-        }
-    }
-
-    enqueue_wiki_note_indexing(&state, &app, &note.vault_id, &note.id);
-
-    Ok(note)
+    // 建行、图谱缓存失效、反馈数据湖与索引入队已下沉 wiki.store provider。
+    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
+    service.create_note(input).await.map_err(|e| e.to_string())
 }
 
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "更新 Wiki 笔记")]

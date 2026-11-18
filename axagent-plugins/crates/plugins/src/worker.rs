@@ -477,6 +477,7 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // `wiki.store` 的唯一写 op：把宿主笔记同步进知识库（落文档行 + 可能触发
         // embedding 计费的索引入队）⇒ 必须 `write`。同接缝将来开的读 op 一律 `None`。
         ("wiki.store", "sync_note_to_knowledge_base") => Some(PluginPermission::Write),
+        ("wiki.store", "create_note") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -2896,6 +2897,23 @@ impl HostPeer {
                 }
             },
             // ── wiki.store 接缝：宿主把「笔记 → 知识库文档」同步写面暴露给插件 ──
+            "wiki.store" if op == "create_note" => {
+                let input: axagent_harness::note_dtos::CreateNoteInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_note(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(note) => to_value("Note", &note),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "wiki.store" if op == "list_notes" => {
                 // 标量键 vaultId；读 op ⇒ 无权限闸。
                 let vault_id: String = match deserialize_arg(&args, "vaultId", seam) {

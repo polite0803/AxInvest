@@ -42,6 +42,19 @@ pub struct SyncNoteToKnowledgeBaseOutcome {
 /// Wiki 写接缝的宿主 provider。
 #[async_trait]
 pub trait WikiStoreProvider: Send + Sync {
+    /// 创建一条 Wiki 笔记（写）。
+    ///
+    /// 入参 `crate::note_dtos::CreateNoteInput` 是 harness 权威 DTO；宿主 provider 在
+    /// 同一处完成建行、图谱缓存失效、反馈数据湖写入与索引任务入队。
+    async fn create_note(
+        &self,
+        _input: crate::note_dtos::CreateNoteInput,
+    ) -> Result<crate::note_dtos::Note> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::create_note 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 列出一个 vault 下的全部未删除笔记（按标题升序，与宿主 `list_notes` 同口径）。
     async fn list_notes(&self, _vault_id: String) -> Result<Vec<crate::note_dtos::Note>> {
         Err(AxAgentError::Provider(

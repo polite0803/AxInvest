@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 type WorkerPeer = Peer<StdinLock<'static>, StdoutLock<'static>>;
 
 const PLUGIN_NAME: &str = "wiki";
+const COMMAND_CREATE_NOTE: &str = "wiki_create_note";
 const COMMAND_SYNC_NOTE: &str = "wiki_sync_note_to_knowledge_base";
 const COMMAND_LIST_NOTES: &str = "wiki_list_notes";
 const COMMAND_GET_NOTE: &str = "wiki_get_note";
@@ -134,6 +135,20 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("get_note_by_path", json!({ "vaultId": vault_id, "filePath": file_path }))
+        },
+        COMMAND_CREATE_NOTE => {
+            let input = match frame.input.get("input") {
+                Some(value @ Value::Object(_)) => value.clone(),
+                _ => {
+                    return CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                        "命令 `wiki_create_note` 需要对象参数 `input`",
+                    )
+                    .into_frame_response();
+                },
+            };
+            seam_call("create_note", json!({ "input": input }))
         },
         COMMAND_SYNC_NOTE => {
             let note_id = match require_str(&frame.input, "noteId") {

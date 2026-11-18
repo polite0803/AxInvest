@@ -113,6 +113,55 @@ impl HostWikiStore {
 
 #[async_trait]
 impl WikiStoreProvider for HostWikiStore {
+    async fn create_note(
+        &self,
+        input: axagent_harness::note_dtos::CreateNoteInput,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        let state = self.app.state::<crate::AppState>();
+        let note = axagent_dao::repo::note::create_note(state.harness.db(), input)
+            .await
+            .map_err(to_provider_error)?;
+
+        let _ = axagent_dao::repo::wiki_graph_cache::invalidate_cache(
+            state.harness.db(),
+            &note.vault_id,
+        )
+        .await;
+
+        if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
+            let record = axagent_harness::WikiEditRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                conversation_id: None,
+                wiki_id: note.vault_id.clone(),
+                note_id: note.id.clone(),
+                operation: "create".to_string(),
+                before_snippet: None,
+                after_snippet: Some(
+                    axagent_harness::util_fns::truncate_to_char_boundary(&note.content, 500)
+                        .to_string(),
+                ),
+                reason: None,
+                quality_score: None,
+                created_at: chrono::Utc::now().timestamp_millis(),
+            };
+            if let Err(e) = lake.insert_wiki_edit(record).await {
+                tracing::warn!("Wiki 编辑反馈写入失败 note_id={}: {}", note.id, e);
+            }
+        }
+
+        let _ = crate::index_queue::enqueue_job_sync(
+            &state,
+            &self.app,
+            jobs::JOB_TYPE_INDEX_WIKI_NOTE,
+            "wiki",
+            &note.vault_id,
+            &note.id,
+            None,
+            None,
+        );
+        Ok(note)
+    }
+
     async fn list_notes(&self, vault_id: String) -> Result<Vec<axagent_harness::note_dtos::Note>> {
         if vault_id.trim().is_empty() {
             return Err(AxAgentError::Validation(

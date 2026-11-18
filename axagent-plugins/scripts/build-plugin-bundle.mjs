@@ -5482,6 +5482,22 @@ function wikiManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        name: "wiki_create_note",
+        description: "创建一条 Wiki 笔记（经宿主 wiki.store 写面）",
+        command: "worker://wiki_create_note",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              description: "宿主 CreateNoteInput（camelCase：vaultId/title/filePath/content/author）",
+            },
+          },
+          required: ["input"],
+        },
+      },
+      {
         name: "wiki_sync_note_to_knowledge_base",
         description: "把一条 Wiki 笔记同步进知识库（经宿主 wiki.store 写面）",
         command: "worker://wiki_sync_note_to_knowledge_base",

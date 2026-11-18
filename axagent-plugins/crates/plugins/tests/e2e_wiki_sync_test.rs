@@ -52,6 +52,18 @@ struct FixedWikiStore;
 
 #[async_trait::async_trait]
 impl WikiStoreProvider for FixedWikiStore {
+    async fn create_note(
+        &self,
+        input: axagent_harness::note_dtos::CreateNoteInput,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        let mut note = sample_note("note-created".into());
+        note.title = input.title;
+        note.vault_id = input.vault_id;
+        note.file_path = input.file_path;
+        note.content = input.content;
+        Ok(note)
+    }
+
     async fn list_notes(
         &self,
         vault_id: String,
@@ -171,6 +183,25 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         .expect("wiki 按路径读取命令应可执行");
     let by_path: Value = serde_json::from_str(&by_path).expect("按路径输出应是 JSON 文本");
     assert_eq!(by_path["id"], "note-at-a.md");
+
+    let created = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_create_note",
+            &json!({
+                "input": {
+                    "vaultId": "v1",
+                    "title": "新笔记",
+                    "filePath": "new.md",
+                    "content": "# body",
+                    "author": "u"
+                }
+            }),
+        )
+        .expect("wiki 创建命令应可执行");
+    let created: Value = serde_json::from_str(&created).expect("创建输出应是 JSON 文本");
+    assert_eq!(created["id"], "note-created");
+    assert_eq!(created["title"], "新笔记");
 
     drop(manager);
     handle.undo();

@@ -142,7 +142,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   createNote: async (input) => {
     try {
-      const note = await invoke<Note>("wiki_notes_create", { input });
+      const note = await invokePluginCommand<Note>("wiki_create_note", { input });
       set((s) => ({ notes: [...s.notes, note], error: null }));
       return note;
     } catch (e) {

@@ -7504,20 +7504,27 @@ async function executeCommand<T>(
         }));
       return results as unknown as T;
     }
-    case "wiki_notes_create": {
+    case "wiki_notes_create":
+    case "wiki_create_note": {
       const input = (args?.input ?? {}) as Record<string, unknown>;
       const title = String(input.title ?? "未命名");
       const ts = nowTs();
       const note: Note = {
         id: genId(),
-        vaultId: String(input.vault_id ?? ""),
+        vaultId: String(input.vaultId ?? input.vault_id ?? ""),
         title,
-        filePath: String(input.file_path ?? `${title}.md`),
+        filePath: String(input.filePath ?? input.file_path ?? `${title}.md`),
         content: String(input.content ?? ""),
         contentHash: "",
         author: String(input.author ?? "user"),
-        pageType: input.page_type !== undefined ? String(input.page_type) : undefined,
-        sourceRefs: Array.isArray(input.source_refs)
+        pageType: input.pageType !== undefined
+          ? String(input.pageType)
+          : input.page_type !== undefined
+          ? String(input.page_type)
+          : undefined,
+        sourceRefs: Array.isArray(input.sourceRefs)
+          ? (input.sourceRefs as string[])
+          : Array.isArray(input.source_refs)
           ? (input.source_refs as string[])
           : undefined,
         userEdited: true,

@@ -687,6 +687,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axagent-plugin-opc-content-media"
+version = "3.0.0"
+dependencies = [
+ "axagent-plugin-opc-core",
+ "axagent-plugin-proto",
+ "serde_json",
+]
+
+[[package]]
 name = "axagent-plugin-opc-core"
 version = "3.0.0"
 dependencies = [

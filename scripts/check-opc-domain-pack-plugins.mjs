@@ -26,7 +26,7 @@ const SELFTEST = process.argv.includes("--selftest");
 const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
 // YAML manifest 权威目录（id / domain / capabilities 的唯一来源）。
 const MANIFEST_DIR = "config/opc/domain_packs";
-// P6.2 logical manifest 按插件归属分区：公共 1 份 + accounting/sales_growth 独立 worker 各 1 份 + 11 个声明式独立域各 1 份。
+// P6.2 logical manifest 按插件归属分区：公共 0 份 + accounting/sales_growth/content_media 独立 worker 各 1 份 + 11 个声明式独立域各 1 份。
 const MANIFEST_DIRS = new Map([
   ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
   ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
@@ -42,9 +42,10 @@ const MANIFEST_DIRS = new Map([
   ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
   ["plugin-opc-software-dev", "axagent-plugins/crates/plugin-opc-software-dev/domain_packs"],
   ["plugin-opc-sales-growth", "axagent-plugins/crates/plugin-opc-sales-growth/domain_packs"],
+  ["plugin-opc-content-media", "axagent-plugins/crates/plugin-opc-content-media/domain_packs"],
 ]);
 const EXPECTED_COUNTS = new Map([
-  ["plugin-opc", 1],
+  ["plugin-opc", 0],
   ["plugin-opc-accounting", 1],
   ["plugin-opc-ai-research", 1],
   ["plugin-opc-consulting", 1],
@@ -58,6 +59,7 @@ const EXPECTED_COUNTS = new Map([
   ["plugin-opc-security", 1],
   ["plugin-opc-software-dev", 1],
   ["plugin-opc-sales-growth", 1],
+  ["plugin-opc-content-media", 1],
 ]);
 const CONFIG_REL = "axagent-quant/crates/company-runtime/src/opc/capability_pack_config.rs";
 const MAPPING_REL = "src-tauri/src/commands/opc_workflows/mod.rs";
@@ -101,6 +103,9 @@ export function parseVerticalOwner(slice, id) {
   if (id === "sales_growth" && owner !== "opc-sales-growth") {
     throw new Error(`sales_growth: transportOwner=${owner}，期望 opc-sales-growth`);
   }
+  if (id === "content_media" && owner !== "opc-content-media") {
+    throw new Error(`content_media: transportOwner=${owner}，期望 opc-content-media`);
+  }
   return owner;
 }
 
@@ -124,7 +129,7 @@ function selftest() {
   t("OPC 映射解析", parseOpcDomainMapping('const OPC_CAPABILITY_PACK_DOMAIN: &[(&str, &str)] = &[("accounting", "finance")];').get("accounting") === "finance");
   t("集合比较判缺值", !equalSet(["a"], ["a", "b"]));
   t("集合比较判等", equalSet(["a", "b"], ["b", "a"]));
-  t("13 + 1 计数口径", EXPECTED_COUNTS.size === 14 && EXPECTED_COUNTS.get("plugin-opc") === 1 && [...EXPECTED_COUNTS.values()].filter((n) => n === 1).length === 14);
+  t("14 独立 + 0 公共 计数口径", EXPECTED_COUNTS.size === 15 && EXPECTED_COUNTS.get("plugin-opc") === 0 && [...EXPECTED_COUNTS.values()].filter((n) => n === 1).length === 14);
   t("独立 owner 合法", parseVerticalOwner({ transportOwner: "opc-accounting" }, "accounting") === "opc-accounting");
   t("错误 owner 被拦", (() => {
     try {
@@ -143,6 +148,7 @@ function selftest() {
       return true;
     }
   })());
+  t("content_media 独立 owner 合法", parseVerticalOwner({ transportOwner: "opc-content-media" }, "content_media") === "opc-content-media");
   const failed = checks.filter((c) => !c.ok);
   for (const c of checks) console.log(`  ${c.ok ? "✔" : "✖"} ${c.name}`);
   console.log(`selftest：${checks.length - failed.length} passed / ${failed.length} failed`);

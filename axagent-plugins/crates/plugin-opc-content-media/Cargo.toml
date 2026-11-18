@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "axagent-plugin-opc-content-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "OPC content_media 域包 worker：博客与内容资产命令"
+
+[[bin]]
+name = "axagent-plugin-opc-content-media"
+path = "src/main.rs"
+
+[dependencies]
+axagent-plugin-opc-core = { version = "3.0.0", path = "../plugin-opc-core" }
+axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -117,6 +117,14 @@
         "transportOwner": "opc-sales-growth",
         "manifestStrategy": "independent-worker",
         "reason": "三条域包 worker 命令迁独立插件，复用 plugin-opc-core 泛型 helper"
+      },
+      {
+        "phase": 14,
+        "domainPackId": "content_media",
+        "pluginId": "plugin-opc-content-media",
+        "transportOwner": "opc-content-media",
+        "manifestStrategy": "independent-worker",
+        "reason": "八条内容/发布计划命令迁独立 worker，复用 plugin-opc-core 泛型 helper"
       }
     ],
     "sharedCommands": [

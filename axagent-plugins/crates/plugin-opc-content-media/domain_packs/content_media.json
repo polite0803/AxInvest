@@ -1,7 +1,7 @@
 {
   "id": "content_media",
   "pluginId": "plugin-opc-content-media",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-content-media",
   "page": {
     "id": "domain:content-media",
     "path": "/opc/domain/content-media"

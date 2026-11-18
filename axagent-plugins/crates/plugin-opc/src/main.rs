@@ -58,18 +58,14 @@ fn own_id_belongs_to_this_plugin(own_id: &str) -> bool {
 /// 出站宿主接缝：OPC 站点内容的数据面（契约见 harness `src/opc_store.rs`）。
 /// 本插件不持 `DatabaseConnection`，一切表读表写都走它。
 const OPC_STORE_SEAM: &str = "opc.store";
-/// 读 op（表外 op 在宿主分派层落 `SEAM_CALL_UNSUPPORTED`）。
-const OPC_STORE_LIST_BLOG_POSTS: &str = "list_blog_posts";
-/// 写 op：把一行博客置为已发布。宿主侧要 `write` 权限（`worker.rs` 的
-/// `required_permission_for`），故**本插件清单必须声明 `write`** —— `subprocess_execution`
-/// 补不齐它（`has_permission` 是精确 `contains`），少声明一条就是 `PLUGIN_PERMISSION_DENIED`。
-const OPC_STORE_PUBLISH_BLOG_POST: &str = "publish_blog_post";
-/// 写 op：删除一行博客（同样要 `write`）。出参是**三态**枚举串（`removed` / `not_found` /
-/// `protected`），与 `publish_blog_post` 的两态是同一套「正常值走 payload」口径。
-const OPC_STORE_DELETE_BLOG_POST: &str = "delete_blog_post";
-/// 写 op：新建一行博客（同样要 `write`）。正文的字节预算由**宿主**按契约常量判，
-/// 本进程既不截断也不预算（`MAX_FRAME_LEN` 那 64 MiB 是帧层上限，不是本 op 的预算）。
-const OPC_STORE_CREATE_BLOG_POST: &str = "create_blog_post";
+// 读 op（表外 op 在宿主分派层落 `SEAM_CALL_UNSUPPORTED`）。
+// 写 op：把一行博客置为已发布。宿主侧要 `write` 权限（`worker.rs` 的
+// `required_permission_for`），故**本插件清单必须声明 `write`** —— `subprocess_execution`
+// 补不齐它（`has_permission` 是精确 `contains`），少声明一条就是 `PLUGIN_PERMISSION_DENIED`。
+// 写 op：删除一行博客（同样要 `write`）。出参是**三态**枚举串（`removed` / `not_found` /
+// `protected`），与 `publish_blog_post` 的两态是同一套「正常值走 payload」口径。
+// 写 op：新建一行博客（同样要 `write`）。正文的字节预算由**宿主**按契约常量判，
+// 本进程既不截断也不预算（`MAX_FRAME_LEN` 那 64 MiB 是帧层上限，不是本 op 的预算）。
 
 /// 八个只读查询 op（均为读面 ⇒ 宿主侧**无权限闸**）：入参是嵌一层的
 /// `request` DTO（契约 `*ListQuery`），出参是 `*SummaryView` 的**裸数组**。
@@ -78,17 +74,12 @@ const OPC_STORE_LIST_INVOICES: &str = "list_invoices";
 const OPC_STORE_LIST_CUSTOMERS: &str = "list_customers";
 const OPC_STORE_LIST_PROJECTS: &str = "list_projects";
 const OPC_STORE_LIST_KPIS: &str = "list_kpis";
-const OPC_STORE_LIST_CONTENT_ASSETS: &str = "list_content_assets";
-const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
 /// 看板总览（零入参，宿主整表聚合；与 `opc_get_dashboard` 的「首页现算」不同口径）。
 const OPC_STORE_DASHBOARD_SUMMARY: &str = "dashboard_summary";
 
-/// #36 批 2 的三条写 op（同样要 `write`）：发票状态变更已迁 `plugin-opc-accounting`，
-/// 余下为内容资产更新 / 内容资产删除 / 发布计划取消。出参一律是契约的外部标记枚举
-/// （`{"updated": …}` / `"removed"` / `"not_found"`），本进程逐字透传。
-const OPC_STORE_UPDATE_CONTENT_ASSET: &str = "update_content_asset";
-const OPC_STORE_DELETE_CONTENT_ASSET: &str = "delete_content_asset";
-const OPC_STORE_CANCEL_PUBLISH_SCHEDULE: &str = "cancel_publish_schedule";
+// #36 批 2 的三条写 op（同样要 `write`）：发票状态变更已迁 `plugin-opc-accounting`，
+// 余下为内容资产更新 / 内容资产删除 / 发布计划取消。出参一律是契约的外部标记枚举
+// （`{"updated": …}` / `"removed"` / `"not_found"`），本进程逐字透传。
 
 /// #36 批 3 的八条 op：七个写 op（要 `write`）+ 一条读 op（财务报表，宿主侧无权限闸）。
 /// 出参一律是契约的列裁剪视图 / 视图数组，逐字透传（同 `create_blog_post` 的判据）。
@@ -98,7 +89,6 @@ const OPC_STORE_CREATE_LANDING_PAGE: &str = "create_landing_page";
 const OPC_STORE_GET_FINANCIAL_REPORT: &str = "get_financial_report";
 const OPC_STORE_CREATE_CONTENT_ASSET: &str = "create_content_asset";
 const OPC_STORE_CREATE_PUBLISH_SCHEDULE: &str = "create_publish_schedule";
-const OPC_STORE_PROCESS_DUE_SCHEDULES: &str = "process_due_schedules";
 
 /// #32 批 A 的三条 op（都要 `write`）：客户更新 / 客户删除 / 发票删除。前两者同属
 /// 客户面，`delete_invoice` 删的是**域包发票**——宿主同名 Tauri 命令删的是交付域发票
@@ -285,38 +275,29 @@ const OPC_STORE_ESCALATE_WORK_ITEM: &str = "escalate_work_item";
 const OPC_STORE_WORK_ITEM_UNBLOCK: &str = "work_item_unblock";
 const OPC_STORE_RUN_SELF_IMPROVING_WORK_ITEM: &str = "run_self_improving_work_item";
 
-/// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
-/// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
-const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
-/// 发布命令。宿主同名 Tauri 命令已在 #36 blog 刀删除（先例 #144 的双声明收口：
-/// 前端已切完通道）——本条是发布博客的唯一通道，回宿主的两态枚举串。
-const COMMAND_PUBLISH_BLOG_POST: &str = "opc_publish_blog_post";
-/// 删除命令。宿主同名 Tauri 命令已随 #36 blog 刀删除 —— 本条是删除博客的唯一通道，
-/// 出参是三态枚举串逐字透传。
-const COMMAND_DELETE_BLOG_POST: &str = "opc_delete_blog_post";
-/// 新建命令。宿主同名 Tauri 命令已随 #36 blog 刀删除 —— 本条是新建博客的唯一通道。
-///
-/// ⚠ 入参形状与已删的宿主命令**不同名不同形**：宿主命令曾是 `{ input: CreateBlogPostInput }`
-/// （Tauri 具名参数），本命令按清单 `inputSchema` 收**平铺**的五个字段（与 `opc_publish_blog_post`
-/// 的平铺 `id` 同风格）。
-const COMMAND_CREATE_BLOG_POST: &str = "opc_create_blog_post";
+// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
+// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
+// 发布命令。宿主同名 Tauri 命令已在 #36 blog 刀删除（先例 #144 的双声明收口：
+// 前端已切完通道）——本条是发布博客的唯一通道，回宿主的两态枚举串。
+// 删除命令。宿主同名 Tauri 命令已随 #36 blog 刀删除 —— 本条是删除博客的唯一通道，
+// 出参是三态枚举串逐字透传。
+// 新建命令。宿主同名 Tauri 命令已随 #36 blog 刀删除 —— 本条是新建博客的唯一通道。
+//
+// ⚠ 入参形状与已删的宿主命令**不同名不同形**：宿主命令曾是 `{ input: CreateBlogPostInput }`
+// （Tauri 具名参数），本命令按清单 `inputSchema` 收**平铺**的五个字段（与 `opc_publish_blog_post`
+// 的平铺 `id` 同风格）。
 
 /// #36 批 1 的 8 条只读命令：前 7 条各对一条只读接缝 op，第 8 条由本进程组合三次列表调用
 /// 现算看板读数（宿主**不**新增聚合 op）。`opc_list_invoices` 已迁 `plugin-opc-accounting`。
 const COMMAND_LIST_CUSTOMERS: &str = "opc_list_customers";
 const COMMAND_LIST_PROJECTS: &str = "opc_list_projects";
 const COMMAND_LIST_KPIS: &str = "opc_list_kpis";
-const COMMAND_LIST_CONTENT_ASSETS: &str = "opc_list_content_assets";
-const COMMAND_LIST_PUBLISH_SCHEDULES: &str = "opc_list_publish_schedules";
 const COMMAND_GET_DASHBOARD: &str = "opc_get_dashboard";
 /// 看板总览命令。宿主同名 Tauri 命令已随 #267 删除 —— 本条是看板唯一通道，
 /// 出参与迁移前逐字段同形（camelCase）。
 const COMMAND_GET_DASHBOARD_SUMMARY: &str = "opc_get_dashboard_summary";
 
-/// #36 批 2 的三条写命令（清单 `commands[].name` 必须逐字一致）。
-const COMMAND_UPDATE_CONTENT_ASSET: &str = "opc_update_content_asset";
-const COMMAND_DELETE_CONTENT_ASSET: &str = "opc_delete_content_asset";
-const COMMAND_CANCEL_PUBLISH_SCHEDULE: &str = "opc_cancel_publish_schedule";
+// #36 批 2 的三条写命令（清单 `commands[].name` 必须逐字一致）。
 
 /// #36 批 3 的八条命令（清单 `commands[].name` 必须逐字一致）：七条写命令 + 一条只读的
 /// 财务报表（宿主侧无权限闸，与八个 list op 同一档）。
@@ -326,7 +307,6 @@ const COMMAND_CREATE_LANDING_PAGE: &str = "opc_create_landing_page";
 const COMMAND_GET_FINANCIAL_REPORT: &str = "opc_get_financial_report";
 const COMMAND_CREATE_CONTENT_ASSET: &str = "opc_create_content_asset";
 const COMMAND_CREATE_PUBLISH_SCHEDULE: &str = "opc_create_publish_schedule";
-const COMMAND_PROCESS_DUE_SCHEDULES: &str = "opc_process_due_schedules";
 
 /// #32 批 A 的三条写命令（清单 `commands[].name` 必须逐字一致）。`opc_update_customer` /
 /// `opc_delete_customer` 与宿主同名 Tauri 命令同义（批 C 删宿主侧后本条是唯一通道）；
@@ -594,41 +574,11 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
     let outcome = match frame.command.as_str() {
         // 博客列表取数：行数据来自宿主 `opc.store` 的 `list_blog_posts`，本命令只做整表
         // 分页（形状与判据见 [`blog_posts`]）。
-        COMMAND_LIST_BLOG_POSTS => match blog_posts(&frame.input, &request.call_chain, peer) {
-            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-            Err((code, message)) => {
-                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-            },
-        },
         // 发布一篇博客：唯一写面，本命令只做入参形状 + 逐字透出宿主的两态结果。
-        COMMAND_PUBLISH_BLOG_POST => {
-            match publish_blog_post(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
         // 删除一篇博客：入参形状同 publish（只有 `id`），出参是**三态**枚举的逐字透传
         // （判据见 [`delete_blog_post`]）。
-        COMMAND_DELETE_BLOG_POST => {
-            match delete_blog_post(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
         // 新建一篇博客：入参是平铺的五个 DTO 字段（形状判在本层），出参是列裁剪视图
         // （判据见 [`create_blog_post`]）。
-        COMMAND_CREATE_BLOG_POST => {
-            match create_blog_post(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
         // ── #36 批 1：七条只读查询命令（出参 = 接缝回帧的裸数组，逐字透传）──
         // 会计域 `opc_list_invoices` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
         COMMAND_LIST_CUSTOMERS => match list_rows(
@@ -668,60 +618,8 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
         },
-        COMMAND_LIST_CONTENT_ASSETS => {
-            match list_rows(
-                &frame.input,
-                &request.call_chain,
-                peer,
-                OPC_STORE_LIST_CONTENT_ASSETS,
-                &[],
-            ) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
-        COMMAND_LIST_PUBLISH_SCHEDULES => {
-            match list_rows(
-                &frame.input,
-                &request.call_chain,
-                peer,
-                OPC_STORE_LIST_PUBLISH_SCHEDULES,
-                &[],
-            ) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
         // ── #36 批 2：三条写命令（出参 = 接缝外部标记枚举，逐字透传）──
         // 会计域 `opc_transition_invoice` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
-        COMMAND_UPDATE_CONTENT_ASSET => {
-            match update_content_asset(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
-        COMMAND_DELETE_CONTENT_ASSET => {
-            match delete_content_asset(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
-        COMMAND_CANCEL_PUBLISH_SCHEDULE => {
-            match cancel_publish_schedule(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
         // ── #36 批 3：七条写命令 + 一条只读报表（出参 = 契约列裁剪视图，逐字透传）──
         // 会计域 `opc_create_invoice` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
         // ── #32 批 A：三条写命令（更新出参 = 列裁剪视图，删除出参 = 无载荷）──
@@ -1553,12 +1451,6 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             }
         },
-        COMMAND_PROCESS_DUE_SCHEDULES => match process_due_schedules(&request.call_chain, peer) {
-            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-            Err((code, message)) => {
-                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-            },
-        },
         // 看板读数：宿主没有聚合 op，由本进程组合三次列表查询现算。
         COMMAND_GET_DASHBOARD => match dashboard(&request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -1599,87 +1491,42 @@ fn declaration() -> FrameResponse {
     )
 }
 
-/// `opc_list_blog_posts`：博客文章列表，出参是行对象数组。
-///
-/// ## 为什么要在这里分页取尽
-///
-/// 它替代的宿主命令一次返回**整表**（同进程 IPC、不过帧、无上限）；接缝侧要过帧，故契约给
-/// `limit` 上了区间闸（`OPC_BLOG_POST_LIST_LIMIT_RANGE`）。于是「调用方没指定分页」= 宿主语义
-/// 的整表 ⇒ 按接缝回带的 `total` 翻页直到取尽。不这么做的后果不是「少一帧数据」而是**静默少
-/// 计数**：`DashboardTab` 的 `blog_posts_count` 取的就是本数组的 `length`，一页封顶会让它把
-/// 137 篇显示成 50 篇。
-///
-/// 给了 `limit` / `offset` 则**原样透传、只取一页**（插件不钳位：越界由宿主按契约区间拒收，
-/// 缺省档也交给宿主 ⇒ 本进程里没有第二个 50 / 200，同 `plugin-stock` 的
-/// `stock_analysis_records` 判据）。
-///
-/// ## 出参线格式 = 接缝视图逐字 camelCase（禁区 13，无例外）
-///
-/// 出参就是接缝视图 `BlogPostView`（契约：harness `src/opc_store.rs`，该结构体带
-/// `#[serde(rename_all = "camelCase")]`）的回帧键名，本进程**不做任何键名改写**：
-/// `publishedAt` / `viewCount` / `createdAt` / `updatedAt` / `excerpt` / `slug` / `tags` /
-/// `title` / `id` / `published`。前端消费方（`src/pages/opc/components/SitesTab.tsx` 的
-/// `interface BlogPost` 与表格列 `dataIndex: "viewCount"`）与这套键名逐字对齐 —— 键名在
-/// 整条链上只有一套。
-///
-/// 这里曾有的一层 camelCase → snake_case 逐字段映射（复刻被删宿主 DTO
-/// `company-runtime::BlogPost` 的蛇形线格式）已删除 —— 那是禁区 13 全站 camelCase 约定的一处
-/// 刻意偏离，迁移初期为了「本批只换通道、不动前端」而临时保留，#167 连同那两个前端消费面
-/// 一起收口。新增命令**不许**再建这种出口适配层：接缝给什么就交什么。
-///
-/// 唯一仍在出口做的形状约束是**字段集合不扩容**：出参逐字 = 接缝回帧里的行对象，接缝哪天
-/// 多给一个字段，它会直接出现在出参里 —— 由 `tests/protocol.rs` 与本文件的键集合用例逐字
-/// 钉住，扩容属于契约变更，要走评审而不是静默发生。
-///
-/// ## 少掉的字段
-///
-/// `content`（博客正文）不过线 —— 裁剪做在 SQL 侧（判据与两个消费方的实证见契约模块头）。
-/// 现网无人读列表里的正文；真要读正文走宿主详情面，不属本命令。
-fn blog_posts(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let explicit_limit = input.get("limit").filter(|v| !v.is_null()).cloned();
-    let explicit_offset = input.get("offset").filter(|v| !v.is_null()).cloned();
-
-    if explicit_limit.is_some() || explicit_offset.is_some() {
-        let mut args = serde_json::Map::new();
-        if let Some(limit) = explicit_limit {
-            args.insert("limit".to_string(), limit);
-        }
-        if let Some(offset) = explicit_offset {
-            args.insert("offset".to_string(), offset);
-        }
-        let page =
-            call_opc_store(peer, OPC_STORE_LIST_BLOG_POSTS, Value::Object(args), call_chain)?;
-        // 逐字透传接缝视图（键名 camelCase，禁区 13）：出口不再有第二套键名。
-        return Ok(Value::Array(post_rows_of(&page)));
-    }
-
-    // 整表语义：offset 按**实际取回的条数**推进（不是按请求的 limit 推进）——最后一页本来就短。
-    let mut rows: Vec<Value> = Vec::new();
-    let mut offset: u64 = 0;
-    loop {
-        let page = call_opc_store(
-            peer,
-            OPC_STORE_LIST_BLOG_POSTS,
-            json!({ "offset": offset }),
-            call_chain,
-        )?;
-        let posts = post_rows_of(&page);
-        // 两个终止条件都要：`total` 只在该次调用内自洽（并发写入下可能小于已取行数），
-        // 而空页是越界 offset 的合法回帧（契约：空数组不是错误）—— 只看 `total` 会吊死。
-        let total = page.get("total").and_then(Value::as_u64).unwrap_or(0);
-        let fetched = posts.len();
-        rows.extend(posts);
-        offset += fetched as u64;
-        if fetched == 0 || rows.len() as u64 >= total {
-            break;
-        }
-    }
-    Ok(Value::Array(rows))
-}
+// `opc_list_blog_posts`：博客文章列表，出参是行对象数组。
+//
+// ## 为什么要在这里分页取尽
+//
+// 它替代的宿主命令一次返回**整表**（同进程 IPC、不过帧、无上限）；接缝侧要过帧，故契约给
+// `limit` 上了区间闸（`OPC_BLOG_POST_LIST_LIMIT_RANGE`）。于是「调用方没指定分页」= 宿主语义
+// 的整表 ⇒ 按接缝回带的 `total` 翻页直到取尽。不这么做的后果不是「少一帧数据」而是**静默少
+// 计数**：`DashboardTab` 的 `blog_posts_count` 取的就是本数组的 `length`，一页封顶会让它把
+// 137 篇显示成 50 篇。
+//
+// 给了 `limit` / `offset` 则**原样透传、只取一页**（插件不钳位：越界由宿主按契约区间拒收，
+// 缺省档也交给宿主 ⇒ 本进程里没有第二个 50 / 200，同 `plugin-stock` 的
+// `stock_analysis_records` 判据）。
+//
+// ## 出参线格式 = 接缝视图逐字 camelCase（禁区 13，无例外）
+//
+// 出参就是接缝视图 `BlogPostView`（契约：harness `src/opc_store.rs`，该结构体带
+// `#[serde(rename_all = "camelCase")]`）的回帧键名，本进程**不做任何键名改写**：
+// `publishedAt` / `viewCount` / `createdAt` / `updatedAt` / `excerpt` / `slug` / `tags` /
+// `title` / `id` / `published`。前端消费方（`src/pages/opc/components/SitesTab.tsx` 的
+// `interface BlogPost` 与表格列 `dataIndex: "viewCount"`）与这套键名逐字对齐 —— 键名在
+// 整条链上只有一套。
+//
+// 这里曾有的一层 camelCase → snake_case 逐字段映射（复刻被删宿主 DTO
+// `company-runtime::BlogPost` 的蛇形线格式）已删除 —— 那是禁区 13 全站 camelCase 约定的一处
+// 刻意偏离，迁移初期为了「本批只换通道、不动前端」而临时保留，#167 连同那两个前端消费面
+// 一起收口。新增命令**不许**再建这种出口适配层：接缝给什么就交什么。
+//
+// 唯一仍在出口做的形状约束是**字段集合不扩容**：出参逐字 = 接缝回帧里的行对象，接缝哪天
+// 多给一个字段，它会直接出现在出参里 —— 由 `tests/protocol.rs` 与本文件的键集合用例逐字
+// 钉住，扩容属于契约变更，要走评审而不是静默发生。
+//
+// ## 少掉的字段
+//
+// `content`（博客正文）不过线 —— 裁剪做在 SQL 侧（判据与两个消费方的实证见契约模块头）。
+// 现网无人读列表里的正文；真要读正文走宿主详情面，不属本命令。
 
 /// 发一次 `opc.store` 的帧（op 由调用方给），把宿主侧的失败落成命令失败。
 ///
@@ -1706,137 +1553,68 @@ fn call_opc_store(
     }
 }
 
-/// `opc_publish_blog_post`：发布一篇博客（本插件的写面之一）。
-///
-/// ## 入参只有 `id`，且只判形状
-///
-/// 命令层只看 `id` 在不在、是不是字符串（不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）；
-/// 「非空」这条语义闸留在宿主 provider（`opc_store_service.rs` 的 `require_publish_id`）。
-/// 分两层各判一半会漂移，故刻意分工成「形状 / 语义」而不是两处都判空白。
-/// 正文 `content` 从来不是本命令的入参 —— 接缝那侧也没读它。
-///
-/// ## 出参 = 接缝的两态枚举串，逐字透传
-///
-/// `"published"` / `"not_found"`（契约：`PublishBlogPostOutcome`，`#[serde(rename_all =
-/// "snake_case")]`）。这里**不建包装对象、不改取值、不建适配层**（禁区 13 那条判据同样
-/// 管枚举）：「这一篇不在表里」是**正常结果**，插件侧不许把它翻成错误码 —— 翻了就等于让
-/// 前端分不出「发布失败」与「本来就没有这篇」。
-fn publish_blog_post(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let Some(id) = input.get("id").and_then(Value::as_str) else {
-        return Err((
-            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
-            "opc_publish_blog_post 需要字符串 id（形状判在命令层，非空判在宿主 provider）"
-                .to_string(),
-        ));
-    };
-    // 出站帧的 args 只有一个键 `id` —— 逐字与接缝 op 的入参同名，不套 `request` 外层
-    // （那是 `knowledge.vector` / `stock.monitor` 的嵌套 DTO 形态；这里没有 DTO）。
-    call_opc_store(peer, OPC_STORE_PUBLISH_BLOG_POST, json!({ "id": id }), call_chain)
-}
+// `opc_publish_blog_post`：发布一篇博客（本插件的写面之一）。
+//
+// ## 入参只有 `id`，且只判形状
+//
+// 命令层只看 `id` 在不在、是不是字符串（不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）；
+// 「非空」这条语义闸留在宿主 provider（`opc_store_service.rs` 的 `require_publish_id`）。
+// 分两层各判一半会漂移，故刻意分工成「形状 / 语义」而不是两处都判空白。
+// 正文 `content` 从来不是本命令的入参 —— 接缝那侧也没读它。
+//
+// ## 出参 = 接缝的两态枚举串，逐字透传
+//
+// `"published"` / `"not_found"`（契约：`PublishBlogPostOutcome`，`#[serde(rename_all =
+// "snake_case")]`）。这里**不建包装对象、不改取值、不建适配层**（禁区 13 那条判据同样
+// 管枚举）：「这一篇不在表里」是**正常结果**，插件侧不许把它翻成错误码 —— 翻了就等于让
+// 前端分不出「发布失败」与「本来就没有这篇」。
 
-/// 接缝回帧里的 `posts` 数组（缺键 / 非数组 ⇒ 空页，**不** panic）。
-///
-/// 它交出的行**原样**成为命令出参：键名 = 接缝视图的 camelCase，出口不做任何改写
-/// （判据见 [`blog_posts`] 的「出参线格式」一节）。
-fn post_rows_of(page: &Value) -> Vec<Value> {
-    page.get("posts").and_then(Value::as_array).cloned().unwrap_or_default()
-}
+// 接缝回帧里的 `posts` 数组（缺键 / 非数组 ⇒ 空页，**不** panic）。
+//
+// 它交出的行**原样**成为命令出参：键名 = 接缝视图的 camelCase，出口不做任何改写
+// （判据见 [`blog_posts`] 的「出参线格式」一节）。
 
-/// `opc_delete_blog_post`：删除一篇博客（#180-① 的写 op）。
-///
-/// ## 入参只有 `id`，且只判形状
-///
-/// 与 [`publish_blog_post`] 逐条同构：命令层只看 `id` 在不在、是不是字符串
-/// （不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）；「非空」这条语义闸留在宿主
-/// provider（`init/opc_store_service.rs` 的 `require_blog_post_id`）。正文不是入参。
-///
-/// ## 出参 = 接缝的三态枚举串，逐字透传
-///
-/// `"removed"` / `"not_found"` / `"protected"`（契约：`RemoveBlogPostOutcome`，
-/// `#[serde(rename_all = "snake_case")]`，与 `jobs.store` 的 `remove` 同一套取值）。
-/// **不建包装对象、不改取值、不建适配层**（禁区 13 那条判据同样管枚举）：
-/// 「本来就没有这篇」与「这篇受保护、不许删」都是**正常结果**，插件侧不许把它们翻成错误码 ——
-/// 翻了就等于让前端分不出「删失败」「本来没有」「不许删」三件事。
-fn delete_blog_post(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let Some(id) = input.get("id").and_then(Value::as_str) else {
-        return Err((
-            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
-            "opc_delete_blog_post 需要字符串 id（形状判在命令层，非空判在宿主 provider）"
-                .to_string(),
-        ));
-    };
-    // 出站帧的 args 只有一个键 `id` —— 与接缝 op 的入参同名，不套 `request` 外层。
-    call_opc_store(peer, OPC_STORE_DELETE_BLOG_POST, json!({ "id": id }), call_chain)
-}
+// `opc_delete_blog_post`：删除一篇博客（#180-① 的写 op）。
+//
+// ## 入参只有 `id`，且只判形状
+//
+// 与 [`publish_blog_post`] 逐条同构：命令层只看 `id` 在不在、是不是字符串
+// （不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）；「非空」这条语义闸留在宿主
+// provider（`init/opc_store_service.rs` 的 `require_blog_post_id`）。正文不是入参。
+//
+// ## 出参 = 接缝的三态枚举串，逐字透传
+//
+// `"removed"` / `"not_found"` / `"protected"`（契约：`RemoveBlogPostOutcome`，
+// `#[serde(rename_all = "snake_case")]`，与 `jobs.store` 的 `remove` 同一套取值）。
+// **不建包装对象、不改取值、不建适配层**（禁区 13 那条判据同样管枚举）：
+// 「本来就没有这篇」与「这篇受保护、不许删」都是**正常结果**，插件侧不许把它们翻成错误码 ——
+// 翻了就等于让前端分不出「删失败」「本来没有」「不许删」三件事。
 
-/// `opc_create_blog_post`：新建一篇博客（#180-② 的写 op）。
-///
-/// ## 入参形状：平铺的五个 DTO 字段（判形状，不判语义）
-///
-/// 清单 `inputSchema` 声明 `title` / `slug` / `excerpt` / `content` / `tags` 五个属性，
-/// 本层只验**形状**（前四个是字符串、`tags` 是字符串数组）。语义闸（`slug` 空、正文超
-/// 字节预算）全在宿主 provider —— 两处各判一半必然漂移，且字节预算的数字是对接缝的约定，
-/// 不该在进程侧再抄一份（`MAX_FRAME_LEN` 的 64 MiB 是帧层上限，**不是**本 op 的预算）。
-///
-/// ## 出站形状：嵌一层的 `{"request": {…}}`
-///
-/// 这是一个 DTO（不是散标量），照 `knowledge.vector` 的 `request` 形态；宿主侧
-/// `deserialize_arg(&args, "request", seam)` 只认这一种，平铺会在宿主落
-/// `SEAM_CALL_INVALID_ARGS`。多余键不转发（宿主 serde 本来也会忽略未知字段，本层给它同一条口径）。
-///
-/// ## 出参 = 创建的**列裁剪视图**（逐字）
-///
-/// 与列表行同一套 10 个 camelCase 键、同样不含正文。带 `id` 回来是关键：调用方拿它做后续
-/// 发布 / 删除的句柄（#180-④ 的教训 —— 让前端自己造 id 会落下悬空引用）。
-fn create_blog_post(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let request = blog_post_create_request(input)?;
-    call_opc_store(peer, OPC_STORE_CREATE_BLOG_POST, json!({ "request": request }), call_chain)
-}
+// `opc_create_blog_post`：新建一篇博客（#180-② 的写 op）。
+//
+// ## 入参形状：平铺的五个 DTO 字段（判形状，不判语义）
+//
+// 清单 `inputSchema` 声明 `title` / `slug` / `excerpt` / `content` / `tags` 五个属性，
+// 本层只验**形状**（前四个是字符串、`tags` 是字符串数组）。语义闸（`slug` 空、正文超
+// 字节预算）全在宿主 provider —— 两处各判一半必然漂移，且字节预算的数字是对接缝的约定，
+// 不该在进程侧再抄一份（`MAX_FRAME_LEN` 的 64 MiB 是帧层上限，**不是**本 op 的预算）。
+//
+// ## 出站形状：嵌一层的 `{"request": {…}}`
+//
+// 这是一个 DTO（不是散标量），照 `knowledge.vector` 的 `request` 形态；宿主侧
+// `deserialize_arg(&args, "request", seam)` 只认这一种，平铺会在宿主落
+// `SEAM_CALL_INVALID_ARGS`。多余键不转发（宿主 serde 本来也会忽略未知字段，本层给它同一条口径）。
+//
+// ## 出参 = 创建的**列裁剪视图**（逐字）
+//
+// 与列表行同一套 10 个 camelCase 键、同样不含正文。带 `id` 回来是关键：调用方拿它做后续
+// 发布 / 删除的句柄（#180-④ 的教训 —— 让前端自己造 id 会落下悬空引用）。
 
-/// 命令层形状闸：从平铺入参里挑出 `CreateBlogPostInput` 的五个字段，重建一个**只含这五个键**
-/// 的对象交给接缝。
-///
-/// 判据分层与 `publish` / `delete` 同一条：这里只判「键在不在、类型对不对」，不判语义
-/// （空串 / 超预算都放行到宿主 —— 那是 provider 的闸）。
-fn blog_post_create_request(input: &Value) -> Result<Value, (String, String)> {
-    for key in ["title", "slug", "excerpt", "content"] {
-        if input.get(key).and_then(Value::as_str).is_none() {
-            return Err(invalid_shape(format!(
-                "opc_create_blog_post 需要平铺的字符串字段 `{key}`\
-                 （形状判在命令层，非空 / 字节预算判在宿主 provider）"
-            )));
-        }
-    }
-    let tags = match input.get("tags") {
-        Some(Value::Array(items)) if items.iter().all(Value::is_string) => {
-            Value::Array(items.clone())
-        },
-        _ => {
-            return Err(invalid_shape(
-                "opc_create_blog_post 的 `tags` 必须是字符串数组（形状判在命令层）".to_string(),
-            ));
-        },
-    };
-    Ok(json!({
-        "title": input["title"],
-        "slug": input["slug"],
-        "excerpt": input["excerpt"],
-        "content": input["content"],
-        "tags": tags,
-    }))
-}
+// 命令层形状闸：从平铺入参里挑出 `CreateBlogPostInput` 的五个字段，重建一个**只含这五个键**
+// 的对象交给接缝。
+//
+// 判据分层与 `publish` / `delete` 同一条：这里只判「键在不在、类型对不对」，不判语义
+// （空串 / 超预算都放行到宿主 —— 那是 provider 的闸）。
 
 /// 命令层形状错误（`PLUGIN_COMMAND_INVALID_ARGS`）：**不发帧**，也就不存在「注定失败的帧」。
 fn invalid_shape(message: String) -> (String, String) {
@@ -1961,90 +1739,20 @@ fn dashboard_summary(
 
 // ── #36 批 2：三条写命令 ────────────────────────────────────────────────
 
-/// `opc_update_content_asset`：更新内容资产（写 op）。
-///
-/// 入参是平铺的 `id` + 五个可选字段；出站是 `{"id", "request": {…}}`（`request` 是一个
-/// DTO，必须嵌层 —— 与 `create_blog_post` 同一条判据）。缺键 = 该列不动。
-fn update_content_asset(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let Some(id) = input.get("id").and_then(Value::as_str) else {
-        return Err(invalid_shape(
-            "opc_update_content_asset 需要字符串 id（形状判在命令层）".to_string(),
-        ));
-    };
-    let request = content_asset_update_request(input)?;
-    call_opc_store(
-        peer,
-        OPC_STORE_UPDATE_CONTENT_ASSET,
-        json!({ "id": id, "request": request }),
-        call_chain,
-    )
-}
+// `opc_update_content_asset`：更新内容资产（写 op）。
+//
+// 入参是平铺的 `id` + 五个可选字段；出站是 `{"id", "request": {…}}`（`request` 是一个
+// DTO，必须嵌层 —— 与 `create_blog_post` 同一条判据）。缺键 = 该列不动。
 
-/// 命令层形状闸：从平铺入参里挑出 `UpdateContentAssetInput` 的五个字段。
-///
-/// 判据同 [`blog_post_create_request`]：只判「键在不在、类型对不对」，不判语义（空串 /
-/// 非法状态串都放行到宿主 —— 域服务与契约各自收口）。`contentType` 是 camelCase 线格式
-/// （禁区 13），本层不做 snake_case 兼容翻译。
-fn content_asset_update_request(input: &Value) -> Result<Value, (String, String)> {
-    let mut request = serde_json::Map::new();
-    for key in ["title", "contentType", "body", "status"] {
-        match input.get(key) {
-            None | Some(Value::Null) => {},
-            Some(Value::String(value)) => {
-                request.insert(key.to_string(), Value::String(value.clone()));
-            },
-            Some(_) => {
-                return Err(invalid_shape(format!(
-                    "opc_update_content_asset 的 `{key}` 必须是字符串（形状判在命令层）"
-                )));
-            },
-        }
-    }
-    match input.get("tags") {
-        None | Some(Value::Null) => {},
-        Some(Value::Array(items)) if items.iter().all(Value::is_string) => {
-            request.insert("tags".to_string(), Value::Array(items.clone()));
-        },
-        _ => {
-            return Err(invalid_shape(
-                "opc_update_content_asset 的 `tags` 必须是字符串数组（形状判在命令层）".to_string(),
-            ));
-        },
-    }
-    Ok(Value::Object(request))
-}
+// 命令层形状闸：从平铺入参里挑出 `UpdateContentAssetInput` 的五个字段。
+//
+// 判据同 [`blog_post_create_request`]：只判「键在不在、类型对不对」，不判语义（空串 /
+// 非法状态串都放行到宿主 —— 域服务与契约各自收口）。`contentType` 是 camelCase 线格式
+// （禁区 13），本层不做 snake_case 兼容翻译。
 
-/// `opc_delete_content_asset`：删除内容资产（写 op，两态出参逐字透传）。
-fn delete_content_asset(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let Some(id) = input.get("id").and_then(Value::as_str) else {
-        return Err(invalid_shape(
-            "opc_delete_content_asset 需要字符串 id（形状判在命令层）".to_string(),
-        ));
-    };
-    call_opc_store(peer, OPC_STORE_DELETE_CONTENT_ASSET, json!({ "id": id }), call_chain)
-}
+// `opc_delete_content_asset`：删除内容资产（写 op，两态出参逐字透传）。
 
-/// `opc_cancel_publish_schedule`：取消发布计划（写 op，**硬删**；两态出参逐字透传）。
-fn cancel_publish_schedule(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let Some(id) = input.get("id").and_then(Value::as_str) else {
-        return Err(invalid_shape(
-            "opc_cancel_publish_schedule 需要字符串 id（形状判在命令层）".to_string(),
-        ));
-    };
-    call_opc_store(peer, OPC_STORE_CANCEL_PUBLISH_SCHEDULE, json!({ "id": id }), call_chain)
-}
+// `opc_cancel_publish_schedule`：取消发布计划（写 op，**硬删**；两态出参逐字透传）。
 
 // ── #36 批 3：七条写命令 + 一条只读报表 ────────────────────────────────
 //
@@ -3788,15 +3496,9 @@ fn create_publish_schedule(
     )
 }
 
-/// `opc_process_due_schedules`：处理全部到期的发布计划（写 op，无入参）。
-///
-/// 出参是**本次处理过的行**（视图数组）：空数组 = 「没有到期计划」，不是错误。
-fn process_due_schedules(
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    call_opc_store(peer, OPC_STORE_PROCESS_DUE_SCHEDULES, json!({}), call_chain)
-}
+// `opc_process_due_schedules`：处理全部到期的发布计划（写 op，无入参）。
+//
+// 出参是**本次处理过的行**（视图数组）：空数组 = 「没有到期计划」，不是错误。
 
 /// 必需的对象字段（对象内部形状由宿主 serde 判）。
 fn require_object<'a>(
@@ -4074,135 +3776,3 @@ fn copy_optional_i64(
 // 入参形状与两态 / 三态透传全部归 `tests/protocol.rs` 的 `command_frame_*` 三条用例钉住 ——
 // 那里同时锁出站帧的 seam / op 逐字、`args` 的键集合、以及 `not_found` / `protected`
 // 走 payload 不走错误码。
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn seam_row() -> Value {
-        json!({
-            "id": "post-1",
-            "title": "第一篇",
-            "slug": "first-post",
-            "excerpt": "摘要",
-            "tags": ["opc", "blog"],
-            "published": true,
-            "publishedAt": 1_700_000_000_000_i64,
-            "viewCount": 42,
-            "createdAt": 1_700_000_000_000_i64,
-            "updatedAt": 1_700_000_060_000_i64,
-        })
-    }
-
-    /// 出口的「零键名改写」形态锁：命令出参逐字 = 接缝回帧里的行，键集合是那 10 个 camelCase
-    /// 键（禁区 13）。前端表格列按 `dataIndex` 取值，键名漂一个字母不会报错，只会让那一列
-    /// 静默变空 ⇒ 这是本命令唯一的形态锁。
-    #[test]
-    fn rows_pass_through_verbatim_with_exactly_the_camel_case_keys() {
-        let rows = post_rows_of(&json!({ "posts": [seam_row()] }));
-        assert_eq!(rows.len(), 1);
-        let row = &rows[0];
-
-        // ① 出口没有适配层：交出的行与接缝回帧逐字节相同。
-        assert_eq!(*row, seam_row(), "出参必须逐字透传接缝视图，不得改写键名");
-
-        // ② 键集合逐字钉住：接缝扩容新字段要连同前端一起走评审，不许静默出现在出参里。
-        let mut keys: Vec<String> = row.as_object().expect("行应是对象").keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            [
-                "createdAt",
-                "excerpt",
-                "id",
-                "published",
-                "publishedAt",
-                "slug",
-                "tags",
-                "title",
-                "updatedAt",
-                "viewCount"
-            ]
-        );
-
-        // ③ snake_case 改写与正文列一律不许出现。
-        for bad in ["published_at", "view_count", "created_at", "updated_at", "content"] {
-            assert!(row.get(bad).is_none(), "出口不得再造 snake_case / 正文列键：{bad}");
-        }
-        assert_eq!(row["viewCount"], json!(42));
-        assert_eq!(row["publishedAt"], json!(1_700_000_000_000_i64));
-        assert_eq!(row["tags"], json!(["opc", "blog"]));
-    }
-
-    /// 草稿（`publishedAt = null`）必须透出 `null` 且**保留键**：契约里它是 `Option<i64>`，
-    /// 序列化出的就是 `null`；前端把「值为 null」和「键不存在」当成两种东西（后者读出来是
-    /// `undefined`，会落进缺省分支）。
-    #[test]
-    fn null_stays_null_and_key_still_present() {
-        let mut row = seam_row();
-        row["publishedAt"] = json!(null);
-        row["published"] = json!(false);
-        let rows = post_rows_of(&json!({ "posts": [row] }));
-        assert_eq!(rows[0]["publishedAt"], json!(null));
-        assert!(rows[0].get("publishedAt").is_some(), "键必须存在");
-        assert_eq!(rows[0]["published"], json!(false));
-    }
-
-    #[test]
-    fn posts_absent_or_wrong_type_yields_empty_page() {
-        for page in [json!({}), json!({ "posts": null }), json!({ "posts": {} })] {
-            assert!(post_rows_of(&page).is_empty(), "缺键 / 畸形 posts 都当空页：{page}");
-        }
-        let page = json!({ "posts": [seam_row()] });
-        assert_eq!(post_rows_of(&page).len(), 1);
-    }
-
-    /// 创建命令的**形状闸**：五个字段齐 / 类型对才放行，且只转发这五个键。
-    ///
-    /// 另两档同样要钉：① 空串与超预算正文**照常放行**（语义闸在宿主 provider，本层越界就会
-    /// 变成「两处各判一半」）；② 缺字段 / 类型不符**一律拒**（不发帧）。
-    #[test]
-    fn create_request_shape_gate_keeps_exactly_five_keys() {
-        let ok = blog_post_create_request(&json!({
-            "title": "标题",
-            "slug": "first-post",
-            "excerpt": "摘要",
-            "content": "正文",
-            "tags": ["opc", "blog"],
-            // 多余键：不转发（宿主 serde 本来也会忽略未知字段，本层给它同一条口径）。
-            "extra": 1,
-        }))
-        .expect("五个字段齐应放行");
-        let mut keys: Vec<String> = ok.as_object().expect("应是对象").keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            ["content", "excerpt", "slug", "tags", "title"],
-            "只转发这五个键（接缝 args 的形状是契约）：{ok}"
-        );
-        assert_eq!(ok["tags"], json!(["opc", "blog"]));
-
-        // 语义闸不在本层：空 slug / 超预算正文都放行（宿主 provider 会拒）。
-        let semantic = blog_post_create_request(&json!({
-            "title": "",
-            "slug": "   ",
-            "excerpt": "",
-            "content": "x".repeat(70 * 1024),
-            "tags": [],
-        }));
-        assert!(semantic.is_ok(), "空 slug / 超预算必须留给宿主判（两处各判一半必然漂移）");
-
-        // 形状不符：缺字段、类型不符、tags 非字符串数组 —— 一律拒。
-        for bad in [
-            json!({}),
-            json!({ "title": 1, "slug": "s", "excerpt": "e", "content": "c", "tags": [] }),
-            json!({ "title": "t", "slug": "s", "content": "c", "tags": [] }),
-            json!({ "title": "t", "slug": "s", "excerpt": "e", "content": "c", "tags": "opc" }),
-            json!({ "title": "t", "slug": "s", "excerpt": "e", "content": "c", "tags": [1] }),
-        ] {
-            let (code, message) = blog_post_create_request(&bad).expect_err("形状不符必须拒");
-            assert_eq!(code, error_codes::PLUGIN_COMMAND_INVALID_ARGS, "错误码必须逐字：{message}");
-            assert!(!message.is_empty(), "错误文案必须说明缺什么");
-        }
-    }
-}

@@ -129,6 +129,12 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: opcSalesGrowthManifest,
   },
+  "opc-content-media": {
+    packageName: "axagent-plugin-opc-content-media",
+    webDir: path.join("crates", "plugin-opc-content-media", "web"),
+    uiSchema: null,
+    manifest: opcContentMediaManifest,
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -5499,6 +5505,48 @@ function opcSalesGrowthManifest({ version, binaryName, sha256 }) {
         inputSchema: { type: "object", properties: {} },
       },
     ],
+    integrity: { algorithm: "sha256", hash: sha256 },
+  };
+}
+
+/** content_media 域包独立清单：八条内容/发布计划命令迁独立 worker。 */
+function opcContentMediaManifest({ version, binaryName, sha256 }) {
+  const names = [
+    "opc_list_blog_posts",
+    "opc_create_blog_post",
+    "opc_list_publish_schedules",
+    "opc_list_content_assets",
+    "opc_update_content_asset",
+    "opc_delete_content_asset",
+    "opc_cancel_publish_schedule",
+    "opc_process_due_schedules",
+  ];
+  const writes = new Set([
+    "opc_create_blog_post",
+    "opc_update_content_asset",
+    "opc_delete_content_asset",
+    "opc_cancel_publish_schedule",
+    "opc_process_due_schedules",
+  ]);
+  return {
+    name: "opc-content-media",
+    version,
+    description: "OPC content_media 域包：博客 / 内容资产 / 发布计划",
+    permissions: ["subprocess_execution", "write"],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    defaultEnabled: true,
+    worker: { program: path.posix.join("bin", binaryName) },
+    pages: [{ id: "opc-content-media", title: "内容媒体", entry: PAGE_ENTRY, loading: "bundle" }],
+    domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "content_media.json")],
+    commands: names.map((name) => ({
+      name,
+      description: `content_media 域包命令 ${name}`,
+      command: `worker://${name}`,
+      requiredPermission: writes.has(name) ? "workspace-write" : "read-only",
+      inputSchema: { type: "object", properties: {} },
+    })),
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

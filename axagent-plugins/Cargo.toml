@@ -10,6 +10,7 @@ resolver = "2"
 members = [
   "crates/plugin-opc",
   "crates/plugin-opc-accounting",
+  "crates/plugin-opc-content-media",
   "crates/plugin-opc-core",
   "crates/plugin-opc-sales-growth",
   "crates/plugin-stock",

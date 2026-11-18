@@ -55,6 +55,20 @@ pub trait WikiStoreProvider: Send + Sync {
         ))
     }
 
+    /// 更新一条 Wiki 笔记（写）。
+    ///
+    /// 旧内容在宿主侧做版本备份（最多 20 个版本）；随后更新笔记、失效图谱缓存、
+    /// 写反馈数据湖并入队索引任务。入参用 harness 权威 `UpdateNoteInput`。
+    async fn update_note(
+        &self,
+        _id: String,
+        _input: crate::note_dtos::UpdateNoteInput,
+    ) -> Result<crate::note_dtos::Note> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::update_note 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 列出一个 vault 下的全部未删除笔记（按标题升序，与宿主 `list_notes` 同口径）。
     async fn list_notes(&self, _vault_id: String) -> Result<Vec<crate::note_dtos::Note>> {
         Err(AxAgentError::Provider(

@@ -266,90 +266,13 @@ pub async fn wiki_notes_create(
 #[tauri::command]
 pub async fn wiki_notes_update(
     app: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     id: String,
     input: UpdateNoteInput,
 ) -> Result<Note, String> {
-    let existing_content = if input.content.is_some() || input.title.is_some() {
-        match axagent_dao::repo::note::get_note(state.harness.db(), &id).await {
-            Ok(existing) => {
-                // 版本备份失败时记录错误日志但不阻止更新（版本备份是辅助功能，
-                // 不应因备份失败阻止用户修改内容；但需记录以便排查）
-                if let Err(e) = wiki::create_version(
-                    state.harness.db(),
-                    &existing.vault_id,
-                    &existing.id,
-                    &existing.title,
-                    &existing.content,
-                    &existing.author,
-                )
-                .await
-                {
-                    tracing::error!("[wiki] 笔记 {} 版本备份失败，原始内容将被覆盖: {}", id, e);
-                }
-                Some(existing)
-            },
-            Err(e) => {
-                tracing::warn!("[wiki] 更新前获取笔记 {} 失败，跳过版本备份: {}", id, e);
-                None
-            },
-        }
-    } else {
-        None
-    };
-
-    let updated = axagent_dao::repo::note::update_note(state.harness.db(), &id, input)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-
-    let _ = wiki::delete_old_versions(state.harness.db(), &id, 20).await;
-
-    // 失效图谱缓存（notes 表有更新）
-    let _ = axagent_dao::repo::wiki_graph_cache::invalidate_cache(
-        state.harness.db(),
-        &updated.vault_id,
-    )
-    .await;
-
-    // 写入反馈数据湖
-    if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
-        let before_snippet = existing_content.map(|e| {
-            if e.content.len() > 500 {
-                e.content[..500].to_string()
-            } else {
-                e.content
-            }
-        });
-        let after_snippet = if updated.content.len() > 500 {
-            Some(updated.content[..500].to_string())
-        } else {
-            Some(updated.content.clone())
-        };
-        let record = axagent_harness::WikiEditRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            conversation_id: None,
-            wiki_id: updated.vault_id.clone(),
-            note_id: updated.id.clone(),
-            operation: "update".to_string(),
-            before_snippet,
-            after_snippet,
-            reason: None,
-            quality_score: None,
-            created_at: chrono::Utc::now().timestamp_millis(),
-        };
-        if let Err(e) = lake.insert_wiki_edit(record).await {
-            tracing::warn!("Wiki 编辑反馈写入失败 note_id={}: {}", updated.id, e);
-        }
-    }
-
-    enqueue_wiki_note_indexing(&state, &app, &updated.vault_id, &updated.id);
-
-    Ok(updated)
+    // 版本备份、建行更新、缓存失效、反馈数据湖与索引入队已下沉 wiki.store provider。
+    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
+    service.update_note(id, input).await.map_err(|e| e.to_string())
 }
 
 #[agent_command(domain = wiki, safety = Dangerous, call_mode = StateInput, description = "删除 Wiki 笔记")]

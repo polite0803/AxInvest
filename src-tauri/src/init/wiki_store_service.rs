@@ -162,6 +162,90 @@ impl WikiStoreProvider for HostWikiStore {
         Ok(note)
     }
 
+    async fn update_note(
+        &self,
+        id: String,
+        input: axagent_harness::note_dtos::UpdateNoteInput,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        if id.trim().is_empty() {
+            return Err(AxAgentError::Validation("wiki.store::update_note 需要非空 id".into()));
+        }
+        let state = self.app.state::<crate::AppState>();
+        let existing_content = if input.content.is_some() || input.title.is_some() {
+            match axagent_dao::repo::note::get_note(state.harness.db(), &id).await {
+                Ok(existing) => {
+                    if let Err(e) = axagent_dao::repo::wiki::create_version(
+                        state.harness.db(),
+                        &existing.vault_id,
+                        &existing.id,
+                        &existing.title,
+                        &existing.content,
+                        &existing.author,
+                    )
+                    .await
+                    {
+                        tracing::error!("[wiki] 笔记 {} 版本备份失败，原始内容将被覆盖: {}", id, e);
+                    }
+                    Some(existing)
+                },
+                Err(e) => {
+                    tracing::warn!("[wiki] 更新前获取笔记 {} 失败，跳过版本备份: {}", id, e);
+                    None
+                },
+            }
+        } else {
+            None
+        };
+
+        let updated = axagent_dao::repo::note::update_note(state.harness.db(), &id, input)
+            .await
+            .map_err(to_provider_error)?;
+
+        let _ = axagent_dao::repo::wiki::delete_old_versions(state.harness.db(), &id, 20).await;
+        let _ = axagent_dao::repo::wiki_graph_cache::invalidate_cache(
+            state.harness.db(),
+            &updated.vault_id,
+        )
+        .await;
+
+        if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
+            let before_snippet = existing_content.map(|e| {
+                axagent_harness::util_fns::truncate_to_char_boundary(&e.content, 500).to_string()
+            });
+            let after_snippet = Some(
+                axagent_harness::util_fns::truncate_to_char_boundary(&updated.content, 500)
+                    .to_string(),
+            );
+            let record = axagent_harness::WikiEditRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                conversation_id: None,
+                wiki_id: updated.vault_id.clone(),
+                note_id: updated.id.clone(),
+                operation: "update".to_string(),
+                before_snippet,
+                after_snippet,
+                reason: None,
+                quality_score: None,
+                created_at: chrono::Utc::now().timestamp_millis(),
+            };
+            if let Err(e) = lake.insert_wiki_edit(record).await {
+                tracing::warn!("Wiki 编辑反馈写入失败 note_id={}: {}", updated.id, e);
+            }
+        }
+
+        let _ = crate::index_queue::enqueue_job_sync(
+            &state,
+            &self.app,
+            jobs::JOB_TYPE_INDEX_WIKI_NOTE,
+            "wiki",
+            &updated.vault_id,
+            &updated.id,
+            None,
+            None,
+        );
+        Ok(updated)
+    }
+
     async fn list_notes(&self, vault_id: String) -> Result<Vec<axagent_harness::note_dtos::Note>> {
         if vault_id.trim().is_empty() {
             return Err(AxAgentError::Validation(

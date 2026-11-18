@@ -123,6 +123,50 @@ impl axagent_harness::WorkflowRunProvider for FixedWorkflowRunProvider {
     }
 }
 
+/// 固定单股分析记录替身：只实现 `analysis.record::list`。
+/// 两条固定行一条在跑、一条已完成且带完成时刻；一条子行用于锁插件侧根记录收窄。
+pub struct FixedAnalysisRecordProvider;
+
+#[async_trait::async_trait]
+impl axagent_harness::AnalysisRecordProvider for FixedAnalysisRecordProvider {
+    async fn list(
+        &self,
+        _limit: Option<usize>,
+        _offset: Option<usize>,
+    ) -> axagent_harness::core_error::Result<axagent_harness::AnalysisRecordListOutcome> {
+        use axagent_harness::{AnalysisRecordListOutcome, AnalysisRecordView};
+        let record = |id: &str, status: &str, completed_at: Option<i64>| AnalysisRecordView {
+            id: id.to_string(),
+            stock_code: "300308".to_string(),
+            stock_name: "中际旭创".to_string(),
+            analysis_date: "2026-11-05".to_string(),
+            status: status.to_string(),
+            decision_action: None,
+            decision_position_state: None,
+            decision_position_pct: None,
+            analysis_kind: "live".to_string(),
+            as_of_date: None,
+            parent_analysis_id: None,
+            template_id: None,
+            template_version: None,
+            decision_time_horizon: None,
+            decision_horizon_source: None,
+            created_at: 1_699_999_000_000,
+            updated_at: 1_699_999_999_000,
+            completed_at,
+            execution_quality: None,
+        };
+        Ok(AnalysisRecordListOutcome {
+            records: vec![
+                record("analysis-1", "running", None),
+                record("analysis-0", "completed", Some(1_699_999_999_000)),
+                AnalysisRecordView { parent_analysis_id: Some("analysis-0".to_string()), ..record("analysis-child", "completed", Some(1_699_999_999_000)) },
+            ],
+            total: 3,
+        })
+    }
+}
+
 /// 创建测试用临时目录并在 test 完成后自动清理。
 pub struct TempDir {
     pub path: PathBuf,

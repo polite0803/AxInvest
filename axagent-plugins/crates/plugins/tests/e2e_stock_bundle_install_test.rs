@@ -57,6 +57,10 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     let workflow_run = registry
         .register_workflow_run(Arc::new(FixedWorkflowRunProvider))
         .expect("工作流执行替身应能注册到 workflow.run");
+    assert!(registry.get_analysis_record().is_none(), "测试进程起点：analysis.record 应为空");
+    let analysis_record = registry
+        .register_analysis_record(Arc::new(common::FixedAnalysisRecordProvider))
+        .expect("分析记录替身应能注册到 analysis.record");
 
     let home = TempDir::new("stock-bundle-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
@@ -111,8 +115,8 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
         "输入一个分析师 ⇒ 一个权重：{weights}"
     );
 
-    // B8-0：前端资产随包安装 —— `pages[]` 声明的 entry 必须解析成**安装目录内**的既有文件。
-    // 这里锁的是「打包脚本写出的清单与盘上资产一致」，不是资产内容本身（内容归 B8-2）。
+    // 前端资产随包安装 —— `pages[]` 声明的 entry 必须解析成**安装目录内**的既有文件，
+    // 且页面仍装载随包 bundle（真实数据切片页已取代早期仅显示探针文案的占位页）。
     let listed = manager.list_plugin_pages().expect("页面列表投影应可读");
     let stock = listed
         .iter()
@@ -134,7 +138,10 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     );
     assert!(page_path.is_file(), "页面资产不存在：{}", page_path.display());
     let html = std::fs::read_to_string(&page_path).expect("页面资产应可读");
-    assert!(html.contains("股票插件前端通道已打通"), "读到的不是探针页：{html}");
+    assert!(html.contains("股票插件 · 数据切片"), "读到的不是当前股票插件页：{html}");
+    assert!(html.contains("./bundle.js"), "页面必须装载随包 bundle：{html}");
+    let bundle_path = page_path.parent().expect("页面资产应有父目录").join("bundle.js");
+    assert!(bundle_path.is_file(), "随包 bundle.js 必须存在：{}", bundle_path.display());
 
     // B8-1b：任务中心任务源的**整条链** —— 清单声明 → 宿主投影 → 命名命令 → 宿主接缝取数 → 行记录。
     // 这四步任一漂了都会在真实安装里静默少一个源，所以在这里一次锁穿。
@@ -146,17 +153,27 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     assert!(stock_sources.enabled, "enable 之后任务源投影的 enabled 应为 true");
     assert_eq!(
         stock_sources.task_sources.len(),
-        1,
-        "清单声明的任务源数应与 taskSources[] 一致：{:?}",
+        2,
+        "清单声明的两个任务源都应投影：{:?}",
         stock_sources.task_sources
     );
-    let declared = &stock_sources.task_sources[0];
-    assert_eq!(declared.id, "stock-workflow-runs");
-    assert_eq!(declared.command, "list_recent_workflow_runs");
+    let workflow_source = stock_sources
+        .task_sources
+        .iter()
+        .find(|source| source.id == "stock-workflow-runs")
+        .expect("股票工作流执行任务源应存在");
+    assert_eq!(workflow_source.command, "list_recent_workflow_runs");
+    let analysis_source = stock_sources
+        .task_sources
+        .iter()
+        .find(|source| source.id == "stock-analysis")
+        .expect("单股分析任务源应存在");
+    assert_eq!(analysis_source.command, "list_stock_analysis_records");
+    assert_eq!(analysis_source.detail_schema.as_deref(), Some("stock-analysis-detail"));
 
-    // 投影里的 `command` 必须真能执行 —— 否则任务中心会挂一个永远为空的标签。
+    // 投影里的两个 `command` 都必须真能执行 —— 否则任务中心会挂一个永远为空的标签。
     let rows_output = manager
-        .execute_plugin_command(&outcome.plugin_id, &declared.command, &json!({}))
+        .execute_plugin_command(&outcome.plugin_id, &workflow_source.command, &json!({}))
         .expect("清单声明的任务源取数命令应能经 worker 通道执行");
     let rows: Value = serde_json::from_str(&rows_output).expect("取数命令应返回 JSON 文本");
     let rows = rows.as_array().expect("任务源取数必须回数组（宿主泛型适配器按数组消费）");
@@ -184,8 +201,26 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
         assert!(rows[1].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[1]);
     }
 
+    let analysis_rows_output = manager
+        .execute_plugin_command(&outcome.plugin_id, &analysis_source.command, &json!({}))
+        .expect("单股分析任务源取数命令应能经 worker 通道执行");
+    let analysis_rows: Value =
+        serde_json::from_str(&analysis_rows_output).expect("单股分析取数应返回 JSON 文本");
+    let analysis_rows = analysis_rows.as_array().expect("单股分析任务源取数必须回数组");
+    assert_eq!(analysis_rows.len(), 2, "根记录 + 已结束记录各一行：{analysis_rows:?}");
+    assert_eq!(analysis_rows[0]["nativeId"], "analysis-1");
+    assert_eq!(analysis_rows[0]["state"], "running");
+    assert_eq!(analysis_rows[1]["nativeId"], "analysis-0");
+    assert_eq!(analysis_rows[1]["state"], "succeeded");
+    assert_eq!(analysis_rows[1]["finishedAt"], 1_699_999_999_000_i64);
+    let detail_rows = analysis_rows[1]["raw"]["rows"]
+        .as_array()
+        .expect("详情 schema 的 rows 投影应存在");
+    assert_eq!(detail_rows[0]["stockCode"], "300308");
+
     // 先放 manager（析构时停 worker），再删临时目录（Windows 上占用中的 exe 删不掉）。
     drop(manager);
     market.undo();
     workflow_run.undo();
+    analysis_record.undo();
 }

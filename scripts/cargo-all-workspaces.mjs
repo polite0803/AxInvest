@@ -25,6 +25,7 @@
  * 额外参数会原样追加到每个 workspace 的 cargo 命令末尾（`--` 之后的部分照常传）。
  */
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
@@ -42,6 +43,65 @@ const argv = process.argv.slice(2);
 const listOnly = argv.includes("--list");
 const mode = argv.find((a) => !a.startsWith("--"));
 const extra = argv.filter((a) => a !== mode && a !== "--list" && a !== "--selftest");
+
+/**
+ * nextest 前必须真实暂存的插件产物（顺序即串行构建顺序）。
+ *
+ * 一份规格同时驱动 staging 与自检：新增「靠环境变量门控」的 bundle E2E 时，
+ * 必须在这里登记插件名与环境变量，否则自检会因测试面出现未登记变量而失败。
+ * 这样 CI 不会因为漏设变量而把 `SKIP` 读成通过。
+ */
+const BUNDLE_STAGING = [
+  { plugin: "stock", env: "AXAGENT_STOCK_BUNDLE_DIR" },
+  { plugin: "opc-accounting", env: "AXAGENT_ACCOUNTING_BUNDLE_DIR" },
+  { plugin: "opc-sales-growth", env: "AXAGENT_SALES_BUNDLE_DIR" },
+  { plugin: "opc-content-media", env: "AXAGENT_CONTENT_BUNDLE_DIR" },
+  { plugin: "opc-ai-research", env: null },
+  { plugin: "opc-consulting", env: null },
+  { plugin: "opc-design", env: null },
+  { plugin: "opc-ecommerce", env: null },
+  { plugin: "opc-education", env: null },
+  { plugin: "opc-finance-invest", env: null },
+  { plugin: "opc-game-dev", env: null },
+  { plugin: "opc-geospatial", env: null },
+  { plugin: "opc-project-management", env: null },
+  { plugin: "opc-security", env: "AXAGENT_SECURITY_BUNDLE_DIR" },
+  { plugin: "opc-software-dev", env: null },
+];
+const BUNDLE_ENV_BY_PLUGIN = new Map(BUNDLE_STAGING.filter((item) => item.env).map((item) => [item.plugin, item.env]));
+const E2E_NON_BUNDLE_GATES = new Set([
+  // 通用子进程开关：本入口没有生成通用测试 worker，CI 仍诚实 SKIP，不伪造通过。
+  "AXAGENT_TEST_PLUGIN_SUBPROCESS",
+]);
+const E2E_GATED_BUNDLE_VARS = new Set([
+  ...BUNDLE_STAGING.map((item) => item.env).filter(Boolean),
+  "AXAGENT_DECLARATIVE_BUNDLE_ROOT",
+  // stock 工具 E2E 与 bundle 安装 E2E 共用同一份 worker 文件。
+  "AXAGENT_STOCK_WORKER_BIN",
+]);
+
+function platformWorkerName() {
+  return process.platform === "win32" ? "axagent-plugin-stock.exe" : "axagent-plugin-stock";
+}
+
+/** 测试源码里的 `AXAGENT_*` 门控变量；只认 `env::var` / `var_os` 的实参，不认注释。 */
+function bundleGateEnvVarsFromTests() {
+  const testsDir = path.join(repoRoot, "axagent-plugins", "crates", "plugins", "tests");
+  if (!fs.existsSync(testsDir)) return null;
+  const found = new Set();
+  for (const file of fs.readdirSync(testsDir)) {
+    if (!file.endsWith(".rs")) continue;
+    const source = fs.readFileSync(path.join(testsDir, file), "utf8");
+    for (const match of source.matchAll(/std::env::var(?:_os)?\(\s*"([A-Z0-9_]+)"/g)) {
+      if (match[1].startsWith("AXAGENT_")) found.add(match[1]);
+    }
+  }
+  return found;
+}
+
+function bundledPluginDir(plugin) {
+  return path.join(repoRoot, "axagent-plugins", "dist", "plugins", plugin);
+}
 
 /**
  * 不变量：cargo 自己的参数（含 `--manifest-path`）必须全部落在**第一个 `--` 之前**。
@@ -111,6 +171,29 @@ function selftest() {
   const bad = roots.filter((r) => !cargoSideArgsOrdered(buildArgs("clippy", r, [])));
   t(`⑨ 本机 ${roots.length} 个根的 clippy 命令逐条守序`, bad.length === 0);
 
+  // staging 规格自检：之前这里只验 argv，漏 staging 时测试会 SKIP 而门禁仍绿。
+  const plugins = BUNDLE_STAGING.map((item) => item.plugin);
+  t(`⑩ staging 插件清单无重复（${plugins.length} 项）`, new Set(plugins).size === plugins.length);
+  t("⑪ staging 覆盖 stock 与全部 14 个 OPC 域插件", plugins.includes("stock") && plugins.filter((p) => p.startsWith("opc-")).length === 14);
+  t(
+    `⑫ 门控变量一一对应、${BUNDLE_ENV_BY_PLUGIN.size} 个 bundle E2E 都被暂存`,
+    new Set(BUNDLE_ENV_BY_PLUGIN.values()).size === BUNDLE_ENV_BY_PLUGIN.size
+      && BUNDLE_ENV_BY_PLUGIN.size === E2E_GATED_BUNDLE_VARS.size - 2,
+  );
+  const missingStagedVars = [...E2E_GATED_BUNDLE_VARS].filter((name) => !stagedEnvironment()[name]);
+  t(`⑬ 每个 E2E 门控变量都有暂存路径（缺：${missingStagedVars.join(", ") || "无"}）`, missingStagedVars.length === 0);
+  const testVars = bundleGateEnvVarsFromTests();
+  const unregisteredVars = testVars
+    ? [...testVars].filter((name) => !E2E_GATED_BUNDLE_VARS.has(name) && !E2E_NON_BUNDLE_GATES.has(name))
+    : [];
+  t(`⑭ E2E 源码里的 bundle 门控变量全部已登记或显式豁免（漏：${unregisteredVars.join(", ") || "无"}）`, unregisteredVars.length === 0);
+  const missingDirs = BUNDLE_STAGING.filter((item) => !fs.existsSync(bundledPluginDir(item.plugin))).map((item) => item.plugin);
+  t(`⑮ staging 声明的插件产物都已存在（缺：${missingDirs.join(", ") || "无"}）`, missingDirs.length === 0);
+  t("⑯ 负控：删掉一个门控变量后确实能被检出", !stagedEnvironment({ skip: [BUNDLE_STAGING[0].env] })[BUNDLE_STAGING[0].env]);
+  const stockWorker = stagedEnvironment().AXAGENT_STOCK_WORKER_BIN;
+  t(`⑰ stock worker 路径指向已暂存的可执行文件（${stockWorker ?? "未生成"}）`, Boolean(stockWorker && fs.existsSync(stockWorker)));
+  t(`⑱ 负控：平台 worker 文件名由平台决定（${platformWorkerName()}）`, ["axagent-plugin-stock", "axagent-plugin-stock.exe"].includes(platformWorkerName()));
+
   console.log(`[cargo-all-workspaces --selftest] ${pass} 项通过 / ${fails.length} 项失败`);
   for (const f of fails) console.log(`  ✖ ${f}`);
   return fails.length === 0 ? 0 : 1;
@@ -154,90 +237,27 @@ function buildArgs(modeName, root, extraArgs) {
     : [...base.slice(0, sep), ...manifest, ...base.slice(sep)];
 }
 
-if (mode === "nextest" && !listOnly) {
-  // stock 真 bundle 端到端测试同样需要 staged 产物。此前只 stage OPC，stock 测试
-  // 在 CI 里会静默 SKIP（测试返回成功）；这里先补上，避免把 SKIP 读成验收通过。
-  const stockBundle = spawnSync(
-    "node",
-    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "stock", "--check"],
-    { cwd: repoRoot, stdio: "inherit", env: process.env },
-  );
-  if (stockBundle.status !== 0) {
-    console.error(`[cargo ${mode}] staging stock bundle 失败`);
-    process.exit(stockBundle.status ?? 1);
+/** 由 staging 规格导出 E2E 环境变量；`skip` 只给自检做负控。 */
+function stagedEnvironment({ skip = [] } = {}) {
+  const env = {
+    AXAGENT_DECLARATIVE_BUNDLE_ROOT: path.join(repoRoot, "axagent-plugins", "dist", "plugins"),
+  };
+  for (const item of BUNDLE_STAGING) {
+    if (!item.env || skip.includes(item.env)) continue;
+    env[item.env] = bundledPluginDir(item.plugin);
   }
-  process.env.AXAGENT_STOCK_BUNDLE_DIR = path.join(
-    repoRoot,
-    "axagent-plugins",
-    "dist",
-    "plugins",
-    "stock",
-  );
+  // 同一个 stock worker 同时供 bundle 安装 E2E 与工具/命令帧 E2E 使用；
+  // 两个变量必须指向同一份已暂存产物，避免后者因缺 env 静默 SKIP。
+  if (env.AXAGENT_STOCK_BUNDLE_DIR && !skip.includes("AXAGENT_STOCK_WORKER_BIN")) {
+    env.AXAGENT_STOCK_WORKER_BIN = path.join(env.AXAGENT_STOCK_BUNDLE_DIR, "bin", platformWorkerName());
+  }
+  return env;
+}
 
-  // accounting 真 bundle 端到端测试需要 staged 产物；没有产物时该测试会打印 SKIP。
-  // CI 里必须真跑，不能靠 SKIP 假绿，故在测试前串行构建产物。
-  const r = spawnSync(
-    "node",
-    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-accounting", "--check"],
-    { cwd: repoRoot, stdio: "inherit", env: process.env },
-  );
-  if (r.status !== 0) {
-    console.error(`[cargo ${mode}] staging opc-accounting bundle 失败`);
-    process.exit(r.status ?? 1);
-  }
-  process.env.AXAGENT_ACCOUNTING_BUNDLE_DIR = path.join(
-    repoRoot,
-    "axagent-plugins",
-    "dist",
-    "plugins",
-    "opc-accounting",
-  );
-  const sales = spawnSync(
-    "node",
-    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-sales-growth", "--check"],
-    { cwd: repoRoot, stdio: "inherit", env: process.env },
-  );
-  if (sales.status !== 0) {
-    console.error(`[cargo ${mode}] staging opc-sales-growth bundle 失败`);
-    process.exit(sales.status ?? 1);
-  }
-  process.env.AXAGENT_SALES_BUNDLE_DIR = path.join(
-    repoRoot,
-    "axagent-plugins",
-    "dist",
-    "plugins",
-    "opc-sales-growth",
-  );
-  const content = spawnSync(
-    "node",
-    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-content-media", "--check"],
-    { cwd: repoRoot, stdio: "inherit", env: process.env },
-  );
-  if (content.status !== 0) {
-    console.error(`[cargo ${mode}] staging opc-content-media bundle 失败`);
-    process.exit(content.status ?? 1);
-  }
-  process.env.AXAGENT_CONTENT_BUNDLE_DIR = path.join(
-    repoRoot,
-    "axagent-plugins",
-    "dist",
-    "plugins",
-    "opc-content-media",
-  );
-  const declarative = [
-    "opc-ai-research",
-    "opc-consulting",
-    "opc-design",
-    "opc-ecommerce",
-    "opc-education",
-    "opc-finance-invest",
-    "opc-game-dev",
-    "opc-geospatial",
-    "opc-project-management",
-    "opc-security",
-    "opc-software-dev",
-  ];
-  for (const plugin of declarative) {
+if (mode === "nextest" && !listOnly) {
+  // bundle E2E 在没有产物时只会打印 SKIP 并返回成功。这里逐插件串行 staging，
+  // 任一失败立即中止，确保 CI 里每个门控 E2E 都有真实产物可用。
+  for (const { plugin } of BUNDLE_STAGING) {
     const staged = spawnSync(
       "node",
       ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--check"],
@@ -248,16 +268,7 @@ if (mode === "nextest" && !listOnly) {
       process.exit(staged.status ?? 1);
     }
   }
-  process.env.AXAGENT_DECLARATIVE_BUNDLE_ROOT = path.join(
-    repoRoot,
-    "axagent-plugins",
-    "dist",
-    "plugins",
-  );
-  process.env.AXAGENT_SECURITY_BUNDLE_DIR = path.join(
-    process.env.AXAGENT_DECLARATIVE_BUNDLE_ROOT,
-    "opc-security",
-  );
+  Object.assign(process.env, stagedEnvironment());
 }
 
 for (const root of roots) {

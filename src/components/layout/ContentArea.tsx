@@ -9,11 +9,11 @@ import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { useDomainPageRoutes } from "@/lib/domainPageRegistry";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
-import { refreshPluginPageRoutes, usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
+import { usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { workspaceTabPath } from "@/lib/workspaceTabs";
 
 import { Button, Result, Spin } from "antd";
-import { lazy, memo, Suspense, useEffect } from "react";
+import { lazy, memo, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
@@ -141,10 +141,6 @@ export const ContentArea = memo(function ContentArea() {
   // 域贡献的页面路由（注册表投影）：宿主不认识任何具体域组件，也不点名有哪些域
   const contributedPages = useDomainPageRoutes();
   const pluginPages = usePluginPageRoutes();
-
-  useEffect(() => {
-    void refreshPluginPageRoutes();
-  }, []);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0 }}>

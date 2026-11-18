@@ -19,7 +19,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const JSON_OUT = process.argv.includes("--json");
 const SELFTEST = process.argv.includes("--selftest");
-const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
+const REGISTRY_REL = "axagent-plugins/scripts/opc-domain-pack-plugins.json";
 const MANIFEST_DIRS = new Map([
   ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
   ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],

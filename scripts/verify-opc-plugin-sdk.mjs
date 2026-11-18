@@ -123,6 +123,21 @@ for (const pkg of packages) {
   run("cargo", ["test", "-p", pkg, "--all-targets"], sdkRoot, `独立树 test ${pkg}`);
 }
 
+// 4) 独立树 bundle 验收：底册已随 SDK workspace 走，bundle 脚本不得假设主仓布局。
+//    accounting 锁独立 worker 全链；security 锁声明式插件（无 worker）链。
+run(
+  "node",
+  ["scripts/build-plugin-bundle.mjs", "--plugin", "opc-accounting", "--check"],
+  sdkRoot,
+  "独立树 bundle opc-accounting",
+);
+run(
+  "node",
+  ["scripts/build-plugin-bundle.mjs", "--plugin", "opc-security", "--check"],
+  sdkRoot,
+  "独立树 bundle opc-security",
+);
+
 if (!KEEP) rmSync(TEMP_ROOT, { recursive: true, force: true });
 console.log(JSON.stringify(OUT, null, 2));
 console.log("SDK_VERIFY_OK");

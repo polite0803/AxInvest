@@ -256,7 +256,7 @@ const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
 const webRoot = spec.webDir ? path.join(workspaceRoot, spec.webDir) : null;
 const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) : null;
-const registryPath = path.join(workspaceRoot, "..", "scripts", "opc-domain-pack-plugins.json");
+const registryPath = path.join(workspaceRoot, "scripts", "opc-domain-pack-plugins.json");
 const ownershipRegistry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 const domainPackSourceByPlugin = Object.fromEntries(
   ownershipRegistry.packs

@@ -23,7 +23,7 @@ const ROOT = resolve(HERE, "..");
 const JSON_OUT = process.argv.includes("--json");
 const SELFTEST = process.argv.includes("--selftest");
 
-const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
+const REGISTRY_REL = "axagent-plugins/scripts/opc-domain-pack-plugins.json";
 // YAML manifest 权威目录（id / domain / capabilities 的唯一来源）。
 const MANIFEST_DIR = "config/opc/domain_packs";
 // P6.2 logical manifest 按插件归属分区：公共 0 份 + accounting/sales_growth/content_media 独立 worker 各 1 份 + 11 个声明式独立域各 1 份。

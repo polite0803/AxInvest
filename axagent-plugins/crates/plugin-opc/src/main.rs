@@ -77,8 +77,6 @@ const OPC_STORE_CREATE_BLOG_POST: &str = "create_blog_post";
 const OPC_STORE_LIST_INVOICES: &str = "list_invoices";
 const OPC_STORE_LIST_CUSTOMERS: &str = "list_customers";
 const OPC_STORE_LIST_PROJECTS: &str = "list_projects";
-const OPC_STORE_LIST_LANDING_PAGES: &str = "list_landing_pages";
-const OPC_STORE_LIST_CONTACTS: &str = "list_contacts";
 const OPC_STORE_LIST_KPIS: &str = "list_kpis";
 const OPC_STORE_LIST_CONTENT_ASSETS: &str = "list_content_assets";
 const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
@@ -94,7 +92,6 @@ const OPC_STORE_CANCEL_PUBLISH_SCHEDULE: &str = "cancel_publish_schedule";
 
 /// #36 批 3 的八条 op：七个写 op（要 `write`）+ 一条读 op（财务报表，宿主侧无权限闸）。
 /// 出参一律是契约的列裁剪视图 / 视图数组，逐字透传（同 `create_blog_post` 的判据）。
-const OPC_STORE_CREATE_CUSTOMER: &str = "create_customer";
 const OPC_STORE_CREATE_PROJECT: &str = "create_project";
 const OPC_STORE_ADD_MILESTONE: &str = "add_milestone";
 const OPC_STORE_CREATE_LANDING_PAGE: &str = "create_landing_page";
@@ -308,8 +305,6 @@ const COMMAND_CREATE_BLOG_POST: &str = "opc_create_blog_post";
 /// 现算看板读数（宿主**不**新增聚合 op）。`opc_list_invoices` 已迁 `plugin-opc-accounting`。
 const COMMAND_LIST_CUSTOMERS: &str = "opc_list_customers";
 const COMMAND_LIST_PROJECTS: &str = "opc_list_projects";
-const COMMAND_LIST_LANDING_PAGES: &str = "opc_list_landing_pages";
-const COMMAND_LIST_CONTACTS: &str = "opc_list_contacts";
 const COMMAND_LIST_KPIS: &str = "opc_list_kpis";
 const COMMAND_LIST_CONTENT_ASSETS: &str = "opc_list_content_assets";
 const COMMAND_LIST_PUBLISH_SCHEDULES: &str = "opc_list_publish_schedules";
@@ -325,7 +320,6 @@ const COMMAND_CANCEL_PUBLISH_SCHEDULE: &str = "opc_cancel_publish_schedule";
 
 /// #36 批 3 的八条命令（清单 `commands[].name` 必须逐字一致）：七条写命令 + 一条只读的
 /// 财务报表（宿主侧无权限闸，与八个 list op 同一档）。
-const COMMAND_CREATE_CUSTOMER: &str = "opc_create_customer";
 const COMMAND_CREATE_PROJECT: &str = "opc_create_project";
 const COMMAND_ADD_MILESTONE: &str = "opc_add_milestone";
 const COMMAND_CREATE_LANDING_PAGE: &str = "opc_create_landing_page";
@@ -662,28 +656,6 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             },
         },
         // 以下四条无入参（契约 op 也不收 query）。
-        COMMAND_LIST_LANDING_PAGES => {
-            match list_rows(
-                &frame.input,
-                &request.call_chain,
-                peer,
-                OPC_STORE_LIST_LANDING_PAGES,
-                &[],
-            ) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
-        COMMAND_LIST_CONTACTS => {
-            match list_rows(&frame.input, &request.call_chain, peer, OPC_STORE_LIST_CONTACTS, &[]) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
         COMMAND_LIST_KPIS => match list_rows(
             &frame.input,
             &request.call_chain,
@@ -752,12 +724,6 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         },
         // ── #36 批 3：七条写命令 + 一条只读报表（出参 = 契约列裁剪视图，逐字透传）──
         // 会计域 `opc_create_invoice` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
-        COMMAND_CREATE_CUSTOMER => match create_customer(&frame.input, &request.call_chain, peer) {
-            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-            Err((code, message)) => {
-                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-            },
-        },
         // ── #32 批 A：三条写命令（更新出参 = 列裁剪视图，删除出参 = 无载荷）──
         COMMAND_UPDATE_CUSTOMER => match update_customer(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -2089,46 +2055,6 @@ fn cancel_publish_schedule(
 // 入参键一律 camelCase（禁区 13，与契约 DTO 的 serde 线格式同源）。数组字段（`lineItems` /
 // `tags`）只判「是不是对象数组 / 字符串数组」，元素内部字段类型的错由宿主 serde 拒收
 // （`SEAM_CALL_INVALID_ARGS`）—— 逐元素逐字段再判一遍只会把同一件事判两次。
-
-/// `opc_create_customer`：创建客户（写 op）。
-///
-/// `customerType` / `source` 收**串**：未知值分别由宿主落 `Unknown` / `Other(原串)`，
-/// 不在此处把枚举抄第二遍（迁移前工具的映射原样下沉到 provider）。
-fn create_customer(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    const OP: &str = "opc_create_customer";
-    let name = require_str(input, OP, "name")?;
-    let email = require_str(input, OP, "email")?;
-    let mut request = serde_json::Map::new();
-    request.insert("name".to_string(), Value::String(name.to_string()));
-    request.insert("email".to_string(), Value::String(email.to_string()));
-    copy_optional_strings(
-        input,
-        OP,
-        &mut request,
-        &[
-            "phone",
-            "company",
-            "customerType",
-            "country",
-            "region",
-            "city",
-            "address",
-            "source",
-            "notes",
-        ],
-    )?;
-    copy_optional_f64(input, OP, &mut request, &["latitude", "longitude"])?;
-    call_opc_store(
-        peer,
-        OPC_STORE_CREATE_CUSTOMER,
-        json!({ "request": Value::Object(request) }),
-        call_chain,
-    )
-}
 
 /// `opc_update_customer`：更新客户（#32 批 A 的写 op）。
 ///

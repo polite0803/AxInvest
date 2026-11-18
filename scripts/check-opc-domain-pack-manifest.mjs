@@ -34,9 +34,10 @@ const MANIFEST_DIRS = new Map([
   ["plugin-opc-project-management", "axagent-plugins/crates/plugin-opc-project-management/domain_packs"],
   ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
   ["plugin-opc-software-dev", "axagent-plugins/crates/plugin-opc-software-dev/domain_packs"],
+  ["plugin-opc-sales-growth", "axagent-plugins/crates/plugin-opc-sales-growth/domain_packs"],
 ]);
 const EXPECTED_COUNTS = new Map([
-  ["plugin-opc", 2],
+  ["plugin-opc", 1],
   ["plugin-opc-accounting", 1],
   ["plugin-opc-ai-research", 1],
   ["plugin-opc-consulting", 1],
@@ -49,6 +50,7 @@ const EXPECTED_COUNTS = new Map([
   ["plugin-opc-project-management", 1],
   ["plugin-opc-security", 1],
   ["plugin-opc-software-dev", 1],
+  ["plugin-opc-sales-growth", 1],
 ]);
 
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -103,7 +105,7 @@ function selftest() {
     independent,
   ).length === 0);
   t("独立 owner 漂移被拦", validateManifest({ ...good, transportOwner: "opc-accounting" }, expected).length > 0);
-  t("12 + 2 计数口径", EXPECTED_COUNTS.size === 13 && EXPECTED_COUNTS.get("plugin-opc") === 2 && [...EXPECTED_COUNTS.values()].filter((n) => n === 1).length === 12);
+  t("13 + 1 计数口径", EXPECTED_COUNTS.size === 14 && EXPECTED_COUNTS.get("plugin-opc") === 1 && [...EXPECTED_COUNTS.values()].filter((n) => n === 1).length === 14);
   t("commandName 小写转 snake", commandName("tool:OpcGetFinancialReport") === "opc_get_financial_report");
   t("非 OPC 能力无命令名", commandName("tool:WebSearch") === null);
   const failed = checks.filter((c) => !c.ok);
@@ -168,7 +170,7 @@ function main() {
   } else if (problems.length) {
     for (const p of problems) console.error(`FAIL: ${p}`);
   } else {
-    console.log(`PASS: ${manifests.length} 个域包 logical manifest 一致（12 独立 + 2 公共 分区 / 一域一 owner / 页面 / capabilities / 命令 / 接缝）`);
+    console.log(`PASS: ${manifests.length} 个域包 logical manifest 一致（13 独立 + 1 公共 分区 / 一域一 owner / 页面 / capabilities / 命令 / 接缝）`);
   }
   process.exit(problems.length === 0 ? 0 : 1);
 }

@@ -1016,34 +1016,6 @@ fn batch3_roundtrip(
 fn command_frame_batch3_creates_go_through_host_seam() {
     let mut worker = Worker::spawn();
 
-    // ① 创建客户：`customer_type` → `customerType`；未给出的键不补 null。
-    let customer = serde_json::json!({
-        "id": "cust-1",
-        "name": "张三",
-        "email": "z@example.com",
-        "phone": null,
-        "company": null,
-        "status": "lead",
-        "totalRevenue": 0.0,
-        "createdAt": 1_700_000_000_i64,
-    });
-    let args = batch3_roundtrip(
-        &mut worker,
-        "opc_create_customer",
-        serde_json::json!({ "name": "张三", "email": "z@example.com", "customerType": "Business" }),
-        "create_customer",
-        customer,
-    );
-    let request = args["request"].as_object().expect("request 应是对象");
-    let mut keys = request.keys().cloned().collect::<Vec<String>>();
-    keys.sort();
-    assert_eq!(
-        keys,
-        ["customerType", "email", "name"].map(str::to_string).to_vec(),
-        "只转发真正给出的键，缺键不补 null：{request:?}"
-    );
-    assert_eq!(request["customerType"], "Business");
-
     // ③ 项目与里程碑：`project_id` → `projectId`；里程碑 id / 状态由宿主设。
     let project = serde_json::json!({
         "id": "proj-1",
@@ -1201,11 +1173,6 @@ fn command_frame_batch3_creates_go_through_host_seam() {
 
     // ⑨ 形状闸：必需键缺失 / 类型不符 ⇒ 命令层直接拒，**不发接缝帧**。
     for (command, input) in [
-        ("opc_create_customer", serde_json::json!({ "name": "张三" })),
-        (
-            "opc_create_customer",
-            serde_json::json!({ "name": "张三", "email": "z", "latitude": "北纬30" }),
-        ),
         ("opc_create_project", serde_json::json!({ "budget": 1 })),
         ("opc_add_milestone", serde_json::json!({ "title": "上线", "projectId": 3 })),
         ("opc_create_landing_page", serde_json::json!({ "title": "t", "slug": "s" })),

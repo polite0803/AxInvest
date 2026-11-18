@@ -1,7 +1,7 @@
 {
   "id": "sales_growth",
   "pluginId": "plugin-opc-sales-growth",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-sales-growth",
   "page": {
     "id": "domain:automation-sales",
     "path": "/opc/domain/sales-growth"

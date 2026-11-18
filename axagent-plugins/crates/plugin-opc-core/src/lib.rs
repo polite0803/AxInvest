@@ -20,6 +20,11 @@ pub const OPC_STORE_LIST_INVOICES: &str = "list_invoices";
 pub const OPC_STORE_TRANSITION_INVOICE: &str = "transition_invoice";
 pub const OPC_STORE_CREATE_INVOICE: &str = "create_invoice";
 
+/// sales_growth 域包三条命令的 seam op 名。
+pub const OPC_STORE_CREATE_CUSTOMER: &str = "create_customer";
+pub const OPC_STORE_LIST_LANDING_PAGES: &str = "list_landing_pages";
+pub const OPC_STORE_LIST_CONTACTS: &str = "list_contacts";
+
 /// 发票列表的过滤键（camelCase，与契约 `InvoiceListQuery` 的 serde 键一致）。
 const QUERY_KEYS_INVOICES: &[&str] = &["status", "customerId", "dateFrom", "dateTo", "limit"];
 
@@ -107,6 +112,56 @@ pub fn create_invoice<R: Read, W: Write>(
     call_opc_store(peer, OPC_STORE_CREATE_INVOICE, json!({ "request": request }), call_chain)
 }
 
+/// `opc_create_customer`：创建客户（写 op）。
+pub fn create_customer<R: Read, W: Write>(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_customer";
+    let name = require_str(input, OP, "name")?;
+    let email = require_str(input, OP, "email")?;
+    let mut request = Map::new();
+    request.insert("name".to_string(), Value::String(name.to_string()));
+    request.insert("email".to_string(), Value::String(email.to_string()));
+    copy_optional_strings(
+        input,
+        OP,
+        &mut request,
+        &[
+            "phone",
+            "company",
+            "customerType",
+            "country",
+            "region",
+            "city",
+            "address",
+            "source",
+            "notes",
+        ],
+    )?;
+    copy_optional_f64(input, OP, &mut request, &["latitude", "longitude"])?;
+    call_opc_store(peer, OPC_STORE_CREATE_CUSTOMER, json!({ "request": request }), call_chain)
+}
+
+/// `opc_list_landing_pages`：落地页列表（无入参，裸数组透传）。
+pub fn list_landing_pages<R: Read, W: Write>(
+    _input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    list_rows(&json!({}), call_chain, peer, OPC_STORE_LIST_LANDING_PAGES, &[])
+}
+
+/// `opc_list_contacts`：联系人列表（无入参，裸数组透传）。
+pub fn list_contacts<R: Read, W: Write>(
+    _input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    list_rows(&json!({}), call_chain, peer, OPC_STORE_LIST_CONTACTS, &[])
+}
+
 fn invalid_shape(message: String) -> (String, String) {
     (error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(), message)
 }
@@ -143,6 +198,26 @@ fn copy_optional_strings(
                 return Err(invalid_shape(format!(
                     "{op} 的 `{key}` 必须是字符串（形状判在命令层）"
                 )));
+            },
+        }
+    }
+    Ok(())
+}
+
+fn copy_optional_f64(
+    input: &Value,
+    op: &str,
+    request: &mut Map<String, Value>,
+    keys: &[&str],
+) -> Result<(), (String, String)> {
+    for key in keys {
+        match input.get(*key) {
+            None | Some(Value::Null) => {},
+            Some(value) if value.as_f64().is_some() => {
+                request.insert((*key).to_string(), value.clone());
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!("{op} 的 `{key}` 必须是数值（形状判在命令层）")));
             },
         }
     }

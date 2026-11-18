@@ -695,6 +695,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axagent-plugin-opc-sales-growth"
+version = "3.0.0"
+dependencies = [
+ "axagent-plugin-opc-core",
+ "axagent-plugin-proto",
+ "serde_json",
+]
+
+[[package]]
 name = "axagent-plugin-proto"
 version = "3.0.0"
 dependencies = [

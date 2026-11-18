@@ -109,6 +109,14 @@
         "transportOwner": "plugin-opc-common",
         "manifestStrategy": "declarative-only",
         "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+      },
+      {
+        "phase": 13,
+        "domainPackId": "sales_growth",
+        "pluginId": "plugin-opc-sales-growth",
+        "transportOwner": "opc-sales-growth",
+        "manifestStrategy": "independent-worker",
+        "reason": "三条域包 worker 命令迁独立插件，复用 plugin-opc-core 泛型 helper"
       }
     ],
     "sharedCommands": [

@@ -123,6 +123,12 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: declarativeOpcManifest("opc-software-dev", "软件开发", "software_dev"),
   },
+  "opc-sales-growth": {
+    packageName: "axagent-plugin-opc-sales-growth",
+    webDir: path.join("crates", "plugin-opc-sales-growth", "web"),
+    uiSchema: null,
+    manifest: opcSalesGrowthManifest,
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -5435,5 +5441,64 @@ function opcSecurityManifest({ version }) {
     pages: [{ id: "opc-security", title: "安全合规", entry: PAGE_ENTRY, loading: "bundle" }],
     domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "security.json")],
     commands: [],
+  };
+}
+
+/** sales_growth 域包独立清单：三条命令迁独立 worker。 */
+function opcSalesGrowthManifest({ version, binaryName, sha256 }) {
+  return {
+    name: "opc-sales-growth",
+    version,
+    description: "OPC sales_growth 域包：客户创建 / 落地页列表 / 联系人列表",
+    permissions: ["subprocess_execution", "write"],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    defaultEnabled: true,
+    worker: { program: path.posix.join("bin", binaryName) },
+    pages: [{ id: "opc-sales-growth", title: "销售增长", entry: PAGE_ENTRY, loading: "bundle" }],
+    domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "sales_growth.json")],
+    commands: [
+      {
+        name: "opc_create_customer",
+        description: "创建客户（sales_growth 域包，经宿主 opc.store 写面）",
+        command: "worker://opc_create_customer",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            email: { type: "string" },
+            phone: { type: "string" },
+            company: { type: "string" },
+            customerType: { type: "string" },
+            country: { type: "string" },
+            region: { type: "string" },
+            city: { type: "string" },
+            address: { type: "string" },
+            source: { type: "string" },
+            notes: { type: "string" },
+            latitude: { type: "number" },
+            longitude: { type: "number" },
+          },
+          required: ["name", "email"],
+        },
+      },
+      {
+        name: "opc_list_landing_pages",
+        description: "列出落地页（sales_growth 域包，只读）",
+        command: "worker://opc_list_landing_pages",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "opc_list_contacts",
+        description: "列出联系人（sales_growth 域包，只读）",
+        command: "worker://opc_list_contacts",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

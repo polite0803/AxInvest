@@ -205,6 +205,22 @@ if (mode === "nextest" && !listOnly) {
     "plugins",
     "opc-content-media",
   );
+  const security = spawnSync(
+    "node",
+    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-security", "--check"],
+    { cwd: repoRoot, stdio: "inherit", env: process.env },
+  );
+  if (security.status !== 0) {
+    console.error(`[cargo ${mode}] staging opc-security bundle 失败`);
+    process.exit(security.status ?? 1);
+  }
+  process.env.AXAGENT_SECURITY_BUNDLE_DIR = path.join(
+    repoRoot,
+    "axagent-plugins",
+    "dist",
+    "plugins",
+    "opc-security",
+  );
 }
 
 for (const root of roots) {

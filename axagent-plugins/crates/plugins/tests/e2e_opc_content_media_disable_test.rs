@@ -72,6 +72,20 @@ impl OpcStoreProvider for FixedContentStore {
         }])
     }
 
+    async fn create_content_asset(
+        &self,
+        input: axagent_harness::CreateContentAssetRequest,
+    ) -> axagent_harness::core_error::Result<axagent_harness::ContentAssetSummaryView> {
+        Ok(axagent_harness::ContentAssetSummaryView {
+            id: "asset-new".into(),
+            title: input.title,
+            content_type: input.content_type,
+            status: "draft".into(),
+            tags: input.tags.unwrap_or_default(),
+            created_at: 1_700_000_000,
+        })
+    }
+
     async fn list_publish_schedules(
         &self,
     ) -> axagent_harness::core_error::Result<Vec<axagent_harness::PublishScheduleSummaryView>> {
@@ -83,6 +97,34 @@ impl OpcStoreProvider for FixedContentStore {
             scheduled_at: 1_700_400_000,
             published_at: None,
         }])
+    }
+
+    async fn create_publish_schedule(
+        &self,
+        input: axagent_harness::CreatePublishScheduleRequest,
+    ) -> axagent_harness::core_error::Result<axagent_harness::PublishScheduleSummaryView> {
+        Ok(axagent_harness::PublishScheduleSummaryView {
+            id: "sched-new".into(),
+            content_ref_type: input.content_ref_type,
+            content_ref_id: input.content_ref_id,
+            status: "pending".into(),
+            scheduled_at: input.scheduled_at,
+            published_at: None,
+        })
+    }
+
+    async fn delete_content_asset(
+        &self,
+        _id: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::RemoveContentAssetOutcome> {
+        Ok(axagent_harness::RemoveContentAssetOutcome::Removed)
+    }
+
+    async fn cancel_publish_schedule(
+        &self,
+        _id: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::RemovePublishScheduleOutcome> {
+        Ok(axagent_harness::RemovePublishScheduleOutcome::Removed)
     }
 
     async fn process_due_schedules(
@@ -148,11 +190,56 @@ fn content_media_bundle_disable_and_restore_is_scoped_to_its_plugin() {
         .expect("启用后内容资产列表应可执行");
     let parsed_assets: Value = serde_json::from_str(&assets).expect("资产输出应是 JSON 文本");
     assert_eq!(parsed_assets[0]["contentType"], "article");
+    let created_asset = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "opc_create_content_asset",
+            &json!({
+                "title": "新资产",
+                "contentType": "article",
+                "body": "正文",
+                "tags": ["opc"]
+            }),
+        )
+        .expect("启用后创建内容资产应可执行");
+    let parsed_created_asset: Value =
+        serde_json::from_str(&created_asset).expect("创建资产输出应是 JSON 文本");
+    assert_eq!(parsed_created_asset["contentType"], "article");
+    let removed_asset = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "opc_delete_content_asset",
+            &json!({ "id": "asset-new" }),
+        )
+        .expect("启用后删除内容资产应可执行");
+    assert_eq!(removed_asset, "removed", "删除结果应按 payload 透传");
     let schedules = manager
         .execute_plugin_command(&outcome.plugin_id, "opc_list_publish_schedules", &json!({}))
         .expect("启用后发布计划列表应可执行");
     let parsed_schedules: Value = serde_json::from_str(&schedules).expect("计划输出应是 JSON 文本");
     assert_eq!(parsed_schedules[0]["contentRefId"], "post-1");
+    let created_schedule = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "opc_create_publish_schedule",
+            &json!({
+                "contentRefType": "content_asset",
+                "contentRefId": "asset-new",
+                "scheduledAt": 1_700_400_000
+            }),
+        )
+        .expect("启用后创建发布计划应可执行");
+    let parsed_created_schedule: Value =
+        serde_json::from_str(&created_schedule).expect("创建计划输出应是 JSON 文本");
+    assert_eq!(parsed_created_schedule["contentRefId"], "asset-new");
+    let cancelled = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "opc_cancel_publish_schedule",
+            &json!({ "id": "sched-new" }),
+        )
+        .expect("启用后取消发布计划应可执行");
+    assert_eq!(cancelled, "removed", "取消结果应按 payload 透传");
     let due = manager
         .execute_plugin_command(&outcome.plugin_id, "opc_process_due_schedules", &json!({}))
         .expect("启用后处理到期计划应可执行");
@@ -183,6 +270,12 @@ fn content_media_bundle_disable_and_restore_is_scoped_to_its_plugin() {
         .expect("恢复后页面资产应可解析");
     let page_path = std::path::PathBuf::from(&located.absolute_path);
     assert!(page_path.is_file(), "页面资产不存在：{}", page_path.display());
+    let page_entry = std::fs::read_to_string(&page_path).expect("页面入口应可读");
+    assert!(
+        page_entry.contains("./bundle.js"),
+        "content_media 页面必须加载真实 bundle.js，不得退回说明页：{}",
+        page_path.display()
+    );
 
     drop(manager);
     handle.undo();

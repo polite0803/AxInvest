@@ -1,5 +1,58 @@
 <!doctype html>
 <html lang="zh">
-  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>OPC 销售增长</title><style>:root{color-scheme:light dark;font-family:system-ui,sans-serif}body{margin:0;padding:16px;font-size:13px;line-height:1.6}h1{font-size:16px;margin:0 0 12px}</style></head>
-  <body><h1>OPC 销售增长</h1><p>本插件承接客户创建、落地页列表与联系人列表三条命令；其它共享能力仍由公共底座提供。</p></body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OPC 销售增长</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; padding: 16px; font-size: 13px; line-height: 1.6; }
+      h1 { font-size: 16px; margin: 0 0 12px; }
+      h2 { font-size: 14px; margin: 20px 0 8px; }
+      section { margin-bottom: 16px; }
+      label { display: block; margin: 8px 0 4px; }
+      input { padding: 6px 8px; min-width: 220px; box-sizing: border-box; }
+      button { padding: 6px 12px; margin-right: 8px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #8884; padding: 6px 8px; text-align: left; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+      .state { color: #888; }
+      .error { color: #d4380d; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>OPC 销售增长</h1>
+    <div class="grid">
+      <section>
+        <h2>新增客户</h2>
+        <form id="customer-form">
+          <label for="customer-name">姓名</label>
+          <input id="customer-name" required />
+          <label for="customer-email">邮箱</label>
+          <input id="customer-email" type="email" required />
+          <label for="customer-company">公司</label>
+          <input id="customer-company" />
+          <div style="margin-top: 8px"><button type="submit">创建客户</button></div>
+        </form>
+        <p id="customer-state" class="state" role="status"></p>
+      </section>
+      <section>
+        <h2>落地页</h2>
+        <p id="landing-state" class="state" role="status">加载中…</p>
+        <table id="landing-pages" hidden>
+          <thead><tr><th>标题</th><th>路径</th><th>状态</th><th>创建时间</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </div>
+    <section>
+      <h2>联系表单</h2>
+      <p id="contact-state" class="state" role="status">加载中…</p>
+      <table id="contacts" hidden>
+        <thead><tr><th>姓名</th><th>邮箱</th><th>来源</th><th>已读</th><th>提交时间</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+    <script src="./bundle.js"></script>
+  </body>
 </html>

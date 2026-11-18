@@ -419,7 +419,30 @@ console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
 if (sha256) { console.log(`[plugin-bundle] sha256   ：${sha256}`); }
 
 if (check) {
+  checkPageVerifierIfPresent();
   await checkStagedBundle(manifest, outRoot);
+}
+
+/**
+ * 真实页面 bundle 的静态验收入口。
+ *
+ * 只查「文件可加载 + manifest 有 bundle 页」不够：说明页也能通过。凡是带
+ * `src-web/__verify__/verify-bundle.mjs` 的页面产物，都必须真跑到它通过；这样
+ * worker 命令页退回占位文案时，CI 会红而不是静默绿。
+ */
+function checkPageVerifierIfPresent() {
+  const verifier = path.join(workspaceRoot, spec.webDir ?? "", "..", "src-web", "__verify__", "verify-bundle.mjs");
+  if (!spec.webDir || !fs.existsSync(verifier)) {
+    return;
+  }
+  const result = spawnSync(process.execPath, [verifier], {
+    cwd: path.dirname(path.dirname(verifier)),
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (result.status !== 0) {
+    fail(`页面 bundle 验收失败：${path.relative(workspaceRoot, verifier)}（exit ${result.status}）`);
+  }
 }
 
 /** 起一次成品 worker：describe 必须回合法声明，shutdown 必须回执并以 0 退出。 */
@@ -5309,9 +5332,11 @@ function opcSalesGrowthManifest({ version, binaryName, sha256 }) {
   };
 }
 
-/** content_media 域包独立清单：八条内容/发布计划命令迁独立 worker。 */
+/** content_media 域包独立清单：内容资产 / 博客 / 发布计划命令迁独立 worker。 */
 function opcContentMediaManifest({ version, binaryName, sha256 }) {
   const names = [
+    "opc_create_content_asset",
+    "opc_create_publish_schedule",
     "opc_list_blog_posts",
     "opc_create_blog_post",
     "opc_list_publish_schedules",
@@ -5322,6 +5347,8 @@ function opcContentMediaManifest({ version, binaryName, sha256 }) {
     "opc_process_due_schedules",
   ];
   const writes = new Set([
+    "opc_create_content_asset",
+    "opc_create_publish_schedule",
     "opc_create_blog_post",
     "opc_update_content_asset",
     "opc_delete_content_asset",

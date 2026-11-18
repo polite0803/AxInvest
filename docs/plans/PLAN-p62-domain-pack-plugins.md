@@ -110,6 +110,8 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 ### 7.3 独立仓验收进展
 
 - **真 bundle 启停端到端已验收**：三个独立 worker 域（accounting / sales_growth / content_media）覆盖命令安装 → 启用 → 执行 → 禁用 → 命令链不可用且域包投影消失 → 恢复启用 → 再执行；声明式插件以 security（零命令、零 worker）为代表完成页面资产与域包投影的启停端到端。CI 会在 `cargo nextest` 前串行 staging 这四个 bundle，避免空跑 SKIP 假绿。
+- **独立 worker 域的真实页面已落地**：accounting、sales_growth、content_media 均改为插件内自足的 `src-web/main.ts` + `web/pages/bundle.js`，只经 SDK `executeCommand` 访问本插件命令；页面覆盖 loading / empty / error 与真实写操作。`build-plugin-bundle.mjs --check` 会执行各域 `src-web/__verify__/verify-bundle.mjs`，worker 页面退回说明文案或改用 `client.invoke("opc_*")` 时门禁直接失败。
+- **页面与命令声明对齐补漏**：content_media 页面所需的 `opc_create_content_asset` / `opc_create_publish_schedule` 原先只存在于公共 worker 与逻辑清单，未进独立 bundle 清单和 content_media worker 分派；本批把实现上收到 `plugin-opc-core`、补齐独立 worker 分派、manifest 命令与协议测试，并由真 bundle E2E 覆盖创建 / 删除 / 排期 / 取消全链。sales_growth 与 content_media E2E 同时断言页面入口必须加载 `./bundle.js`。
 
 - **2026-11-18 已建立可复跑验收链**：`scripts/verify-opc-plugin-sdk.mjs` 会拷出 OPC 插件 SDK 最小独立树（axagent-plugins + axagent-core 根配置 + harness/plugin-proto），在其中完成 `cargo metadata` / `cargo check` / `cargo clippy` / `cargo test` 全绿；`scripts/check-workspace-boundary.mjs` 把插件 workspace 对外部 workspace 的 path 依赖量化为 12 条并按基线只减不增锁定。`scripts/check-sdk-package-surface.mjs` 再对 proto / harness / testkit 三件套逐包运行 `cargo package --list --allow-dirty`，校验包内必含 `Cargo.toml` 与 `src/lib.rs`、不得混入 `target/` 或越界路径。三道门均已接入 `scripts/ci-check.mjs` 与 `.github/workflows/ci.yml`。
 - **持续验证**：SDK 三件套已齐：协议 crate `axagent-plugin-proto` + `axagent-plugin-testkit`（契约快照与测试夹具）+ harness。OPC 六个 crate 在独立树中 `check / clippy / test` 全部通过；`--full` 模式另验全插件树 `cargo check --workspace`。域包底册已迁入 SDK workspace（`axagent-plugins/scripts/opc-domain-pack-plugins.json`），独立树内 `build-plugin-bundle.mjs --plugin opc-accounting/opc-security --check` 均通过，bundle 生成链不再假设主仓布局。独立树打包出的 accounting bundle 已进一步走 `PluginManager` 安装 → 启用 → 命令 → 禁用 → 恢复全链 e2e，证明独立树产物可被宿主装载并执行。
@@ -122,4 +124,5 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 ### 7.5 尚未闭合
 
 - 物理拆仓（把插件 workspace 独立成 git 仓库）尚未执行；当前证据是“可拷出独立树构建”而非“仓库已独立”。
-- 真机禁用/启用插件后的页面端到端点击链路与升级前数据逐表对比尚未做；当前证据是插件边界门禁、禁用投影单测与 schema 未变证明。
+- 11 个声明式域仍只有信息页，尚未迁入各自主壳真实业务页面；其“页面资产存在”不等于“真实业务页面已插件化”。
+- 真机 GUI 内的页面点击链路与升级前数据逐表对比尚未做；当前证据是静态 bundle 验证、真 bundle 安装 / 启停 / 命令 e2e 与 schema 未变证明。

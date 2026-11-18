@@ -32,6 +32,8 @@ pub const OPC_STORE_DELETE_BLOG_POST: &str = "delete_blog_post";
 pub const OPC_STORE_CREATE_BLOG_POST: &str = "create_blog_post";
 pub const OPC_STORE_LIST_CONTENT_ASSETS: &str = "list_content_assets";
 pub const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
+pub const OPC_STORE_CREATE_CONTENT_ASSET: &str = "create_content_asset";
+pub const OPC_STORE_CREATE_PUBLISH_SCHEDULE: &str = "create_publish_schedule";
 pub const OPC_STORE_UPDATE_CONTENT_ASSET: &str = "update_content_asset";
 pub const OPC_STORE_DELETE_CONTENT_ASSET: &str = "delete_content_asset";
 pub const OPC_STORE_CANCEL_PUBLISH_SCHEDULE: &str = "cancel_publish_schedule";
@@ -247,6 +249,61 @@ pub fn create_blog_post<R: Read, W: Write>(
 ) -> Result<Value, (String, String)> {
     let request = blog_post_create_request(input)?;
     call_opc_store(peer, OPC_STORE_CREATE_BLOG_POST, json!({ "request": request }), call_chain)
+}
+
+/// `opc_create_content_asset`：创建内容资产（写 op，创建后为草稿态）。
+pub fn create_content_asset<R: Read, W: Write>(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_content_asset";
+    let title = require_str(input, OP, "title")?;
+    let content_type = require_str(input, OP, "contentType")?;
+    let body = require_str(input, OP, "body")?;
+    let mut request = Map::new();
+    request.insert("title".to_string(), Value::String(title.to_string()));
+    request.insert("contentType".to_string(), Value::String(content_type.to_string()));
+    request.insert("body".to_string(), Value::String(body.to_string()));
+    if let Some(tags) = input.get("tags").filter(|value| !value.is_null()) {
+        let items = tags.as_array().filter(|items| items.iter().all(Value::is_string)).ok_or_else(
+            || invalid_shape(format!("{OP} 的 `tags` 必须是字符串数组（形状判在命令层）")),
+        )?;
+        request.insert("tags".to_string(), Value::Array(items.clone()));
+    }
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_CONTENT_ASSET,
+        json!({ "request": Value::Object(request) }),
+        call_chain,
+    )
+}
+
+/// `opc_create_publish_schedule`：创建发布计划（写 op）。
+pub fn create_publish_schedule<R: Read, W: Write>(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_create_publish_schedule";
+    let content_ref_type = require_str(input, OP, "contentRefType")?;
+    let content_ref_id = require_str(input, OP, "contentRefId")?;
+    let scheduled_at = input
+        .get("scheduledAt")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| invalid_shape(format!("{OP} 需要整数时间戳字段 `scheduledAt`")))?;
+    call_opc_store(
+        peer,
+        OPC_STORE_CREATE_PUBLISH_SCHEDULE,
+        json!({
+            "request": {
+                "contentRefType": content_ref_type,
+                "contentRefId": content_ref_id,
+                "scheduledAt": scheduled_at,
+            }
+        }),
+        call_chain,
+    )
 }
 
 fn blog_post_create_request(input: &Value) -> Result<Value, (String, String)> {

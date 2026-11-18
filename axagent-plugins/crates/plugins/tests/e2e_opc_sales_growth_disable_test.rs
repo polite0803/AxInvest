@@ -146,6 +146,12 @@ fn sales_growth_bundle_disable_and_restore_is_scoped_to_its_plugin() {
         .expect("恢复后页面资产应可解析");
     let page_path = std::path::PathBuf::from(&located.absolute_path);
     assert!(page_path.is_file(), "页面资产不存在：{}", page_path.display());
+    let page_entry = std::fs::read_to_string(&page_path).expect("页面入口应可读");
+    assert!(
+        page_entry.contains("./bundle.js"),
+        "sales_growth 页面必须加载真实 bundle.js，不得退回说明页：{}",
+        page_path.display()
+    );
 
     drop(manager);
     handle.undo();

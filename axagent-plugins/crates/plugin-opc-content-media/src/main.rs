@@ -57,11 +57,17 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         "opc_list_content_assets" => {
             core::list_rows_no_args(&request.call_chain, peer, core::OPC_STORE_LIST_CONTENT_ASSETS)
         },
+        "opc_create_content_asset" => {
+            core::create_content_asset(&frame.input, &request.call_chain, peer)
+        },
         "opc_list_publish_schedules" => core::list_rows_no_args(
             &request.call_chain,
             peer,
             core::OPC_STORE_LIST_PUBLISH_SCHEDULES,
         ),
+        "opc_create_publish_schedule" => {
+            core::create_publish_schedule(&frame.input, &request.call_chain, peer)
+        },
         "opc_update_content_asset" => {
             core::update_content_asset(&frame.input, &request.call_chain, peer)
         },

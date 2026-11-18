@@ -956,3 +956,126 @@ fn command_frame_batch3_creates_go_through_host_seam() {
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
 }
+
+#[test]
+fn content_asset_and_publish_schedule_creates_use_nested_camel_case_requests() {
+    let mut worker = Worker::spawn();
+
+    let asset = serde_json::json!({
+        "id": "asset-new",
+        "title": "新资产",
+        "contentType": "article",
+        "status": "draft",
+        "tags": ["opc"],
+        "createdAt": 1_700_000_000
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_content_asset",
+        serde_json::json!({
+            "title": "新资产",
+            "contentType": "article",
+            "body": "正文",
+            "tags": ["opc"]
+        }),
+        "create_content_asset",
+        asset,
+    );
+    assert_eq!(
+        args,
+        serde_json::json!({
+            "request": {
+                "title": "新资产",
+                "contentType": "article",
+                "body": "正文",
+                "tags": ["opc"]
+            }
+        })
+        .as_object()
+        .expect("夹具应是对象")
+        .clone(),
+        "内容资产创建必须只发一个 request 嵌层，并用 camelCase key"
+    );
+
+    let schedule = serde_json::json!({
+        "id": "sched-new",
+        "contentRefType": "content_asset",
+        "contentRefId": "asset-new",
+        "status": "pending",
+        "scheduledAt": 1_700_400_000,
+        "publishedAt": null
+    });
+    let args = batch3_roundtrip(
+        &mut worker,
+        "opc_create_publish_schedule",
+        serde_json::json!({
+            "contentRefType": "content_asset",
+            "contentRefId": "asset-new",
+            "scheduledAt": 1_700_400_000
+        }),
+        "create_publish_schedule",
+        schedule,
+    );
+    assert_eq!(
+        args,
+        serde_json::json!({
+            "request": {
+                "contentRefType": "content_asset",
+                "contentRefId": "asset-new",
+                "scheduledAt": 1_700_400_000
+            }
+        })
+        .as_object()
+        .expect("夹具应是对象")
+        .clone(),
+        "发布计划创建必须只发一个 request 嵌层，并用 camelCase key"
+    );
+
+    worker.send(&shutdown_frame());
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+#[test]
+fn content_asset_and_publish_schedule_creates_reject_invalid_shape_before_seam() {
+    let mut worker = Worker::spawn();
+    for (command, input) in [
+        ("opc_create_content_asset", serde_json::json!({ "contentType": "article", "body": "x" })),
+        ("opc_create_content_asset", serde_json::json!({ "title": "t", "body": "x" })),
+        ("opc_create_content_asset", serde_json::json!({ "title": "t", "contentType": "article" })),
+        (
+            "opc_create_content_asset",
+            serde_json::json!({ "title": "t", "contentType": "article", "body": "x", "tags": "opc" }),
+        ),
+        (
+            "opc_create_publish_schedule",
+            serde_json::json!({ "contentRefType": "content_asset", "contentRefId": "asset-new" }),
+        ),
+        (
+            "opc_create_publish_schedule",
+            serde_json::json!({
+                "contentRefType": "content_asset",
+                "contentRefId": "asset-new",
+                "scheduledAt": "1700400000"
+            }),
+        ),
+    ] {
+        worker.send(
+            &CommandFrame::new(PLUGIN_ID, command, input.clone(), 5_000)
+                .to_frame_request()
+                .expect("命令帧应能编成请求"),
+        );
+        let response = worker.recv_response();
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+            "{command} 的形状不符必须在命令层拒（{input}）：{response:?}"
+        );
+    }
+
+    worker.send(&shutdown_frame());
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}

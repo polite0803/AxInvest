@@ -1097,6 +1097,9 @@ jobs:
       - name: Check workspace boundary (plugin path deps ratchet)
         run: node scripts/check-workspace-boundary.mjs
 
+      - name: Verify OPC plugin SDK standalone tree
+        run: node scripts/verify-opc-plugin-sdk.mjs
+
       # 多 workspace cargo 命令组装自检（纯 Node，不起 cargo）。
       # 为什么要单列：`--manifest-path` 若落到 `--` 之后，rustc/clippy-driver 会报
       # `Unrecognized option: 'manifest-path'` —— 而**已缓存的 crate 根本不调 rustc ⇒ 不报错**，

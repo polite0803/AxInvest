@@ -317,6 +317,7 @@ if (canRunFrontend) {
   // 显式化并锁死只减不增；命令与 ci.yml 的 workspace-config-parity job 逐字同源。
   step("插件 workspace 边界自检（正负对照）", "node scripts/check-workspace-boundary.mjs --selftest");
   step("插件 workspace 跨根 path 依赖（基线只减不增）", "node scripts/check-workspace-boundary.mjs");
+  step("OPC 插件 SDK 独立树验收", "node scripts/verify-opc-plugin-sdk.mjs");
 
   // ── 能力域单一真相源门禁（权威枚举 ↔ 前端 / prompt / i18n 副本）──
   // 为什么需要：`CapabilityDomain`（`harness/src/capability.rs`）是唯一权威，

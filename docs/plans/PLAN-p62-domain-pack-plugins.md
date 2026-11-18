@@ -115,7 +115,11 @@ P6.2 的可插单元从 `plugin-opc` 一个大包改为**按域包逐包插件�
 - **持续验证**：OPC 六个 crate（plugin-opc-core / accounting / sales-growth / content-media / plugin-opc / plugins）在独立树中 `check / clippy / test` 全部通过；这意味着 OPC 插件域的 Rust 构建面已具备脱离主仓的形态。
 - **剩余 debt**：`workspace-boundary-allowlist.json` 当前登记 11 条跨根 path 依赖，核心缺口仍是 plugin-stock 对 `analysis-engine` / `astock-data` 的业务实现依赖，以及 `plugins` / `schema-gen` 对 harness 的实现依赖。终局仍需把 SDK crate 发布成可解析版本，或提供私有 registry。
 
-### 7.4 尚未闭合
+### 7.4 数据保留实测
+
+- **升级收敛数据保留已验收**：`axagent-infra/crates/dao/tests/opc_data_preservation.rs` 用 `opc_invoices` 的交付 + 客户账单两种投影形态插入真实行，然后重跑生产同源的声明式收敛引擎（`bootstrap_schema`），断言行数不变、逐字段保留（lead_id / customer_id / invoice_number / total / line_items_json）。手工 migration 清单为空，这一步就是「升级」的建表/加列/索引收敛面；真机升级前的数据逐表对比仍列于 7.5。
+
+### 7.5 尚未闭合
 
 - 物理拆仓（把插件 workspace 独立成 git 仓库）尚未执行；当前证据是“可拷出独立树构建”而非“仓库已独立”。
 - 真机禁用/启用插件后的页面端到端点击链路与升级前数据逐表对比尚未做；当前证据是插件边界门禁、禁用投影单测与 schema 未变证明。

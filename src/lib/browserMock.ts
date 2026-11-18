@@ -7465,8 +7465,9 @@ async function executeCommand<T>(
       const fx = await loadWikiGraphFixture();
       return (fx ? fx.communitiesResult : { communities: {} }) as T;
     }
-    case "wiki_notes_list": {
-      const vaultId = String(args?.vault_id ?? "");
+    case "wiki_notes_list":
+    case "wiki_list_notes": {
+      const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");
       return seedWikiNotes(vaultId) as unknown as T;
     }
     case "wiki_notes_get":
@@ -7476,9 +7477,10 @@ async function executeCommand<T>(
       if (!note) { throw new Error(`Note ${id} not found`); }
       return note as unknown as T;
     }
-    case "wiki_notes_get_by_path": {
-      const vaultId = String(args?.vault_id ?? "");
-      const filePath = String(args?.file_path ?? "");
+    case "wiki_notes_get_by_path":
+    case "wiki_get_note_by_path": {
+      const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");
+      const filePath = String(args?.filePath ?? args?.file_path ?? "");
       const note = getWikiNotes().find(
         (n) => n.vaultId === vaultId && n.filePath === filePath,
       );

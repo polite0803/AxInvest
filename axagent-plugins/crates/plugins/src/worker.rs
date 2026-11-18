@@ -2896,6 +2896,23 @@ impl HostPeer {
                 }
             },
             // ── wiki.store 接缝：宿主把「笔记 → 知识库文档」同步写面暴露给插件 ──
+            "wiki.store" if op == "list_notes" => {
+                // 标量键 vaultId；读 op ⇒ 无权限闸。
+                let vault_id: String = match deserialize_arg(&args, "vaultId", seam) {
+                    Ok(vault_id) => vault_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_notes(vault_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(notes) => to_value("Vec<Note>", &notes),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "wiki.store" if op == "get_note" => {
                 // 标量键：id 与 trait 形参同名，无 request 外壳（与 knowledge.vector
                 // 的 get_collection_info 同形态）。读 op ⇒ 不设权限闸。
@@ -2907,6 +2924,27 @@ impl HostPeer {
                     return self.unavailable(seam);
                 };
                 let Some(result) = self.block_on(provider.get_note(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(note) => to_value("Note", &note),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "get_note_by_path" => {
+                let vault_id: String = match deserialize_arg(&args, "vaultId", seam) {
+                    Ok(vault_id) => vault_id,
+                    Err(response) => return response,
+                };
+                let file_path: String = match deserialize_arg(&args, "filePath", seam) {
+                    Ok(file_path) => file_path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_note_by_path(vault_id, file_path))
+                else {
                     return no_runtime(seam);
                 };
                 match result {

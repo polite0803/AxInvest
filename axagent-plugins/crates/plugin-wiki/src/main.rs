@@ -20,7 +20,9 @@ type WorkerPeer = Peer<StdinLock<'static>, StdoutLock<'static>>;
 
 const PLUGIN_NAME: &str = "wiki";
 const COMMAND_SYNC_NOTE: &str = "wiki_sync_note_to_knowledge_base";
+const COMMAND_LIST_NOTES: &str = "wiki_list_notes";
 const COMMAND_GET_NOTE: &str = "wiki_get_note";
+const COMMAND_GET_NOTE_BY_PATH: &str = "wiki_get_note_by_path";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -80,7 +82,35 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         .into_frame_response();
     }
 
+    let mut seam_call = |op: &str, args: Value| -> Result<Value, (String, String)> {
+        match peer.call_seam(WIKI_STORE_SEAM, op, args, request.call_chain.clone()) {
+            Ok(reply) => match reply.kind {
+                axagent_plugin_proto::ResponseKind::Success => {
+                    Ok(reply.value.unwrap_or(Value::Null))
+                },
+                axagent_plugin_proto::ResponseKind::Error => Err((
+                    reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+                    reply
+                        .message
+                        .unwrap_or_else(|| "宿主 wiki.store 接缝返回错误但未说明".to_string()),
+                )),
+            },
+            Err(e) => Err((
+                error_codes::PLUGIN_COMMAND_FAILED.to_string(),
+                format!("wiki.store 接缝调用失败：{e}"),
+            )),
+        }
+    };
     let outcome = match frame.command.as_str() {
+        COMMAND_LIST_NOTES => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("list_notes", json!({ "vaultId": vault_id }))
+        },
         COMMAND_GET_NOTE => {
             let id = match require_str(&frame.input, "id") {
                 Ok(value) => value,
@@ -88,34 +118,22 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     return CommandFault::for_frame(&frame, code, message).into_frame_response();
                 },
             };
-            match peer.call_seam(
-                WIKI_STORE_SEAM,
-                "get_note",
-                json!({ "id": id }),
-                request.call_chain.clone(),
-            ) {
-                Ok(reply) => match reply.kind {
-                    axagent_plugin_proto::ResponseKind::Success => CommandOutcome::Reply(
-                        CommandReply::for_frame(&frame, reply.value.unwrap_or(Value::Null)),
-                    ),
-                    axagent_plugin_proto::ResponseKind::Error => {
-                        CommandOutcome::Fault(CommandFault::for_frame(
-                            &frame,
-                            reply
-                                .code
-                                .unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
-                            reply.message.unwrap_or_else(|| {
-                                "宿主 wiki.store 接缝返回错误但未说明".to_string()
-                            }),
-                        ))
-                    },
+            seam_call("get_note", json!({ "id": id }))
+        },
+        COMMAND_GET_NOTE_BY_PATH => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
                 },
-                Err(e) => CommandOutcome::Fault(CommandFault::for_frame(
-                    &frame,
-                    error_codes::PLUGIN_COMMAND_FAILED.to_string(),
-                    format!("wiki.store 接缝调用失败：{e}"),
-                )),
-            }
+            };
+            let file_path = match require_str(&frame.input, "filePath") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("get_note_by_path", json!({ "vaultId": vault_id, "filePath": file_path }))
         },
         COMMAND_SYNC_NOTE => {
             let note_id = match require_str(&frame.input, "noteId") {
@@ -132,34 +150,10 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             };
             // 命令面 camelCase（禁区 13）；接缝入参同样 camelCase，宿主 provider
             // 反序列化成契约 DTO。id 之外的字段插件侧不传（数据主权在宿主）。
-            match peer.call_seam(
-                WIKI_STORE_SEAM,
+            seam_call(
                 WIKI_STORE_SYNC_NOTE,
                 json!({ "request": { "noteId": note_id, "knowledgeBaseId": knowledge_base_id } }),
-                request.call_chain.clone(),
-            ) {
-                Ok(reply) => match reply.kind {
-                    axagent_plugin_proto::ResponseKind::Success => CommandOutcome::Reply(
-                        CommandReply::for_frame(&frame, reply.value.unwrap_or(Value::Null)),
-                    ),
-                    axagent_plugin_proto::ResponseKind::Error => {
-                        CommandOutcome::Fault(CommandFault::for_frame(
-                            &frame,
-                            reply
-                                .code
-                                .unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
-                            reply.message.unwrap_or_else(|| {
-                                "宿主 wiki.store 接缝返回错误但未说明".to_string()
-                            }),
-                        ))
-                    },
-                },
-                Err(e) => CommandOutcome::Fault(CommandFault::for_frame(
-                    &frame,
-                    error_codes::PLUGIN_COMMAND_FAILED.to_string(),
-                    format!("wiki.store 接缝调用失败：{e}"),
-                )),
-            }
+            )
         },
         other => {
             return CommandFault::for_frame(
@@ -168,6 +162,12 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 format!("wiki 插件没有命令 `{other}`"),
             )
             .into_frame_response();
+        },
+    };
+    let outcome = match outcome {
+        Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+        Err((code, message)) => {
+            CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
         },
     };
     outcome

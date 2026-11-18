@@ -74,6 +74,31 @@ fn command(plugin_id: &str, name: &str, input: serde_json::Value) -> FrameReques
     command_frame(plugin_id, name, input, 5_000)
 }
 
+fn sample_note(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "vaultId": "v1",
+        "title": "测试笔记",
+        "filePath": "a.md",
+        "content": "# hi",
+        "contentHash": "h",
+        "author": "u",
+        "pageType": null,
+        "tags": [],
+        "sourceRefs": null,
+        "relatedPages": null,
+        "qualityScore": null,
+        "lastLintedAt": null,
+        "lastCompiledAt": null,
+        "compiledSourceHash": null,
+        "userEdited": false,
+        "userEditedAt": null,
+        "createdAt": 1,
+        "updatedAt": 2,
+        "isDeleted": false,
+    })
+}
+
 #[test]
 fn describe_declares_only_the_wiki_store_seam() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
@@ -167,28 +192,7 @@ fn get_note_reads_via_the_host_seam_without_write_permission() {
     // 标量键（无 request 外壳），与 get_collection_info 同形态。
     assert_eq!(call.args["args"]["id"], "note-9");
 
-    let note = serde_json::json!({
-        "id": "note-9",
-        "vaultId": "v1",
-        "title": "测试笔记",
-        "filePath": "a.md",
-        "content": "# hi",
-        "contentHash": "h",
-        "author": "u",
-        "pageType": null,
-        "tags": [],
-        "sourceRefs": null,
-        "relatedPages": null,
-        "qualityScore": null,
-        "lastLintedAt": null,
-        "lastCompiledAt": null,
-        "compiledSourceHash": null,
-        "userEdited": false,
-        "userEditedAt": null,
-        "createdAt": 1,
-        "updatedAt": 2,
-        "isDeleted": false,
-    });
+    let note = sample_note("note-9");
     worker.send_response(
         &FrameResponse::success(note.clone())
             .with_id(call.request_id.expect("出站请求带 request_id")),
@@ -198,6 +202,44 @@ fn get_note_reads_via_the_host_seam_without_write_permission() {
     worker.shutdown();
 }
 
+#[test]
+fn list_and_get_by_path_are_read_only_seam_calls() {
+    // ① 列表：标量 vaultId。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_list_notes", serde_json::json!({ "vaultId": "v1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "list_notes");
+    assert_eq!(call.args["args"]["vaultId"], "v1");
+    let notes = serde_json::json!([sample_note("note-1")]);
+    worker.send_response(
+        &FrameResponse::success(notes.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &notes);
+    worker.shutdown();
+
+    // ② 按路径：两个标量键都是 camelCase。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_get_note_by_path",
+        serde_json::json!({ "vaultId": "v1", "filePath": "dir/a.md" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "get_note_by_path");
+    assert_eq!(call.args["args"]["vaultId"], "v1");
+    assert_eq!(call.args["args"]["filePath"], "dir/a.md");
+    let note = sample_note("note-2");
+    worker.send_response(
+        &FrameResponse::success(note.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &note);
+    worker.shutdown();
+}
 #[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);

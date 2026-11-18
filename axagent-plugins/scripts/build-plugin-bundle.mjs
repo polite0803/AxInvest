@@ -5446,6 +5446,17 @@ function wikiManifest({ version, binaryName, sha256 }) {
     worker: { program: path.posix.join("bin", binaryName) },
     commands: [
       {
+        name: "wiki_list_notes",
+        description: "列出一个 Wiki vault 下的笔记（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_list_notes",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { vaultId: { type: "string", description: "宿主侧 vault id" } },
+          required: ["vaultId"],
+        },
+      },
+      {
         name: "wiki_get_note",
         description: "按 id 读取一条 Wiki 笔记（经宿主 wiki.store 只读接缝）",
         command: "worker://wiki_get_note",
@@ -5454,6 +5465,20 @@ function wikiManifest({ version, binaryName, sha256 }) {
           type: "object",
           properties: { id: { type: "string", description: "宿主侧笔记 id" } },
           required: ["id"],
+        },
+      },
+      {
+        name: "wiki_get_note_by_path",
+        description: "按 vault + 路径读取一条 Wiki 笔记（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_get_note_by_path",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: {
+            vaultId: { type: "string", description: "宿主侧 vault id" },
+            filePath: { type: "string", description: "vault 内相对路径" },
+          },
+          required: ["vaultId", "filePath"],
         },
       },
       {

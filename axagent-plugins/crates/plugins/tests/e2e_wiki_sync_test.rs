@@ -22,37 +22,56 @@ use axagent_harness::{
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use serde_json::{Value, json};
 
+fn sample_note(id: String) -> axagent_harness::note_dtos::Note {
+    axagent_harness::note_dtos::Note {
+        id,
+        vault_id: "v1".into(),
+        title: "测试笔记".into(),
+        file_path: "a.md".into(),
+        content: "# hi".into(),
+        content_hash: "h".into(),
+        author: "u".into(),
+        page_type: None,
+        tags: Vec::new(),
+        source_refs: None,
+        related_pages: None,
+        quality_score: None,
+        last_linted_at: None,
+        last_compiled_at: None,
+        compiled_source_hash: None,
+        user_edited: false,
+        user_edited_at: None,
+        created_at: 1,
+        updated_at: 2,
+        is_deleted: false,
+    }
+}
+
 /// `wiki.store` 的宿主替身：只回执同步结果，不碰 DB / 文件系统。
 struct FixedWikiStore;
 
 #[async_trait::async_trait]
 impl WikiStoreProvider for FixedWikiStore {
+    async fn list_notes(
+        &self,
+        vault_id: String,
+    ) -> axagent_harness::core_error::Result<Vec<axagent_harness::note_dtos::Note>> {
+        Ok(vec![sample_note(format!("note-in-{vault_id}"))])
+    }
+
+    async fn get_note_by_path(
+        &self,
+        _vault_id: String,
+        file_path: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        Ok(sample_note(format!("note-at-{file_path}")))
+    }
+
     async fn get_note(
         &self,
         id: String,
     ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
-        Ok(axagent_harness::note_dtos::Note {
-            id,
-            vault_id: "v1".into(),
-            title: "测试笔记".into(),
-            file_path: "a.md".into(),
-            content: "# hi".into(),
-            content_hash: "h".into(),
-            author: "u".into(),
-            page_type: None,
-            tags: Vec::new(),
-            source_refs: None,
-            related_pages: None,
-            quality_score: None,
-            last_linted_at: None,
-            last_compiled_at: None,
-            compiled_source_hash: None,
-            user_edited: false,
-            user_edited_at: None,
-            created_at: 1,
-            updated_at: 2,
-            is_deleted: false,
-        })
+        Ok(sample_note(id))
     }
 
     async fn sync_note_to_knowledge_base(
@@ -136,6 +155,22 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
     let note: Value = serde_json::from_str(&note).expect("读取输出应是 JSON 文本");
     assert_eq!(note["id"], "note-9");
     assert_eq!(note["title"], "测试笔记");
+
+    let listed = manager
+        .execute_plugin_command(&outcome.plugin_id, "wiki_list_notes", &json!({ "vaultId": "v1" }))
+        .expect("wiki 列表命令应可执行");
+    let listed: Value = serde_json::from_str(&listed).expect("列表输出应是 JSON 文本");
+    assert_eq!(listed[0]["id"], "note-in-v1");
+
+    let by_path = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_get_note_by_path",
+            &json!({ "vaultId": "v1", "filePath": "a.md" }),
+        )
+        .expect("wiki 按路径读取命令应可执行");
+    let by_path: Value = serde_json::from_str(&by_path).expect("按路径输出应是 JSON 文本");
+    assert_eq!(by_path["id"], "note-at-a.md");
 
     drop(manager);
     handle.undo();

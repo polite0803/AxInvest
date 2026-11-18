@@ -104,7 +104,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   loadNotes: async (vaultId) => {
     set({ loading: true, error: null });
     try {
-      const notes = await invoke<Note[]>("wiki_notes_list", { vaultId });
+      const notes = await invokePluginCommand<Note[]>("wiki_list_notes", { vaultId });
       set({ notes, loading: false });
     } catch (e) {
       set({ error: translateBackendError(e), loading: false });
@@ -130,7 +130,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   getNoteByPath: async (vaultId, filePath) => {
     try {
-      return await invoke<Note>("wiki_notes_get_by_path", {
+      return await invokePluginCommand<Note>("wiki_get_note_by_path", {
         vaultId,
         filePath,
       });

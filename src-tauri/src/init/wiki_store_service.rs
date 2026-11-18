@@ -113,12 +113,40 @@ impl HostWikiStore {
 
 #[async_trait]
 impl WikiStoreProvider for HostWikiStore {
+    async fn list_notes(&self, vault_id: String) -> Result<Vec<axagent_harness::note_dtos::Note>> {
+        if vault_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::list_notes 需要非空 vaultId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::note::list_notes(state.harness.db(), &vault_id)
+            .await
+            .map_err(to_provider_error)
+    }
+
     async fn get_note(&self, id: String) -> Result<axagent_harness::note_dtos::Note> {
         if id.trim().is_empty() {
             return Err(AxAgentError::Validation("wiki.store::get_note 需要非空 id".into()));
         }
         let state = self.app.state::<crate::AppState>();
         axagent_dao::repo::note::get_note(state.harness.db(), &id)
+            .await
+            .map_err(to_provider_error)
+    }
+
+    async fn get_note_by_path(
+        &self,
+        vault_id: String,
+        file_path: String,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        if vault_id.trim().is_empty() || file_path.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::get_note_by_path 需要非空 vaultId / filePath".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::note::get_note_by_path(state.harness.db(), &vault_id, &file_path)
             .await
             .map_err(to_provider_error)
     }

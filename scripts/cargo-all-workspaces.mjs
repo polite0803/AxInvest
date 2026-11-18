@@ -155,6 +155,25 @@ function buildArgs(modeName, root, extraArgs) {
 }
 
 if (mode === "nextest" && !listOnly) {
+  // stock 真 bundle 端到端测试同样需要 staged 产物。此前只 stage OPC，stock 测试
+  // 在 CI 里会静默 SKIP（测试返回成功）；这里先补上，避免把 SKIP 读成验收通过。
+  const stockBundle = spawnSync(
+    "node",
+    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "stock", "--check"],
+    { cwd: repoRoot, stdio: "inherit", env: process.env },
+  );
+  if (stockBundle.status !== 0) {
+    console.error(`[cargo ${mode}] staging stock bundle 失败`);
+    process.exit(stockBundle.status ?? 1);
+  }
+  process.env.AXAGENT_STOCK_BUNDLE_DIR = path.join(
+    repoRoot,
+    "axagent-plugins",
+    "dist",
+    "plugins",
+    "stock",
+  );
+
   // accounting 真 bundle 端到端测试需要 staged 产物；没有产物时该测试会打印 SKIP。
   // CI 里必须真跑，不能靠 SKIP 假绿，故在测试前串行构建产物。
   const r = spawnSync(

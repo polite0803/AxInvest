@@ -23,8 +23,8 @@ P6.1 的**已裁定工作全部完成并推送**（HEAD `00918c06a`，tag `v3.0.
 |---|---|---|---|
 | 1 | 主壳 `grep` 域 crate = 0 | `src-tauri/src` 命中 **500 处**（`axagent_analysis_engine::` / `axagent_astock_data::` / `axagent_quant::` / `axagent_stock_core::`；含 `lib.rs:143` 注释中的说明） | ✗ 字面未达标；按 §80/§81 过渡期口径为**预期态**，终局断开依赖才算完成 |
 | 2 | `src-tauri/Cargo.toml` 无股票 crate | **6 条依赖**：`axagent-analysis-engine` / `axagent-astock-data` / `axagent-company-runtime` / `axagent-market-sim` / `axagent-quant`（均 :128–147）+ `axagent-stock-core`（:160） | ✗ 同上，过渡期预期态 |
-| 3 | 卸载股票插件后其余 1 099 条命令可用 | 判定档 `commandTotal=1171`，插件边界口径股票命令 71 条 ⇒ 理论余量 1100 条；**未做真实卸载端到端测试** | △ 算术可达，**未实测** |
-| 4 | `stock_*` 表与数据保留 | entities 侧股票/荐股/组合/反思表实体文件 **21 个**（`stock_analyses` / `stock_reflections` / `reco_picks` / `reco_pool_batches` / `portfolio_holdings` / `trades` 等）仍在；`MIGRATIONS = &[]`（声明式收敛引擎建表），历史手写 migration 已删（§8364） | ✓ 表实体保留；数据保留**未做升级前后数据对账实测** |
+| 3 | 卸载股票插件后其余 1 099 条命令可用 | 判定档 `commandTotal=1171`，插件边界口径股票命令 71 条 ⇒ 理论余量 1100 条；2026-11-18 追加 `e2e_stock_uninstall_isolation_test.rs`：真 stock + security bundle 并存，卸载 stock 后 stock worker/命令/页面消失，security 页面与域包投影仍可用 | △ 宿主插件隔离已实测；完整 1 099 条命令与真机全应用可用性仍未实测 |
+| 4 | `stock_*` 表与数据保留 | entities 侧股票/荐股/组合/反思表实体文件 **21 个**（`stock_analyses` / `stock_reflections` / `reco_picks` / `reco_pool_batches` / `portfolio_holdings` / `trades` 等）仍在；`MIGRATIONS = &[]`（声明式收敛引擎建表），历史手写 migration 已删（§8364）；2026-11-18 追加 `stock_data_preservation.rs` 对 `stock_analyses` / `reco_picks` / `portfolio_holdings` 做真 SQLite 写行 + `bootstrap_schema` 重跑 + 逐字段断言 | ✓ 三类核心表升级收敛保留已实测；真机历史库逐表对比仍未做 |
 
 ## 三、阻塞面与命令面实测（`audit-l1-blockers.mjs` 只读档）
 
@@ -47,7 +47,7 @@ P6.1 的**已裁定工作全部完成并推送**（HEAD `00918c06a`，tag `v3.0.
 ## 四、未完成项与需裁定项（如实登记）
 
 1. **判据行 :999 文字订正**（需裁定）：四项终局判据写于立项时，与 §64.10/§80/§81 已裁定的「过渡期宿主链接域 crate」形态冲突。建议改判据为两阶段：过渡期 = 阻塞面 0 / 前端反向清零 / 命令面迁移完成；终局 = 宿主断开域 crate 依赖（另立批次）。**未改文档**——等用户确认口径。
-2. **判据③④未端到端实测**：卸载插件后命令可用数（算术 1100）与升级前后表数据保留，均只做了静态取证，未做真机/迁移实测。
+2. **判据③④仍有真机面**：宿主级卸载隔离已由真 stock + security bundle 覆盖，三类核心表升级收敛保留已由真 SQLite 覆盖；但完整 1 099 条命令扫描、真机 UI 点击与生产历史库逐表对比仍未做。
 3. **finance 53 vs 45 的 8 条口径差**：未逐条归因，不能把「53」当精确的命令清单引用。
 4. **§204.4 D 组 `quant_backtest_run`**：样本/预算裁定未完成，按 §142 序列等待。
 5. **F9 43 条**：§204.4 列为「刻意不迁」，是否永远留宿主未完成最终裁定。

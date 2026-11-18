@@ -994,6 +994,12 @@ impl PluginManager {
     /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2；
     /// 任务 #49 升级为**双通道**）。
     ///
+    /// ## 逻辑名兼容路由（P6.2 批 1）
+    ///
+    /// 域包拆分后同一逻辑 OPC 命令可能由公共 worker 或独立域 worker 承接；
+    /// 传 `"opc"` 这类不带 `@` 的名字已不再是完整注册表键。此时按命令名找
+    /// **唯一启用 owner**，返回完整注册表 id 后再走原有精确分派。
+    ///
     /// ## 通道选择（本次改动的全部增量）
     ///
     /// 插件**已长驻 worker**（manifest 声明 `worker` 且启用成功，见 `loaded_workers`）时，
@@ -1070,12 +1076,53 @@ impl PluginManager {
         command_name: &str,
         input: &Value,
     ) -> Result<String, PluginError> {
+        let plugin_id = if plugin_id.contains('@') {
+            plugin_id.to_string()
+        } else {
+            self.resolve_command_owner(plugin_id, command_name)?
+        };
         self.execute_plugin_command_with_timeout(
-            plugin_id,
+            &plugin_id,
             command_name,
             input,
             Duration::from_millis(DEFAULT_COMMAND_TIMEOUT_MS),
         )
+    }
+
+    /// 按「逻辑插件名 + 命令名」解析唯一启用 owner，返回完整注册表 id。
+    ///
+    /// 只扫描 enabled 插件；0 个 owner 报 `NotFound`，多个 enabled owner 报
+    /// `CommandFailed`（**禁止静默取第一个**）。逻辑名本身只用于收窄候选：公共 OPC
+    /// 命令与域包命令都带 `opc_` 前缀，域包 worker 名带 `opc-` 前缀。
+    pub fn resolve_command_owner(
+        &self,
+        logical_name: &str,
+        command_name: &str,
+    ) -> Result<String, PluginError> {
+        let registry = self.plugin_registry()?;
+        let owners: Vec<String> = registry
+            .plugins()
+            .iter()
+            .filter(|plugin| plugin.is_enabled())
+            .filter(|plugin| {
+                let id = plugin.metadata().id.as_str();
+                id == logical_name
+                    || id.starts_with(&format!("{logical_name}@"))
+                    || (logical_name == "opc" && id.starts_with("opc-"))
+            })
+            .filter(|plugin| plugin.commands().iter().any(|c| c.name == command_name))
+            .map(|plugin| plugin.metadata().id.clone())
+            .collect();
+        match owners.as_slice() {
+            [only] => Ok(only.clone()),
+            [] => Err(PluginError::NotFound(format!(
+                "没有启用的插件声明命令 `{command_name}`（逻辑名 `{logical_name}`）"
+            ))),
+            many => Err(PluginError::CommandFailed(format!(
+                "命令 `{command_name}` 被多个启用插件声明：{}；禁止静默选第一个",
+                many.join(", ")
+            ))),
+        }
     }
 
     /// [`Self::execute_plugin_command`] 的显式预算变体（任务 #49）。
@@ -4422,6 +4469,57 @@ mod tests {
             .expect("time should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("plugins-{label}-{nanos}"))
+    }
+
+    /// P6.2 批 1：owner 解析正负控。用已安装 External 插件夹具，命令名相同、插件名不同。
+    #[test]
+    fn resolve_command_owner_enforces_unique_enabled_owner() {
+        let temp = temp_dir("owner-resolve");
+        let source = temp.join("source");
+        write_command_plugin_source(
+            &source,
+            "opc-accounting",
+            r#"["subprocess_execution"]"#,
+            r#"{ "name": "opc_list_invoices", "description": "accounting", "command": "cmd.sh" }"#,
+        );
+        let mut manager = PluginManager::new(isolated_config(temp.join("home")));
+        let installed = manager.install(source.to_str().expect("utf8")).expect("install 成功");
+        manager.write_enabled_state(&installed.plugin_id, Some(true)).expect("启用");
+        manager.config.enabled_plugins.insert(installed.plugin_id.clone(), true);
+
+        let resolved = manager
+            .resolve_command_owner("opc", "opc_list_invoices")
+            .expect("唯一 owner 应解析为完整注册表 id");
+        assert_eq!(resolved, installed.plugin_id);
+
+        // 零 owner：命令名不存在。
+        let err = manager.resolve_command_owner("opc", "opc_not_declared").unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)), "期望 NotFound，实际 {err:?}");
+
+        // disabled owner 不算命中：关掉后同一命令应变成零 owner。
+        manager.write_enabled_state(&installed.plugin_id, Some(false)).expect("禁用");
+        manager.config.enabled_plugins.insert(installed.plugin_id.clone(), false);
+        let err = manager.resolve_command_owner("opc", "opc_list_invoices").unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)), "禁用后应零 owner，实际 {err:?}");
+
+        // 多 owner：再装一个同样声明该命令的插件并启用，必须报冲突而不是取第一个。
+        let conflict_source = temp.join("conflict");
+        write_command_plugin_source(
+            &conflict_source,
+            "opc-legacy",
+            r#"["subprocess_execution"]"#,
+            r#"{ "name": "opc_list_invoices", "description": "legacy", "command": "cmd.sh" }"#,
+        );
+        let conflict =
+            manager.install(conflict_source.to_str().expect("utf8")).expect("install 成功");
+        manager.write_enabled_state(&conflict.plugin_id, Some(true)).expect("启用");
+        manager.config.enabled_plugins.insert(conflict.plugin_id.clone(), true);
+        manager.write_enabled_state(&installed.plugin_id, Some(true)).expect("恢复启用");
+        manager.config.enabled_plugins.insert(installed.plugin_id.clone(), true);
+        let err = manager.resolve_command_owner("opc", "opc_list_invoices").unwrap_err();
+        assert!(matches!(err, PluginError::CommandFailed(_)), "多 owner 应冲突，实际 {err:?}");
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     /// 测试专用配置：把 bundled 根**钉到一个空目录**。

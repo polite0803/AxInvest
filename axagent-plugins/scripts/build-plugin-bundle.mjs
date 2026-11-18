@@ -49,6 +49,12 @@ const pluginName = pluginFlag >= 0 && argv[pluginFlag + 1] ? argv[pluginFlag + 1
  *   （`JSON.stringify` 保序），改键序等于改产物，下游比对会当漂移。
  */
 const PLUGIN_SPECS = {
+  "opc-accounting": {
+    packageName: "axagent-plugin-opc-accounting",
+    webDir: path.join("crates", "plugin-opc-accounting", "web"),
+    uiSchema: null,
+    manifest: opcAccountingManifest,
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -170,10 +176,19 @@ const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
 const webRoot = spec.webDir ? path.join(workspaceRoot, spec.webDir) : null;
 const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) : null;
-const domainPackSource = pluginName === "opc"
-  ? path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs")
-  : null;
+const domainPackSourceByPlugin = {
+  opc: path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs"),
+  "opc-accounting": path.join(workspaceRoot, "crates", "plugin-opc-accounting", "domain_packs"),
+};
+const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
+const expectedDomainPackCount = pluginName === "opc" ? 13 : pluginName === "opc-accounting" ? 1 : null;
 const DOMAIN_PACK_DIR = "domain_packs";
+
+/** 各插件 logical manifest 的合法 owner（公共底座 vs 独立 worker）。 */
+const DOMAIN_PACK_OWNER = {
+  opc: "plugin-opc-common",
+  "opc-accounting": "opc-accounting",
+};
 
 function fail(message) {
   console.error(`[plugin-bundle] ${message}`);
@@ -276,7 +291,9 @@ if (domainPackSource) {
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(target, { recursive: true });
   const files = fs.readdirSync(domainPackSource).filter((f) => f.endsWith(".json")).sort();
-  if (files.length === 0) { fail(`域包清单目录为空：${domainPackSource}`); }
+  if (expectedDomainPackCount !== null && files.length !== expectedDomainPackCount) {
+    fail(`域包清单份数应为 ${expectedDomainPackCount}，实得 ${files.length}：${domainPackSource}`);
+  }
   for (const file of files) {
     const raw = fs.readFileSync(path.join(domainPackSource, file), "utf8");
     try {
@@ -445,15 +462,30 @@ function checkDeclaredPages(declared, root) {
   console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
 }
 
-/** 域包清单自检：产物里必须有 14 份合法 JSON，且 pluginId 一域一值、命令不跨域重复。 */
+/** 域包清单自检：本插件预期份数（公共 13 / accounting 1），owner 与命令不跨域重复。 */
 function checkDeclaredDomainPacks(root) {
+  // 所有插件的 logical manifest 全局只读投影：命令 owner 不得在两个产物里同时声明。
+  const globalCommandOwners = new Map();
+  for (const source of Object.values(domainPackSourceByPlugin)) {
+    for (const file of fs.readdirSync(source).filter((f) => f.endsWith(".json")).sort()) {
+      const global = JSON.parse(fs.readFileSync(path.join(source, file), "utf8"));
+      for (const command of global.commands ?? []) {
+        if (globalCommandOwners.has(command)) {
+          fail(`--check：命令 ${command} 被 ${globalCommandOwners.get(command)} 与 ${global.id} 同时声明`);
+        }
+        globalCommandOwners.set(command, global.id);
+      }
+    }
+  }
   const dir = path.join(root, DOMAIN_PACK_DIR);
   if (!fs.existsSync(dir)) { fail(`--check：域包清单目录不存在：${dir}`); }
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
-  if (files.length !== 14) { fail(`--check：域包清单应为 14 份，实得 ${files.length}`); }
+  if (expectedDomainPackCount !== null && files.length !== expectedDomainPackCount) {
+    fail(`--check：域包清单应为 ${expectedDomainPackCount} 份，实得 ${files.length}`);
+  }
+  const expectedOwner = DOMAIN_PACK_OWNER[pluginName];
   const seenIds = new Set();
   const seenPluginIds = new Set();
-  const commandOwners = new Map();
   for (const file of files) {
     let manifest;
     try {
@@ -461,21 +493,15 @@ function checkDeclaredDomainPacks(root) {
     } catch (error) {
       fail(`--check：域包清单不是合法 JSON（${file}）：${error.message}`);
     }
-    if (!manifest.id || !manifest.pluginId || manifest.transportOwner !== "plugin-opc-common") {
-      fail(`--check：域包清单 ${file} 缺 id/pluginId 或 transportOwner 不是 plugin-opc-common`);
+    if (!manifest.id || !manifest.pluginId || manifest.transportOwner !== expectedOwner) {
+      fail(`--check：域包清单 ${file} 缺 id/pluginId 或 transportOwner 不是 ${expectedOwner}`);
     }
     if (seenIds.has(manifest.id)) { fail(`--check：域包 id 重复：${manifest.id}`); }
     if (seenPluginIds.has(manifest.pluginId)) { fail(`--check：域包 pluginId 重复：${manifest.pluginId}`); }
     seenIds.add(manifest.id);
     seenPluginIds.add(manifest.pluginId);
-    for (const command of manifest.commands ?? []) {
-      if (commandOwners.has(command) && commandOwners.get(command) !== manifest.id) {
-        fail(`--check：命令 ${command} 被 ${manifest.id} 与 ${commandOwners.get(command)} 同时声明`);
-      }
-      commandOwners.set(command, manifest.id);
-    }
   }
-  console.log(`[plugin-bundle] --check ✅ ${files.length} 个域包逻辑清单齐全，pluginId/commands 无跨域重复`);
+  console.log(`[plugin-bundle] --check ✅ ${files.length} 个域包逻辑清单齐全，pluginId/owner/commands 无跨域重复`);
 }
 
 /** 递归列出目录下的所有文件（保持不排序；调用方只按相对路径逐个处理）。 */
@@ -3520,6 +3546,12 @@ function opcManifest({ version, binaryName, sha256 }) {
     .filter((f) => f.endsWith(".json"))
     .sort()
     .map((f) => path.posix.join(DOMAIN_PACK_DIR, f));
+  // P6.2 批 1：这三条命令的 owner 已迁 `plugin-opc-accounting`，公共包不得继续声明。
+  const migratedAccountingCommands = new Set([
+    "opc_list_invoices",
+    "opc_create_invoice",
+    "opc_transition_invoice",
+  ]);
   return {
     name: "opc",
     version,
@@ -5188,7 +5220,89 @@ function opcManifest({ version, binaryName, sha256 }) {
           properties: {},
         },
       },
-    ]),
+    ]).filter((command) => !migratedAccountingCommands.has(command.name)),
+    integrity: { algorithm: "sha256", hash: sha256 },
+  };
+}
+
+/** accounting 域包独立清单：只声明三条迁出的发票命令。 */
+function opcAccountingManifest({ version, binaryName, sha256 }) {
+  return {
+    name: "opc-accounting",
+    version,
+    description: "OPC accounting 域包：发票列表 / 创建 / 状态变更",
+    permissions: ["subprocess_execution", "write"],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    defaultEnabled: true,
+    worker: { program: path.posix.join("bin", binaryName) },
+    pages: [{ id: "opc-accounting", title: "会计", entry: PAGE_ENTRY, loading: "bundle" }],
+    domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "accounting.json")],
+    commands: [
+      {
+        name: "opc_list_invoices",
+        description: "列出 OPC 发票（accounting 域包，经宿主 opc.store 只读接缝取数）",
+        command: "worker://opc_list_invoices",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: {
+            status: { type: "string", description: "状态过滤" },
+            customerId: { type: "string", description: "客户 id" },
+            dateFrom: { type: "number", description: "开票时间下界（epoch 秒）" },
+            dateTo: { type: "number", description: "开票时间上界（epoch 秒）" },
+            limit: { type: "number", description: "返回条数上限" },
+          },
+        },
+      },
+      {
+        name: "opc_create_invoice",
+        description: "创建 OPC 发票（accounting 域包，经宿主 opc.store 写面）",
+        command: "worker://opc_create_invoice",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            customerId: { type: "string", description: "客户 id" },
+            lineItems: {
+              type: "array",
+              description: "行项目；行金额由宿主现算",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string" },
+                  quantity: { type: "number" },
+                  unitPrice: { type: "number" },
+                  taxRate: { type: "number" },
+                },
+              },
+            },
+            currency: { type: "string" },
+            dueAt: { type: "number" },
+            notes: { type: "string" },
+          },
+          required: ["customerId", "lineItems"],
+        },
+      },
+      {
+        name: "opc_transition_invoice",
+        description: "变更 OPC 发票状态（accounting 域包，两态回执）",
+        command: "worker://opc_transition_invoice",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["draft", "sent", "paid", "overdue", "cancelled", "refunded"],
+            },
+          },
+          required: ["id", "status"],
+        },
+      },
+    ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

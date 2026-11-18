@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# OPC 域包 worker 的共享命令实现。
+#
+# 角色：foundation（零 axagent-* 依赖，仅协议 crate + serde_json）。
+# 通用 helper 必须对 Peer<R, W> 泛型，不能锁死 stdin/stdout；各域 worker 自己用
+# serve() 构造具体 Peer，再复用这里的命令函数。
+
+[package]
+name = "axagent-plugin-opc-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "OPC 域包共享命令实现：泛型 opc.store helper 与会计域命令"
+
+[dependencies]
+axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
+serde_json = "1"
+
+[lints]
+workspace = true

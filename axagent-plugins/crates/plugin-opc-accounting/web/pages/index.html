@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OPC 会计</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; padding: 16px; font-size: 13px; line-height: 1.6; }
+      h1 { font-size: 16px; margin: 0 0 12px; }
+      section { margin-bottom: 16px; }
+      label { display: block; margin-bottom: 4px; }
+      input { padding: 6px 8px; min-width: 220px; }
+      button { padding: 6px 12px; margin-right: 8px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border-bottom: 1px solid #8884; padding: 6px 8px; text-align: left; }
+      .state { color: #888; }
+      .error { color: #d4380d; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>OPC 会计</h1>
+    <section>
+      <button id="reload" type="button">刷新发票</button>
+      <p id="list-state" class="state" role="status">加载中…</p>
+      <table id="invoices" hidden>
+        <thead><tr><th>编号</th><th>客户</th><th>状态</th><th>金额</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>创建发票</h2>
+      <label for="customer-id">客户 ID</label>
+      <input id="customer-id" />
+      <label for="item-desc">项目描述</label>
+      <input id="item-desc" />
+      <div style="margin-top: 8px"><button id="create" type="button">创建</button></div>
+      <p id="create-state" class="state" role="status"></p>
+    </section>
+    <script src="./bundle.js"></script>
+  </body>
+</html>

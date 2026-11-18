@@ -18,9 +18,9 @@
         "phase": 1,
         "domainPackId": "accounting",
         "pluginId": "plugin-opc-accounting",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "logical-manifest",
-        "reason": "manifest 有 6 条完整领域能力，页面是 CapabilityPackHub 配置驱动；先拆逻辑清单，不复制 4382 行公共 worker"
+        "transportOwner": "opc-accounting",
+        "manifestStrategy": "independent-worker",
+        "reason": "批 1 垂直切片：发票列表 / 创建 / 状态变更三条命令迁独立 worker；其余会计能力仍属公共底座"
       },
       {
         "phase": 2,

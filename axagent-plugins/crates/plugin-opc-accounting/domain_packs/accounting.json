@@ -1,7 +1,7 @@
 {
   "id": "accounting",
   "pluginId": "plugin-opc-accounting",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-accounting",
   "page": {
     "id": "domain:finance-accounting",
     "path": "/opc/domain/accounting"

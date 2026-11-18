@@ -71,8 +71,9 @@ const OPC_STORE_DELETE_BLOG_POST: &str = "delete_blog_post";
 /// 本进程既不截断也不预算（`MAX_FRAME_LEN` 那 64 MiB 是帧层上限，不是本 op 的预算）。
 const OPC_STORE_CREATE_BLOG_POST: &str = "create_blog_post";
 
-/// 八个只读查询 op（#36 批 1，均为读面 ⇒ 宿主侧**无权限闸**）：入参是嵌一层的
+/// 八个只读查询 op（均为读面 ⇒ 宿主侧**无权限闸**）：入参是嵌一层的
 /// `request` DTO（契约 `*ListQuery`），出参是 `*SummaryView` 的**裸数组**。
+/// `list_invoices` 仍被公共看板用于现算聚合；命令 owner 已迁 `plugin-opc-accounting`。
 const OPC_STORE_LIST_INVOICES: &str = "list_invoices";
 const OPC_STORE_LIST_CUSTOMERS: &str = "list_customers";
 const OPC_STORE_LIST_PROJECTS: &str = "list_projects";
@@ -84,17 +85,15 @@ const OPC_STORE_LIST_PUBLISH_SCHEDULES: &str = "list_publish_schedules";
 /// 看板总览（零入参，宿主整表聚合；与 `opc_get_dashboard` 的「首页现算」不同口径）。
 const OPC_STORE_DASHBOARD_SUMMARY: &str = "dashboard_summary";
 
-/// #36 批 2 的四条写 op（同样要 `write`）：发票状态变更 / 内容资产更新 / 内容资产删除 /
-/// 发布计划取消。出参一律是契约的外部标记枚举（`{"transitioned": …}` / `{"updated": …}` /
-/// `"removed"` / `"not_found"`），本进程逐字透传。
-const OPC_STORE_TRANSITION_INVOICE: &str = "transition_invoice";
+/// #36 批 2 的三条写 op（同样要 `write`）：发票状态变更已迁 `plugin-opc-accounting`，
+/// 余下为内容资产更新 / 内容资产删除 / 发布计划取消。出参一律是契约的外部标记枚举
+/// （`{"updated": …}` / `"removed"` / `"not_found"`），本进程逐字透传。
 const OPC_STORE_UPDATE_CONTENT_ASSET: &str = "update_content_asset";
 const OPC_STORE_DELETE_CONTENT_ASSET: &str = "delete_content_asset";
 const OPC_STORE_CANCEL_PUBLISH_SCHEDULE: &str = "cancel_publish_schedule";
 
-/// #36 批 3 的九条 op：八个写 op（要 `write`）+ 一条读 op（财务报表，宿主侧无权限闸）。
+/// #36 批 3 的八条 op：七个写 op（要 `write`）+ 一条读 op（财务报表，宿主侧无权限闸）。
 /// 出参一律是契约的列裁剪视图 / 视图数组，逐字透传（同 `create_blog_post` 的判据）。
-const OPC_STORE_CREATE_INVOICE: &str = "create_invoice";
 const OPC_STORE_CREATE_CUSTOMER: &str = "create_customer";
 const OPC_STORE_CREATE_PROJECT: &str = "create_project";
 const OPC_STORE_ADD_MILESTONE: &str = "add_milestone";
@@ -305,9 +304,8 @@ const COMMAND_DELETE_BLOG_POST: &str = "opc_delete_blog_post";
 /// 的平铺 `id` 同风格）。
 const COMMAND_CREATE_BLOG_POST: &str = "opc_create_blog_post";
 
-/// #36 批 1 的 9 条只读命令：前 8 条各对一条只读接缝 op，第 9 条由本进程组合三次列表调用
-/// 现算看板读数（宿主**不**新增聚合 op）。
-const COMMAND_LIST_INVOICES: &str = "opc_list_invoices";
+/// #36 批 1 的 8 条只读命令：前 7 条各对一条只读接缝 op，第 8 条由本进程组合三次列表调用
+/// 现算看板读数（宿主**不**新增聚合 op）。`opc_list_invoices` 已迁 `plugin-opc-accounting`。
 const COMMAND_LIST_CUSTOMERS: &str = "opc_list_customers";
 const COMMAND_LIST_PROJECTS: &str = "opc_list_projects";
 const COMMAND_LIST_LANDING_PAGES: &str = "opc_list_landing_pages";
@@ -320,15 +318,13 @@ const COMMAND_GET_DASHBOARD: &str = "opc_get_dashboard";
 /// 出参与迁移前逐字段同形（camelCase）。
 const COMMAND_GET_DASHBOARD_SUMMARY: &str = "opc_get_dashboard_summary";
 
-/// #36 批 2 的四条写命令（清单 `commands[].name` 必须逐字一致）。
-const COMMAND_TRANSITION_INVOICE: &str = "opc_transition_invoice";
+/// #36 批 2 的三条写命令（清单 `commands[].name` 必须逐字一致）。
 const COMMAND_UPDATE_CONTENT_ASSET: &str = "opc_update_content_asset";
 const COMMAND_DELETE_CONTENT_ASSET: &str = "opc_delete_content_asset";
 const COMMAND_CANCEL_PUBLISH_SCHEDULE: &str = "opc_cancel_publish_schedule";
 
-/// #36 批 3 的九条命令（清单 `commands[].name` 必须逐字一致）：八条写命令 + 一条只读的
+/// #36 批 3 的八条命令（清单 `commands[].name` 必须逐字一致）：七条写命令 + 一条只读的
 /// 财务报表（宿主侧无权限闸，与八个 list op 同一档）。
-const COMMAND_CREATE_INVOICE: &str = "opc_create_invoice";
 const COMMAND_CREATE_CUSTOMER: &str = "opc_create_customer";
 const COMMAND_CREATE_PROJECT: &str = "opc_create_project";
 const COMMAND_ADD_MILESTONE: &str = "opc_add_milestone";
@@ -639,19 +635,8 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             }
         },
-        // ── #36 批 1：八条只读查询命令（出参 = 接缝回帧的裸数组，逐字透传）──
-        COMMAND_LIST_INVOICES => match list_rows(
-            &frame.input,
-            &request.call_chain,
-            peer,
-            OPC_STORE_LIST_INVOICES,
-            QUERY_KEYS_INVOICES,
-        ) {
-            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-            Err((code, message)) => {
-                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-            },
-        },
+        // ── #36 批 1：七条只读查询命令（出参 = 接缝回帧的裸数组，逐字透传）──
+        // 会计域 `opc_list_invoices` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
         COMMAND_LIST_CUSTOMERS => match list_rows(
             &frame.input,
             &request.call_chain,
@@ -739,15 +724,8 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             }
         },
-        // ── #36 批 2：四条写命令（出参 = 接缝外部标记枚举，逐字透传）──
-        COMMAND_TRANSITION_INVOICE => {
-            match transition_invoice(&frame.input, &request.call_chain, peer) {
-                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-                Err((code, message)) => {
-                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-                },
-            }
-        },
+        // ── #36 批 2：三条写命令（出参 = 接缝外部标记枚举，逐字透传）──
+        // 会计域 `opc_transition_invoice` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
         COMMAND_UPDATE_CONTENT_ASSET => {
             match update_content_asset(&frame.input, &request.call_chain, peer) {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
@@ -772,13 +750,8 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             }
         },
-        // ── #36 批 3：八条写命令 + 一条只读报表（出参 = 契约列裁剪视图，逐字透传）──
-        COMMAND_CREATE_INVOICE => match create_invoice(&frame.input, &request.call_chain, peer) {
-            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
-            Err((code, message)) => {
-                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
-            },
-        },
+        // ── #36 批 3：七条写命令 + 一条只读报表（出参 = 契约列裁剪视图，逐字透传）──
+        // 会计域 `opc_create_invoice` 已迁 `plugin-opc-accounting`，此处不再声明 owner。
         COMMAND_CREATE_CUSTOMER => match create_customer(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
@@ -1906,10 +1879,9 @@ fn invalid_shape(message: String) -> (String, String) {
 
 // ── #36 批 1：只读查询命令 ──────────────────────────────────────────────
 
-/// 四条带过滤条件的命令各自认的入参键（camelCase，与契约 `*ListQuery` 的 serde 键逐字一致）。
+/// 三条带过滤条件的命令各自认的入参键（camelCase，与契约 `*ListQuery` 的 serde 键逐字一致）。
 /// 只挑这些键转发：多余键不进门（同 [`blog_post_create_request`] 的口径）。`list_customers`
 /// 刻意不含 `tags` —— 域服务不消费该过滤位，契约也不收（见 `opc_store.rs` 的 `CustomerListQuery`）。
-const QUERY_KEYS_INVOICES: &[&str] = &["status", "customerId", "dateFrom", "dateTo", "limit"];
 const QUERY_KEYS_CUSTOMERS: &[&str] = &["status", "customerType", "search", "limit"];
 const QUERY_KEYS_PROJECTS: &[&str] = &["status", "customerId", "search", "limit"];
 const QUERY_KEYS_KPIS: &[&str] = &["period", "limit"];
@@ -2021,44 +1993,7 @@ fn dashboard_summary(
     call_opc_store(peer, OPC_STORE_DASHBOARD_SUMMARY, json!({}), call_chain)
 }
 
-// ── #36 批 2：四条写命令 ────────────────────────────────────────────────
-
-/// `opc_transition_invoice`：变更发票状态（写 op）。
-///
-/// ## 入参只判形状
-///
-/// `id` / `status` 都必须在且是字符串（不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）。
-/// 语义闸全在宿主 provider：`status` 的枚举合法性（非法串 ⇒ `SEAM_CALL_INVALID_ARGS`）与
-/// 状态转换合法性（非法转换 ⇒ `PLUGIN_CALL_FAILED`）。
-///
-/// ## 出站形状：`{"id", "target"}`
-///
-/// 契约 op 的第二个键叫 `target`（与域服务 `transition_status(id, target)` 同名）；命令面
-/// 对外用 `status`（与清单 inputSchema / 智能体工具入参一致）⇒ 改名只发生在**本函数**。
-///
-/// ## 出参 = `{"transitioned": {…}}` / `"not_found"`，逐字透传
-fn transition_invoice(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    let Some(id) = input.get("id").and_then(Value::as_str) else {
-        return Err(invalid_shape(
-            "opc_transition_invoice 需要字符串 id（形状判在命令层）".to_string(),
-        ));
-    };
-    let Some(status) = input.get("status").and_then(Value::as_str) else {
-        return Err(invalid_shape(
-            "opc_transition_invoice 需要字符串 status（合法性判在宿主 provider）".to_string(),
-        ));
-    };
-    call_opc_store(
-        peer,
-        OPC_STORE_TRANSITION_INVOICE,
-        json!({ "id": id, "target": status }),
-        call_chain,
-    )
-}
+// ── #36 批 2：三条写命令 ────────────────────────────────────────────────
 
 /// `opc_update_content_asset`：更新内容资产（写 op）。
 ///
@@ -2145,7 +2080,7 @@ fn cancel_publish_schedule(
     call_opc_store(peer, OPC_STORE_CANCEL_PUBLISH_SCHEDULE, json!({ "id": id }), call_chain)
 }
 
-// ── #36 批 3：八条写命令 + 一条只读报表 ────────────────────────────────
+// ── #36 批 3：七条写命令 + 一条只读报表 ────────────────────────────────
 //
 // 判据与批 2 同一条：**命令层只判形状**（缺必需键 / 类型不对 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，
 // **不发帧**），语义与闸全在宿主 provider（空串 / 非法枚举 / 缺行由它各自收口）。出参是契约
@@ -2154,31 +2089,6 @@ fn cancel_publish_schedule(
 // 入参键一律 camelCase（禁区 13，与契约 DTO 的 serde 线格式同源）。数组字段（`lineItems` /
 // `tags`）只判「是不是对象数组 / 字符串数组」，元素内部字段类型的错由宿主 serde 拒收
 // （`SEAM_CALL_INVALID_ARGS`）—— 逐元素逐字段再判一遍只会把同一件事判两次。
-
-/// `opc_create_invoice`：创建发票（写 op）。
-///
-/// 行项目的 `total` **不在这里算**：由宿主 provider 按 `quantity × unitPrice × (1 + taxRate)`
-/// 现算（迁移前工具在本进程算，上收后单价/税率的缺省口径只有一个落点）。
-fn create_invoice(
-    input: &Value,
-    call_chain: &[String],
-    peer: &mut WorkerPeer,
-) -> Result<Value, (String, String)> {
-    const OP: &str = "opc_create_invoice";
-    let customer_id = require_str(input, OP, "customerId")?;
-    let line_items = object_array(input, OP, "lineItems")?;
-    let mut request = serde_json::Map::new();
-    request.insert("customerId".to_string(), Value::String(customer_id.to_string()));
-    request.insert("lineItems".to_string(), line_items);
-    copy_optional_strings(input, OP, &mut request, &["currency", "notes"])?;
-    copy_optional_i64(input, OP, &mut request, &["dueAt"])?;
-    call_opc_store(
-        peer,
-        OPC_STORE_CREATE_INVOICE,
-        json!({ "request": Value::Object(request) }),
-        call_chain,
-    )
-}
 
 /// `opc_create_customer`：创建客户（写 op）。
 ///
@@ -4222,16 +4132,6 @@ fn copy_optional_i64(
         }
     }
     Ok(())
-}
-
-/// 必需的对象数组字段（元素内部字段类型由宿主 serde 判）。
-fn object_array(input: &Value, op: &str, key: &str) -> Result<Value, (String, String)> {
-    let items = input
-        .get(key)
-        .and_then(Value::as_array)
-        .filter(|items| items.iter().all(Value::is_object))
-        .ok_or_else(|| invalid_shape(format!("{op} 需要对象数组字段 `{key}`（形状判在命令层）")))?;
-    Ok(Value::Array(items.clone()))
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────

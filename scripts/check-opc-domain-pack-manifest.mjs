@@ -3,9 +3,10 @@
 /**
  * 域包插件 logical manifest 门禁。
  *
- * P6.2 拆包采用“一域一逻辑清单 + 公共 transport worker”过渡形态：每个域包必须能独立
- * 列出 pluginId、页面、能力、命令与依赖接缝；命令实际由公共 worker 承接，但不得把
- * 公共 OPC 全量命令复制进单个域包清单。
+ * P6.2 拆包采用“一域一逻辑清单 + 明确 transport owner”形态：每个域包必须能独立
+ * 列出 pluginId、页面、能力、命令与依赖接缝。过渡期域包由公共 worker 承接，批 1 起
+ * accounting 由独立 worker `opc-accounting` 承接；owner 必须逐份按 verticalSlices 校验，
+ * 不得全局钉死 `plugin-opc-common`。
  *
  * 用法：node scripts/check-opc-domain-pack-manifest.mjs [--json] [--selftest]
  */
@@ -19,7 +20,14 @@ const ROOT = resolve(HERE, "..");
 const JSON_OUT = process.argv.includes("--json");
 const SELFTEST = process.argv.includes("--selftest");
 const REGISTRY_REL = "scripts/opc-domain-pack-plugins.json";
-const MANIFEST_DIR = "axagent-plugins/crates/plugin-opc/domain_packs";
+const MANIFEST_DIRS = new Map([
+  ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
+  ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
+]);
+const EXPECTED_COUNTS = new Map([
+  ["plugin-opc", 13],
+  ["plugin-opc-accounting", 1],
+]);
 
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 
@@ -27,7 +35,10 @@ export function validateManifest(m, expected, options = {}) {
   const problems = [];
   if (m.id !== expected.id) problems.push(`id=${m.id}，期望 ${expected.id}`);
   if (m.pluginId !== expected.pluginId) problems.push(`pluginId=${m.pluginId}，期望 ${expected.pluginId}`);
-  if (m.transportOwner !== "plugin-opc-common") problems.push(`transportOwner=${m.transportOwner}，必须是 plugin-opc-common`);
+  const expectedOwner = expected.transportOwner ?? "plugin-opc-common";
+  if (m.transportOwner !== expectedOwner) {
+    problems.push(`transportOwner=${m.transportOwner}，期望 ${expectedOwner}`);
+  }
   if (m.page?.id !== expected.page.id || m.page?.path !== expected.page.path) problems.push("page 与底册不一致");
   const own = [...new Set(m.capabilities ?? [])].sort();
   const want = [...new Set(expected.capabilities)].sort();
@@ -64,6 +75,13 @@ function selftest() {
   t("合法 manifest 通过", validateManifest(good, expected).length === 0);
   t("pluginId 漂移被拦", validateManifest({ ...good, pluginId: "plugin-opc-b" }, expected).length > 0);
   t("transportOwner 漂移被拦", validateManifest({ ...good, transportOwner: "plugin-opc-a" }, expected).length > 0);
+  const independent = { ...expected, transportOwner: "opc-accounting" };
+  t("独立 owner 合法", validateManifest(
+    { ...independent, transportOwner: "opc-accounting", commands: ["opc_get_invoice"], calls: ["opc.store"] },
+    independent,
+  ).length === 0);
+  t("独立 owner 漂移被拦", validateManifest({ ...good, transportOwner: "opc-accounting" }, expected).length > 0);
+  t("13 + 1 计数口径", EXPECTED_COUNTS.get("plugin-opc") === 13 && EXPECTED_COUNTS.get("plugin-opc-accounting") === 1);
   t("commandName 小写转 snake", commandName("tool:OpcGetFinancialReport") === "opc_get_financial_report");
   t("非 OPC 能力无命令名", commandName("tool:WebSearch") === null);
   const failed = checks.filter((c) => !c.ok);
@@ -79,20 +97,39 @@ function main() {
   const sharedCommands = new Set(registry.policy?.sharedCommands ?? []);
   const problems = [];
   const manifests = [];
-  if (!existsSync(join(ROOT, MANIFEST_DIR))) {
-    fail(`域包 manifest 目录不存在：${MANIFEST_DIR}`);
-  }
-  const files = readdirSync(join(ROOT, MANIFEST_DIR)).filter((f) => f.endsWith(".json")).sort();
-  for (const file of files) {
-    const m = JSON.parse(read(`${MANIFEST_DIR}/${file}`));
-    const pack = registry.packs.find((p) => p.id === m.id);
-    if (!pack) {
-      problems.push(`${file}: id=${m.id} 不在底册`);
-      continue;
+  const commandOwners = new Map();
+  for (const [owner, dir] of MANIFEST_DIRS) {
+    if (!existsSync(join(ROOT, dir))) {
+      fail(`域包 manifest 目录不存在：${dir}`);
     }
-    const expected = { ...pack, pluginId: slices.get(pack.id)?.pluginId ?? pack.pluginId };
-    problems.push(...validateManifest(m, expected, { sharedCommands }).map((p) => `${file}: ${p}`));
-    manifests.push({ id: m.id, pluginId: m.pluginId, commands: m.commands.length, transportOwner: m.transportOwner });
+    const files = readdirSync(join(ROOT, dir)).filter((f) => f.endsWith(".json")).sort();
+    const expectedCount = EXPECTED_COUNTS.get(owner);
+    if (expectedCount !== undefined && files.length !== expectedCount) {
+      problems.push(`${dir}: manifest 份数应为 ${expectedCount}，实得 ${files.length}`);
+    }
+    for (const file of files) {
+      const rel = `${dir}/${file}`;
+      const m = JSON.parse(read(rel));
+      const pack = registry.packs.find((p) => p.id === m.id);
+      if (!pack) {
+        problems.push(`${rel}: id=${m.id} 不在底册`);
+        continue;
+      }
+      const slice = slices.get(pack.id);
+      const expected = {
+        ...pack,
+        pluginId: slice?.pluginId ?? pack.pluginId,
+        transportOwner: slice?.transportOwner ?? "plugin-opc-common",
+      };
+      problems.push(...validateManifest(m, expected, { sharedCommands }).map((p) => `${rel}: ${p}`));
+      manifests.push({ id: m.id, owner, pluginId: m.pluginId, commands: m.commands.length, transportOwner: m.transportOwner });
+      for (const command of m.commands ?? []) {
+        if (commandOwners.has(command) && commandOwners.get(command) !== m.id) {
+          problems.push(`命令 ${command} 被 ${m.id} 与 ${commandOwners.get(command)} 同时声明`);
+        }
+        commandOwners.set(command, m.id);
+      }
+    }
   }
   const expectedIds = registry.packs.map((p) => p.id).sort();
   const foundIds = manifests.map((m) => m.id).sort();
@@ -102,13 +139,14 @@ function main() {
   for (const [id, slice] of slices) {
     const m = manifests.find((x) => x.id === id);
     if (m && m.pluginId !== slice.pluginId) problems.push(`${id}: pluginId=${m.pluginId}，vertical slice 期望 ${slice.pluginId}`);
+    if (m && m.transportOwner !== slice.transportOwner) problems.push(`${id}: transportOwner=${m.transportOwner}，vertical slice 期望 ${slice.transportOwner}`);
   }
   if (JSON_OUT) {
     console.log(JSON.stringify({ manifestCount: manifests.length, manifests, problems }, null, 2));
   } else if (problems.length) {
     for (const p of problems) console.error(`FAIL: ${p}`);
   } else {
-    console.log(`PASS: ${manifests.length} 个域包 logical manifest 一致（一域一 pluginId / 页面 / capabilities / 命令 / 接缝）`);
+    console.log(`PASS: ${manifests.length} 个域包 logical manifest 一致（13 + 1 分区 / 一域一 owner / 页面 / capabilities / 命令 / 接缝）`);
   }
   process.exit(problems.length === 0 ? 0 : 1);
 }

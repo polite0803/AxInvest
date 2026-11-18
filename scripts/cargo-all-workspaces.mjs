@@ -189,6 +189,22 @@ if (mode === "nextest" && !listOnly) {
     "plugins",
     "opc-sales-growth",
   );
+  const content = spawnSync(
+    "node",
+    ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", "opc-content-media", "--check"],
+    { cwd: repoRoot, stdio: "inherit", env: process.env },
+  );
+  if (content.status !== 0) {
+    console.error(`[cargo ${mode}] staging opc-content-media bundle 失败`);
+    process.exit(content.status ?? 1);
+  }
+  process.env.AXAGENT_CONTENT_BUNDLE_DIR = path.join(
+    repoRoot,
+    "axagent-plugins",
+    "dist",
+    "plugins",
+    "opc-content-media",
+  );
 }
 
 for (const root of roots) {

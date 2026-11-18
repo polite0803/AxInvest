@@ -8258,7 +8258,7 @@ PLAN 同批回写六处：`:268`/`:269`（evidence 改指）、`:366`（1466 条
 
 ### 154.2 验收
 
-批 6 的验收证据在提交 `d8695f3ea` 的单行消息与同批登记表 note 里，**该提交没有把退出码逐条落进 PLAN**（本节不补写未经日志支撑的 EXIT 码）。可复核的盘上现状（2026-11-11 批 7 窗口实测）：整文件已不在（`ls src-tauri/src/commands/demand_discovery.rs` ⇒ No such file）、`commands/mod.rs` 内 `demand_discovery` 零命中、`register_commands.rs` 内 `demand_discovery::` 零命中；五条插件命令在清单逐条在位（`axagent-plugins/scripts/build-plugin-bundle.mjs:2755` 起）、五个分派臂与权限表条目在盘（`worker.rs:6259`（`scan_capabilities`）/`:6272`（`proactive_evaluate_leads`）/`:6285`（`list_capability_gaps`）/`:6302`（`close_capability_gap`）/`:6319`（`analyze_capability_gaps`）；测试锁 `worker.rs:16884` 的 `WRITE_OPS` / `READ_OPS` 含对应 op）。批 6 与批 7 刀 A 的编译/测试链在同一条联合窗口里合并取证，见 §155.2。
+批 6 的验收证据在提交 `d8695f3ea` 的单行消息与同批登记表 note 里，**该提交没有把退出码逐条落进 PLAN**（本节不补写未经日志支撑的 EXIT 码）。可复核的盘上现状（2026-11-11 批 7 窗口实测）：整文件已不在（`ls src-tauri/src/commands/demand_discovery.rs` ⇒ No such file）、`commands/mod.rs` 内 `demand_discovery` 零命中、`register_commands.rs` 内 `demand_discovery::` 零命中；五条插件命令在清单逐条在位（`axagent-plugins/scripts/build-plugin-bundle.mjs:2755` 起）、五个分派臂与权限表条目在盘（`worker.rs:6259`（`scan_capabilities`）/`:6272`（`proactive_evaluate_leads`）/`:6285`（`list_capability_gaps`）/`:6302`（`close_capability_gap`）/`:6319`（`analyze_capability_gaps`）；测试锁 `worker.rs:16920` 的 `WRITE_OPS` / `READ_OPS` 含对应 op）。批 6 与批 7 刀 A 的编译/测试链在同一条联合窗口里合并取证，见 §155.2。
 
 ⚠ **随本批补记登记一条既存腐烂注释**：`src-tauri/src/commands/desktop.rs:161` 仍把 `commands/demand_discovery.rs` 当作在位的复用方来写（该文件已由批 6 整文件删除）。属他人文件、纯注释，本批不改（改它会连带触发他人文件的 fmt/clippy 面）；移交安静窗口随注释巡检批一并处理。
 

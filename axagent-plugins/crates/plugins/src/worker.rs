@@ -16734,6 +16734,42 @@ mod tests {
             }])
         }
 
+        // ── P6.2：content_media 域包 e2e 替身 ──
+        async fn list_content_assets(
+            &self,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::ContentAssetSummaryView>>
+        {
+            Ok(vec![axagent_harness::ContentAssetSummaryView {
+                id: "asset-1".into(),
+                title: "文章".into(),
+                content_type: "article".into(),
+                status: "draft".into(),
+                tags: vec!["opc".into()],
+                created_at: 1_700_000_000,
+            }])
+        }
+
+        async fn list_publish_schedules(
+            &self,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::PublishScheduleSummaryView>>
+        {
+            Ok(vec![axagent_harness::PublishScheduleSummaryView {
+                id: "sched-1".into(),
+                content_ref_type: "blog_post".into(),
+                content_ref_id: "post-1".into(),
+                status: "pending".into(),
+                scheduled_at: 1_700_400_000,
+                published_at: None,
+            }])
+        }
+
+        async fn process_due_schedules(
+            &self,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::PublishScheduleSummaryView>>
+        {
+            Ok(vec![])
+        }
+
         async fn list_contacts(
             &self,
         ) -> axagent_harness::core_error::Result<Vec<axagent_harness::ContactSummaryView>> {

@@ -763,7 +763,7 @@ async fn write_decision_validations(
             v.factor_snapshot.as_ref().and_then(|m| serde_json::to_string(m).ok());
 
         let active = decision_validations::ActiveModel {
-            id: Set(uuid_v4()),
+            id: Set(uuid::Uuid::new_v4().to_string()),
             pick_id: Set(v.pick_id.clone()),
             stock_code: Set(v.stock_code.clone()),
             stock_name: Set(v.stock_name.clone()),
@@ -1235,20 +1235,10 @@ fn empty_report() -> HitRateReport {
     }
 }
 
-/// UUID v4 简易实现（避免引入额外依赖）
-fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    // 时间戳 + 纳秒数 + 进程 ID 拼一个伪 UUID
-    format!(
-        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
-        (nanos >> 32) as u32,
-        ((nanos >> 16) as u16),
-        (nanos & 0x0FFF) as u16,
-        std::process::id(),
-        nanos as u64 & 0xFFFFFFFFFFFF
-    )
-}
+// UUID v4 简易实现（避免引入额外依赖）—— 已删除（2026-11-18）：
+// 旧伪实现用 `{:04x}` 格式化 `std::process::id()`，PID 超过 0xFFFF（CI 容器常态）时
+// 溢出为 5+ 位十六进制，长度不再是 36（CI 实测：left: 37, right: 36）。
+// `uuid` crate（v4 feature）早已是主 crate 依赖且全仓大量先例，直接复用，不再手写。
 
 /// P2-F15 切入点 3：从 decision_validations 回写 stock_analyses.outcome + lesson_applications.outcome_at_validation
 ///
@@ -1462,11 +1452,19 @@ mod tests {
 
     #[test]
     fn test_uuid_v4_format() {
-        let id = uuid_v4();
-        // 格式: 8-4-4-4-12 hex
+        let id = uuid::Uuid::new_v4().to_string();
+        // 真实 UUID v4：8-4-4-4-12 hex，版本段恒 '4'，变体段首位 ∈ [89ab]
         assert_eq!(id.len(), 36);
         assert_eq!(id.chars().filter(|c| *c == '-').count(), 4);
-        assert!(id.split('-').next().unwrap().chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(id.chars().all(|c| c == '-' || c.is_ascii_hexdigit()));
+        assert_eq!(id.split('-').nth(2).unwrap().chars().next(), Some('4'));
+        let variant_head = id.split('-').nth(3).unwrap();
+        assert!(
+            variant_head.starts_with('8')
+                || variant_head.starts_with('9')
+                || variant_head.starts_with('a')
+                || variant_head.starts_with('b')
+        );
     }
 
     #[test]

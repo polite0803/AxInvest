@@ -1911,9 +1911,9 @@
       "check": "implementorCount",
       "evidence": [
         {
-          "ref": "src-tauri/src/commands/agent/command_bridge.rs:1649",
+          "ref": "src-tauri/src/commands/agent/command_bridge.rs:1657",
           "file": "src-tauri/src/commands/agent/command_bridge.rs",
-          "line": 1649,
+          "line": 1657,
           "token": "pub trait CommandHandler",
           "anchorText": "pub trait CommandHandler: Send + Sync {",
           "role": "契约"

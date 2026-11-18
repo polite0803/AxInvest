@@ -136,6 +136,13 @@ function classifyLiteral(t) {
   if (s) {
     return { kind: "str", value: s[1] };
   }
+  // Rust 原始字符串：r"…" / r#"…"# / r##"…"##（内部无转义，两侧 # 数对称）。
+  // 现网 `prefetch_tools` / `prefetch_args` 就是 `json!(r#"…"#)` 形态（内含大量 `"`，
+  // 普通字符串写不了）——不认它就会误报「解析失败」（2026-11-18 CI 实测）。
+  const raw = /^r(#+)"([\s\S]*?)"\1$/.exec(t);
+  if (raw) {
+    return { kind: "str", value: raw[2] };
+  }
   return null;
 }
 
@@ -475,6 +482,8 @@ function selftest() {
     `Variable {\n    name: "agent_temperature".into(),\n    var_type: "number".into(),\n` +
       `    // 这行注释不该干扰抽取\n    value: serde_json::json!(DEFAULT_Y),\n},`,
     seedBlock("monitor_channels", "string", '"in_app"'),
+    // 原始字符串形态（现网 `prefetch_tools` / `prefetch_args` 就是它，2026-11-18 CI 实测）
+    seedBlock("prefetch_tools_demo", "string", 'r#"["a","b"]"#'),
     seedBlock("reco_trend_enabled", "boolean", "true"),
     seedBlock("value_dcf_discount_rate", "number", "DEFAULT_DCF_PCT"),
   ];
@@ -504,7 +513,7 @@ function selftest() {
 
   const CASES = [
     {
-      title: "正样本：同文件 const / 字符串 / 布尔 / 跨 crate 派生式四类值全等 ⇒ 必须无错",
+      title: "正样本：同文件 const / 字符串 / 原始字符串 r#\"…\"# / 布尔 / 跨 crate 派生式全等 ⇒ 必须无错",
       seed: seedSrc(CORE_SEED, CORE_CONSTS),
       panel: panelSrc(CORE_PANEL),
       readDepFile: readFake,

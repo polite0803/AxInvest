@@ -1934,7 +1934,7 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 |---|---|
 | `axagent-plugins/crates/plugins/src/types.rs:181` | 新增 `PluginPagesInfo`（`rename_all = "camelCase"`，`pages: Vec<PluginPage>`） |
 | `axagent-plugins/crates/plugins/src/manager.rs:796` | `list_plugin_pages()`：遍历 `list_plugins()` → 单包 `load_plugin_from_directory` 失败只 `warn!` 跳过 → `pages.is_empty()` 跳过 ⇒ **无第二套 registry / 缓存 / 路由表** |
-| `src-tauri/src/commands/plugin.rs:557` | `plugin_list_pages`（`#[agent_command(domain = plugin, safety = Safe, call_mode = StateOnly)]` + `spawn_blocking` + `blocking_read`）；`register_commands.rs` 由 `build.rs` 自动生成，未手改 |
+| `src-tauri/src/commands/plugin.rs:617` | `plugin_list_pages`（`#[agent_command(domain = plugin, safety = Safe, call_mode = StateOnly)]` + `spawn_blocking` + `blocking_read`）；`register_commands.rs` 由 `build.rs` 自动生成，未手改 |
 | `src/types/index.ts:2215` | `PluginPagesInfoDto`，`pages` 复用既有 `PluginPageDto` |
 | `src/lib/browserMock.ts` | `plugin_list_pages` ⇒ `[]`（与 `dashboard_list_plugins` 同口径，不抛错） |
 | `src/components/plugin/PluginPageHost.tsx` | 只订正「列表侧无枚举面」那段过期注释；渲染逻辑未动 |
@@ -5760,7 +5760,7 @@ camel 优先、回落 `camelToSnake`），落点 create `:5383` / update `:5444`
 | 锚点 | 登记 token | 盘上实测 | 归因 |
 |---|---|---|---|
 | `dojo.extension`（组 H · planLine 304） | `pub fn execute_plugin_command` @ `manager.rs:875` | 第 875 行是一行 `///` 文档注释 | `axagent-plugins/crates/plugins/src/manager.rs` 与 `types.rs` 正在被智能体侧那一批改（未提交） |
-| `command.handler`（组 K · planLine 315） | `pub trait CommandHandler` @ `command_bridge.rs:1649` | 第 1292 行是 `\|spec\| {` | 同一批正在改 `src-tauri/src/commands/agent/command_bridge.rs` |
+| `command.handler`（组 K · planLine 315） | `pub trait CommandHandler` @ `command_bridge.rs:1657` | 第 1292 行是 `\|spec\| {` | 同一批正在改 `src-tauri/src/commands/agent/command_bridge.rs` |
 
 ⇒ **刻意不跑 `--repin-code --apply`**：锚点在别人未提交的中间态上重锚，等那批落地又得再锚一次，
 而且会把「中间态行号」钉成登记表基线。处理办法与 §117.5 相同：那批交回后一次性重锚 + 对账，
@@ -6584,7 +6584,7 @@ note 里写死**升 hard 的三条前置**（① 复现稳定 ≥2 连续批，`
 |---|---|---|
 | B1–B5（`agent_get_session`/`agent_update_session`/`plan_generate`/`plan_activate`） | **采纳：改 mock**（解 `request` 层 + 逐键 `readMockReqField`） | 后端参数名就是 `request`（`commands/agent/mod.rs:3917`、`:3568`，`commands/plan.rs:913`、`:1432`），调用方也确实传 `{request:{…}}`（`agentStore.ts:244`、`InputArea.tsx:339-341`）⇒ 错在 mock |
 | **B6–B8 改判**（`create_artifact` ×2、`update_artifact` ×2） | **不是 mock 的错，改调用方**（`artifactStore.ts:58`、`:73-76`、`ImageGenPanel.tsx:128`）+ mock 侧对 `input` 缺失 fail-closed | 后端签名 `create_artifact(state, input: CreateArtifactInput)`、`update_artifact(state, id, input)`（`commands/artifacts.rs:36-38`、`:55-59`）；mock 读 `args.input` **本来就是对的**，真错是调用方把载荷摊平到顶层 ⇒ 真机 IPC 会以 `missing required key input` 拒，只在 dev mock 里表现为「假成功 + 空字段孤儿产物」 |
-| C1–C3（插件卸载/启停/UI 动作） | **三件套同批采纳** | 后端参数是顶层 `plugin_id`（`commands/plugin.rs:382`/`:299`/`:440`）⇒ 只改键形；C3 的「已启用」判定依赖 C2 写回的 `enabled` |
+| C1–C3（插件卸载/启停/UI 动作） | **三件套同批采纳** | 后端参数是顶层 `plugin_id`（`commands/plugin.rs:391`/`:329`/`:495`）⇒ 只改键形；C3 的「已启用」判定依赖 C2 写回的 `enabled` |
 | C4 `save_program_policy` | **采纳，但不写 localStorage 去重迁移**，代价明写「存量重复行不会自动合并」 | 调用方形状对（`gatewayStore.ts:270-272` 传 `{input}`，后端 `commands/gateway.rs:788` 收 `input`）；dev mock 数据非持久资产、本机无真实分布 |
 | C5 / C6（OPC 评分筛选、搜索源上限与凭据位） | **采纳** | C6 调用方形状与后端一致（`searchStore.ts:195-206` vs `commands/search.rs:48`/`:79`）⇒ 只改键形；`hasApiKey` 只是 `!!apiKey` 布尔位，mock 不存密钥本体 ⇒ 无新增安全面 |
 | 普查漏检一处 `list_memory_items` | **采纳** | `memoryStore.ts:119` 传 `{namespaceId}`、`memoryStore.test.ts:174` 钉该 camel 传参、后端 `commands/memory.rs:215-217` 收 `namespace_id` ⇒ 纯键形死点，属 A 档形态被扫描器漏掉（转 **#211** 补扫描形态） |
@@ -7512,7 +7512,7 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 | `trend_screening` | 0 | 同形分派（`:389` / `:367` / `:376`）；`_core` 在 `commands/recommendation_cron.rs:298` / `:336` / `:347` | `scripts/build-plugin-bundle.mjs` 的 `stock_{create,list,toggle,delete}_trend_screening_cron` 四条声明 | **部分可退役**，同池扫描族 |
 | `batch_reflection` | 0 | list/toggle/delete 定义已删（§141）；create 保留 `commands/stock_analysis.rs:6081` | 无 | **已退役**（§141）；create 保留（任务中心表单在用，§138.3） |
 | `watchlist_scan` | 0 | list/toggle/delete 定义已删（§141）；create 保留 `commands/stock_analysis.rs:5790` | 无 | **已退役**（§141），同 batch_reflection 族 |
-| `decision_backtest` | 0 | list/toggle/delete 定义已删（§141）；create 保留 `commands/backtest_validation.rs:1415` | 无 | **已退役**（§141），同 batch_reflection 族 |
+| `decision_backtest` | 0 | list/toggle/delete 定义已删（§141）；create 保留 `commands/backtest_validation.rs:1400` | 无 | **已退役**（§141），同 batch_reflection 族 |
 
 ### 138.3 为什么「前端零调用」不等于功能缺失
 
@@ -7575,7 +7575,7 @@ console.log("新增",a,"移出",b,"两侧皆有内改动",c,"合计",a-b+c);'
 | 同上 | 6474–6520 | `list_batch_reflection_crons` / `toggle_batch_reflection_cron` / `delete_batch_reflection_cron` |
 | `src-tauri/src/commands/backtest_validation.rs` | 1473–1519 | `list_decision_backtest_crons` / `toggle_decision_backtest_cron` / `delete_decision_backtest_cron` |
 
-保留三条 `create_*`：`create_watchlist_scan_cron`（`stock_analysis.rs:5790`）/ `create_batch_reflection_cron`（`:6081`）/ `create_decision_backtest_cron`（`backtest_validation.rs:1415`）—— 任务中心表单仍在用（§138.3）。`CronJobResponse` / `CronJobStatus` / `DECISION_BACKTEST_TASK_TYPE` 均仍被三兄弟使用，无孤儿符号。删除前 `git grep`（排除构建产物）复核：9 条命令除定义外**只在文档出现**，零代码引用。
+保留三条 `create_*`：`create_watchlist_scan_cron`（`stock_analysis.rs:5790`）/ `create_batch_reflection_cron`（`:6081`）/ `create_decision_backtest_cron`（`init/stock_analysis_service.rs:1758`）—— 任务中心表单仍在用（§138.3）。`CronJobResponse` / `CronJobStatus` / `DECISION_BACKTEST_TASK_TYPE` 均仍被三兄弟使用，无孤儿符号。删除前 `git grep`（排除构建产物）复核：9 条命令除定义外**只在文档出现**，零代码引用。
 
 ### 140.2 读数级联（`--dump-readings` 实测，非照抄 §138.5 预估）
 
@@ -8149,7 +8149,7 @@ PLAN 同批回写五处：`:366`（1475 条 / 162 模块）、`:514`（88 条 / 
 3. **宿主实现**：`src-tauri/src/init/opc_store_service.rs:1175` / `:1217` / `:1232` 三方法 + impl 闭合后五个 helper（`extract_domain_from_id` / `domain_id_to_name` / `parse_tags` / `parse_nodes_len` / `model_to_domain_response`）。逐字段保持迁移前语义：`description` 为 `None` 时空串、`step_count` 解析失败按 0、`list_domains` 去重后按 id 升序。`model_to_domain_response` 刻意不复用 dao 的 `workflow_template_response_from_model` —— 后者把 `tool_defs` 固定为 `None` 且 nodes/edges 解析失败降级为空数组，合并会静默改变出参。✅ 修一处真编译错误：该函数返回类型写作 `Result<…, String>` 时撞上本文件作用域的 `harness::core_error::Result<T>`（单泛型别名，E0107）⇒ 改为 `std::result::Result<WorkflowTemplateResponse, String>`。
 4. **worker 分派**：`axagent-plugins/crates/plugins/src/worker.rs` 的 `opc.store` 只读白名单追加三条（`:12798-12800`）；`:3926` / `:3949` / `:3965` 三分派臂 —— 列表用 `deserialize_optional_arg`（`domain_id` / `tag` 可省略），详情用 `deserialize_arg("workflow_id")`，`list_domains` 零入参。
 5. **插件命令**：`axagent-plugins/crates/plugin-opc/src/main.rs` 三组 `OPC_STORE_*`（`:153-155`）/ `COMMAND_*`（`:260-262`）常量 + 三分派臂（`:694-716`）+ 三函数（`:1796` / `:1817` / `:1833`）；命令面读 **camelCase**（`domainId` / `workflowId`），函数内转接缝 snake_case。
-6. **清单声明**：`axagent-plugins/scripts/build-plugin-bundle.mjs:4245` 追加三条 `worker://`；`opc_list_domain_workflows` 两个过滤项均可选（无 `required`）、`opc_get_domain_workflow` required `["workflowId"]`、`opc_list_domains` 空 properties。
+6. **清单声明**：`axagent-plugins/scripts/build-plugin-bundle.mjs:4252` 追加三条 `worker://`；`opc_list_domain_workflows` 两个过滤项均可选（无 `required`）、`opc_get_domain_workflow` required `["workflowId"]`、`opc_list_domains` 空 properties。
 7. **宿主删除**：删 `commands/opc_workflows/domain_workflows.rs` 与 `opc_workflows/mod.rs` 的 `pub mod` 声明（父模块仍在，只剩种子化与 re-export）；`register_commands.rs` 由 build.rs 重生成，恰 −3 行（未手改）。两处棘轮基线同批下调：`scripts/layer-discipline-allowlist.json` 删该模块条目（total 625→**623**）、`scripts/raw-map-err-baseline.json` 删该文件扁平键（−5 处）。
 8. **前端**：零改动 —— 前端本就零 `invoke`；`browserMock.ts` 无同名分支需要新增。
 
@@ -8196,7 +8196,7 @@ PLAN 同批回写五处：`:250`（2047→2046）、`:366`（1472 条 / 161 模�
 3. **宿主实现**：`execute_demand_workflow`（`src-tauri/src/init/opc_store_service.rs:1436`，起交付记录 → `tokio::spawn` 后台跑 `run_demand_delivery`，完成/失败路径各 `mark_*` 回写）+ 五只读与状态方法 `:1542` / `:1550` / `:1555` / `:1578` / `:1583`。
 4. **worker 分派**：`axagent-plugins/crates/plugins/src/worker.rs` 权限表：写 op 四条（`:546-549` execute/update/retry/cancel）加 `write` 闸，读 op 两条（list/get）不设闸；六分派臂 `:3983` / `:4006` / `:4028` / `:4043` / `:4090` / `:4106`（接缝侧入参 snake_case：`lead_id` / `delivery_id` / `workflow_template_id`）；权限表测试锁 `:12925` 起同批追加四写清单。
 5. **插件命令**：`axagent-plugins/crates/plugin-opc/src/main.rs` 六组常量（`:276-281` COMMAND_*）+ 六分派臂 + 六函数（`:1897` execute / `:1924` list / `:1996` retry 等）；命令面读 **camelCase**（`leadId` / `deliveryId`），函数内转接缝 snake_case。
-6. **清单声明**：`axagent-plugins/scripts/build-plugin-bundle.mjs:4275` 追加六条 `worker://`；`opc_execute_demand_workflow` required `["leadId"]`（`workflowTemplateId` 可选）、`opc_list_deliveries` 两个过滤项均可选、get/update/retry/cancel required `["deliveryId"]`。
+6. **清单声明**：`axagent-plugins/scripts/build-plugin-bundle.mjs:4282` 追加六条 `worker://`；`opc_execute_demand_workflow` required `["leadId"]`（`workflowTemplateId` 可选）、`opc_list_deliveries` 两个过滤项均可选、get/update/retry/cancel required `["deliveryId"]`。
 7. **宿主删除**：删 `demand_discovery.rs` 交付段六命令（文件 936→**587** 行）；`register_commands.rs` 由 build.rs 重生成，恰 −6 行（未手改）。该模块剩余五条发现面命令 + `run_demand_discovery_cron`（无 `#[tauri::command]`，供 `services.rs` CronExecutor 调用）留待批 6。
 8. **前端**：`DemandDiscoveryPage.tsx` 四处调用切 `invokePluginCommand` + 11 个 snake 消费点改 camel（`workflowTemplateId` / `startedAt` / `completedAt` / `resultSummary` 等）；`Delivery` 类型从 `pages/opc/utils/constants.ts` 上收 `src/types/opc.ts`（页面 + dev mock 双消费方同源，constants 经 `export type { Delivery }` re-export）；`browserMock.ts` 新增 `MOCK_DELIVERIES` 数组与六 case（execute 缺线索抛错 / list 双过滤 + 降序 / update completed 落 `completedAt` / retry 复位 pending / cancel 标 cancelled，全部镜像宿主 dao 语义）。
 
@@ -8778,7 +8778,7 @@ PLAN 同批回写五处：`:366`（1450 条 / 160 模块 + 批 7 记账段）、
 
 **三处形状差异（不等价，显式登记）**：
 
-1. **入参形态** —— 原宿主命令收 `{ request: { codes, perStockTimeoutMs, … } }` 嵌套 DTO（`BatchQuotesRequest`，本批已从 `src-tauri/src/commands/stock_analysis.rs` 退役），插件命令收扁平 camelCase，由 `main.rs:1182` 逐键译成接缝 snake_case（`codes` / `per_stock_timeout_ms` / `total_timeout_ms` / `max_failures`），非法键（非负整数之外、`codes` 缺失或非字符串数组）⇒ 错误码 `SEAM_CALL_INVALID_ARGS`（`main.rs:1183` / `:1212`）。本批前端零调用方 ⇒ 无消费方需改；LLM 侧靠 inputSchema 描述（`axagent-plugins/scripts/build-plugin-bundle.mjs:2982` 的 `codes` 属性）。`codes` 走 `main.rs:1211`：缺字段 / 非字符串数组判协议错，空数组放行（与迁移前 `BatchRequest::new(vec![])` 一致）。
+1. **入参形态** —— 原宿主命令收 `{ request: { codes, perStockTimeoutMs, … } }` 嵌套 DTO（`BatchQuotesRequest`，本批已从 `src-tauri/src/commands/stock_analysis.rs` 退役），插件命令收扁平 camelCase，由 `main.rs:1182` 逐键译成接缝 snake_case（`codes` / `per_stock_timeout_ms` / `total_timeout_ms` / `max_failures`），非法键（非负整数之外、`codes` 缺失或非字符串数组）⇒ 错误码 `SEAM_CALL_INVALID_ARGS`（`main.rs:1183` / `:1212`）。本批前端零调用方 ⇒ 无消费方需改；LLM 侧靠 inputSchema 描述（`axagent-plugins/scripts/build-plugin-bundle.mjs:2989` 的 `codes` 属性）。`codes` 走 `main.rs:1211`：缺字段 / 非字符串数组判协议错，空数组放行（与迁移前 `BatchRequest::new(vec![])` 一致）。
 2. **出参顺序** —— `list_watched_quotes` 迁移前返回 `watched_stocks()`，底层是 `HashMap` 键的 `keys().cloned()`（`axagent-quant/crates/astock-data/src/realtime_quote.rs:103`）⇒ 顺序不可复现；接缝经 `sorted_codes`（`quote_watcher_service.rs:94`，裁定 J6）⇒ 升序。行为面**变了但变好**，测试锁在 `quote_watcher_service.rs:259`。
 3. **执行器形态** —— trait 实现只拿得到 `&self`，凑不齐 `tokio::spawn` 的 `'static` 要求 ⇒ 批量内核改为**当前任务内** `FuturesUnordered` 轮询（`batch.rs:293`）。副作用：as-of 的 `task_local` 在轮询体内可读（迁移前 spawn 出去读不到），但本批入参未开放 `as_of` ⇒ 不构成功能差异；登记它是为了防止后续批次把「顺手能读」误读成「已支持回放」。
 
@@ -10287,7 +10287,7 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 |---|---|---|---|---|
 | **A 通知渠道可关** | `NotificationChannel` trait（`axagent-core/crates/harness/src/notification_channel.rs:194-233`）+ `NotificationPolicy.enabled`（:131-144）+ `RouteConfig.channels`（:117 起）+ dispatcher 按 trait 分发（`Arc<dyn NotificationChannel>`，axagent-runtime/crates/notification/src/dispatcher.rs:114/:143-151） | 生产装配空：`src-tauri/src/init/services.rs:5135` 只 `NotificationDispatcher::new()`，全仓无 `register_channel` / `configure_route` 生产调用；`monitor_emitter.rs:15-16,197-202` 自承「0 渠道只 warn」；`is_ready()` 定义后零发送路径调用（:230-232）；无渠道配置字段/命令/前端 UI（现有 4 个 Switch 是通知中心总闸，非渠道开关） | 当前=**改代码重编译**；接通后=改 UI 开关写 settings，不动主壳 | `notification_channel.rs:131` = `pub struct NotificationPolicy`；`services.rs:5136` 仅 new，均命中 |
 | **B 行情源可替换** | `MarketDataProvider` trait（`axagent-core/crates/harness/src/market_data.rs:266`）+ 14 vendor 实现（`axagent-quant/crates/astock-data/src/vendors/*`）+ fallback 执行器（`lib.rs:1695`） | 切换靠硬编码优先级 `VendorRouting::default_routing()`（`lib.rs:188`）+ replay 覆盖表写死（:169/:176-186）；新增源/改优先级要改 Rust 重编译；"关已有源"走工作流模板变量 `vendor_*`（`analysis-engine/.../pool.rs:354-413` 注入 `commands/stock_workflow/decision.rs:343-355`），非 settings/UI | 当前=新增/换源改代码，仅关已有源走模板变量；接通后=清单/settings 驱动 | `market_data.rs:266` = `pub trait MarketDataProvider: Send + Sync` |
-| **C 插件级可关（现成）** | `plugin_disable` 命令（`src-tauri/src/commands/plugin.rs:346-378`）写 `settings.json` 的 `enabledPlugins`（`manager.rs:1651-1661/:2155-2171`）；`plugin_list_pages`（:557-569）带出 `summary.enabled`；前端 `flattenPages` 过滤 disabled（`PluginPageExplorer.tsx:36-48`） | 粒度是**插件级 + UI 隐藏**：宿主 `plugin_*` 命令注册不随 disable 变化（`register_commands.rs:781-796` 仍可 invoke），只对插件自有命令/UI action 设闸（`manager.rs:1022-1026`）；`plugin_resolve_page_asset` 无 enabled 检查（:674-715）；打包无条件 `resources: ["plugins"]`（`tauri.conf.json:41-44`）⇒ 不落判据④ | 当前=**改配置即可**（已有 UI/命令），但只覆盖插件级，不满足"换一个行情源/关一个通知渠道"字面 | 五锚点全命中：`plugin.rs:346` fn 签名、`PluginPageExplorer.tsx:40` enabled 过滤 |
+| **C 插件级可关（现成）** | `plugin_disable` 命令（`src-tauri/src/commands/plugin.rs:391`）写 `settings.json` 的 `enabledPlugins`（`manager.rs:1651-1661/:2155-2171`）；`plugin_list_pages`（:617-629）带出 `summary.enabled`；前端 `flattenPages` 过滤 disabled（`PluginPageExplorer.tsx:36-48`） | 粒度是**插件级 + UI 隐藏**：宿主 `plugin_*` 命令注册不随 disable 变化（`register_commands.rs:781-796` 仍可 invoke），只对插件自有命令/UI action 设闸（`manager.rs:1022-1026`）；`plugin_resolve_page_asset` 无 enabled 检查（:674-715）；打包无条件 `resources: ["plugins"]`（`tauri.conf.json:41-44`）⇒ 不落判据④ | 当前=**改配置即可**（已有 UI/命令），但只覆盖插件级，不满足"换一个行情源/关一个通知渠道"字面 | 五锚点全命中：`plugin.rs:391` fn 签名、`PluginPageExplorer.tsx:40` enabled 过滤 |
 
 ### §208.2 三条候选的改动面与验收判据
 

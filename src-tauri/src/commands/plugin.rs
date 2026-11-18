@@ -56,7 +56,12 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
             })
     })
     .await
-    .map_err(|e| format!("plugin list task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin list task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 #[agent_command(domain = plugin, safety = Safe, call_mode = StateInput, description = "验证插件源并获取元数据")]
@@ -134,7 +139,12 @@ pub async fn plugin_validate_source(
         })
     })
     .await
-    .map_err(|e| format!("plugin validate task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin validate task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 /// 插件源码静态审计（PLAN §12.2）：对**内联源码**做形式合规检查。
@@ -196,7 +206,12 @@ pub async fn plugin_source_build(
         })
     })
     .await
-    .map_err(|e| format!("plugin source build task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin source build task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 /// 把构建失败映射到前端可翻译的错误码（PLAN §12.3 / §14.3）。
@@ -270,7 +285,12 @@ pub async fn plugin_install(
             })
         })
         .await
-        .map_err(|e| format!("plugin install task panicked: {e}"))??;
+        .map_err(|e| {
+            String::from(ErrorResponse::from_error(
+                format!("plugin install task panicked: {e}"),
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })??;
 
     // 插件表声明（PLAN-shell-plus-plugins §69.3）：安装成功后再收敛，失败则把
     // 「插件已装、建表失败」如实报给用户（下一次启用 / 启动会重试同一份声明）。
@@ -280,7 +300,12 @@ pub async fn plugin_install(
         Some(&outcome.plugin_id),
     )
     .await
-    .map_err(|e| format!("插件已安装，但 schema.json 收敛失败：{e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("插件已安装，但 schema.json 收敛失败：{e}"),
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
     // 插件 UI 贡献（任务 #149 第 2 步）：`ui.json` → `dynamic_ui_schemas`（origin=plugin）。
     // 与建表同批挂载，但**失败不回滚安装** —— 表声明失败会让插件跑不起来，UI 失败只是
     // 少一张表页；错误照样交给用户，下一次启用 / 启动会重试。
@@ -290,7 +315,12 @@ pub async fn plugin_install(
         Some(&outcome.plugin_id),
     )
     .await
-    .map_err(|e| format!("插件已安装，但 ui.json 收敛失败：{e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("插件已安装，但 ui.json 收敛失败：{e}"),
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
     Ok(outcome)
 }
 
@@ -313,7 +343,12 @@ pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Res
         (result, passports)
     })
     .await
-    .map_err(|e| format!("plugin enable task panicked: {e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin enable task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?;
     enable_result?;
     // 索引同步：把该插件的能力护照写入能力发现索引（async 上下文）
     for passport in &passports {
@@ -329,7 +364,12 @@ pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Res
         Some(&plugin_id),
     )
     .await
-    .map_err(|e| format!("插件已启用，但 schema.json 收敛失败：{e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("插件已启用，但 schema.json 收敛失败：{e}"),
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
     // 插件 UI 贡献（任务 #149 第 2 步）：同样覆盖「安装时 UI 写入失败」与「库被换掉」。
     crate::init::plugin_ui_schema::reconcile_ui_schemas(
         state.harness.db(),
@@ -337,7 +377,12 @@ pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Res
         Some(&plugin_id),
     )
     .await
-    .map_err(|e| format!("插件已启用，但 ui.json 收敛失败：{e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("插件已启用，但 ui.json 收敛失败：{e}"),
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
     Ok(())
 }
 
@@ -366,7 +411,12 @@ pub async fn plugin_disable(state: State<'_, AppState>, plugin_id: String) -> Re
         (result, ids)
     })
     .await
-    .map_err(|e| format!("plugin disable task panicked: {e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin disable task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?;
     disable_result?;
     // 索引同步：移除该插件的能力护照（async 上下文）
     for id in ids {
@@ -402,7 +452,12 @@ pub async fn plugin_uninstall(state: State<'_, AppState>, plugin_id: String) -> 
         (result, ids)
     })
     .await
-    .map_err(|e| format!("plugin uninstall task panicked: {e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin uninstall task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?;
     uninstall_result?;
     // 索引同步：移除该插件的能力护照（async 上下文）
     for id in ids {
@@ -457,7 +512,12 @@ pub async fn plugin_ui_action(
             .map_err(|e| ErrorResponse::err_with_detail(plugin_err::UI_ACTION_FAILED, e))
     })
     .await
-    .map_err(|e| format!("plugin ui action task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin ui action task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 /// 读取插件仪表盘面板声明的前端资产 —— 面板渲染宿主（沙箱 iframe）的内容来源。
@@ -568,7 +628,12 @@ pub async fn plugin_list_pages(
         })
     })
     .await
-    .map_err(|e| format!("plugin list pages task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin list pages task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 /// OPC 域包清单 —— `manifest.domainPacks[]` 指向的 logical manifest 的只读投影。
@@ -596,7 +661,12 @@ pub async fn plugin_list_domain_packs(
         })
     })
     .await
-    .map_err(|e| format!("plugin list domain packs task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin list domain packs task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 /// 任务中心任务源清单 —— `manifest.taskSources[]` 的只读投影（任务 #148，PLAN §97.4）。
@@ -626,7 +696,12 @@ pub async fn plugin_list_task_sources(
         })
     })
     .await
-    .map_err(|e| format!("plugin list task sources task panicked: {e}"))??;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin list task sources task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })??;
     // 运行期复核 `detailSchema` 的归属（任务 #149 第 2 步）：安装期校验只证明「当时声明过」，
     // 库被换掉 / 行被剪掉 / ui.json 被删都会让那份 key 变成悬空引用。复核不过就置 `None`
     // —— 详情槽退化成「无详情」，绝不把 key 原样交给前端去加载一张别人的或不存在的地表。
@@ -667,7 +742,12 @@ pub async fn plugin_list_task_cards(
         })
     })
     .await
-    .map_err(|e| format!("plugin list task cards task panicked: {e}"))??;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin list task cards task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })??;
     // 运行期复核 `detailSchema` 的归属：安装期校验只证明「当时声明过」，库被换掉 / 行被剪掉 /
     // ui.json 被删都会让那份 key 变成悬空引用。复核不过置 `None`（卡片退化为纯计数卡）。
     crate::init::plugin_ui_schema::retain_owned_card_schemas(state.harness.db(), &mut infos)
@@ -699,7 +779,12 @@ pub async fn plugin_update(
             })
         })
         .await
-        .map_err(|e| format!("plugin update task panicked: {e}"))??;
+        .map_err(|e| {
+            String::from(ErrorResponse::from_error(
+                format!("plugin update task panicked: {e}"),
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })??;
 
     // 新版本可能新增表声明；旧表**不删**（additive-only，见 PLAN §69.2）。
     crate::init::plugin_schema::reconcile_installed(
@@ -708,7 +793,12 @@ pub async fn plugin_update(
         Some(&outcome.plugin_id),
     )
     .await
-    .map_err(|e| format!("插件已更新，但 schema.json 收敛失败：{e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("插件已更新，但 schema.json 收敛失败：{e}"),
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
     // UI 贡献**会剪枝**（与表不同）：新版 `ui.json` 里删掉的 key 对应的行要一起清掉，
     // 否则升级后旧表单页在界面上残留、点开就是一张已经不存在的表。
     crate::init::plugin_ui_schema::reconcile_ui_schemas(
@@ -717,7 +807,12 @@ pub async fn plugin_update(
         Some(&outcome.plugin_id),
     )
     .await
-    .map_err(|e| format!("插件已更新，但 ui.json 收敛失败：{e}"))?;
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("插件已更新，但 ui.json 收敛失败：{e}"),
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
     Ok(outcome)
 }
 
@@ -758,7 +853,12 @@ pub async fn plugin_execute_command(
             .map_err(|e| String::from(crate::commands::error::plugin_command_error_response(&e)))
     })
     .await
-    .map_err(|e| format!("plugin execute_command task panicked: {e}"))?
+    .map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            format!("plugin execute_command task panicked: {e}"),
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?
 }
 
 #[derive(Debug, serde::Serialize)]

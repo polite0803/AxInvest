@@ -631,7 +631,15 @@ impl axagent_harness::PluginCommandBridge for AppPluginCommandBridge {
             execute_plugin_command_on(self.plugin_manager.clone(), plugin_id, command, &input)
                 .await?;
         // 回帧本身就是 JSON 文本；解析失败说明插件协议损坏，不得静默透传原文
-        serde_json::from_str(&raw).map_err(|e| format!("插件命令回帧解析失败: {e}"))
+        serde_json::from_str(&raw).map_err(|e| {
+            String::from(
+                crate::commands::error::ErrorResponse::new(
+                    crate::commands::error_code::common::INTERNAL,
+                )
+                .with_category(crate::commands::error::ErrorCategory::Unrecoverable)
+                .with_detail(format!("插件命令回帧解析失败：{e}")),
+            )
+        })
     }
 }
 

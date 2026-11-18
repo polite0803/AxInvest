@@ -53,7 +53,7 @@ Schema 存储与归属：
 
 `ComponentRegistry` 用 **namespace 前缀**隔离插件组件：`register(entry, namespace)` 的键是 `${namespace}:${entry.type}`，`resolve(type, namespace)` 先查命名空间键、再回退全局键（`src/lib/dynamicUI/ComponentRegistry.ts:14-59`）。卸载时需要 `unregister` 同 namespace，并修复反向索引避免裸类型悬空（`:75-85`）。
 
-Action 回流是单向显式链路：`DynamicPageViewer` 仅在 `record.origin === "plugin" && record.ownerId` 时把 `pluginId` 带进 `load_ok`（`src/pages/DynamicPageViewer.tsx:67-72`），`DynamicUIRenderer` 的 `onAction` 是宿主感知动作的唯一通路，直接接到 `pluginStore.runUiAction(pluginId, action)`（`:88-94`），最终落到 IPC `plugin_ui_action`（`src-tauri/src/commands/plugin.rs:440`）。渲染侧只在前端 `parseSchema` 失败时显示 `dynamicUIManager.invalidSchema`（`src/pages/DynamicPageViewer.tsx:63-65`）；后端不重复校验 JSON 结构。
+Action 回流是单向显式链路：`DynamicPageViewer` 仅在 `record.origin === "plugin" && record.ownerId` 时把 `pluginId` 带进 `load_ok`（`src/pages/DynamicPageViewer.tsx:67-72`），`DynamicUIRenderer` 的 `onAction` 是宿主感知动作的唯一通路，直接接到 `pluginStore.runUiAction(pluginId, action)`（`:88-94`），最终落到 IPC `plugin_ui_action`（`src-tauri/src/commands/plugin.rs:495`）。渲染侧只在前端 `parseSchema` 失败时显示 `dynamicUIManager.invalidSchema`（`src/pages/DynamicPageViewer.tsx:63-65`）；后端不重复校验 JSON 结构。
 
 （对应版本：v3.0.0+（unreleased；页面装载通道 A，证据 `CHANGELOG.md:120`、45221a824））
 
@@ -63,9 +63,9 @@ Action 回流是单向显式链路：`DynamicPageViewer` 仅在 `record.origin =
 
 | 阶段 | 实现入口 |
 |---|---|
-| ② 静态审计 | `plugin_source_audit`（`src-tauri/src/commands/plugin.rs:156`）→ `axagent-plugins/crates/plugins/src/source_audit.rs` |
-| ③ 隔离构建 | `plugin_source_build`（`src-tauri/src/commands/plugin.rs:183`）→ `axagent-plugins/crates/plugins/src/source_build.rs:177-207` |
-| ④ 装载 | `plugin_enable`（`src-tauri/src/commands/plugin.rs:299`）→ `LoadedPlugin::load`（`axagent-plugins/crates/plugins/src/worker.rs:5063-5080`） |
+| ② 静态审计 | `plugin_source_audit`（`src-tauri/src/commands/plugin.rs:166`）→ `axagent-plugins/crates/plugins/src/source_audit.rs` |
+| ③ 隔离构建 | `plugin_source_build`（`src-tauri/src/commands/plugin.rs:193`）→ `axagent-plugins/crates/plugins/src/source_build.rs:177-207` |
+| ④ 装载 | `plugin_enable`（`src-tauri/src/commands/plugin.rs:329`）→ `LoadedPlugin::load`（`axagent-plugins/crates/plugins/src/worker.rs:5063-5080`） |
 | ⑤ 回滚 | `LoadedPlugin::rollback` 逐句柄 LIFO 撤销（`axagent-plugins/crates/plugins/src/worker.rs:5211-5215`） |
 
 审计是**形式合规清单**，不是安全边界：`build.rs`、白名单外 proc-macro、git/path 依赖被列为首要禁止项，因为它们在编译期以宿主用户身份执行任意代码（`docs/plans/PLAN-everything-is-plugin.md` §12.2，`:741-758`）。

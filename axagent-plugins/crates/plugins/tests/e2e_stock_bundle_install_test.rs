@@ -213,9 +213,8 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     assert_eq!(analysis_rows[1]["nativeId"], "analysis-0");
     assert_eq!(analysis_rows[1]["state"], "succeeded");
     assert_eq!(analysis_rows[1]["finishedAt"], 1_699_999_999_000_i64);
-    let detail_rows = analysis_rows[1]["raw"]["rows"]
-        .as_array()
-        .expect("详情 schema 的 rows 投影应存在");
+    let detail_rows =
+        analysis_rows[1]["raw"]["rows"].as_array().expect("详情 schema 的 rows 投影应存在");
     assert_eq!(detail_rows[0]["stockCode"], "300308");
 
     // 先放 manager（析构时停 worker），再删临时目录（Windows 上占用中的 exe 删不掉）。

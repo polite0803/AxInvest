@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! `wiki.store` 接缝的宿主侧实现（P6.3 第一片）。
+//!
+//! 命令体从 `commands/wiki.rs::sync_note_to_knowledge_base` 逐字下沉到此处：笔记读取、
+//! markdown 临时文件、知识库文档行与索引入队全留在宿主，插件只提交两个 id。
+//! `AppHandle` 与 `Arc<AppState>` 是索引入队链的既有依赖，provider 在宿主启动期装配。
+
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+use axagent_dao::repo::index_jobs as jobs;
+use axagent_harness::core_error::{AxAgentError, Result};
+use axagent_harness::{
+    SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest, WikiStoreProvider,
+};
+use tauri::{AppHandle, Manager};
+
+use crate::commands::error::{ErrorCategory, ErrorResponse};
+
+/// Wiki 同步写接缝的宿主 provider。
+///
+/// 持 `AppHandle` 而不是 `Arc<AppState>`：`AppState` 由 Tauri 管理且**不是 `Clone`**，
+/// 复制它等于造第二份运行态。`AppHandle::state` 取回的是同一实例的引用。
+pub struct HostWikiStore {
+    app: AppHandle,
+}
+
+impl HostWikiStore {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+
+    pub async fn sync(
+        &self,
+        request: SyncNoteToKnowledgeBaseRequest,
+    ) -> Result<SyncNoteToKnowledgeBaseOutcome> {
+        let SyncNoteToKnowledgeBaseRequest { note_id, knowledge_base_id } = request;
+        if note_id.trim().is_empty() || knowledge_base_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::sync_note_to_knowledge_base 需要非空 noteId / knowledgeBaseId".into(),
+            ));
+        }
+
+        let state = self.app.state::<crate::AppState>();
+        let note = axagent_dao::repo::note::get_note(state.harness.db(), &note_id)
+            .await
+            .map_err(to_provider_error)?;
+
+        let file_name = format!("{}.md", note.title.replace('/', "_"));
+        let data_dir = state.app_data_dir.join("wiki_sync").join(&note.vault_id);
+        tokio::task::spawn_blocking({
+            let dir = data_dir.clone();
+            move || std::fs::create_dir_all(&dir)
+        })
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("wiki 同步目录创建任务失败: {e}")))?
+        .map_err(to_provider_error)?;
+
+        let full_path: PathBuf = data_dir.join(&file_name);
+        let content = note.content.into_bytes();
+        let write_path = full_path.clone();
+        tokio::task::spawn_blocking(move || std::fs::write(&write_path, &content))
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("wiki 同步文件写入任务失败: {e}")))?
+            .map_err(to_provider_error)?;
+
+        let source_path = full_path.to_string_lossy().to_string();
+        let doc = axagent_dao::repo::knowledge::add_document(
+            state.harness.db(),
+            &knowledge_base_id,
+            &note.title,
+            &source_path,
+            "text/markdown",
+            Some("wiki-sync"),
+        )
+        .await
+        .map_err(to_provider_error)?;
+
+        let kb = axagent_dao::repo::knowledge::get_knowledge_base(
+            state.harness.db(),
+            &knowledge_base_id,
+        )
+        .await
+        .map_err(to_provider_error)?;
+
+        let mut index_queued = false;
+        if kb.embedding_provider.is_some() {
+            let _ = axagent_dao::repo::knowledge::update_document_status(
+                state.harness.db(),
+                &doc.id,
+                "pending",
+            )
+            .await;
+            // 索引任务入队失败不改变同步本身的成功状态 —— 与宿主原命令同口径：
+            // 文档行已落库，队列服务会在启动扫描时捞回 pending 条目。
+            index_queued = crate::index_queue::enqueue_job_sync(
+                &state,
+                &self.app,
+                jobs::JOB_TYPE_INDEX_DOCUMENT,
+                "kb",
+                &knowledge_base_id,
+                &doc.id,
+                None,
+                None,
+            )
+            .is_ok();
+        }
+
+        Ok(SyncNoteToKnowledgeBaseOutcome { document_id: doc.id, index_queued })
+    }
+}
+
+#[async_trait]
+impl WikiStoreProvider for HostWikiStore {
+    async fn sync_note_to_knowledge_base(
+        &self,
+        request: SyncNoteToKnowledgeBaseRequest,
+    ) -> Result<SyncNoteToKnowledgeBaseOutcome> {
+        self.sync(request).await
+    }
+}
+
+fn to_provider_error(error: impl std::fmt::Display) -> AxAgentError {
+    AxAgentError::Provider(
+        ErrorResponse::from_error(error, ErrorCategory::Unrecoverable).to_string(),
+    )
+}

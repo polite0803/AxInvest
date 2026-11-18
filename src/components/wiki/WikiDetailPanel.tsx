@@ -5,7 +5,7 @@ import { MonacoEditor } from "@/components/shared/MonacoEditor";
 import { highlightWikilink } from "@/components/wiki/wikilinkHighlight";
 import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
 import { useWikiAutoSave } from "@/hooks/useWikiAutoSave";
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { message } from "@/lib/toast";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { BacklinkInfo, KnowledgeBase, Note, NoteLink } from "@/types";
@@ -175,7 +175,9 @@ export function WikiDetailPanel({
     }
     setSyncing(true);
     try {
-      await invoke("sync_note_to_knowledge_base", {
+      // 真机经插件命令桥走 Wiki 插件 → 宿主 `wiki.store` 写接缝；浏览器模式落到
+      // browserMock 的同名 case（显式空态，不假装成功）。
+      await invokePluginCommand("wiki_sync_note_to_knowledge_base", {
         noteId: note.id,
         knowledgeBaseId: selectedKbId,
       });

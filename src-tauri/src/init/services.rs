@@ -4986,6 +4986,17 @@ fn start_index_job_service(app: &tauri::AppHandle, state: &AppState) {
         }
     }
 
+    // wiki.store 接缝：Wiki 同步写面的唯一实现在 HostWikiStore，
+    // 宿主 Tauri 命令与插件 worker 都经同一 provider，避免两处实现漂移。
+    {
+        let provider: Arc<dyn axagent_harness::WikiStoreProvider> =
+            Arc::new(crate::init::wiki_store_service::HostWikiStore::new(app_handle.clone()));
+        match axagent_harness::get_capability_registry().register_wiki_store(provider) {
+            Ok(_) => tracing::info!("wiki.store 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("wiki.store 注册失败: {e}"),
+        }
+    }
+
     tauri::async_runtime::spawn(async move {
         let service = std::sync::Arc::new(IndexJobService::new(
             db,

@@ -96,6 +96,12 @@ pub mod workflow_lifecycle;
 pub mod workflow_node_descriptors;
 pub mod workflow_node_deserializer;
 pub mod workflow_node_dyn;
+
+// Wiki 业务功能面的宿主写接缝（P6.3 第一片）；只传 id，数据与文件系统主权留在宿主。
+pub mod wiki_store;
+pub use wiki_store::{
+    SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest, WikiStoreProvider,
+};
 pub mod workflow_types;
 
 // ── 工作流 DAG 端口公理（C1）──

@@ -8553,6 +8553,13 @@ async function executeCommand<T>(
     case "toggle_trading_enabled":
       return null as unknown as T;
 
+    // ── Wiki 插件命名命令（P6.3 第一片）─────────────────────────────
+    // 真机经插件命令桥走宿主 `wiki.store` 写接缝；浏览器模式没有笔记与知识库，
+    // ⇒ 显式返回「已同步」形状的空态（documentId 为空串表示未真正落库），
+    // 不落到 default 的 undefined（消费端不读返回值，但显式化可消除告警）。
+    case "wiki_sync_note_to_knowledge_base":
+      return { documentId: "", indexQueued: false } as unknown as T;
+
     default: {
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);
       // SAFE: browser mock fallback for unhandled commands — returns empty placeholder matching generic T

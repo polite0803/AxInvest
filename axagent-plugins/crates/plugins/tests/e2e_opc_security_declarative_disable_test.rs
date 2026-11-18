@@ -50,13 +50,13 @@ fn security_declarative_bundle_disable_and_restore_is_scoped_to_its_plugin() {
     let html = std::fs::read_to_string(&page_path).expect("页面资产应可读");
     assert!(html.contains("AX_OPC_DOMAIN_DATA"), "页面必须读取随包域数据：{html}");
     assert!(html.contains("OPC 域包"), "读到的不是 OPC 域包页：{html}");
-    let domain_data_path = page_path
-        .parent()
-        .expect("页面资产应有父目录")
-        .join("domain-data.js");
+    let domain_data_path = page_path.parent().expect("页面资产应有父目录").join("domain-data.js");
     let domain_data = std::fs::read_to_string(&domain_data_path).expect("随包域数据应可读");
     assert!(domain_data.contains("\"id\": \"security\""), "域数据必须属于 security：{domain_data}");
-    assert!(domain_data.contains("\"name\": \"安全合规完整流程\""), "域数据必须是真实域包投影：{domain_data}");
+    assert!(
+        domain_data.contains("\"name\": \"安全合规完整流程\""),
+        "域数据必须是真实域包投影：{domain_data}"
+    );
     let packs = manager.list_plugin_domain_packs().expect("域包投影应可读");
     let pack =
         packs.iter().find(|p| p.id == outcome.plugin_id).expect("启用后 security 域包投影应可见");

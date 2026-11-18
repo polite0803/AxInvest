@@ -474,6 +474,9 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ) => Some(PluginPermission::Write),
         ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
         ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
+        // `wiki.store` 的唯一写 op：把宿主笔记同步进知识库（落文档行 + 可能触发
+        // embedding 计费的索引入队）⇒ 必须 `write`。同接缝将来开的读 op 一律 `None`。
+        ("wiki.store", "sync_note_to_knowledge_base") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -2889,6 +2892,29 @@ impl HostPeer {
                     // 集合不存在 ⇒ `Ok` + `{exists:false, dimensions:null}`，**不是错误**
                     // （照 `jobs.store get` 的「查无即 null」口径；插件据此先探再写）。
                     Ok(view) => to_value("CollectionInfoView", &view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // ── wiki.store 接缝：宿主把「笔记 → 知识库文档」同步写面暴露给插件 ──
+            // 一个写 op；`write` 权限闸由 `dispatch_seam` 开头统一把关。
+            // 入参是**嵌一层**的 `{"request": {noteId, knowledgeBaseId}}`（契约 DTO
+            // `SyncNoteToKnowledgeBaseRequest`，camelCase）—— 与 `knowledge.vector` 的
+            // `index_text` 同形态；正文、文件路径与索引队列全在宿主 provider 内。
+            "wiki.store" if op == "sync_note_to_knowledge_base" => {
+                let request: axagent_harness::SyncNoteToKnowledgeBaseRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.sync_note_to_knowledge_base(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("SyncNoteToKnowledgeBaseOutcome", &outcome),
                     Err(e) => seam_provider_error(e),
                 }
             },

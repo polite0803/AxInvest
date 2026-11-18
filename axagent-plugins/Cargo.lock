@@ -744,6 +744,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axagent-plugin-wiki"
+version = "3.0.0"
+dependencies = [
+ "axagent-plugin-proto",
+ "axagent-plugin-testkit",
+ "serde_json",
+]
+
+[[package]]
 name = "axagent-plugins"
 version = "3.0.0"
 dependencies = [

@@ -1448,83 +1448,17 @@ pub async fn invalidate_wiki_graph_cache(
 #[tauri::command]
 pub async fn sync_note_to_knowledge_base(
     app: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     note_id: String,
     knowledge_base_id: String,
 ) -> Result<(), String> {
-    let note =
-        axagent_dao::repo::note::get_note(state.harness.db(), &note_id).await.map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-
-    let file_name = format!("{}.md", note.title.replace('/', "_"));
-    let data_dir = state.app_data_dir.join("wiki_sync").join(&note.vault_id);
-    create_dir_all_blocking(data_dir.clone()).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    let full_path = data_dir.join(&file_name);
-    write_file_blocking(full_path.clone(), note.content.into_bytes()).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    let source_path = full_path.to_string_lossy().to_string();
-
-    let doc = axagent_dao::repo::knowledge::add_document(
-        state.harness.db(),
-        &knowledge_base_id,
-        &note.title,
-        &source_path,
-        "text/markdown",
-        Some("wiki-sync"),
-    )
-    .await
-    .map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    let kb =
-        axagent_dao::repo::knowledge::get_knowledge_base(state.harness.db(), &knowledge_base_id)
-            .await
-            .map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })?;
-
-    if kb.embedding_provider.is_some() {
-        let _ = axagent_dao::repo::knowledge::update_document_status(
-            state.harness.db(),
-            &doc.id,
-            "pending",
-        )
-        .await;
-        let _ = crate::index_queue::enqueue_job_sync(
-            &state,
-            &app,
-            jobs::JOB_TYPE_INDEX_DOCUMENT,
-            "kb",
-            &knowledge_base_id,
-            &doc.id,
-            None,
-            None,
-        );
-    }
-
-    Ok(())
+    // 实现已下沉 `wiki.store` 宿主 provider；宿主命令与插件 worker 共用一条链。
+    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
+    service
+        .sync(axagent_harness::SyncNoteToKnowledgeBaseRequest { note_id, knowledge_base_id })
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "同步知识库文档到 Wiki")]

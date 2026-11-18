@@ -135,6 +135,14 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: opcContentMediaManifest,
   },
+  // Wiki 业务功能包（P6.3 第一片）：只承接一条命令，经宿主 `wiki.store` 写接缝同步笔记。
+  wiki: {
+    packageName: "axagent-plugin-wiki",
+    // 首批不含前端页面资产 ⇒ `webDir` 为 null（清单不得声明 `pages[]`）。
+    webDir: null,
+    uiSchema: null,
+    manifest: wikiManifest,
+  },
   stock: {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
@@ -5415,6 +5423,43 @@ function opcContentMediaManifest({ version, binaryName, sha256 }) {
       requiredPermission: writes.has(name) ? "workspace-write" : "read-only",
       inputSchema: { type: "object", properties: {} },
     })),
+    integrity: { algorithm: "sha256", hash: sha256 },
+  };
+}
+
+/**
+ * Wiki 业务功能包清单（P6.3 第一片）。
+ *
+ * 一条命令：`wiki_sync_note_to_knowledge_base`（写面：笔记 → 知识库文档）。
+ * 首批**不含前端页面资产** ⇒ 不声明 `pages[]`（打包器会据此拒绝 web 资产）。
+ */
+function wikiManifest({ version, binaryName, sha256 }) {
+  return {
+    name: "wiki",
+    version,
+    description: "Wiki 业务功能包：笔记同步到知识库（经宿主 wiki.store 写接缝）",
+    permissions: ["subprocess_execution", "write"],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    defaultEnabled: true,
+    worker: { program: path.posix.join("bin", binaryName) },
+    commands: [
+      {
+        name: "wiki_sync_note_to_knowledge_base",
+        description: "把一条 Wiki 笔记同步进知识库（经宿主 wiki.store 写面）",
+        command: "worker://wiki_sync_note_to_knowledge_base",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            noteId: { type: "string", description: "宿主侧笔记 id" },
+            knowledgeBaseId: { type: "string", description: "宿主侧知识库 id" },
+          },
+          required: ["noteId", "knowledgeBaseId"],
+        },
+      },
+    ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

@@ -26,6 +26,7 @@ pub mod stock_automation_cron_seed;
 pub mod stock_domain_state;
 pub mod stock_domain_tools;
 pub mod trigger_recovery;
+pub mod wiki_store_service;
 pub mod workflow_injections;
 
 pub use cognitive_router_init::{

@@ -67,6 +67,7 @@ const BUNDLE_STAGING = [
   { plugin: "opc-project-management", env: null },
   { plugin: "opc-security", env: "AXAGENT_SECURITY_BUNDLE_DIR" },
   { plugin: "opc-software-dev", env: null },
+  { plugin: "wiki", env: "AXAGENT_WIKI_BUNDLE_DIR" },
 ];
 const BUNDLE_ENV_BY_PLUGIN = new Map(BUNDLE_STAGING.filter((item) => item.env).map((item) => [item.plugin, item.env]));
 const E2E_NON_BUNDLE_GATES = new Set([

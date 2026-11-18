@@ -28,5 +28,11 @@
   ],
   "schema-gen": [
     "axagent-harness"
+  ],
+  "plugin-wiki": [
+    "axagent-plugin-proto"
+  ],
+  "stock-core": [
+    "axagent-harness"
   ]
 }

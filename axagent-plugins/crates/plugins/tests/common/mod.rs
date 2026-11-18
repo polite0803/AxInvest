@@ -160,7 +160,10 @@ impl axagent_harness::AnalysisRecordProvider for FixedAnalysisRecordProvider {
             records: vec![
                 record("analysis-1", "running", None),
                 record("analysis-0", "completed", Some(1_699_999_999_000)),
-                AnalysisRecordView { parent_analysis_id: Some("analysis-0".to_string()), ..record("analysis-child", "completed", Some(1_699_999_999_000)) },
+                AnalysisRecordView {
+                    parent_analysis_id: Some("analysis-0".to_string()),
+                    ..record("analysis-child", "completed", Some(1_699_999_999_000))
+                },
             ],
             total: 3,
         })

@@ -256,6 +256,19 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 wiki-store 接缝（Wiki 同步写面，宿主独占实现）。
+    ///
+    /// 一个写 op：`sync_note_to_knowledge_base`（note id + kb id；笔记正文、文件落盘、
+    /// 文档行与索引入队全在宿主 provider 内完成）。插件不拿数据库句柄、不拼路径。
+    pub fn wiki_store() -> Self {
+        Self::new(
+            "wiki.store",
+            "1.0",
+            "axagent_harness::WikiStoreProvider",
+            "Wiki 同步写面：sync_note_to_knowledge_base（write 权限；返回 documentId 与 indexQueued）",
+        )
+    }
+
     /// 预置 stock-analysis 接缝（股票分析数据面，宿主独占实现）。
     ///
     /// 宿主把 `analysis-engine` 的三条确定性能力经本接缝暴露给插件：读两条
@@ -1254,6 +1267,21 @@ impl CapabilityRegistry {
     /// 取回 opc.store 接缝上的 OPC 站点内容提供者（若已注册）。
     pub fn get_opc_store(&self) -> Option<Arc<dyn crate::OpcStoreProvider>> {
         self.provider_as::<dyn crate::OpcStoreProvider>("opc.store")
+    }
+
+    // ── wiki.store 接缝（Wiki 同步写面，单实例）──
+
+    /// 注册 Wiki 同步写接缝的宿主 provider；同名重复注册保留先注册者。
+    pub fn register_wiki_store(
+        &self,
+        provider: Arc<dyn crate::WikiStoreProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::wiki_store(), Arc::new(provider), "wiki-store")
+    }
+
+    /// 取回 wiki.store 接缝上的宿主 provider（若已注册）。
+    pub fn get_wiki_store(&self) -> Option<Arc<dyn crate::WikiStoreProvider>> {
+        self.provider_as::<dyn crate::WikiStoreProvider>("wiki.store")
     }
 
     // ── stock.analysis 接缝（股票分析数据面，单实例；读两条 + 写一条） ──

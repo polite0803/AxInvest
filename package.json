@@ -8,6 +8,27 @@
   "engines": {
     "node": ">=24"
   },
+  "//audit": [
+    "ci.yml 的 `npm audit` 口径是 `--omit=dev`（2026-11-18 起）。理由写在这里而不是 ci.yml：",
+    "该文件被全仓 278 处 `ci.yml:<行号>` 引用，中段插行会让其后引用成批腐烂（见",
+    "PLAN-shell-plus-plugins.md §15.3），故 ci.yml 只留一行内联注释指向本字段。",
+    "",
+    "为什么必须收窄：picomatch 的 CVE-2026-112366（GHSA-fc5q-39xc-vjpf，high，ReDoS）",
+    "advisory 覆盖 `<= 4.0.7`，而 4.0.7 就是最新发布版，上游修复 PR",
+    "（micromatch/picomatch#194）至今未合并 ⇒ 当前不存在任何可安装的修复版本。",
+    "`npm audit fix --force` 声称能修，实为把 vitest 降级到 3.1.4 的假修复。",
+    "",
+    "它经 vite / vitest / tinyglobby 传递进来，而这条链全在 devDependencies：",
+    "`npm ls picomatch --omit=dev` 实测 (empty)，生产依赖树 53 个包里一个都没有，",
+    "`npm audit --omit=dev` = 0 漏洞。Tauri 只把 frontendDist（../dist）打进安装包，",
+    "devDependencies 不随包分发 ⇒ 这条 ReDoS 在用户侧不可达。",
+    "",
+    "恢复全量口径的条件（任一满足）：① picomatch 发布 > 4.0.7（届时 audit fix 能真修）；",
+    "② 生产依赖新增对 vite / vitest / tinyglobby 的引用（当前不存在）。",
+    "另：minimatch 的 GHSA-g3hv-75wg-m249（moderate）已升到 11.0.9 修复；仅 typedoc",
+    "（0.28.20 为最新版，仍锁 ^10.2.5，上游未跟进 11.x）残留一提，且 typedoc 只经",
+    "`npm run docs` 手动跑，不在 CI 任何 job 中。"
+  ],
   "overrides": {
     "dompurify": "^3.4.17",
     "@babel/runtime": "7.29.2",
@@ -222,7 +243,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "dprint": "^0.57.0",
     "esbuild": "^0.28.2",
-    "eslint": "^10.8.1",
+    "eslint": "^10.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.6",
     "globals": "^17.9.0",
@@ -234,7 +255,7 @@
     "tailwindcss": "^4.3.3",
     "typedoc": "^0.28.19",
     "typescript": "^7.0.2",
-    "typescript-eslint": "^8.67.0",
+    "typescript-eslint": "^8.73.0",
     "vite": "^8.2.1",
     "vite-plugin-monaco-editor": "^1.1.0",
     "vitest": "4.1.12"

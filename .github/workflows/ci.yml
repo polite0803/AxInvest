@@ -920,8 +920,8 @@ jobs:
       - name: Run frontend integration tests
         run: npm run test:integration
 
-      - name: npm audit
-        run: npm audit --audit-level=high
+      - name: npm audit  # ⚠ 为何加 --omit=dev：见 package.json 的 //audit 字段（本文件被全仓 278 处 `ci.yml:<行号>` 引用，禁止中段插行）
+        run: npm audit --omit=dev --audit-level=high
 
   test-e2e:
     name: E2E Tests (macOS)

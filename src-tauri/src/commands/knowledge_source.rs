@@ -1225,7 +1225,7 @@ pub async fn sitemap_crawl(
 /// 命中用户编辑时返回 action=skipped。
 ///
 /// 说明：Note DTO 的 user_edited 字段由前端编辑置位，抓取管道只读不改。
-/// 若要强制覆盖，前端先调用 wiki_notes_update 清除 user_edited 再抓取。
+/// 若要强制覆盖，前端先调用插件命令 `wiki_update_note` 清除 user_edited 再抓取。
 ///
 /// 抓取成功后把页面精华沉淀进 Memory（写入首个可用 namespace，失败仅告警）。
 async fn deposit_to_memory(db: &sea_orm::DatabaseConnection, title: &str, url: &str, body: &str) {

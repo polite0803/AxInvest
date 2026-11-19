@@ -7465,19 +7465,16 @@ async function executeCommand<T>(
       const fx = await loadWikiGraphFixture();
       return (fx ? fx.communitiesResult : { communities: {} }) as T;
     }
-    case "wiki_notes_list":
     case "wiki_list_notes": {
       const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");
       return seedWikiNotes(vaultId) as unknown as T;
     }
-    case "wiki_notes_get":
     case "wiki_get_note": {
       const id = String(args?.id ?? "");
       const note = getWikiNotes().find((n) => n.id === id);
       if (!note) { throw new Error(`Note ${id} not found`); }
       return note as unknown as T;
     }
-    case "wiki_notes_get_by_path":
     case "wiki_get_note_by_path": {
       const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");
       const filePath = String(args?.filePath ?? args?.file_path ?? "");
@@ -7533,7 +7530,6 @@ async function executeCommand<T>(
         }));
       return results as unknown as T;
     }
-    case "wiki_notes_create":
     case "wiki_create_note": {
       const input = (args?.input ?? {}) as Record<string, unknown>;
       const title = String(input.title ?? "未命名");
@@ -7564,7 +7560,6 @@ async function executeCommand<T>(
       setWikiNotes([...getWikiNotes(), note]);
       return note as unknown as T;
     }
-    case "wiki_notes_update":
     case "wiki_update_note": {
       const id = String(args?.id ?? "");
       const input = (args?.input ?? {}) as Record<string, unknown>;
@@ -7594,7 +7589,6 @@ async function executeCommand<T>(
       setWikiNotes(next);
       return updated as unknown as T;
     }
-    case "wiki_notes_delete":
     case "wiki_delete_note": {
       const id = String(args?.id ?? "");
       setWikiNotes(getWikiNotes().filter((n) => n.id !== id));

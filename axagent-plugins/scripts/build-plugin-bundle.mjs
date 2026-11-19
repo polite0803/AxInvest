@@ -5432,13 +5432,23 @@ function opcContentMediaManifest({ version, binaryName, sha256 }) {
  *
  * 一条命令：`wiki_sync_note_to_knowledge_base`（写面：笔记 → 知识库文档）。
  * 首批**不含前端页面资产** ⇒ 不声明 `pages[]`（打包器会据此拒绝 web 资产）。
+ *
+ * ⚠ 包级 `permissions` 含 `execute`：删除类命令（`wiki_delete_note` /
+ * `wiki_template_delete`）的宿主等价命令是 `#[agent_command(safety = Dangerous)]`
+ * ⇒ 智能体工具面在派发层**无条件硬拒**（`command_decision`，含 `full_access` 会话）。
+ * 清单必须把这两条对齐成 `danger-full-access`（投影同为 Dangerous），否则插件名
+ * 成为「确认即可删」的旁路（判据见 PLAN §142.3 与 §328 两条 Dangerous 的对齐先例）。
+ * `check_command_gate` 的 `DangerFullAccess` 分支**只认 `execute`**
+ * （`subprocess_execution` 明确不算）⇒ 不声明它，这两条会在启动子进程前被拒。
+ * 副作用仅限 gate 的档位判定：沙箱推导（`build_sandbox_from_permissions`）只看
+ * `subprocess_execution` / `network_access`。
  */
 function wikiManifest({ version, binaryName, sha256 }) {
   return {
     name: "wiki",
     version,
     description: "Wiki 业务功能包：笔记同步到知识库（经宿主 wiki.store 写接缝）",
-    permissions: ["subprocess_execution", "write"],
+    permissions: ["subprocess_execution", "write", "execute"],
     mcp_servers: [],
     skills: [],
     agents: [],
@@ -5625,7 +5635,10 @@ function wikiManifest({ version, binaryName, sha256 }) {
         name: "wiki_delete_note",
         description: "删除一条 Wiki 笔记（经宿主 wiki.store 写面）",
         command: "worker://wiki_delete_note",
-        requiredPermission: "workspace-write",
+        // 宿主等价命令 `wiki_notes_delete` 是 `#[agent_command(safety = Dangerous)]`
+        // 且**保留在宿主**（智能体面硬拒删笔记）⇒ 清单必须 danger-full-access，
+        // 否则插件名成为「确认即可删」的旁路。包级 `execute` 的依据见上方 permissions 注释。
+        requiredPermission: "danger-full-access",
         inputSchema: {
           type: "object",
           properties: { id: { type: "string", description: "宿主侧笔记 id" } },
@@ -5712,7 +5725,10 @@ function wikiManifest({ version, binaryName, sha256 }) {
         name: "wiki_template_delete",
         description: "删除 Wiki 模板（经宿主 wiki.store 写面）",
         command: "worker://wiki_template_delete",
-        requiredPermission: "workspace-write",
+        // 宿主等价命令 `wiki_template_delete` 原档是 `Dangerous`（P6.3 搜索/导入/导出/
+        // 模板删除片退役）⇒ 清单必须 danger-full-access 保持等阶，否则智能体面把
+        // 「禁止删模板」放松成「确认即可删」。包级 `execute` 的依据见上方 permissions 注释。
+        requiredPermission: "danger-full-access",
         inputSchema: {
           type: "object",
           properties: { id: { type: "string", description: "宿主侧模板 id" } },

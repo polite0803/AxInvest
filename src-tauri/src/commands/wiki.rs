@@ -116,20 +116,6 @@ pub(crate) fn enqueue_wiki_note_indexing(
     );
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "列出 Wiki 下的笔记")]
-#[tauri::command]
-pub async fn wiki_notes_list(
-    state: State<'_, AppState>,
-    vault_id: String,
-) -> Result<Vec<Note>, String> {
-    axagent_dao::repo::note::list_notes(state.harness.db(), &vault_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 /// 更新 Wiki 元数据，目前主要用于修改 embedding_provider。
 /// 仅当字段非空时才更新对应列。
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "更新 Wiki 信息")]
@@ -212,59 +198,16 @@ pub async fn delete_wiki(state: State<'_, AppState>, id: String) -> Result<(), S
     })
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取 Wiki 笔记")]
-#[tauri::command]
-pub async fn wiki_notes_get(state: State<'_, AppState>, id: String) -> Result<Note, String> {
-    axagent_dao::repo::note::get_note(state.harness.db(), &id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "按路径获取 Wiki 笔记")]
-#[tauri::command]
-pub async fn wiki_notes_get_by_path(
-    state: State<'_, AppState>,
-    vault_id: String,
-    file_path: String,
-) -> Result<Note, String> {
-    axagent_dao::repo::note::get_note_by_path(state.harness.db(), &vault_id, &file_path)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "创建 Wiki 笔记")]
-#[tauri::command]
-pub async fn wiki_notes_create(
-    app: AppHandle,
-    _state: State<'_, AppState>,
-    input: CreateNoteInput,
-) -> Result<Note, String> {
-    // 建行、图谱缓存失效、反馈数据湖与索引入队已下沉 wiki.store provider。
-    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
-    service.create_note(input).await.map_err(|e| e.to_string())
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "更新 Wiki 笔记")]
-#[tauri::command]
-pub async fn wiki_notes_update(
-    app: AppHandle,
-    _state: State<'_, AppState>,
-    id: String,
-    input: UpdateNoteInput,
-) -> Result<Note, String> {
-    // 版本备份、建行更新、缓存失效、反馈数据湖与索引入队已下沉 wiki.store provider。
-    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
-    service.update_note(id, input).await.map_err(|e| e.to_string())
-}
-
+/// 删除 Wiki 笔记。
+///
+/// ⚠ 本命令**保留在宿主**（P6.3 Wiki 旧名族退役批，2026-11-19）：宿主档位是
+/// `Dangerous` ⇒ 智能体工具面在派发层**无条件硬拒**（`command_decision`，
+/// 含 `full_access` 会话）。插件侧同名命令 `wiki_delete_note` 走
+/// `wiki.store::delete_note` 接缝，能力面与本条**完全同权**，但清单档位必须与
+/// 宿主等阶（`danger-full-access` + 包级 `execute`）才不构成「禁止 ⇒ 需确认」
+/// 的安全放松（判据见 PLAN §142.3 与 §328 两条 Dangerous 的对齐先例）。
+///
+/// 本条命令**不因「插件已承接」而下线**：它是智能体面禁止删除笔记的那道闸。
 #[agent_command(domain = wiki, safety = Dangerous, call_mode = StateInput, description = "删除 Wiki 笔记")]
 #[tauri::command]
 pub async fn wiki_notes_delete(
@@ -1117,23 +1060,6 @@ pub async fn invalidate_wiki_graph_cache(
                 crate::commands::error::ErrorCategory::Unrecoverable,
             ))
         })
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "同步笔记到知识库")]
-#[tauri::command]
-pub async fn sync_note_to_knowledge_base(
-    app: AppHandle,
-    _state: State<'_, AppState>,
-    note_id: String,
-    knowledge_base_id: String,
-) -> Result<(), String> {
-    // 实现已下沉 `wiki.store` 宿主 provider；宿主命令与插件 worker 共用一条链。
-    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
-    service
-        .sync(axagent_harness::SyncNoteToKnowledgeBaseRequest { note_id, knowledge_base_id })
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "同步知识库文档到 Wiki")]

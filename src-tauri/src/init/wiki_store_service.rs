@@ -2,7 +2,8 @@
 
 //! `wiki.store` 接缝的宿主侧实现（P6.3 第一片）。
 //!
-//! 命令体从 `commands/wiki.rs::sync_note_to_knowledge_base` 逐字下沉到此处：笔记读取、
+//! 命令体从宿主 `commands/wiki.rs::sync_note_to_knowledge_base` 逐字下沉到此处（该宿主
+//! 命令已于 2026-11-19 P6.3 旧名族退役片删除，调用面改走插件命令）：笔记读取、
 //! markdown 临时文件、知识库文档行与索引入队全留在宿主，插件只提交两个 id。
 //! `AppHandle` 与 `Arc<AppState>` 是索引入队链的既有依赖，provider 在宿主启动期装配。
 

@@ -5645,6 +5645,42 @@ function wikiManifest({ version, binaryName, sha256 }) {
           required: ["wikiId"],
         },
       },
+      {
+        name: "wiki_note_versions",
+        description: "读取笔记版本历史（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_note_versions",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { noteId: { type: "string", description: "宿主侧笔记 id" } },
+          required: ["noteId"],
+        },
+      },
+      {
+        name: "wiki_note_get_version",
+        description: "读取指定笔记版本（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_note_get_version",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { versionId: { type: "integer", description: "宿主侧版本 id" } },
+          required: ["versionId"],
+        },
+      },
+      {
+        name: "wiki_note_restore_version",
+        description: "恢复笔记历史版本（经宿主 wiki.store 写面）",
+        command: "worker://wiki_note_restore_version",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            noteId: { type: "string", description: "宿主侧笔记 id" },
+            versionId: { type: "integer", description: "宿主侧版本 id" },
+          },
+          required: ["noteId", "versionId"],
+        },
+      },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };

@@ -519,6 +519,89 @@ fn graph_cache_commands_reject_missing_wiki_id() {
 }
 
 #[test]
+fn note_version_commands_map_to_host_wiki_store_seam() {
+    let versions = serde_json::json!([{
+        "id": 7,
+        "wikiId": "w1",
+        "noteId": "n1",
+        "title": "旧标题",
+        "content": "旧正文",
+        "contentHash": "h",
+        "author": "u",
+        "createdAt": 123,
+    }]);
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_note_versions", serde_json::json!({ "noteId": "n1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "list_note_versions");
+    assert_eq!(call.args["args"]["noteId"], "n1");
+    worker.send_response(
+        &FrameResponse::success(versions.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &versions);
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_get_version",
+        serde_json::json!({ "versionId": 7 }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "get_note_version");
+    assert_eq!(call.args["args"]["versionId"], 7);
+    worker.send_response(
+        &FrameResponse::success(versions[0].clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &versions[0]);
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_restore_version",
+        serde_json::json!({ "noteId": "n1", "versionId": 7 }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "restore_note_version");
+    assert_eq!(call.args["args"]["noteId"], "n1");
+    assert_eq!(call.args["args"]["versionId"], 7);
+    worker.send_response(
+        &FrameResponse::success(sample_note("n1"))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &sample_note("n1"));
+    worker.shutdown();
+}
+
+#[test]
+fn note_version_commands_reject_invalid_args() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_note_versions", serde_json::json!({})));
+    assert_eq!(
+        worker.recv_response().code.as_deref(),
+        Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS)
+    );
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_get_version",
+        serde_json::json!({ "versionId": 0 }),
+    ));
+    assert_eq!(
+        worker.recv_response().code.as_deref(),
+        Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS)
+    );
+    worker.shutdown();
+}
+
+#[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
     worker.send(&command(PLUGIN_ID, "wiki_not_a_command", serde_json::json!({})));

@@ -2,7 +2,7 @@
 //! Wiki 业务功能包 worker（P6.3 第一片）。
 //!
 //! 当前命令面覆盖笔记创建、更新、删除、列表、读取、出链、反链、模板读写，
-//! 以及同步到知识库与缓存图谱 / 社区检测两个只读面。
+//! 同步到知识库、缓存图谱 / 社区检测，以及笔记版本历史读写面。
 //! 它**不查库、不读文件**，只把命令参数转成宿主 `wiki.store` 接缝的入参；
 //! 笔记正文、markdown 落盘、知识库文档行与索引入队全部在宿主 provider 内完成
 //!（数据主权在宿主）。
@@ -36,6 +36,9 @@ const COMMAND_CREATE_TEMPLATE: &str = "wiki_create_template";
 const COMMAND_UPDATE_TEMPLATE: &str = "wiki_update_template";
 const COMMAND_GET_GRAPH_CACHED: &str = "wiki_get_graph_cached";
 const COMMAND_GET_GRAPH_COMMUNITIES_CACHED: &str = "wiki_get_graph_communities_cached";
+const COMMAND_LIST_NOTE_VERSIONS: &str = "wiki_note_versions";
+const COMMAND_GET_NOTE_VERSION: &str = "wiki_note_get_version";
+const COMMAND_RESTORE_NOTE_VERSION: &str = "wiki_note_restore_version";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -63,6 +66,21 @@ fn require_str(input: &Value, key: &str) -> Result<String, (String, String)> {
         _ => Err((
             error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
             format!("命令 `{COMMAND_SYNC_NOTE}` 需要非空字符串参数 `{key}`"),
+        )),
+    }
+}
+
+/// 取必填正整数版本 id；缺失 / 非整数 / 非正数一律拒收。
+fn require_i64(input: &Value, key: &str) -> Result<i64, (String, String)> {
+    match input.get(key) {
+        Some(Value::Number(number))
+            if number.is_i64() && number.as_i64().is_some_and(|v| v > 0) =>
+        {
+            Ok(number.as_i64().expect("已确认是 i64"))
+        },
+        _ => Err((
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            format!("命令需要正整数参数 `{key}`"),
         )),
     }
 }
@@ -318,6 +336,39 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("get_cached_communities", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_LIST_NOTE_VERSIONS => {
+            let note_id = match require_str(&frame.input, "noteId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("list_note_versions", json!({ "noteId": note_id }))
+        },
+        COMMAND_GET_NOTE_VERSION => {
+            let version_id = match require_i64(&frame.input, "versionId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("get_note_version", json!({ "versionId": version_id }))
+        },
+        COMMAND_RESTORE_NOTE_VERSION => {
+            let note_id = match require_str(&frame.input, "noteId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let version_id = match require_i64(&frame.input, "versionId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("restore_note_version", json!({ "noteId": note_id, "versionId": version_id }))
         },
         other => {
             return CommandFault::for_frame(

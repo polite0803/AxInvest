@@ -19,6 +19,7 @@ use crate::core_error::{AxAgentError, Result};
 use crate::graph_dtos::GraphData;
 use crate::louvain_dtos::LouvainResult;
 use crate::types::{BacklinkInfo, NoteLink};
+use crate::wiki_dtos::NoteVersion;
 
 /// `sync_note_to_knowledge_base` op 的入参。
 ///
@@ -126,6 +127,34 @@ pub trait WikiStoreProvider: Send + Sync {
     async fn get_cached_communities(&self, _wiki_id: String) -> Result<LouvainResult> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::get_cached_communities 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出一条笔记的历史版本（读）。
+    async fn list_note_versions(&self, _note_id: String) -> Result<Vec<NoteVersion>> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::list_note_versions 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 按版本 id 读取一个笔记版本（读）。
+    async fn get_note_version(&self, _version_id: i64) -> Result<NoteVersion> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_note_version 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 恢复一个笔记历史版本（写）。
+    ///
+    /// 宿主先把当前正文存成新版本，再更新笔记正文、清理超量旧版本、入队索引并写审计；
+    /// 插件只提交 `noteId` + `versionId`，不接触数据库、文件与队列。
+    async fn restore_note_version(
+        &self,
+        _note_id: String,
+        _version_id: i64,
+    ) -> Result<crate::note_dtos::Note> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::restore_note_version 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

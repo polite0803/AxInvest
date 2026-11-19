@@ -99,7 +99,7 @@ async fn create_dir_all_blocking(path: PathBuf) -> std::io::Result<()> {
 }
 
 fn enqueue_wiki_note_indexing(
-    state: &State<'_, AppState>,
+    state: &AppState,
     app: &AppHandle,
     wiki_id: &str,
     note_id: &str,
@@ -1203,10 +1203,9 @@ pub async fn sync_knowledge_document_to_wiki(
     Ok(())
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取笔记版本历史")]
-#[tauri::command]
-pub async fn wiki_note_versions(
-    state: State<'_, AppState>,
+/// 宿主 `wiki.store::list_note_versions` 的读面实现；原命令体逐字下沉到这里。
+pub(crate) async fn note_versions_core(
+    state: &AppState,
     note_id: String,
 ) -> Result<Vec<NoteVersion>, String> {
     wiki::list_versions(state.harness.db(), &note_id).await.map_err(|e| {
@@ -1217,10 +1216,9 @@ pub async fn wiki_note_versions(
     })
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取笔记特定版本")]
-#[tauri::command]
-pub async fn wiki_note_get_version(
-    state: State<'_, AppState>,
+/// 宿主 `wiki.store::get_note_version` 的读面实现；原命令体逐字下沉到这里。
+pub(crate) async fn note_get_version_core(
+    state: &AppState,
     version_id: i64,
 ) -> Result<NoteVersion, String> {
     wiki::get_version(state.harness.db(), version_id).await.map_err(|e| {
@@ -1231,20 +1229,14 @@ pub async fn wiki_note_get_version(
     })
 }
 
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "恢复笔记历史版本")]
-#[tauri::command]
-pub async fn wiki_note_restore_version(
-    app: AppHandle,
-    state: State<'_, AppState>,
+/// 宿主 `wiki.store::restore_note_version` 的写面实现；原命令体逐字下沉到这里。
+pub(crate) async fn note_restore_version_core(
+    app: &AppHandle,
+    state: &AppState,
     note_id: String,
     version_id: i64,
 ) -> Result<Note, String> {
-    let version = wiki::get_version(state.harness.db(), version_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
+    let version = note_get_version_core(state, version_id).await?;
 
     let note =
         axagent_dao::repo::note::get_note(state.harness.db(), &note_id).await.map_err(|e| {
@@ -1288,7 +1280,7 @@ pub async fn wiki_note_restore_version(
 
     let _ = wiki::delete_old_versions(state.harness.db(), &note_id, 20).await;
 
-    enqueue_wiki_note_indexing(&state, &app, &updated.vault_id, &updated.id);
+    enqueue_wiki_note_indexing(state, app, &updated.vault_id, &updated.id);
 
     // 操作历史：restore 成功落一条审计记录（失败仅告警，不打断主流程）
     if let Err(e) = wiki::log_wiki_operation(

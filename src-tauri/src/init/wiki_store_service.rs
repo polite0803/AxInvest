@@ -14,6 +14,7 @@ use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::graph_dtos::GraphData;
 use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::BacklinkInfo;
+use axagent_harness::wiki_dtos::NoteVersion;
 use axagent_harness::{
     SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
     WikiStoreProvider,
@@ -47,6 +48,34 @@ impl HostWikiStore {
     pub async fn cached_communities(&self, wiki_id: String) -> Result<LouvainResult> {
         let state = self.app.state::<crate::AppState>();
         crate::commands::wiki::cached_communities_core(&state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// `list_note_versions` 的宿主实现：只读历史版本列表。
+    pub async fn note_versions(&self, note_id: String) -> Result<Vec<NoteVersion>> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::note_versions_core(&state, note_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// `get_note_version` 的宿主实现：只读指定版本。
+    pub async fn note_version(&self, version_id: i64) -> Result<NoteVersion> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::note_get_version_core(&state, version_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// `restore_note_version` 的宿主实现：保留版本备份、索引入队与审计记录。
+    pub async fn restore_note_version(
+        &self,
+        note_id: String,
+        version_id: i64,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::note_restore_version_core(&self.app, &state, note_id, version_id)
             .await
             .map_err(AxAgentError::Provider)
     }
@@ -270,6 +299,37 @@ impl WikiStoreProvider for HostWikiStore {
             ));
         }
         self.cached_communities(wiki_id).await
+    }
+
+    async fn list_note_versions(&self, note_id: String) -> Result<Vec<NoteVersion>> {
+        if note_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::list_note_versions 需要非空 noteId".into(),
+            ));
+        }
+        self.note_versions(note_id).await
+    }
+
+    async fn get_note_version(&self, version_id: i64) -> Result<NoteVersion> {
+        if version_id <= 0 {
+            return Err(AxAgentError::Validation(
+                "wiki.store::get_note_version 需要正数 versionId".into(),
+            ));
+        }
+        self.note_version(version_id).await
+    }
+
+    async fn restore_note_version(
+        &self,
+        note_id: String,
+        version_id: i64,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        if note_id.trim().is_empty() || version_id <= 0 {
+            return Err(AxAgentError::Validation(
+                "wiki.store::restore_note_version 需要非空 noteId 与正数 versionId".into(),
+            ));
+        }
+        self.restore_note_version(note_id, version_id).await
     }
 
     async fn create_note(

@@ -227,7 +227,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   loadVersions: async (noteId) => {
     try {
-      return await invoke<NoteVersion[]>("wiki_note_versions", { noteId });
+      return await invokePluginCommand<NoteVersion[]>("wiki_note_versions", { noteId });
     } catch (e) {
       set({ error: translateBackendError(e) });
       return [];
@@ -236,7 +236,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   getVersion: async (versionId) => {
     try {
-      return await invoke<NoteVersion>("wiki_note_get_version", { versionId });
+      return await invokePluginCommand<NoteVersion>("wiki_note_get_version", { versionId });
     } catch (e) {
       set({ error: translateBackendError(e) });
       return null;
@@ -245,7 +245,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   restoreVersion: async (noteId, versionId) => {
     try {
-      const updated = await invoke<Note>("wiki_note_restore_version", {
+      const updated = await invokePluginCommand<Note>("wiki_note_restore_version", {
         noteId,
         versionId,
       });

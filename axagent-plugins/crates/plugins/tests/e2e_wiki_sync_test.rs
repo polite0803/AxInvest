@@ -18,7 +18,7 @@ use std::sync::Arc;
 use axagent_harness::{
     SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
     WikiStoreProvider, get_capability_registry,
-    wiki_dtos::{CreateWikiTemplateInput, UpdateWikiTemplateInput, WikiTemplate},
+    wiki_dtos::{CreateWikiTemplateInput, NoteVersion, UpdateWikiTemplateInput, WikiTemplate},
 };
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use serde_json::{Value, json};
@@ -224,6 +224,46 @@ impl WikiStoreProvider for FixedWikiStore {
             entity_communities: None,
             color_palette: axagent_harness::louvain_dtos::LouvainResult::default_palette(),
         })
+    }
+
+    async fn list_note_versions(
+        &self,
+        note_id: String,
+    ) -> axagent_harness::core_error::Result<Vec<NoteVersion>> {
+        Ok(vec![NoteVersion {
+            id: 7,
+            wiki_id: "w1".into(),
+            note_id,
+            title: "旧标题".into(),
+            content: "旧正文".into(),
+            content_hash: "h".into(),
+            author: "u".into(),
+            created_at: 123,
+        }])
+    }
+
+    async fn get_note_version(
+        &self,
+        version_id: i64,
+    ) -> axagent_harness::core_error::Result<NoteVersion> {
+        Ok(NoteVersion {
+            id: version_id,
+            wiki_id: "w1".into(),
+            note_id: "n1".into(),
+            title: "旧标题".into(),
+            content: "旧正文".into(),
+            content_hash: "h".into(),
+            author: "u".into(),
+            created_at: 123,
+        })
+    }
+
+    async fn restore_note_version(
+        &self,
+        note_id: String,
+        _version_id: i64,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        Ok(sample_note(note_id))
     }
 }
 
@@ -456,6 +496,36 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         .expect("wiki 社区读命令应可执行");
     let communities: Value = serde_json::from_str(&communities).expect("社区输出应是 JSON 文本");
     assert_eq!(communities["communities"]["note-w1"], 1);
+
+    let versions = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_note_versions",
+            &json!({ "noteId": "n1" }),
+        )
+        .expect("wiki 版本列表命令应可执行");
+    let versions: Value = serde_json::from_str(&versions).expect("版本列表输出应是 JSON 文本");
+    assert_eq!(versions[0]["id"], 7);
+
+    let version = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_note_get_version",
+            &json!({ "versionId": 7 }),
+        )
+        .expect("wiki 指定版本命令应可执行");
+    let version: Value = serde_json::from_str(&version).expect("版本输出应是 JSON 文本");
+    assert_eq!(version["id"], 7);
+
+    let restored = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_note_restore_version",
+            &json!({ "noteId": "n1", "versionId": 7 }),
+        )
+        .expect("wiki 版本恢复命令应可执行");
+    let restored: Value = serde_json::from_str(&restored).expect("恢复结果应是 JSON 文本");
+    assert_eq!(restored["id"], "n1");
 
     drop(manager);
     handle.undo();

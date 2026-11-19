@@ -7495,6 +7495,19 @@ async function executeCommand<T>(
       // 真机由宿主 note_links + notes 表投影；浏览器模式没有链接表 ⇒ 显式空数组。
       return [] as unknown as T;
     }
+    case "wiki_note_versions": {
+      // 真机经插件命令桥读宿主版本表；浏览器模式没有版本表 ⇒ 显式空数组。
+      return [] as unknown as T;
+    }
+    case "wiki_note_get_version": {
+      // 真机经插件命令桥读宿主版本表；浏览器模式没有版本表 ⇒ 显式空。
+      return null as unknown as T;
+    }
+    case "wiki_note_restore_version": {
+      // 真机经插件命令桥恢复并回更新后的笔记；mock 仅回执当前笔记。
+      const noteId = String(args?.noteId ?? "");
+      return getWikiNotes().find((n) => n.id === noteId) as unknown as T;
+    }
     case "wiki_sync_note_links": {
       // 真机经插件命令桥走宿主 wiki.store 写接缝；浏览器模式没有链接表 ⇒ 空回执。
       return null as unknown as T;

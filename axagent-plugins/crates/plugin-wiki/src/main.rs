@@ -31,14 +31,23 @@ const COMMAND_GET_NOTE_BACKLINKS: &str = "wiki_get_note_backlinks";
 const COMMAND_GET_NOTE_LINKS: &str = "wiki_get_note_links";
 const COMMAND_GET_NOTE: &str = "wiki_get_note";
 const COMMAND_GET_NOTE_BY_PATH: &str = "wiki_get_note_by_path";
+const COMMAND_SEARCH_NOTES: &str = "wiki_notes_search";
+const COMMAND_IMPORT_OBSIDIAN_VAULT: &str = "wiki_import_obsidian_vault";
+const COMMAND_IMPORT_KNOWLEDGE_MD: &str = "wiki_import_knowledge_md";
+const COMMAND_EXPORT_MARKDOWN: &str = "wiki_export_markdown";
+const COMMAND_EXPORT_HTML: &str = "wiki_export_html";
+const COMMAND_NOTE_EXPORT_HTML: &str = "wiki_note_export_html";
 const COMMAND_LIST_TEMPLATES: &str = "wiki_list_templates";
 const COMMAND_CREATE_TEMPLATE: &str = "wiki_create_template";
 const COMMAND_UPDATE_TEMPLATE: &str = "wiki_update_template";
+const COMMAND_DELETE_TEMPLATE: &str = "wiki_template_delete";
 const COMMAND_GET_GRAPH_CACHED: &str = "wiki_get_graph_cached";
 const COMMAND_GET_GRAPH_COMMUNITIES_CACHED: &str = "wiki_get_graph_communities_cached";
 const COMMAND_LIST_NOTE_VERSIONS: &str = "wiki_note_versions";
 const COMMAND_GET_NOTE_VERSION: &str = "wiki_note_get_version";
 const COMMAND_RESTORE_NOTE_VERSION: &str = "wiki_note_restore_version";
+const COMMAND_NOTE_FROM_TEMPLATE: &str = "wiki_note_create_from_template";
+const COMMAND_CREATE_DAILY_NOTE: &str = "wiki_create_daily_note";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -81,6 +90,19 @@ fn require_i64(input: &Value, key: &str) -> Result<i64, (String, String)> {
         _ => Err((
             error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
             format!("命令需要正整数参数 `{key}`"),
+        )),
+    }
+}
+
+/// 取可选标题：缺失 / `null` 表示由宿主用模板名兜底；非字符串一律拒收。
+fn optional_title(input: &Value) -> Result<Option<String>, (String, String)> {
+    match input.get("title") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.clone())),
+        _ => Err((
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            "命令 `wiki_note_create_from_template` 的可选参数 `title` 必须是非空字符串或 null"
+                .into(),
         )),
     }
 }
@@ -183,6 +205,120 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("get_note_by_path", json!({ "vaultId": vault_id, "filePath": file_path }))
+        },
+        COMMAND_SEARCH_NOTES => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let query = match require_str(&frame.input, "query") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let top_k = match frame.input.get("topK") {
+                None | Some(Value::Null) => None,
+                Some(Value::Number(number)) if number.is_u64() => {
+                    Some(number.as_u64().unwrap() as usize)
+                },
+                _ => {
+                    return CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                        "命令 `wiki_notes_search` 的可选参数 `topK` 必须是非负整数或 null",
+                    )
+                    .into_frame_response();
+                },
+            };
+            seam_call("search_notes", json!({ "vaultId": vault_id, "query": query, "topK": top_k }))
+        },
+        COMMAND_IMPORT_OBSIDIAN_VAULT => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let vault_path = match require_str(&frame.input, "vaultPath") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call(
+                "import_obsidian_vault",
+                json!({ "wikiId": wiki_id, "vaultPath": vault_path }),
+            )
+        },
+        COMMAND_IMPORT_KNOWLEDGE_MD => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            // `filePath` 可选：缺失 / null 表示由宿主用默认路径（KNOWLEDGE.md）。
+            let file_path = match frame.input.get("filePath") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(value)) if !value.trim().is_empty() => Some(value.clone()),
+                _ => {
+                    return CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                        "命令 `wiki_import_knowledge_md` 的可选参数 `filePath` 必须是非空字符串或 null",
+                    )
+                    .into_frame_response();
+                },
+            };
+            seam_call("import_knowledge_md", json!({ "wikiId": wiki_id, "filePath": file_path }))
+        },
+        COMMAND_EXPORT_MARKDOWN => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let output_path = match require_str(&frame.input, "outputPath") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("export_markdown", json!({ "wikiId": wiki_id, "outputPath": output_path }))
+        },
+        COMMAND_EXPORT_HTML => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let output_path = match require_str(&frame.input, "outputPath") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("export_html", json!({ "wikiId": wiki_id, "outputPath": output_path }))
+        },
+        COMMAND_NOTE_EXPORT_HTML => {
+            let note_id = match require_str(&frame.input, "noteId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let output_path = match require_str(&frame.input, "outputPath") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("export_note_html", json!({ "noteId": note_id, "outputPath": output_path }))
         },
         COMMAND_CREATE_NOTE => {
             let input = match frame.input.get("input") {
@@ -319,6 +455,15 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             };
             seam_call("update_wiki_template", json!({ "input": input }))
         },
+        COMMAND_DELETE_TEMPLATE => {
+            let id = match require_str(&frame.input, "id") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("delete_wiki_template", json!({ "id": id }))
+        },
         COMMAND_GET_GRAPH_CACHED => {
             let wiki_id = match require_str(&frame.input, "wikiId") {
                 Ok(value) => value,
@@ -369,6 +514,39 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("restore_note_version", json!({ "noteId": note_id, "versionId": version_id }))
+        },
+        COMMAND_NOTE_FROM_TEMPLATE => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let template_id = match require_str(&frame.input, "templateId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let title = match optional_title(&frame.input) {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call(
+                "create_note_from_template",
+                json!({ "vaultId": vault_id, "templateId": template_id, "title": title }),
+            )
+        },
+        COMMAND_CREATE_DAILY_NOTE => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("create_daily_note", json!({ "vaultId": vault_id }))
         },
         other => {
             return CommandFault::for_frame(

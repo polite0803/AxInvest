@@ -5504,6 +5504,91 @@ function wikiManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        name: "wiki_notes_search",
+        description: "搜索一个 Wiki vault 下的笔记（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_notes_search",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: {
+            vaultId: { type: "string", description: "宿主侧 vault id" },
+            query: { type: "string", description: "检索词" },
+            topK: { type: "integer", description: "可选返回条数上限" },
+          },
+          required: ["vaultId", "query"],
+        },
+      },
+      {
+        name: "wiki_import_obsidian_vault",
+        description: "导入 Obsidian Vault 到 Wiki（经宿主 wiki.store 写面）",
+        command: "worker://wiki_import_obsidian_vault",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            wikiId: { type: "string", description: "宿主侧 wiki id" },
+            vaultPath: { type: "string", description: "Obsidian vault 目录路径" },
+          },
+          required: ["wikiId", "vaultPath"],
+        },
+      },
+      {
+        name: "wiki_import_knowledge_md",
+        description: "导入 KNOWLEDGE.md 到 Wiki（经宿主 wiki.store 写面）",
+        command: "worker://wiki_import_knowledge_md",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            wikiId: { type: "string", description: "宿主侧 wiki id" },
+            filePath: { type: "string", description: "可选 KNOWLEDGE.md 路径" },
+          },
+          required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_export_markdown",
+        description: "导出 Wiki 为 Markdown 目录（经宿主 wiki.store 写面）",
+        command: "worker://wiki_export_markdown",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            wikiId: { type: "string", description: "宿主侧 wiki id" },
+            outputPath: { type: "string", description: "输出目录路径" },
+          },
+          required: ["wikiId", "outputPath"],
+        },
+      },
+      {
+        name: "wiki_export_html",
+        description: "导出 Wiki 为 HTML 目录（经宿主 wiki.store 写面）",
+        command: "worker://wiki_export_html",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            wikiId: { type: "string", description: "宿主侧 wiki id" },
+            outputPath: { type: "string", description: "输出目录路径" },
+          },
+          required: ["wikiId", "outputPath"],
+        },
+      },
+      {
+        name: "wiki_note_export_html",
+        description: "导出一条 Wiki 笔记为 HTML（经宿主 wiki.store 写面）",
+        command: "worker://wiki_note_export_html",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            noteId: { type: "string", description: "宿主侧笔记 id" },
+            outputPath: { type: "string", description: "输出文件路径" },
+          },
+          required: ["noteId", "outputPath"],
+        },
+      },
+      {
         name: "wiki_create_note",
         description: "创建一条 Wiki 笔记（经宿主 wiki.store 写面）",
         command: "worker://wiki_create_note",
@@ -5624,6 +5709,17 @@ function wikiManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        name: "wiki_template_delete",
+        description: "删除 Wiki 模板（经宿主 wiki.store 写面）",
+        command: "worker://wiki_template_delete",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "宿主侧模板 id" } },
+          required: ["id"],
+        },
+      },
+      {
         name: "wiki_get_graph_cached",
         description: "读取带缓存的 Wiki 图谱（经宿主 wiki.store 只读接缝）",
         command: "worker://wiki_get_graph_cached",
@@ -5679,6 +5775,32 @@ function wikiManifest({ version, binaryName, sha256 }) {
             versionId: { type: "integer", description: "宿主侧版本 id" },
           },
           required: ["noteId", "versionId"],
+        },
+      },
+      {
+        name: "wiki_note_create_from_template",
+        description: "从 Wiki 模板创建笔记（经宿主 wiki.store 写接缝）",
+        command: "worker://wiki_note_create_from_template",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            vaultId: { type: "string", description: "宿主侧 vault id" },
+            templateId: { type: "string", description: "宿主侧模板 id" },
+            title: { type: "string", description: "可选笔记标题，缺省用模板名" },
+          },
+          required: ["vaultId", "templateId"],
+        },
+      },
+      {
+        name: "wiki_create_daily_note",
+        description: "取得或创建当天 Wiki 每日笔记（经宿主 wiki.store 写接缝）",
+        command: "worker://wiki_create_daily_note",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { vaultId: { type: "string", description: "宿主侧 vault id" } },
+          required: ["vaultId"],
         },
       },
     ],

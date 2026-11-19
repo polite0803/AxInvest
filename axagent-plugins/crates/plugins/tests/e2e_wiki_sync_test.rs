@@ -80,6 +80,71 @@ impl WikiStoreProvider for FixedWikiStore {
         Ok(sample_note(format!("note-at-{file_path}")))
     }
 
+    async fn search_notes(
+        &self,
+        vault_id: String,
+        query: String,
+        _top_k: Option<usize>,
+    ) -> axagent_harness::core_error::Result<Vec<axagent_harness::rag_config::NoteSearchResult>>
+    {
+        let mut note = sample_note("note-search".into());
+        note.vault_id = vault_id;
+        note.title = query;
+        Ok(vec![axagent_harness::rag_config::NoteSearchResult {
+            note,
+            snippet: "…搜索…".into(),
+            score: 0.9,
+        }])
+    }
+
+    async fn import_obsidian_vault(
+        &self,
+        _wiki_id: String,
+        _vault_path: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::wiki_dtos::ImportStats> {
+        Ok(axagent_harness::wiki_dtos::ImportStats { imported: 2, failed: 0, skipped: 1 })
+    }
+
+    async fn import_knowledge_md(
+        &self,
+        _wiki_id: String,
+        _file_path: Option<String>,
+    ) -> axagent_harness::core_error::Result<axagent_harness::wiki_dtos::KnowledgeMdImportStats>
+    {
+        Ok(axagent_harness::wiki_dtos::KnowledgeMdImportStats {
+            imported: 1,
+            failed: 0,
+            skipped: 0,
+            total: 4,
+        })
+    }
+
+    async fn export_markdown(
+        &self,
+        _wiki_id: String,
+        _output_path: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::wiki_dtos::ExportStats> {
+        Ok(axagent_harness::wiki_dtos::ExportStats { exported: 3, failed: 0 })
+    }
+
+    async fn export_html(
+        &self,
+        _wiki_id: String,
+        _output_path: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::wiki_dtos::ExportStats> {
+        Ok(axagent_harness::wiki_dtos::ExportStats { exported: 2, failed: 0 })
+    }
+
+    async fn export_note_html(
+        &self,
+        _note_id: String,
+        output_path: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::wiki_dtos::NoteExportPath> {
+        Ok(axagent_harness::wiki_dtos::NoteExportPath {
+            path: output_path.replace(".pdf", ".html"),
+        })
+    }
+
     async fn get_note_links(
         &self,
         _note_id: String,
@@ -192,6 +257,10 @@ impl WikiStoreProvider for FixedWikiStore {
         })
     }
 
+    async fn delete_wiki_template(&self, _id: String) -> axagent_harness::core_error::Result<()> {
+        Ok(())
+    }
+
     async fn get_cached_graph(
         &self,
         wiki_id: String,
@@ -264,6 +333,28 @@ impl WikiStoreProvider for FixedWikiStore {
         _version_id: i64,
     ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
         Ok(sample_note(note_id))
+    }
+
+    async fn create_note_from_template(
+        &self,
+        vault_id: String,
+        template_id: String,
+        title: Option<String>,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        let mut note = sample_note(format!("note-from-{template_id}"));
+        note.vault_id = vault_id;
+        note.title = title.unwrap_or_else(|| "模板笔记".into());
+        Ok(note)
+    }
+
+    async fn create_daily_note(
+        &self,
+        vault_id: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        let mut note = sample_note("note-daily".into());
+        note.vault_id = vault_id;
+        note.title = "今日笔记".into();
+        Ok(note)
     }
 }
 
@@ -353,6 +444,72 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         .expect("wiki 按路径读取命令应可执行");
     let by_path: Value = serde_json::from_str(&by_path).expect("按路径输出应是 JSON 文本");
     assert_eq!(by_path["id"], "note-at-a.md");
+
+    let searched = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_notes_search",
+            &json!({ "vaultId": "v1", "query": "测试", "topK": 5 }),
+        )
+        .expect("wiki 搜索命令应可执行");
+    let searched: Value = serde_json::from_str(&searched).expect("搜索输出应是 JSON 文本");
+    assert_eq!(searched[0]["note"]["id"], "note-search");
+    assert_eq!(searched[0]["note"]["title"], "测试");
+    assert_eq!(searched[0]["snippet"], "…搜索…");
+    assert_eq!(searched[0]["score"], 0.9);
+
+    let imported = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_import_obsidian_vault",
+            &json!({ "wikiId": "w1", "vaultPath": "/tmp/vault" }),
+        )
+        .expect("wiki 导入命令应可执行");
+    let imported: Value = serde_json::from_str(&imported).expect("导入输出应是 JSON 文本");
+    assert_eq!(imported, json!({ "imported": 2, "failed": 0, "skipped": 1 }));
+
+    let imported_md = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_import_knowledge_md",
+            &json!({ "wikiId": "w1" }),
+        )
+        .expect("wiki KNOWLEDGE.md 导入命令应可执行");
+    let imported_md: Value =
+        serde_json::from_str(&imported_md).expect("KNOWLEDGE.md 导入输出应是 JSON 文本");
+    assert_eq!(imported_md, json!({ "imported": 1, "failed": 0, "skipped": 0, "total": 4 }));
+
+    let exported_md = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_export_markdown",
+            &json!({ "wikiId": "w1", "outputPath": "/tmp/out" }),
+        )
+        .expect("wiki Markdown 导出命令应可执行");
+    let exported_md: Value = serde_json::from_str(&exported_md).expect("导出输出应是 JSON 文本");
+    assert_eq!(exported_md, json!({ "exported": 3, "failed": 0 }));
+
+    let exported_html = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_export_html",
+            &json!({ "wikiId": "w1", "outputPath": "/tmp/out" }),
+        )
+        .expect("wiki HTML 导出命令应可执行");
+    let exported_html: Value =
+        serde_json::from_str(&exported_html).expect("导出输出应是 JSON 文本");
+    assert_eq!(exported_html, json!({ "exported": 2, "failed": 0 }));
+
+    let exported_note = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_note_export_html",
+            &json!({ "noteId": "n1", "outputPath": "/tmp/out/n1.pdf" }),
+        )
+        .expect("wiki 笔记导出命令应可执行");
+    let exported_note: Value =
+        serde_json::from_str(&exported_note).expect("导出输出应是 JSON 文本");
+    assert_eq!(exported_note, json!({ "path": "/tmp/out/n1.html" }));
 
     let created = manager
         .execute_plugin_command(
@@ -477,6 +634,20 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
     assert_eq!(updated_template["id"], "tpl-1");
     assert_eq!(updated_template["name"], "改过的模板");
 
+    let deleted_template = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_template_delete",
+            &json!({ "id": "tpl-1" }),
+        )
+        .expect("wiki 模板删除命令应可执行");
+    let deleted_template: Value =
+        serde_json::from_str(&deleted_template).expect("模板删除输出应是 JSON 文本");
+    assert!(
+        deleted_template.is_null() || deleted_template.as_object().is_some_and(|o| o.is_empty()),
+        "模板删除回执应为 null 或空对象：{deleted_template:?}"
+    );
+
     let graph = manager
         .execute_plugin_command(
             &outcome.plugin_id,
@@ -526,6 +697,28 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         .expect("wiki 版本恢复命令应可执行");
     let restored: Value = serde_json::from_str(&restored).expect("恢复结果应是 JSON 文本");
     assert_eq!(restored["id"], "n1");
+
+    let from_template = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_note_create_from_template",
+            &json!({ "vaultId": "v1", "templateId": "t1", "title": "自定义标题" }),
+        )
+        .expect("wiki 从模板创建笔记命令应可执行");
+    let from_template: Value =
+        serde_json::from_str(&from_template).expect("模板创建结果应是 JSON 文本");
+    assert_eq!(from_template["id"], "note-from-t1");
+    assert_eq!(from_template["title"], "自定义标题");
+
+    let daily = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_create_daily_note",
+            &json!({ "vaultId": "v1" }),
+        )
+        .expect("wiki 每日笔记命令应可执行");
+    let daily: Value = serde_json::from_str(&daily).expect("每日笔记结果应是 JSON 文本");
+    assert_eq!(daily["id"], "note-daily");
 
     drop(manager);
     handle.undo();

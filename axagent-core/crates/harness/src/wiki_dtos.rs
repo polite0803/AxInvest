@@ -142,6 +142,50 @@ pub struct UpdateWikiTemplateInput {
     pub page_type: Option<String>,
 }
 
+// ── 导入 / 导出统计 DTO ─────────────────────────────────────────
+
+/// 导入统计（Obsidian vault 等目录型导入）。
+///
+/// 宿主与插件共享同一份定义：导入逻辑（文件遍历、frontmatter 解析、笔记落库）
+/// 全部在宿主 provider 内完成，插件只转发参数并透传本统计。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportStats {
+    pub imported: usize,
+    pub failed: usize,
+    pub skipped: usize,
+}
+
+/// KNOWLEDGE.md 按章节导入的统计（比 `ImportStats` 多一个 `total`）。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeMdImportStats {
+    pub imported: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub total: usize,
+}
+
+/// 导出统计（Markdown / HTML 导出共用）。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportStats {
+    pub exported: usize,
+    pub failed: usize,
+}
+
+/// 单条笔记导出 HTML 的回执（落盘后的绝对路径）。
+///
+/// 为什么用对象而不用裸字符串：插件命令帧通道的字符串回执会被宿主按**原文**
+/// 返回（`command_value_to_text` 对 `Value::String` 不加引号），而前端
+/// `invokePluginCommand` 按 JSON 文本解析 ⇒ 裸字符串走这条链会解析失败。
+/// 包一层对象后回执是合法 JSON 文本，两端口径一致。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteExportPath {
+    pub path: String,
+}
+
 // ── WikiRepository trait ────────────────────────────────────────
 
 /// Version record for a wiki page.

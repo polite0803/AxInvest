@@ -111,6 +111,15 @@ pub trait WikiStoreProvider: Send + Sync {
         ))
     }
 
+    /// 删除一个 Wiki 模板（写，危险）。
+    ///
+    /// 宿主侧完成 DB 行删除。要求插件声明 `write`，权限检查在 worker 分派层完成。
+    async fn delete_wiki_template(&self, _id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::delete_wiki_template 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 读取带缓存的 Wiki 融合图谱（读）。
     ///
     /// 缓存命中、知识图谱实体融合、悬空边诊断与告警节流全部留在宿主 provider；
@@ -155,6 +164,30 @@ pub trait WikiStoreProvider: Send + Sync {
     ) -> Result<crate::note_dtos::Note> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::restore_note_version 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 从 Wiki 模板创建笔记（写）。
+    ///
+    /// 模板读取、变量替换、标题/路径生成、笔记落库与索引入队全在宿主 provider 内完成；
+    /// 插件只提交 `vaultId` / `templateId` / 可选 `title`。
+    async fn create_note_from_template(
+        &self,
+        _vault_id: String,
+        _template_id: String,
+        _title: Option<String>,
+    ) -> Result<crate::note_dtos::Note> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::create_note_from_template 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 取得或创建当天的 Wiki 每日笔记（写）。
+    ///
+    /// 日期、路径与幂等判重由宿主 provider 决定；插件只提交 `vaultId`。
+    async fn create_daily_note(&self, _vault_id: String) -> Result<crate::note_dtos::Note> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::create_daily_note 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 
@@ -218,6 +251,91 @@ pub trait WikiStoreProvider: Send + Sync {
     ) -> Result<crate::note_dtos::Note> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::get_note_by_path 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 搜索一个 vault 下的 Wiki 笔记（读）。
+    ///
+    /// hybrid 检索、embedding 调用、FTS 回退、片段高亮与评分排序全部留在宿主 provider；
+    /// 插件只提交 `vaultId` / `query` / 可选 `topK`。
+    async fn search_notes(
+        &self,
+        _vault_id: String,
+        _query: String,
+        _top_k: Option<usize>,
+    ) -> Result<Vec<crate::rag_config::NoteSearchResult>> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::search_notes 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 把一个 Obsidian vault 目录导入为 Wiki 笔记（写）。
+    ///
+    /// 目录遍历、frontmatter 解析、笔记落库与索引入队全部在宿主 provider 内完成；
+    /// 插件只提交 `wikiId` 与 vault 目录路径。
+    async fn import_obsidian_vault(
+        &self,
+        _wiki_id: String,
+        _vault_path: String,
+    ) -> Result<crate::wiki_dtos::ImportStats> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::import_obsidian_vault 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 把 KNOWLEDGE.md 按章节导入为 Wiki 笔记（写）。
+    ///
+    /// 换行归一化、章节切分、判重、笔记落库与索引入队全部在宿主 provider 内完成；
+    /// 插件只提交 `wikiId` 与可选文件路径。
+    async fn import_knowledge_md(
+        &self,
+        _wiki_id: String,
+        _file_path: Option<String>,
+    ) -> Result<crate::wiki_dtos::KnowledgeMdImportStats> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::import_knowledge_md 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 把一个 Wiki 导出为 Markdown 目录（写，落盘）。
+    ///
+    /// 目录创建、frontmatter 生成与文件写入全部在宿主 provider 内完成；
+    /// 插件只提交 `wikiId` 与输出目录路径。
+    async fn export_markdown(
+        &self,
+        _wiki_id: String,
+        _output_path: String,
+    ) -> Result<crate::wiki_dtos::ExportStats> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::export_markdown 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 把一个 Wiki 导出为 HTML 目录（写，落盘）。
+    ///
+    /// Markdown → HTML 转换、样式模板与 `index.html` 生成全部在宿主 provider 内完成；
+    /// 插件只提交 `wikiId` 与输出目录路径。
+    async fn export_html(
+        &self,
+        _wiki_id: String,
+        _output_path: String,
+    ) -> Result<crate::wiki_dtos::ExportStats> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::export_html 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 把一条笔记导出为 HTML 文件（写，落盘）并返回落盘路径。
+    ///
+    /// 宿主侧统一把扩展名改写为 `.html`（本能力不真正生成 PDF），
+    /// 落盘后打开系统默认浏览器；插件只提交 `noteId` 与目标路径。
+    async fn export_note_html(
+        &self,
+        _note_id: String,
+        _output_path: String,
+    ) -> Result<crate::wiki_dtos::NoteExportPath> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::export_note_html 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

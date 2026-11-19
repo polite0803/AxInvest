@@ -7512,6 +7512,10 @@ async function executeCommand<T>(
       // 真机经插件命令桥走宿主 wiki.store 写接缝；浏览器模式没有链接表 ⇒ 空回执。
       return null as unknown as T;
     }
+    case "wiki_template_delete": {
+      // 真机经插件命令桥走宿主 wiki.store 写接缝；浏览器模式没有模板表 ⇒ 空回执。
+      return null as unknown as T;
+    }
     case "wiki_notes_search": {
       const vaultId = String(args?.vault_id ?? "");
       const query = String(args?.query ?? "").toLowerCase();
@@ -7598,7 +7602,7 @@ async function executeCommand<T>(
     }
     case "wiki_note_create_from_template":
     case "wiki_create_daily_note": {
-      const vaultId = String(args?.vault_id ?? "");
+      const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");
       const isDaily = cmd === "wiki_create_daily_note";
       const title = isDaily
         ? new Date().toISOString().slice(0, 10)

@@ -98,7 +98,7 @@ async fn create_dir_all_blocking(path: PathBuf) -> std::io::Result<()> {
         .map_err(std::io::Error::other)?
 }
 
-fn enqueue_wiki_note_indexing(
+pub(crate) fn enqueue_wiki_note_indexing(
     state: &AppState,
     app: &AppHandle,
     wiki_id: &str,
@@ -352,10 +352,12 @@ pub async fn rebuild_wiki_index(
     Ok(())
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "搜索 Wiki 笔记")]
-#[tauri::command]
-pub async fn wiki_notes_search(
-    state: State<'_, AppState>,
+/// Wiki 笔记检索的核心宿主实现。
+///
+/// P6.3 迁移后由 `wiki.store` 宿主 provider 调用，不再直接暴露给前端 IPC；
+/// 原 `wiki_notes_search` 命令已退役，宿主 IPC 不再注册该命令。
+pub(crate) async fn wiki_notes_search_core(
+    state: &AppState,
     vault_id: String,
     query: String,
     top_k: Option<usize>,
@@ -372,7 +374,7 @@ pub async fn wiki_notes_search(
         })?;
 
     if wiki.embedding_provider.is_some() {
-        match wiki_notes_search_hybrid(&state, &vault_id, &query, top_k).await {
+        match wiki_notes_search_hybrid(state, &vault_id, &query, top_k).await {
             Ok(results) => {
                 // ⚠ 2026-09-15 二次修（过滤位置）：阈值过滤已**上移到检索层**
                 // （`wiki_notes_search_hybrid` 里写进 `options.min_score`，在
@@ -399,10 +401,10 @@ pub async fn wiki_notes_search(
         }
     }
 
-    wiki_notes_search_keyword(&state, &vault_id, &query, top_k).await
+    wiki_notes_search_keyword(state, &vault_id, &query, top_k).await
 }
 
-async fn wiki_notes_search_hybrid(
+pub(crate) async fn wiki_notes_search_hybrid(
     state: &AppState,
     vault_id: &str,
     query: &str,
@@ -494,7 +496,7 @@ async fn wiki_notes_search_hybrid(
     Ok(results)
 }
 
-async fn wiki_notes_search_keyword(
+pub(crate) async fn wiki_notes_search_keyword(
     state: &AppState,
     vault_id: &str,
     query: &str,
@@ -629,7 +631,7 @@ async fn wiki_notes_search_keyword(
 ///
 /// FTS5 中双引号是特殊字符，需要转义；多个 token 之间默认 OR 不行（FTS5 默认 AND），
 /// 这里显式用 OR 连接提升召回率。空 query 返回空串（调用方应已 trim 检查）。
-fn build_fts5_match_query(query: &str) -> String {
+pub(crate) fn build_fts5_match_query(query: &str) -> String {
     let tokens: Vec<String> = query
         .split_whitespace()
         .filter(|s| !s.is_empty())
@@ -647,7 +649,7 @@ fn build_fts5_match_query(query: &str) -> String {
     tokens.join(" OR ")
 }
 
-fn extract_highlight_snippet(
+pub(crate) fn extract_highlight_snippet(
     content: &str,
     query: &str,
     context_chars: usize,
@@ -1303,133 +1305,27 @@ pub(crate) async fn note_restore_version_core(
     Ok(updated)
 }
 
-#[agent_command(domain = wiki, safety = Dangerous, call_mode = StateInput, description = "删除 Wiki 模板")]
-#[tauri::command]
-pub async fn wiki_template_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    wiki::delete_wiki_template(state.harness.db(), &id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "从模板创建笔记")]
-#[tauri::command]
-pub async fn wiki_note_create_from_template(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    vault_id: String,
-    template_id: String,
-    title: Option<String>,
-) -> Result<Note, String> {
-    let template =
-        wiki::get_wiki_template(state.harness.db(), &template_id).await.map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-
-    let wiki_obj = wiki::get_wiki(state.harness.db(), &vault_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    let content = wiki::apply_template_variables(&template.content, &wiki_obj.name);
-
-    let note_title = title.unwrap_or_else(|| template.name.clone());
-    let now = chrono::Utc::now().timestamp();
-    let file_path =
-        format!("templates/{}-{}.md", template.name.replace(' ', "_").to_lowercase(), now);
-
-    let input = CreateNoteInput {
-        vault_id: vault_id.clone(),
-        title: note_title,
-        file_path,
-        content,
-        author: "template".to_string(),
-        page_type: template.page_type,
-        source_refs: None,
-    };
-
-    let note =
-        axagent_dao::repo::note::create_note(state.harness.db(), input).await.map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-
-    enqueue_wiki_note_indexing(&state, &app, &vault_id, &note.id);
-
-    Ok(note)
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "创建每日笔记")]
-#[tauri::command]
-pub async fn wiki_create_daily_note(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    vault_id: String,
-) -> Result<Note, String> {
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let file_path = format!("daily/{}.md", today);
-
-    match axagent_dao::repo::note::get_note_by_path(state.harness.db(), &vault_id, &file_path).await
-    {
-        Ok(note) => Ok(note),
-        Err(_) => {
-            let content = format!("# {}\n\n## Tasks\n\n## Notes\n\n## Ideas\n", today);
-
-            let input = CreateNoteInput {
-                vault_id: vault_id.clone(),
-                title: today.clone(),
-                file_path,
-                content,
-                author: "user".to_string(),
-                page_type: Some("daily".to_string()),
-                source_refs: None,
-            };
-
-            let note = axagent_dao::repo::note::create_note(state.harness.db(), input)
-                .await
-                .map_err(|e| {
-                    String::from(crate::commands::error::ErrorResponse::from_error(
-                        e,
-                        crate::commands::error::ErrorCategory::Unrecoverable,
-                    ))
-                })?;
-
-            enqueue_wiki_note_indexing(&state, &app, &vault_id, &note.id);
-
-            Ok(note)
-        },
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportStats {
-    pub imported: usize,
-    pub failed: usize,
-    pub skipped: usize,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExportStats {
-    pub exported: usize,
-    pub failed: usize,
-}
+// 导入 / 导出的统计 DTO 权威定义在 harness（宿主与插件共享一份，见禁区 12）。
+pub use axagent_harness::wiki_dtos::{ExportStats, ImportStats, KnowledgeMdImportStats};
 
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "导入 Obsidian Vault 到 Wiki")]
 #[tauri::command]
 pub async fn wiki_import_obsidian_vault(
     app: AppHandle,
     state: State<'_, AppState>,
+    wiki_id: String,
+    vault_path: String,
+) -> Result<ImportStats, String> {
+    import_obsidian_vault_core(&app, &state, wiki_id, vault_path).await
+}
+
+/// Obsidian vault 目录导入的核心宿主实现。
+///
+/// P6.3 迁移后由 `wiki.store` 宿主 provider 调用；目录遍历、frontmatter 解析、
+/// 判重与笔记落库全部留宿主，插件只提交两个 id 级参数。
+pub(crate) async fn import_obsidian_vault_core(
+    app: &AppHandle,
+    state: &AppState,
     wiki_id: String,
     vault_path: String,
 ) -> Result<ImportStats, String> {
@@ -1523,7 +1419,7 @@ pub async fn wiki_import_obsidian_vault(
 
         match axagent_dao::repo::note::create_note(state.harness.db(), input).await {
             Ok(note) => {
-                enqueue_wiki_note_indexing(&state, &app, &wiki_id, &note.id);
+                enqueue_wiki_note_indexing(state, app, &wiki_id, &note.id);
                 imported += 1;
             },
             Err(e) => {
@@ -1536,15 +1432,6 @@ pub async fn wiki_import_obsidian_vault(
     Ok(ImportStats { imported, failed, skipped })
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KnowledgeMdImportStats {
-    pub imported: usize,
-    pub failed: usize,
-    pub skipped: usize,
-    pub total: usize,
-}
-
 /// 将 KNOWLEDGE.md（精炼知识源）导入为 Wiki 笔记。
 /// 按 `## ` 标题分割章节，每个章节创建一条笔记。
 /// 自动触发向量索引，使知识可通过 RAG 管道检索。
@@ -1553,6 +1440,19 @@ pub struct KnowledgeMdImportStats {
 pub async fn wiki_import_knowledge_md(
     app: AppHandle,
     state: State<'_, AppState>,
+    wiki_id: String,
+    file_path: Option<String>,
+) -> Result<KnowledgeMdImportStats, String> {
+    import_knowledge_md_core(&app, &state, wiki_id, file_path).await
+}
+
+/// KNOWLEDGE.md 章节导入的核心宿主实现。
+///
+/// P6.3 迁移后由 `wiki.store` 宿主 provider 调用；换行归一化、章节切分与
+/// 判重全部留宿主，插件只提交 `wikiId` 与可选文件路径。
+pub(crate) async fn import_knowledge_md_core(
+    app: &AppHandle,
+    state: &AppState,
     wiki_id: String,
     file_path: Option<String>,
 ) -> Result<KnowledgeMdImportStats, String> {
@@ -1642,7 +1542,7 @@ pub async fn wiki_import_knowledge_md(
 
         match axagent_dao::repo::note::create_note(state.harness.db(), input).await {
             Ok(note) => {
-                enqueue_wiki_note_indexing(&state, &app, &wiki_id, &note.id);
+                enqueue_wiki_note_indexing(state, app, &wiki_id, &note.id);
                 imported += 1;
             },
             Err(e) => {
@@ -1699,6 +1599,18 @@ fn parse_frontmatter(raw: &str) -> (serde_yaml::Value, String) {
 #[tauri::command]
 pub async fn wiki_export_markdown(
     state: State<'_, AppState>,
+    wiki_id: String,
+    output_path: String,
+) -> Result<ExportStats, String> {
+    export_markdown_core(&state, wiki_id, output_path).await
+}
+
+/// Markdown 目录导出的核心宿主实现。
+///
+/// P6.3 迁移后由 `wiki.store` 宿主 provider 调用；目录创建、frontmatter 生成
+/// 与文件写入全部留宿主，插件只提交 `wikiId` 与输出目录路径。
+pub(crate) async fn export_markdown_core(
+    state: &AppState,
     wiki_id: String,
     output_path: String,
 ) -> Result<ExportStats, String> {
@@ -1779,6 +1691,18 @@ pub async fn wiki_export_markdown(
 #[tauri::command]
 pub async fn wiki_export_html(
     state: State<'_, AppState>,
+    wiki_id: String,
+    output_path: String,
+) -> Result<ExportStats, String> {
+    export_html_core(&state, wiki_id, output_path).await
+}
+
+/// HTML 目录导出的核心宿主实现。
+///
+/// P6.3 迁移后由 `wiki.store` 宿主 provider 调用；Markdown → HTML 转换、
+/// 样式模板与 `index.html` 生成全部留宿主。
+pub(crate) async fn export_html_core(
+    state: &AppState,
     wiki_id: String,
     output_path: String,
 ) -> Result<ExportStats, String> {
@@ -1900,6 +1824,18 @@ li {{ padding: 4px 0; }}
 #[tauri::command]
 pub async fn wiki_note_export_html(
     state: State<'_, AppState>,
+    note_id: String,
+    output_path: String,
+) -> Result<String, String> {
+    export_note_html_core(&state, note_id, output_path).await
+}
+
+/// 单条笔记导出 HTML 的核心宿主实现。
+///
+/// P6.3 迁移后由 `wiki.store` 宿主 provider 调用；扩展名改写、落盘与
+/// 打开系统浏览器全部留宿主。
+pub(crate) async fn export_note_html_core(
+    state: &AppState,
     note_id: String,
     output_path: String,
 ) -> Result<String, String> {

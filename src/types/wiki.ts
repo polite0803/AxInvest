@@ -112,6 +112,11 @@ export type ExportStats = {
   failed: number;
 };
 
+/** 单条笔记导出 HTML 的回执（落盘后的路径）。 */
+export type NoteExportPath = {
+  path: string;
+};
+
 // ── 知识源（Knowledge Source）— 知识库增长更新入口 ────────────────
 
 export type KnowledgeSource = {

@@ -80,6 +80,70 @@ impl HostWikiStore {
             .map_err(AxAgentError::Provider)
     }
 
+    /// `create_note_from_template` 的宿主实现：模板读取、变量替换、索引入队全留宿主。
+    pub async fn note_from_template(
+        &self,
+        vault_id: String,
+        template_id: String,
+        title: Option<String>,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        let state = self.app.state::<crate::AppState>();
+        let template = axagent_dao::repo::wiki::get_wiki_template(state.harness.db(), &template_id)
+            .await
+            .map_err(to_provider_error)?;
+        let wiki = axagent_dao::repo::wiki::get_wiki(state.harness.db(), &vault_id)
+            .await
+            .map_err(to_provider_error)?;
+        let content =
+            axagent_dao::repo::wiki::apply_template_variables(&template.content, &wiki.name);
+        let note_title = title.unwrap_or_else(|| template.name.clone());
+        let now = chrono::Utc::now().timestamp();
+        let file_path =
+            format!("templates/{}-{}.md", template.name.replace(' ', "_").to_lowercase(), now);
+        let input = axagent_harness::note_dtos::CreateNoteInput {
+            vault_id: vault_id.clone(),
+            title: note_title,
+            file_path,
+            content,
+            author: "template".to_string(),
+            page_type: template.page_type,
+            source_refs: None,
+        };
+        let note = axagent_dao::repo::note::create_note(state.harness.db(), input)
+            .await
+            .map_err(to_provider_error)?;
+        crate::commands::wiki::enqueue_wiki_note_indexing(&state, &self.app, &vault_id, &note.id);
+        Ok(note)
+    }
+
+    /// `create_daily_note` 的宿主实现：按宿主当天日期与固定路径幂等取得或创建。
+    pub async fn daily_note(&self, vault_id: String) -> Result<axagent_harness::note_dtos::Note> {
+        let state = self.app.state::<crate::AppState>();
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let file_path = format!("daily/{}.md", today);
+        if let Ok(note) =
+            axagent_dao::repo::note::get_note_by_path(state.harness.db(), &vault_id, &file_path)
+                .await
+        {
+            return Ok(note);
+        }
+        let content = format!("# {}\n\n## Tasks\n\n## Notes\n\n## Ideas\n", today);
+        let input = axagent_harness::note_dtos::CreateNoteInput {
+            vault_id: vault_id.clone(),
+            title: today.clone(),
+            file_path,
+            content,
+            author: "user".to_string(),
+            page_type: Some("daily".to_string()),
+            source_refs: None,
+        };
+        let note = axagent_dao::repo::note::create_note(state.harness.db(), input)
+            .await
+            .map_err(to_provider_error)?;
+        crate::commands::wiki::enqueue_wiki_note_indexing(&state, &self.app, &vault_id, &note.id);
+        Ok(note)
+    }
+
     pub async fn sync(
         &self,
         request: SyncNoteToKnowledgeBaseRequest,
@@ -283,6 +347,18 @@ impl WikiStoreProvider for HostWikiStore {
             .map_err(to_provider_error)
     }
 
+    async fn delete_wiki_template(&self, id: String) -> Result<()> {
+        if id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::delete_wiki_template 需要非空 id".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::wiki::delete_wiki_template(state.harness.db(), &id)
+            .await
+            .map_err(to_provider_error)
+    }
+
     async fn get_cached_graph(&self, wiki_id: String) -> Result<GraphData> {
         if wiki_id.trim().is_empty() {
             return Err(AxAgentError::Validation(
@@ -330,6 +406,32 @@ impl WikiStoreProvider for HostWikiStore {
             ));
         }
         self.restore_note_version(note_id, version_id).await
+    }
+
+    async fn create_note_from_template(
+        &self,
+        vault_id: String,
+        template_id: String,
+        title: Option<String>,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        if vault_id.trim().is_empty() || template_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::create_note_from_template 需要非空 vaultId / templateId".into(),
+            ));
+        }
+        self.note_from_template(vault_id, template_id, title).await
+    }
+
+    async fn create_daily_note(
+        &self,
+        vault_id: String,
+    ) -> Result<axagent_harness::note_dtos::Note> {
+        if vault_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::create_daily_note 需要非空 vaultId".into(),
+            ));
+        }
+        self.daily_note(vault_id).await
     }
 
     async fn create_note(
@@ -567,6 +669,104 @@ impl WikiStoreProvider for HostWikiStore {
         axagent_dao::repo::note::get_note_by_path(state.harness.db(), &vault_id, &file_path)
             .await
             .map_err(to_provider_error)
+    }
+
+    async fn search_notes(
+        &self,
+        vault_id: String,
+        query: String,
+        top_k: Option<usize>,
+    ) -> Result<Vec<axagent_harness::rag_config::NoteSearchResult>> {
+        if vault_id.trim().is_empty() || query.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::search_notes 需要非空 vaultId / query".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::wiki_notes_search_core(&state, vault_id, query, top_k)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    async fn import_obsidian_vault(
+        &self,
+        wiki_id: String,
+        vault_path: String,
+    ) -> Result<axagent_harness::wiki_dtos::ImportStats> {
+        if wiki_id.trim().is_empty() || vault_path.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::import_obsidian_vault 需要非空 wikiId / vaultPath".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::import_obsidian_vault_core(&self.app, &state, wiki_id, vault_path)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    async fn import_knowledge_md(
+        &self,
+        wiki_id: String,
+        file_path: Option<String>,
+    ) -> Result<axagent_harness::wiki_dtos::KnowledgeMdImportStats> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::import_knowledge_md 需要非空 wikiId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::import_knowledge_md_core(&self.app, &state, wiki_id, file_path)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    async fn export_markdown(
+        &self,
+        wiki_id: String,
+        output_path: String,
+    ) -> Result<axagent_harness::wiki_dtos::ExportStats> {
+        if wiki_id.trim().is_empty() || output_path.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::export_markdown 需要非空 wikiId / outputPath".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::export_markdown_core(&state, wiki_id, output_path)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    async fn export_html(
+        &self,
+        wiki_id: String,
+        output_path: String,
+    ) -> Result<axagent_harness::wiki_dtos::ExportStats> {
+        if wiki_id.trim().is_empty() || output_path.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::export_html 需要非空 wikiId / outputPath".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::export_html_core(&state, wiki_id, output_path)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    async fn export_note_html(
+        &self,
+        note_id: String,
+        output_path: String,
+    ) -> Result<axagent_harness::wiki_dtos::NoteExportPath> {
+        if note_id.trim().is_empty() || output_path.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::export_note_html 需要非空 noteId / outputPath".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::export_note_html_core(&state, note_id, output_path)
+            .await
+            .map(|path| axagent_harness::wiki_dtos::NoteExportPath { path })
+            .map_err(AxAgentError::Provider)
     }
 
     async fn sync_note_to_knowledge_base(

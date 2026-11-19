@@ -242,6 +242,184 @@ fn list_and_get_by_path_are_read_only_seam_calls() {
 }
 
 #[test]
+fn search_notes_is_a_read_only_seam_call() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_notes_search",
+        serde_json::json!({ "vaultId": "v1", "query": "测试", "topK": 5 }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "search_notes");
+    assert_eq!(call.args["args"]["vaultId"], "v1");
+    assert_eq!(call.args["args"]["query"], "测试");
+    assert_eq!(call.args["args"]["topK"], 5);
+
+    let result = serde_json::json!([{
+        "note": sample_note("note-search"),
+        "snippet": "…测试…",
+        "score": 0.9,
+    }]);
+    worker.send_response(
+        &FrameResponse::success(result.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &result);
+    worker.shutdown();
+
+    // 可选 topK 缺失 / null 也合法，透传为 null。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_notes_search",
+        serde_json::json!({ "vaultId": "v1", "query": "测试", "topK": null }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "search_notes");
+    assert!(call.args["args"]["topK"].is_null());
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!([]))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &serde_json::json!([]));
+    worker.shutdown();
+}
+
+#[test]
+fn import_and_export_commands_map_to_the_host_wiki_store_seam() {
+    // ① 导入 Obsidian vault：两个标量键，camelCase。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_import_obsidian_vault",
+        serde_json::json!({ "wikiId": "w1", "vaultPath": "/tmp/vault" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "import_obsidian_vault");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    assert_eq!(call.args["args"]["vaultPath"], "/tmp/vault");
+    let stats = serde_json::json!({ "imported": 2, "failed": 0, "skipped": 1 });
+    worker.send_response(
+        &FrameResponse::success(stats.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &stats);
+    worker.shutdown();
+
+    // ② 导入 KNOWLEDGE.md：filePath 可选，缺失时透传 null。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_import_knowledge_md",
+        serde_json::json!({ "wikiId": "w1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "import_knowledge_md");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    assert!(call.args["args"]["filePath"].is_null());
+    let stats = serde_json::json!({ "imported": 1, "failed": 0, "skipped": 0, "total": 4 });
+    worker.send_response(
+        &FrameResponse::success(stats.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &stats);
+    worker.shutdown();
+
+    // ③ 导出 Markdown：wikiId + outputPath。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_export_markdown",
+        serde_json::json!({ "wikiId": "w1", "outputPath": "/tmp/out" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "export_markdown");
+    assert_eq!(call.args["args"]["outputPath"], "/tmp/out");
+    let stats = serde_json::json!({ "exported": 3, "failed": 0 });
+    worker.send_response(
+        &FrameResponse::success(stats.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &stats);
+    worker.shutdown();
+
+    // ④ 导出 HTML：同上。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_export_html",
+        serde_json::json!({ "wikiId": "w1", "outputPath": "/tmp/out" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "export_html");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "exported": 1, "failed": 0 }))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(
+        &worker.recv_response(),
+        &serde_json::json!({ "exported": 1, "failed": 0 }),
+    );
+    worker.shutdown();
+
+    // ⑤ 单条笔记导出 HTML：noteId + outputPath，回执是路径字符串。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_export_html",
+        serde_json::json!({ "noteId": "n1", "outputPath": "/tmp/out/n1.pdf" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "export_note_html");
+    assert_eq!(call.args["args"]["noteId"], "n1");
+    assert_eq!(call.args["args"]["outputPath"], "/tmp/out/n1.pdf");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "path": "/tmp/out/n1.html" }))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(
+        &worker.recv_response(),
+        &serde_json::json!({ "path": "/tmp/out/n1.html" }),
+    );
+    worker.shutdown();
+}
+
+#[test]
+fn import_and_export_commands_reject_missing_args() {
+    // 缺 vaultPath ⇒ 插件侧拒收，不触达宿主。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_import_obsidian_vault",
+        serde_json::json!({ "wikiId": "w1" }),
+    ));
+    let response = worker.recv_response();
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS));
+    worker.shutdown();
+
+    // 缺 outputPath ⇒ 同样拒收。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_export_html", serde_json::json!({ "wikiId": "w1" })));
+    let response = worker.recv_response();
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS));
+    worker.shutdown();
+
+    // 缺 noteId ⇒ 同样拒收。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_export_html",
+        serde_json::json!({ "outputPath": "/tmp/out/n1.html" }),
+    ));
+    let response = worker.recv_response();
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS));
+    worker.shutdown();
+}
+
+#[test]
 fn create_note_is_a_write_seam_call_with_camel_case_input() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
     let input = serde_json::json!({
@@ -457,6 +635,26 @@ fn wiki_template_commands_map_to_the_host_wiki_store_seam() {
     );
     assert_command_value(&worker.recv_response(), &templates[0]);
     worker.shutdown();
+
+    // ④ 删除是写 op：id 标量透传，宿主空回执透出成功。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_template_delete", serde_json::json!({ "id": "tpl-1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "delete_wiki_template");
+    assert_eq!(call.args["args"]["id"], "tpl-1");
+    worker.send_response(
+        &FrameResponse::success(serde_json::Value::Null)
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &serde_json::Value::Null);
+    worker.shutdown();
+
+    // ⑤ 缺 id 必须先在插件侧拒收，不触达宿主。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_template_delete", serde_json::json!({})));
+    let response = worker.recv_response();
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS));
+    worker.shutdown();
 }
 
 #[test]
@@ -594,6 +792,83 @@ fn note_version_commands_reject_invalid_args() {
         "wiki_note_get_version",
         serde_json::json!({ "versionId": 0 }),
     ));
+    assert_eq!(
+        worker.recv_response().code.as_deref(),
+        Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS)
+    );
+    worker.shutdown();
+}
+
+#[test]
+fn template_and_daily_note_commands_map_to_host_wiki_store_seam() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_create_from_template",
+        serde_json::json!({ "vaultId": "v1", "templateId": "t1", "title": "自定义标题" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "create_note_from_template");
+    assert_eq!(call.args["args"]["vaultId"], "v1");
+    assert_eq!(call.args["args"]["templateId"], "t1");
+    assert_eq!(call.args["args"]["title"], "自定义标题");
+    worker.send_response(
+        &FrameResponse::success(sample_note("note-tpl"))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &sample_note("note-tpl"));
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_create_from_template",
+        serde_json::json!({ "vaultId": "v1", "templateId": "t1", "title": null }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "create_note_from_template");
+    assert!(call.args["args"]["title"].is_null());
+    worker.send_response(
+        &FrameResponse::success(sample_note("note-tpl-null"))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &sample_note("note-tpl-null"));
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_create_daily_note",
+        serde_json::json!({ "vaultId": "v1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "create_daily_note");
+    assert_eq!(call.args["args"]["vaultId"], "v1");
+    worker.send_response(
+        &FrameResponse::success(sample_note("note-daily"))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &sample_note("note-daily"));
+    worker.shutdown();
+}
+
+#[test]
+fn template_and_daily_note_commands_reject_invalid_args() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_note_create_from_template",
+        serde_json::json!({ "vaultId": "v1", "templateId": "t1", "title": 7 }),
+    ));
+    assert_eq!(
+        worker.recv_response().code.as_deref(),
+        Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS)
+    );
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_create_daily_note", serde_json::json!({})));
     assert_eq!(
         worker.recv_response().code.as_deref(),
         Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS)

@@ -483,7 +483,16 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("wiki.store", "sync_note_links") => Some(PluginPermission::Write),
         ("wiki.store", "create_wiki_template") => Some(PluginPermission::Write),
         ("wiki.store", "update_wiki_template") => Some(PluginPermission::Write),
+        ("wiki.store", "delete_wiki_template") => Some(PluginPermission::Write),
+        // 导入 / 导出族：导入落笔记行 + 触发索引，导出在宿主文件系统落盘 ⇒ 写面。
+        ("wiki.store", "import_obsidian_vault") => Some(PluginPermission::Write),
+        ("wiki.store", "import_knowledge_md") => Some(PluginPermission::Write),
+        ("wiki.store", "export_markdown") => Some(PluginPermission::Write),
+        ("wiki.store", "export_html") => Some(PluginPermission::Write),
+        ("wiki.store", "export_note_html") => Some(PluginPermission::Write),
         ("wiki.store", "restore_note_version") => Some(PluginPermission::Write),
+        ("wiki.store", "create_note_from_template") => Some(PluginPermission::Write),
+        ("wiki.store", "create_daily_note") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -3046,6 +3055,137 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            "wiki.store" if op == "search_notes" => {
+                let vault_id: String = match deserialize_arg(&args, "vaultId", seam) {
+                    Ok(vault_id) => vault_id,
+                    Err(response) => return response,
+                };
+                let query: String = match deserialize_arg(&args, "query", seam) {
+                    Ok(query) => query,
+                    Err(response) => return response,
+                };
+                let top_k: Option<usize> = match deserialize_optional_arg(&args, "topK", seam) {
+                    Ok(top_k) => top_k,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.search_notes(vault_id, query, top_k))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(results) => to_value("Vec<NoteSearchResult>", &results),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "import_obsidian_vault" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let vault_path: String = match deserialize_arg(&args, "vaultPath", seam) {
+                    Ok(vault_path) => vault_path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.import_obsidian_vault(wiki_id, vault_path))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(stats) => to_value("ImportStats", &stats),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "import_knowledge_md" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let file_path: Option<String> =
+                    match deserialize_optional_arg(&args, "filePath", seam) {
+                        Ok(file_path) => file_path,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.import_knowledge_md(wiki_id, file_path))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(stats) => to_value("KnowledgeMdImportStats", &stats),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "export_markdown" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let output_path: String = match deserialize_arg(&args, "outputPath", seam) {
+                    Ok(output_path) => output_path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.export_markdown(wiki_id, output_path))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(stats) => to_value("ExportStats", &stats),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "export_html" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let output_path: String = match deserialize_arg(&args, "outputPath", seam) {
+                    Ok(output_path) => output_path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.export_html(wiki_id, output_path)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(stats) => to_value("ExportStats", &stats),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "export_note_html" => {
+                let note_id: String = match deserialize_arg(&args, "noteId", seam) {
+                    Ok(note_id) => note_id,
+                    Err(response) => return response,
+                };
+                let output_path: String = match deserialize_arg(&args, "outputPath", seam) {
+                    Ok(output_path) => output_path,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.export_note_html(note_id, output_path))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(export) => to_value("NoteExportPath", &export),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // 一个写 op；`write` 权限闸由 `dispatch_seam` 开头统一把关。
             // 入参是**嵌一层**的 `{"request": {noteId, knowledgeBaseId}}`（契约 DTO
             // `SyncNoteToKnowledgeBaseRequest`，camelCase）—— 与 `knowledge.vector` 的
@@ -3135,6 +3275,22 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            "wiki.store" if op == "delete_wiki_template" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_wiki_template(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => to_value("()", &()),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "wiki.store" if op == "get_cached_graph" => {
                 let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
                     Ok(wiki_id) => wiki_id,
@@ -3214,6 +3370,48 @@ impl HostPeer {
                 let Some(result) =
                     self.block_on(provider.restore_note_version(note_id, version_id))
                 else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(note) => to_value("Note", &note),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "create_note_from_template" => {
+                let vault_id: String = match deserialize_arg(&args, "vaultId", seam) {
+                    Ok(vault_id) => vault_id,
+                    Err(response) => return response,
+                };
+                let template_id: String = match deserialize_arg(&args, "templateId", seam) {
+                    Ok(template_id) => template_id,
+                    Err(response) => return response,
+                };
+                let title: Option<String> = match deserialize_optional_arg(&args, "title", seam) {
+                    Ok(title) => title,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) =
+                    self.block_on(provider.create_note_from_template(vault_id, template_id, title))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(note) => to_value("Note", &note),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "create_daily_note" => {
+                let vault_id: String = match deserialize_arg(&args, "vaultId", seam) {
+                    Ok(vault_id) => vault_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_daily_note(vault_id)) else {
                     return no_runtime(seam);
                 };
                 match result {

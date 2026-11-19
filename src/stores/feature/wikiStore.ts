@@ -2,7 +2,6 @@
 
 import i18n from "@/i18n";
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
 import { addNotification } from "@/lib/notification";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
@@ -13,6 +12,7 @@ import type {
   ImportStats,
   KnowledgeMdImportStats,
   Note,
+  NoteExportPath,
   NoteLink,
   NoteSearchResult,
   NoteVersion,
@@ -181,7 +181,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   searchNotes: async (vaultId, query, topK) => {
     try {
-      return await invoke<NoteSearchResult[]>("wiki_notes_search", {
+      return await invokePluginCommand<NoteSearchResult[]>("wiki_notes_search", {
         vaultId,
         query,
         topK,
@@ -286,7 +286,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   deleteTemplate: async (id) => {
     try {
-      await invoke("wiki_template_delete", { id });
+      await invokePluginCommand("wiki_template_delete", { id });
       set((s) => ({
         templates: s.templates.filter((t) => t.id !== id),
         error: null,
@@ -298,7 +298,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   createNoteFromTemplate: async (vaultId, templateId, title) => {
     try {
-      const note = await invoke<Note>("wiki_note_create_from_template", {
+      const note = await invokePluginCommand<Note>("wiki_note_create_from_template", {
         vaultId,
         templateId,
         title,
@@ -313,7 +313,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   createDailyNote: async (vaultId) => {
     try {
-      const note = await invoke<Note>("wiki_create_daily_note", { vaultId });
+      const note = await invokePluginCommand<Note>("wiki_create_daily_note", { vaultId });
       set((s) => {
         const exists = s.notes.some((n) => n.id === note.id);
         return {
@@ -330,7 +330,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   importObsidianVault: async (wikiId, vaultPath) => {
     try {
-      const stats = await invoke<ImportStats>("wiki_import_obsidian_vault", {
+      const stats = await invokePluginCommand<ImportStats>("wiki_import_obsidian_vault", {
         wikiId,
         vaultPath,
       });
@@ -357,7 +357,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   importKnowledgeMd: async (wikiId, filePath) => {
     try {
-      const stats = await invoke<KnowledgeMdImportStats>("wiki_import_knowledge_md", {
+      const stats = await invokePluginCommand<KnowledgeMdImportStats>("wiki_import_knowledge_md", {
         wikiId,
         filePath: filePath ?? null,
       });
@@ -373,7 +373,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   exportMarkdown: async (wikiId, outputPath) => {
     try {
-      const stats = await invoke<ExportStats>("wiki_export_markdown", {
+      const stats = await invokePluginCommand<ExportStats>("wiki_export_markdown", {
         wikiId,
         outputPath,
       });
@@ -387,7 +387,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   exportHtml: async (wikiId, outputPath) => {
     try {
-      const stats = await invoke<ExportStats>("wiki_export_html", {
+      const stats = await invokePluginCommand<ExportStats>("wiki_export_html", {
         wikiId,
         outputPath,
       });
@@ -401,12 +401,12 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   exportNoteHtml: async (noteId, outputPath) => {
     try {
-      const htmlPath = await invoke<string>("wiki_note_export_html", {
+      const result = await invokePluginCommand<NoteExportPath>("wiki_note_export_html", {
         noteId,
         outputPath,
       });
       set({ error: null });
-      return htmlPath;
+      return result.path;
     } catch (e) {
       set({ error: translateBackendError(e) });
       return null;

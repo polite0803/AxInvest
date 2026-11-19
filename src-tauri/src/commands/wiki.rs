@@ -799,10 +799,10 @@ async fn load_fused_entities(db: &DatabaseConnection, kb_id: &str) -> GraphData 
 /// - 在 Wiki 笔记图谱基础上追加知识图谱实体节点（type="entity"）和关系边（type="reference"）
 /// - 实体节点 ID 加 "entity:" 前缀确保与笔记 ID 不冲突
 /// - 空知识库不影响原有图谱显示
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取 Wiki 图谱（缓存）")]
-#[tauri::command]
-pub async fn get_wiki_graph_cached(
-    state: State<'_, AppState>,
+///
+/// 宿主 `wiki.store` provider 内部的缓存图谱实现；原命令体逐字下沉到这里。
+pub(crate) async fn cached_graph_core(
+    state: &AppState,
     wiki_id: String,
 ) -> Result<GraphData, String> {
     let db = state.harness.db();
@@ -948,15 +948,12 @@ pub async fn get_wiki_graph_cached(
 
 /// 带缓存的社区检测：优先读缓存，未命中则跑 Louvain 并写缓存。
 ///
-/// ⚠ 本函数只算**笔记侧**，并且**刻意不挂** `#[tauri::command]`：
-/// 命令入口是下面的 `wiki_graph_communities_cached` —— 它在本函数的三处 `return`
-/// **之后**统一附加实体侧社区。把命令属性留在这一层，就等于要求三个早返回分支
-/// 各自记得执行附加步骤，漏一个就是「同一条数据两条路径给出不同结果」。
+/// 本函数只算**笔记侧**；宿主 `wiki.store` provider 在它的三处 `return` **之后**
+/// 统一附加实体侧社区，避免早返回分支各自重复组合逻辑。
 ///
-/// 参数取 `&State` 而不是 `State`：调用方（命令入口）需要在调用前后各用一次
-/// `state.harness.db()`，move 会让那个连接的借用与 move 冲突。
+/// 参数取 `&AppState`：调用方在调用前后都要用 `state.harness.db()`，move 会让连接借用冲突。
 async fn note_communities_cached(
-    state: &State<'_, AppState>,
+    state: &AppState,
     wiki_id: String,
 ) -> Result<LouvainResult, String> {
     let db = state.harness.db();
@@ -1039,18 +1036,17 @@ async fn note_communities_cached(
     Ok(result)
 }
 
-/// 带缓存的社区检测**命令入口**：笔记侧 ∪ **实体侧**社区（2026-09-18）。
+/// 带缓存的社区检测宿主 provider 实现：笔记侧 ∪ **实体侧**社区（2026-09-18）。
 ///
 /// 笔记侧由 `note_communities_cached` 算（含缓存），本函数只负责在**所有**
-/// 早返回分支之后统一附加一次实体侧结果 —— 这就是把命令属性放在这一层的原因。
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取 Wiki 社区发现（缓存）")]
-#[tauri::command]
-pub async fn wiki_graph_communities_cached(
-    state: State<'_, AppState>,
+/// 早返回分支之后统一附加一次实体侧结果。
+/// 宿主 `wiki.store` provider 内部的缓存社区实现；原命令体逐字下沉到这里。
+pub(crate) async fn cached_communities_core(
+    state: &AppState,
     wiki_id: String,
 ) -> Result<LouvainResult, String> {
     let db = state.harness.db();
-    let mut result = note_communities_cached(&state, wiki_id.clone()).await?;
+    let mut result = note_communities_cached(state, wiki_id.clone()).await?;
 
     // ── 实体侧单独算一遍社区 ──
     //

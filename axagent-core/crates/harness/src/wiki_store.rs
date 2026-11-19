@@ -16,6 +16,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::core_error::{AxAgentError, Result};
+use crate::graph_dtos::GraphData;
+use crate::louvain_dtos::LouvainResult;
 use crate::types::{BacklinkInfo, NoteLink};
 
 /// `sync_note_to_knowledge_base` op 的入参。
@@ -105,6 +107,25 @@ pub trait WikiStoreProvider: Send + Sync {
     ) -> Result<crate::wiki_dtos::WikiTemplate> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::update_wiki_template 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 读取带缓存的 Wiki 融合图谱（读）。
+    ///
+    /// 缓存命中、知识图谱实体融合、悬空边诊断与告警节流全部留在宿主 provider；
+    /// 插件只提交 `wikiId`，不复制算法，也不接触 DAO / 数据库连接。
+    async fn get_cached_graph(&self, _wiki_id: String) -> Result<GraphData> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_cached_graph 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 读取带缓存的 Wiki 社区检测结果（读）。
+    ///
+    /// Louvain 计算与实体侧社区附加都在宿主 provider 内完成；插件只透传结果 DTO。
+    async fn get_cached_communities(&self, _wiki_id: String) -> Result<LouvainResult> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_cached_communities 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

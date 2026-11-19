@@ -845,8 +845,8 @@ function setWikiNotes(notes: Note[]): void {
 // 改动前的行为**（e2e 不依赖 fixture，因此不受影响）。
 //
 // 文件形态与两个后端命令的返回**逐字段对齐**（由 output/ 下的导出脚本从 PG 生成）：
-//   { wiki, graph, communitiesResult }  ⇒  llm_wiki_list / get_wiki_graph_cached
-//                                          / wiki_graph_communities_cached
+//   { wiki, graph, communitiesResult }  ⇒  llm_wiki_list / wiki_get_graph_cached
+//                                          / wiki_get_graph_communities_cached
 type WikiGraphFixture = {
   wiki: Wiki;
   graph: { nodes: unknown[]; edges: unknown[] };
@@ -7453,7 +7453,7 @@ async function executeCommand<T>(
       const fx = await loadWikiGraphFixture();
       return (fx ? [fx.wiki] : []) as T;
     }
-    case "get_wiki_graph_cached": {
+    case "wiki_get_graph_cached": {
       const fx = await loadWikiGraphFixture();
       const wikiId = String(args?.wiki_id ?? args?.wikiId ?? "");
       if (fx && (!wikiId || fx.wiki.id === wikiId)) {
@@ -7461,7 +7461,7 @@ async function executeCommand<T>(
       }
       return { nodes: [], edges: [] } as T;
     }
-    case "wiki_graph_communities_cached": {
+    case "wiki_get_graph_communities_cached": {
       const fx = await loadWikiGraphFixture();
       return (fx ? fx.communitiesResult : { communities: {} }) as T;
     }

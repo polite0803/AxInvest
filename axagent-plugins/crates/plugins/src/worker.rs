@@ -3134,6 +3134,38 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            "wiki.store" if op == "get_cached_graph" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_cached_graph(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(graph) => to_value("GraphData", &graph),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "get_cached_communities" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_cached_communities(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(communities) => to_value("LouvainResult", &communities),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // ── trajectory.store 接缝：宿主把独持的 TrajectoryStorage 的**读面**暴露给插件 ──
             // 首批四个 op 全是读（PLAN §56.1-Q4：`append` 不给）⇒ `required_permission_for`
             // 里一条条目都没有；四个 op 同样**不收 `as_of`**。

@@ -9,6 +9,7 @@ import { WikiFilePanel } from "@/components/wiki/WikiFilePanel";
 import { WikiNodeContextMenu } from "@/components/wiki/WikiNodeContextMenu";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import { message } from "@/lib/toast";
 import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { useWikiStore } from "@/stores/feature/wikiStore";
@@ -138,7 +139,7 @@ export function WikiGraphPage() {
     setGraphLoading(true);
     try {
       const [data, communityResult] = await Promise.all([
-        invoke<GraphData>("get_wiki_graph_cached", { wikiId: wikiIdFromUrl }),
+        invokePluginCommand<GraphData>("wiki_get_graph_cached", { wikiId: wikiIdFromUrl }),
         invoke<{
           communities: Record<string, number>;
           /**
@@ -147,7 +148,7 @@ export function WikiGraphPage() {
            */
           entityCommunities?: Record<string, number>;
         }>(
-          "wiki_graph_communities_cached",
+          "wiki_get_graph_communities_cached",
           { wikiId: wikiIdFromUrl },
         ).catch(() => null),
       ]);

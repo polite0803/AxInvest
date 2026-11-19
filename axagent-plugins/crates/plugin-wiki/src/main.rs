@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Wiki 业务功能包 worker（P6.3 第一片）。
 //!
-//! 当前命令面覆盖笔记创建、更新、删除、列表、读取、出链、反链，以及同步到知识库。
+//! 当前命令面覆盖笔记创建、更新、删除、列表、读取、出链、反链、模板读写，
+//! 以及同步到知识库与缓存图谱 / 社区检测两个只读面。
 //! 它**不查库、不读文件**，只把命令参数转成宿主 `wiki.store` 接缝的入参；
 //! 笔记正文、markdown 落盘、知识库文档行与索引入队全部在宿主 provider 内完成
 //!（数据主权在宿主）。
@@ -33,6 +34,8 @@ const COMMAND_GET_NOTE_BY_PATH: &str = "wiki_get_note_by_path";
 const COMMAND_LIST_TEMPLATES: &str = "wiki_list_templates";
 const COMMAND_CREATE_TEMPLATE: &str = "wiki_create_template";
 const COMMAND_UPDATE_TEMPLATE: &str = "wiki_update_template";
+const COMMAND_GET_GRAPH_CACHED: &str = "wiki_get_graph_cached";
+const COMMAND_GET_GRAPH_COMMUNITIES_CACHED: &str = "wiki_get_graph_communities_cached";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -297,6 +300,24 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("update_wiki_template", json!({ "input": input }))
+        },
+        COMMAND_GET_GRAPH_CACHED => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("get_cached_graph", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_GET_GRAPH_COMMUNITIES_CACHED => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("get_cached_communities", json!({ "wikiId": wiki_id }))
         },
         other => {
             return CommandFault::for_frame(

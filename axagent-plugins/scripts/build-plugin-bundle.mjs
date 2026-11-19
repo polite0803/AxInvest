@@ -5623,6 +5623,28 @@ function wikiManifest({ version, binaryName, sha256 }) {
           required: ["input"],
         },
       },
+      {
+        name: "wiki_get_graph_cached",
+        description: "读取带缓存的 Wiki 图谱（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_get_graph_cached",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_get_graph_communities_cached",
+        description: "读取带缓存的 Wiki 社区检测结果（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_get_graph_communities_cached",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };

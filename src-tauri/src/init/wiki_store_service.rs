@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use axagent_dao::repo::index_jobs as jobs;
 use axagent_harness::core_error::{AxAgentError, Result};
+use axagent_harness::graph_dtos::GraphData;
+use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::BacklinkInfo;
 use axagent_harness::{
     SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
@@ -31,6 +33,22 @@ pub struct HostWikiStore {
 impl HostWikiStore {
     pub fn new(app: AppHandle) -> Self {
         Self { app }
+    }
+
+    /// `get_cached_graph` 的宿主实现：保留原命令的缓存融合与诊断语义。
+    pub async fn cached_graph(&self, wiki_id: String) -> Result<GraphData> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::cached_graph_core(&state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// `get_cached_communities` 的宿主实现：保留原命令的笔记侧 ∪ 实体侧社区语义。
+    pub async fn cached_communities(&self, wiki_id: String) -> Result<LouvainResult> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::cached_communities_core(&state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
     }
 
     pub async fn sync(
@@ -234,6 +252,24 @@ impl WikiStoreProvider for HostWikiStore {
         axagent_dao::repo::wiki::update_wiki_template(state.harness.db(), input)
             .await
             .map_err(to_provider_error)
+    }
+
+    async fn get_cached_graph(&self, wiki_id: String) -> Result<GraphData> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::get_cached_graph 需要非空 wikiId".into(),
+            ));
+        }
+        self.cached_graph(wiki_id).await
+    }
+
+    async fn get_cached_communities(&self, wiki_id: String) -> Result<LouvainResult> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::get_cached_communities 需要非空 wikiId".into(),
+            ));
+        }
+        self.cached_communities(wiki_id).await
     }
 
     async fn create_note(

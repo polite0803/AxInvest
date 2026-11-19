@@ -191,6 +191,40 @@ impl WikiStoreProvider for FixedWikiStore {
             updated_at: 3,
         })
     }
+
+    async fn get_cached_graph(
+        &self,
+        wiki_id: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::graph_dtos::GraphData> {
+        Ok(axagent_harness::graph_dtos::GraphData::new(
+            vec![axagent_harness::graph_dtos::GraphNode {
+                id: format!("note-{wiki_id}"),
+                title: "图谱节点".to_string(),
+                node_type: "note".to_string(),
+                tags: Vec::new(),
+                link_count: 0,
+                backlink_count: 0,
+                path: String::new(),
+            }],
+            Vec::new(),
+        ))
+    }
+
+    async fn get_cached_communities(
+        &self,
+        _wiki_id: String,
+    ) -> axagent_harness::core_error::Result<axagent_harness::louvain_dtos::LouvainResult> {
+        Ok(axagent_harness::louvain_dtos::LouvainResult {
+            communities: std::collections::HashMap::from([("note-w1".to_string(), 1)]),
+            cohesion_scores: std::collections::HashMap::new(),
+            community_sizes: std::collections::HashMap::new(),
+            top_nodes: std::collections::HashMap::new(),
+            modularity: 0.0,
+            num_communities: 1,
+            entity_communities: None,
+            color_palette: axagent_harness::louvain_dtos::LouvainResult::default_palette(),
+        })
+    }
 }
 
 #[test]
@@ -402,6 +436,26 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         serde_json::from_str(&updated_template).expect("模板更新输出应是 JSON 文本");
     assert_eq!(updated_template["id"], "tpl-1");
     assert_eq!(updated_template["name"], "改过的模板");
+
+    let graph = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_get_graph_cached",
+            &json!({ "wikiId": "w1" }),
+        )
+        .expect("wiki 图谱读命令应可执行");
+    let graph: Value = serde_json::from_str(&graph).expect("图谱输出应是 JSON 文本");
+    assert_eq!(graph["nodes"][0]["id"], "note-w1");
+
+    let communities = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_get_graph_communities_cached",
+            &json!({ "wikiId": "w1" }),
+        )
+        .expect("wiki 社区读命令应可执行");
+    let communities: Value = serde_json::from_str(&communities).expect("社区输出应是 JSON 文本");
+    assert_eq!(communities["communities"]["note-w1"], 1);
 
     drop(manager);
     handle.undo();

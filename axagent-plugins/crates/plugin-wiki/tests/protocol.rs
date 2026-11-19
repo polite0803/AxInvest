@@ -460,6 +460,65 @@ fn wiki_template_commands_map_to_the_host_wiki_store_seam() {
 }
 
 #[test]
+fn graph_cache_commands_map_to_read_only_host_seam_calls() {
+    let graph = serde_json::json!({
+        "nodes": [{ "id": "n1", "title": "节点", "type": "note" }],
+        "edges": [],
+        "danglingEdges": { "totalEdges": 0, "dangling": 0, "missingSourceOnly": 0, "missingTargetOnly": 0, "missingBoth": 0, "sampleEdgeIds": [] },
+        "unresolvedTypes": [],
+        "unresolvedRelations": [],
+    });
+    let communities = serde_json::json!({
+        "communities": { "n1": 1 },
+        "entityCommunities": null,
+        "colorPalette": [],
+    });
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_get_graph_cached",
+        serde_json::json!({ "wikiId": "w1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "get_cached_graph");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(graph.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &graph);
+    worker.shutdown();
+
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_get_graph_communities_cached",
+        serde_json::json!({ "wikiId": "w1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "get_cached_communities");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(communities.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &communities);
+    worker.shutdown();
+}
+
+#[test]
+fn graph_cache_commands_reject_missing_wiki_id() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_get_graph_cached", serde_json::json!({})));
+    let response = worker.recv_response();
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS));
+    worker.shutdown();
+}
+
+#[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
     worker.send(&command(PLUGIN_ID, "wiki_not_a_command", serde_json::json!({})));

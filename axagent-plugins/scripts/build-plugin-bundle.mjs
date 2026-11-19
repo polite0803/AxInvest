@@ -5561,6 +5561,25 @@ function wikiManifest({ version, binaryName, sha256 }) {
           required: ["noteId", "knowledgeBaseId"],
         },
       },
+      {
+        name: "wiki_sync_note_links",
+        description: "同步一条 Wiki 笔记的出链（经宿主 wiki.store 写面）",
+        command: "worker://wiki_sync_note_links",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            vaultId: { type: "string", description: "宿主侧 vault id" },
+            sourceNoteId: { type: "string", description: "宿主侧源笔记 id" },
+            links: {
+              type: "array",
+              description: "三元组 [目标标题, 链接文本, 链接类型]",
+              items: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 3 },
+            },
+          },
+          required: ["vaultId", "sourceNoteId", "links"],
+        },
+      },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };

@@ -634,7 +634,6 @@ const RUST_COMMANDS = [
   "wiki_notes_create",
   "wiki_notes_update",
   "wiki_notes_delete",
-  "wiki_notes_sync_links",
   "wiki_notes_search",
   "get_wiki_graph",
   // Agency expert

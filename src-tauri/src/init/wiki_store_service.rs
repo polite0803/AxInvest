@@ -13,7 +13,8 @@ use axagent_dao::repo::index_jobs as jobs;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::types::BacklinkInfo;
 use axagent_harness::{
-    SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest, WikiStoreProvider,
+    SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
+    WikiStoreProvider,
 };
 use tauri::{AppHandle, Manager};
 
@@ -170,6 +171,24 @@ impl WikiStoreProvider for HostWikiStore {
         }
 
         Ok(map.into_values().collect())
+    }
+
+    async fn sync_note_links(&self, request: SyncNoteLinksRequest) -> Result<()> {
+        let SyncNoteLinksRequest { vault_id, source_note_id, links } = request;
+        if vault_id.trim().is_empty() || source_note_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::sync_note_links 需要非空 vaultId / sourceNoteId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::note::sync_note_links(
+            state.harness.db(),
+            &vault_id,
+            &source_note_id,
+            links,
+        )
+        .await
+        .map_err(to_provider_error)
     }
 
     async fn create_note(

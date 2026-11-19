@@ -480,6 +480,7 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("wiki.store", "create_note") => Some(PluginPermission::Write),
         ("wiki.store", "update_note") => Some(PluginPermission::Write),
         ("wiki.store", "delete_note") => Some(PluginPermission::Write),
+        ("wiki.store", "sync_note_links") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -3061,6 +3062,23 @@ impl HostPeer {
                 };
                 match result {
                     Ok(outcome) => to_value("SyncNoteToKnowledgeBaseOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "sync_note_links" => {
+                let request: axagent_harness::SyncNoteLinksRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.sync_note_links(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => to_value("()", &()),
                     Err(e) => seam_provider_error(e),
                 }
             },

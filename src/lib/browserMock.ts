@@ -7495,6 +7495,10 @@ async function executeCommand<T>(
       // 真机由宿主 note_links + notes 表投影；浏览器模式没有链接表 ⇒ 显式空数组。
       return [] as unknown as T;
     }
+    case "wiki_sync_note_links": {
+      // 真机经插件命令桥走宿主 wiki.store 写接缝；浏览器模式没有链接表 ⇒ 空回执。
+      return null as unknown as T;
+    }
     case "wiki_notes_search": {
       const vaultId = String(args?.vault_id ?? "");
       const query = String(args?.query ?? "").toLowerCase();

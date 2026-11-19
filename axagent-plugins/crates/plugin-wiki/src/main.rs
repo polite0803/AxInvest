@@ -24,6 +24,7 @@ const COMMAND_CREATE_NOTE: &str = "wiki_create_note";
 const COMMAND_UPDATE_NOTE: &str = "wiki_update_note";
 const COMMAND_DELETE_NOTE: &str = "wiki_delete_note";
 const COMMAND_SYNC_NOTE: &str = "wiki_sync_note_to_knowledge_base";
+const COMMAND_SYNC_NOTE_LINKS: &str = "wiki_sync_note_links";
 const COMMAND_LIST_NOTES: &str = "wiki_list_notes";
 const COMMAND_GET_NOTE_BACKLINKS: &str = "wiki_get_note_backlinks";
 const COMMAND_GET_NOTE_LINKS: &str = "wiki_get_note_links";
@@ -220,6 +221,41 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             seam_call(
                 WIKI_STORE_SYNC_NOTE,
                 json!({ "request": { "noteId": note_id, "knowledgeBaseId": knowledge_base_id } }),
+            )
+        },
+        COMMAND_SYNC_NOTE_LINKS => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let source_note_id = match require_str(&frame.input, "sourceNoteId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let links = match frame.input.get("links") {
+                Some(Value::Array(links)) => links.clone(),
+                _ => {
+                    return CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                        format!("命令 `{COMMAND_SYNC_NOTE_LINKS}` 需要数组参数 `links`"),
+                    )
+                    .into_frame_response();
+                },
+            };
+            seam_call(
+                "sync_note_links",
+                json!({
+                    "request": {
+                        "vaultId": vault_id,
+                        "sourceNoteId": source_note_id,
+                        "links": links,
+                    }
+                }),
             )
         },
         other => {

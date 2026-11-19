@@ -214,7 +214,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   syncNoteLinks: async (vaultId, sourceNoteId, links) => {
     try {
-      await invoke("wiki_notes_sync_links", { vaultId, sourceNoteId, links });
+      await invokePluginCommand("wiki_sync_note_links", { vaultId, sourceNoteId, links });
     } catch (e) {
       set({ error: translateBackendError(e) });
       throw e;

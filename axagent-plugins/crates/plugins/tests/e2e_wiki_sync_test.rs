@@ -16,8 +16,8 @@ mod common;
 use std::sync::Arc;
 
 use axagent_harness::{
-    SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest, WikiStoreProvider,
-    get_capability_registry,
+    SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
+    WikiStoreProvider, get_capability_registry,
 };
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use serde_json::{Value, json};
@@ -131,6 +131,13 @@ impl WikiStoreProvider for FixedWikiStore {
             document_id: format!("doc-for-{}", request.note_id),
             index_queued: true,
         })
+    }
+
+    async fn sync_note_links(
+        &self,
+        _request: SyncNoteLinksRequest,
+    ) -> axagent_harness::core_error::Result<()> {
+        Ok(())
     }
 }
 
@@ -261,6 +268,23 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
     assert_eq!(
         backlinks,
         json!([{ "noteId": "note-created", "title": "来源笔记", "snippets": ["指向 note-created"] }])
+    );
+
+    let synced = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_sync_note_links",
+            &json!({
+                "vaultId": "v1",
+                "sourceNoteId": "note-created",
+                "links": [["note-9", "目标", "wiki"]],
+            }),
+        )
+        .expect("wiki 链接同步命令应可执行");
+    let synced: Value = serde_json::from_str(&synced).expect("链接同步输出应是 JSON 文本");
+    assert!(
+        synced.is_null() || synced.as_object().is_some_and(|o| o.is_empty()),
+        "链接同步回执应为 null 或空对象：{synced:?}"
     );
 
     let updated = manager

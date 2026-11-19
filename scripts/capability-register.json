@@ -47,16 +47,16 @@
     {
       "id": "commandTotal",
       "label": "Tauri 命令总数（parseRegistry 逐行条目）",
-      "value": 1170,
+      "value": 1169,
       "check": "registryCommandCount",
       "hard": true,
-      "planNumber": "1170",
+      "planNumber": "1169",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 366,
           "mustContain": [
-            "1170",
+            "1169",
             "145",
             "`register_commands.rs` 共"
           ]
@@ -87,7 +87,7 @@
     {
       "id": "registryFileLines",
       "label": "register_commands.rs 行数（口径 = split(\"\\n\").length，含末行空元素）",
-      "value": 1231,
+      "value": 1230,
       "check": "registryFileLineCount",
       "hard": false,
       "planMustAppear": false,
@@ -96,12 +96,12 @@
     {
       "id": "commandNameSetParity",
       "label": "不变量：契约 A 名集合数 == 产物条目数 == 登记值",
-      "value": 1170,
+      "value": 1169,
       "check": "commandNameSetCount",
       "hard": true,
       "planMustAppear": false,
       "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1，B8-1b 加 `plugin_list_task_sources` 回升 1；**2026-11-06 对账批 `3fe49c950` 删 `opc_list_blog_posts` ⇒ 三方 1541/1541/1541**）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。**2026-11-08 对账批：三方同时 1540/1540/1540**（−3 博客写面宿主命令 + 2 任务卡片宿主命令，归因见 `commandTotal`）。**2026-11-09 #32 批 C：三方同时 1534/1534/1534**（−6 = 六个已插件化 OPC 宿主命令，归因见 `commandTotal`）。**2026-11-09 D-3/D-1/D-2 收口批：三方同时 1524/1524/1524**（−10 = D-3 三条项目命令 + D-1 七条内容资产/发布计划命令，归因见 `commandTotal`）。**2026-11-09 D-4 收口批：三方同时 1518/1518/1518**（−6 = 六条落地页/联系人命令，归因见 `commandTotal`）。**2026-11-10 #35 批 1：三方同时 1509/1509/1509**（−9 = watchlist / batch-reflection / decision-backtest 三族 cron 命令，归因见 `commandTotal`）。**2026-11-10 #35 批 1b：三方同时 1500/1500/1500**（−9 = pool_scan / recommendation / trend_screening 三族宿主 wrapper 退役，归因见 `commandTotal`）。**2026-11-10 #35 批 1c：三方同时 1499/1499/1499**（−1 = `delete_recommendation_cron` 退役，归因见 `commandTotal`）。**2026-11-10 #266：三方同时 1492/1492/1492**（−7 = 七条双声明 OPC 宿主命令删除，归因见 `commandTotal`）。**2026-11-11 #267：三方同时 1491/1491/1491**（−1 = 删宿主 `opc_get_dashboard_summary`，归因见 `commandTotal`）。**2026-11-11 #264 批 2：三方同时 1478/1478/1478**（−8 本批 = 需求发现八命令整模块迁 T2；1491→1486 的 −5 属并行批已落未登记，归因见 `commandTotal`）。**2026-11-11 #264 批 3 ⇒ 1478→1475**（同 `commandTotal`：需求实现三命令删除后 defined / 已注册名 / 未注册三方仍一致）。**2026-11-11 #264 批 4 ⇒ 1475→1472**（同 `commandTotal`：领域工作流三只读命令整模块删除后 defined 1472 / 已注册名 1472 / 未注册 0 / 孤儿 0 四方一致；本锚点漏改曾让判定档报 `TRUE-DRIFT` −3，已按实测回写）。**2026-11-11 #264 批 5 ⇒ 1466/1466/1466 三方一致**（同 `commandTotal`：交付段六命令删除后 defined 1466 / 已注册名 1466 / 未注册 0 / 孤儿 0）。**2026-11-11 #264 批 6 ⇒ 1461/1461/1461 三方一致**（同 `commandTotal`：`demand_discovery` 剩余五命令整模块删除后 defined 1461 / 已注册名 1461 / 未注册 0 / 孤儿 0）。**2026-11-11 #264 批 7 刀 A ⇒ 三方 1450/1450/1450**（−11 = 11 条零前端调用的 OPC 宿主命令迁 T2 插件命名命令通道，归因见 `commandTotal`；判定档实测「契约 A 名集合与产物一致（defined 1450 / 已注册名 1450 / 未注册 0）」⇒ 差额按登记值漂移处理，非产物滞后）。**2026-11-12 G19 DojoSDK 死通道退役批 ⇒ 1447**（−3 = `dojo_sdk` 整模块三条命令删除，归因见 `commandTotal`；本值与 `commandTotal` 同源同批，三方是否全等由判定档实测，取证结果落在 PLAN §156 验收行）。**2026-11-12 #264 批 7 刀 B1 ⇒ 1440**（−7 = 七条零前端调用的 OPC 全读命令迁 T2 插件命名命令通道，归因见 `commandTotal`；本值与 `commandTotal` 同源同批，三方是否全等由判定档实测，改后 `--dump-readings` 快档已核 registry 1440/1517 行产物 1507 分裂口径）。**2026-11-12 #264 批 7 刀 B2 ⇒ 1428/1428/1428 三方一致**（−12 = 十二条零前端调用的 OPC 命令迁 T2，归因见 `commandTotal`；`--dump-readings` 实测 defined 1428 / 已注册名 1428 / entries 1428、未注册 0 / 孤儿 0）。**2026-11-12 #264 批 7 刀 B3 ⇒ 1420/1420/1420 三方一致**（−8 = 八条零前端调用的 OPC 宿主命令迁 T2，归因见 `commandTotal`；`--dump-readings` 实测 defined 1420 / 已注册名 1420 / entries 1420、未注册 0 / 孤儿 0）。**2026-11-12 #264 刀 C 批 1 ⇒ 1415/1415/1415 三方一致**（−5 = 五条有前端调用的 OPC 只读宿主命令迁 T2，归因见 `commandTotal`；`--dump-readings` 实测 defined 1415 / 已注册名 1415 / entries 1415、未注册 0 / 孤儿 0 —— ⚠ 本批**先出现「产物滞后」中间态**：源码已删而产物未重生成时 defined 1415 / registered 1420 / `orphanRegistered` 恰等于本批五条命令名，判据把该态归「产物滞后」而非「真漂移」，须由主 crate 构建重生成后复取终值）。**2026-11-12 #264 刀 C 批 2 ⇒ 1413/1413/1413 三方一致**（−2 = `opc_execute_analysis` / `opc_execute_workflow` 两条前端有调用的 OPC 执行口迁 T2，归因见 `commandTotal`；`--dump-readings` 实测 defined 1413 / 已注册名 1413 / entries 1413、未注册 0 / 孤儿 0）。**2026-11-13 #264 批 4 双声明收口 ⇒ 三方同时 1394/1394/1394**（−12 = `opc` 模块 12 条命令删宿主，归因见 `commandTotal`）。**2026-11-13 #35 候选 B trade_intent 退役 ⇒ 三方同时 1386/1386/1386**（−8 = `trade_intent` 模块 8 条命令退役，本批 `--dump-readings` 实测 defined 1386 / 已注册名 1386 / entries 1386、未注册 0 / 孤儿 0；归因见 `commandTotal`）。**2026-11-13 #35 C2 aggregator 三命令退役 ⇒ 1383/1383/1383**（−3，本批 `--dump-readings` 实测 defined 1383 / 已注册名 1383 / entries 1383、未注册 0 / 孤儿 0；归因见 `commandTotal`）。**2026-11-13 #35 C3 market_mainline 十条退役 ⇒ 三方同时 1373/1373/1373**（−10，本批 `--dump-readings` 实测 defined 1373 / 已注册名 1373 / entries 1373、未注册 0 / 孤儿 0；归因见 `commandTotal`）。**2026-11-13 #307：三方同时 1370/1370/1370（−3）** = `--dump-readings` 实测 defined 1370 / 已注册名 1370 / entries 1370、`unregistered` 与 `orphanRegistered` 双 0 ⇒ 不是产物滞后。**2026-11-14 #311：三方同时 1366/1366/1366（−4）** = `--dump-readings` 实测 defined 1366 / 已注册名 1366 / entries 1366、`unregistered` 与 `orphanRegistered` 双 0、`scannedFiles` 336 ⇒ 不是产物滞后。**2026-11-14 #322：三方同时 1353/1353/1353（−10）** = 判定档实测 defined 1353 / 已注册名 1353 / entries 1353、`unregistered` 与 `orphanRegistered` 双 0 ⇒ 不是产物滞后（归因见 `commandTotal`）。**2026-11-14 #323：三方现值 1348/1348/1348**（五命令批再 −5，契约 A 名集合与产物一致、未注册 0；见 `commandTotal` 本批段）。 **2026-11-14 #326：1345→1341**，defined / registered / entries 三方同数，unregistered 与 orphanRegistered 双 0。 **2026-11-14 #327：1341→1317**，三方同数、未注册与孤儿注册双 0。 **2026-11-15 #328：1317→1312**，三方同数、未注册与孤儿注册双 0（scannedFiles 336）。 **2026-11-15 #329：1312→1309**，三方同数、双 0（scannedFiles 336）。 **2026-11-15 #330：1309→1308**，三方同数、双 0（scannedFiles 336）。 **2026-11-15 #331：1308→1306**，三方同数、双 0（scannedFiles 336）。 **2026-11-15 #332：1306→1304**，三方同数、双 0（scannedFiles 336）。 **2026-11-15 #333：1304→1302**，三方同数、双 0（scannedFiles 336）。 **2026-11-15 #334：1302→1301**，三方同数、双 0（scannedFiles 336）。**2026-11-15 #335 批 A9：1301→1299（−2）**，同 `commandTotal`（契约 A 名集合与产物一致，defined 1299 / 已注册 1299 / 未注册 0）。**2026-11-15 #335 批 A9：1301→1299（−2）**，同 `commandTotal`（契约 A 名集合与产物一致，defined 1299 / 已注册 1299 / 未注册 0）。**2026-11-15 #336 批 A10：1299→1295（−4）**，同 `commandTotal`（defined 1295 / 已注册 1295 / 未注册 0）。**2026-11-15 #337 批 A11：1295→1293（−2）**，同 `commandTotal`（defined 1293 / 已注册 1293 / 未注册 0）。**2026-11-15 #338 批 A12：1293→1290（−3）**，同 `commandTotal`（defined 1290 / 已注册 1290 / 未注册 0）。**2026-11-15 #341+#342：1290→1271（−19）**，同 `commandTotal`（defined 1271 / 已注册 1271 / 未注册 0）。**2026-11-15 #343：1271→1258（−13）**，同 `commandTotal`（defined 1258 / 已注册 1258 / 未注册 0）。**2026-11-15 #345：1229→1213（−16）**，同 `commandTotal`。**2026-11-15 #346：1213→1202（−11）**，同 `commandTotal`。**2026-11-16 #347：1202→1201（−1）**，同 `commandTotal`。 **2026-11-16 #349：1193→1173（−20）**，同 `commandTotal`（defined 1173 / 已注册 1173 / 未注册 0）。 **2026-11-17 P6.0-① 阶段5：1176→1177，同 commandTotal（defined 1177 / 已注册 1177 / 未注册 0）。****2026-11-17 computer-use 无障碍树阶段3：删 5 条坐标命令（screen_capture / mouse_click / type_text / mouse_scroll / mouse_move）+ 5 条视觉命令（analyze_screen / find_element_on_screen / suggest_screen_action / click_element_at_position / execute_vision_action），新增 4 条语义命令（invoke_ui_element / set_ui_element_value / focus_ui_element / perform_ui_element_action）；find_ui_elements / press_key 保留改造不计增删 ⇒ 净 −6，1177→1171。**",
-      "planNumber": "1170"
+      "planNumber": "1169"
     },
     {
       "id": "stockBoundaryCommands",
@@ -590,19 +590,19 @@
     {
       "id": "agentCommandFace",
       "label": "智能体工具面（`#[agent_command]` 标注条数 / 非宿主根条数）",
-      "value": 1176,
+      "value": 1175,
       "value2": 0,
       "value2Label": "条非宿主根",
       "check": "agentCommandFaceCount",
       "hard": true,
-      "planNumber": "1176",
+      "planNumber": "1175",
       "planMustAppear": true,
       "planPinned": [
         {
           "line": 8954,
           "mustContain": [
             "标注总数",
-            "1176",
+            "1175",
             "domain 桶"
           ]
         }
@@ -910,16 +910,16 @@
           "role": "契约"
         },
         {
-          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9532",
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9550",
           "file": "axagent-plugins/crates/plugins/src/worker.rs",
-          "line": 9532,
+          "line": 9550,
           "token": "fn remote_method_not_supported",
           "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {",
           "role": "拆分阻塞 D2 证据"
         }
       ],
       "note": "拆分阻塞 **D2**：worker.rs:6839 起 `remote_method_not_supported` ⇒ 接缝已建但远程侧方法未通。键控列原文仅「接缝」二字 ⇒ 行号缺省。⚠ 原登记 `:3798` 是**既存腐烂**（`#150` 落地前在 HEAD 上实测 `:4290`，差 492 行）⇒ 本行行号按盘上重抄，见 PLAN §99.4。**2026-11-06 对账批**：`3fe49c950` 给 `worker.rs` 净加 165 行 ⇒ 本条锚点整体 +61（证据锚 `:4295`→`:4356`、PLAN 行内 `:4319`→`:4380`）；`planLine` 同批由 265 重锚到 268（§0.7 表格区 +3 位移）。**2026-11-08 #36 批 1**：`worker.rs` 新增 `opc.store` 八条只读分派臂，净加 175 行 ⇒ 证据锚 `:4386`→`:4561`、PLAN 行内同步改指（行号 268 不变）。**2026-11-08 #36 批 2**：`worker.rs` 再净加 95 行（四条写 op 分派臂 + 权限表 + 测试）⇒ 证据锚 `:4561`→`:4656`（`--repin-code --apply` 回写，token / anchorText 一字未动），PLAN:268 文字同步改指。**2026-11-08 #36 批 3**：`worker.rs` 再净加 163 行（九条写/流程命令分派臂 + op 权限表 + 九条反序列化分支）⇒ 证据锚 `:4656`→`:4819`（`--repin-code --apply` 回写，token / anchorText 一字未动），PLAN:268 与 planAnchorText 文字同批改指，`planLine` 仍 268。**2026-11-11 #264 批 5**：`worker.rs` 净加 145 行（交付面六 seam op：权限表 4 写 + 2 读、六分派臂、反序列化分支与测试锁）⇒ 证据锚 `:5688`→`:5833`（`grep -n` 实测重锚，token / anchorText 一字未动），PLAN:268 与 planAnchorText 文字同批改指，`planLine` 仍 268。**2026-11-11 #264 批 7 刀 A**：`worker.rs` 净 +207 行（`git diff --numstat` = 210/−3；九条 `opc.store` 只读 op 的 `HostPeer` 分派臂 +188、`required_permission_for` 写臂追加两条订阅写 op +5、`mod tests` 三处 +14）⇒ 证据锚 `:5912`→`:6105`（+193，`grep -n \"fn remote_method_not_supported\"` 实测重锚，token / anchorText 一字未动）。⚠ **位移与净增额不等的归因**：+193 = 锚点**之前**两处 hunk（`@@ -554 +554,6` = +5、`@@ -4200,0 +4206,188` = +188）；余 +14 全落在 `mod tests`（老 `12959` / `13010` / `13035` 三处），在锚点之后 ⇒ 不影响本锚。PLAN:268 文字与 planAnchorText 同批改指，`planLine` 仍 268。**2026-11-12 #264 刀 C 批 1**：`worker.rs` 净 +105（`git diff --numstat` = 105/−0，两处 hunk：`@@ -5029,0 +5030,99` 在锚点之前 = 五条 `opc.store` 只读分派臂 +99；`@@ -13912,0 +14012,6` 在 `mod tests`、锚点之后 +6 不影响本锚）⇒ 本锚 +99（`:6740`→`:6839`，`--repin-code --apply` 回写，token / file / anchorText 一字未动，逐字节备份 `.tmp/capability-register.20261112T054438.bak.json`），PLAN:268 文字、本行 `planAnchorText` 与正文首句 `worker.rs:4380` 同批改指，`planLine` 仍 268。**2026-11-12 #264 刀 C 批 2**：`worker.rs` 净 +27（`git diff --numstat` = 27/−0；两处 hunk：`@@ -5128,0 +5129,25 @@` 在锚点之前 = `opc.store` 的 `execute_analysis` 读 op 分派臂 +25；`@@ -14017,0 +14043,2 @@` 在 `mod tests`、锚点之后 +2 不影响本锚）⇒ 本锚 +25（`:6839`→`:6864`，`--repin-code --apply` 回写，token / file / anchorText 一字未动，逐字节备份 `.tmp/capability-register.20261112T064228.bak.json`），PLAN:268 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 268。**2026-11-12 #264 刀 C 批 3**：`worker.rs` 净 +195（`git diff --numstat` = 195/−0；锚点之前一处 hunk `@@ -5153,0 +5154,185 @@` = 学习面七条 `opc.store` 分派臂 +185；另两处 `@@ -13981,0 +14167,8 @@` / `@@ -14044,0 +14238,2 @@` 在 `mod tests`、锚点之后 +10 不影响本锚）；同批 `cargo fmt` 收敛 −3（worker.rs 195→192）⇒ 本锚 +182（`:6864`→`:7046`，`--repin-code --apply` 回写，token / file / anchorText 一字未动），PLAN:268 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 268。**2026-11-13 #304 C3**：`worker.rs` 净 +16（`git diff --numstat` = 17/−1；三处 hunk 全在锚点之前：`@@ -2792 +2792` 单行改写 ±0、`@@ -2793,0 +2794` 插 1 行、`@@ -2806,0 +2808,15` 插 15 行 = `stock.analysis` 的 `list_recent_mainlines` 分派臂）⇒ 本锚 +16（`:7286`→`:7302`，`grep -n` 实测重锚，token / file / anchorText 一字未动），PLAN:268 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 268。",
-      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:9532` 起 `remote_method_not_supported` |",
+      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:9550` 起 `remote_method_not_supported` |",
       "planLine": 268
     },
     {
@@ -950,24 +950,24 @@
           "role": "契约"
         },
         {
-          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9624",
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9642",
           "file": "axagent-plugins/crates/plugins/src/worker.rs",
-          "line": 9624,
+          "line": 9642,
           "token": "remote_method_not_supported",
           "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))",
           "role": "拆分阻塞 D2 证据（区间起点）"
         },
         {
-          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9672",
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:9690",
           "file": "axagent-plugins/crates/plugins/src/worker.rs",
-          "line": 9672,
+          "line": 9690,
           "token": "remote_method_not_supported",
           "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))",
           "role": "拆分阻塞 D2 证据（区间止点）"
         }
       ],
       "note": "备注「同上（worker.rs:4448–:4496 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。⚠ 原登记 `:3890`–`:3938` 是**既存腐烂**（HEAD 上实测 `:4358`–`:4406`）⇒ 与 `workflow.reflector` 同批按盘上重抄。**2026-11-06 对账批**：`3fe49c950` 给 `worker.rs` 净加 165 行 ⇒ 两端点各 +61（`:4387`→`:4448`、`:4435`→`:4496`；⚠ 只按 token 找会让 `set_llm_provider` 那类同名调用冒充端点，故两端都用整行 `anchorText` 复核）；`planLine` 由 266 重锚到 269。**2026-11-06 第二轮对账**：`a9e68621a`（`opc.store` 写 op 批）给 `worker.rs` 净加 217 行 ⇒ 三端点各 +30（`:4356`→`:4386`、`:4448`→`:4478`、`:4496`→`:4526`，`--repin-code --apply` 回写，token / file / anchorText 一字未动，逐字节备份 `.tmp/capability-register.20261105T231325.bak.json`）；该模式明确不改正文，故 PLAN:268 / :269 两行的**文字**引用（`:4380`、`:4448`–`:4496`）与表内两处 `planAnchorText` 由本批人工同批改指，行号仍 268/269 不变。**2026-11-08 #36 批 1**：`worker.rs` 净加 175 行（八条 `opc.store` 只读分派臂）⇒ 两端点各 +175（`:4478`→`:4653`、`:4526`→`:4701`），PLAN:269 文字同步改指，`planLine` 仍 269。**2026-11-08 #36 批 2**：再净加 95 行 ⇒ 两端点各 +95（`:4653`→`:4748`、`:4701`→`:4796`，`--repin-code --apply` 回写，两端整行 `anchorText` 复核），PLAN:269 文字同步改指，`planLine` 仍 269。**2026-11-08 #36 批 3**：再净加 163 行 ⇒ 两端点各 +163（`:4748`→`:4911`、`:4796`→`:4959`，`--repin-code --apply` 回写，两端整行 `anchorText` 复核），PLAN:269 与 planAnchorText 文字同批改指，`planLine` 仍 269。**2026-11-11 #264 批 5**：`worker.rs` 净加 145 行（交付面六 seam op，同 `workflow.reflector`）⇒ 两端点各 +145（`:5780`→`:5925`、`:5828`→`:5973`，`grep -n` 实测重锚，两端整行 `anchorText` 复核），PLAN:269 与 planAnchorText 文字同批改指，`planLine` 仍 269。**2026-11-11 #264 批 7 刀 A**：同 `workflow.reflector`（`worker.rs` 净 +207，锚点前两处 hunk 合计 +193）⇒ 两端点各 +193（`:6004`→`:6197`、`:6052`→`:6245`，`grep -n 'remote_method_not_supported(\"workflow.evolver\"'` 实测重锚，两端整行 `anchorText` 复核），PLAN:269 与 planAnchorText 文字同批改指，`planLine` 仍 269。**2026-11-12 #264 刀 C 批 1**：同 `workflow.reflector`（`worker.rs` 净 +105，锚点之前那一处 hunk `@@ -5029,0 +5030,99` = 五条 `opc.store` 只读分派臂 +99；`mod tests` 那处 +6 在锚点之后）⇒ 两端点各 +99（`:6832`→`:6931`、`:6880`→`:6979`，`--repin-code --apply` 回写，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动，同一份逐字节备份 `.tmp/capability-register.20261112T054438.bak.json`），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269；正文首句「备注『同上（worker.rs:4448–:4496 …）』」是逐字引用 PLAN 当年备注原文，不改。**2026-11-12 #264 刀 C 批 2**：同 `workflow.reflector`（锚点之前那处 hunk `@@ -5128,0 +5129,25 @@` = `execute_analysis` 读 op 分派臂 +25；`mod tests` 那处 +2 在锚点之后）⇒ 两端点各 +25（`:6931`→`:6956`、`:6979`→`:7004`，`--repin-code --apply` 回写，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动，同一份逐字节备份 `.tmp/capability-register.20261112T064228.bak.json`），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269。**2026-11-12 #264 刀 C 批 3**：同 `workflow.reflector`（`worker.rs` 净 +195，锚点之前那一处 hunk `@@ -5153,0 +5154,185 @@` = 学习面七条 `opc.store` 分派臂 +185；`mod tests` 两处 +10 在锚点之后）；同批 `cargo fmt` 收敛 −3 ⇒ 两端点各 +182（`:6956`→`:7138`、`:7004`→`:7186`，`--repin-code --apply` 回写，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269；正文首句「备注『同上（worker.rs:4448–:4496 …）』」是逐字引用 PLAN 当年备注原文，不改。**2026-11-13 #304 C3**：同 `workflow.reflector`（`worker.rs` 净 +16，三处 hunk 全在锚点之前）⇒ 两端点各 +16（`:7378`→`:7394`、`:7426`→`:7442`，`grep -n` 实测重锚，两端整行 `anchorText` 各自唯一命中，token / file / anchorText 一字未动），PLAN:269 文字与本行 `planAnchorText` 同批改指，`planLine` 仍 269。",
-      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:9624`–`:9672` 一批 `remote_method_not_supported`） |",
+      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:9642`–`:9690` 一批 `remote_method_not_supported`） |",
       "planLine": 269
     },
     {

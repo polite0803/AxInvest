@@ -354,24 +354,6 @@ pub async fn rebuild_wiki_index(
     Ok(())
 }
 
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "同步笔记链接关系")]
-#[tauri::command]
-pub async fn wiki_notes_sync_links(
-    state: State<'_, AppState>,
-    vault_id: String,
-    source_note_id: String,
-    links: Vec<(String, String, String)>,
-) -> Result<(), String> {
-    axagent_dao::repo::note::sync_note_links(state.harness.db(), &vault_id, &source_note_id, links)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })
-}
-
 #[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "搜索 Wiki 笔记")]
 #[tauri::command]
 pub async fn wiki_notes_search(

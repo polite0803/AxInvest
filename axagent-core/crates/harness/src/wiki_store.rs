@@ -40,6 +40,18 @@ pub struct SyncNoteToKnowledgeBaseOutcome {
     pub index_queued: bool,
 }
 
+/// `sync_note_links` op 的入参。
+///
+/// `links` 是 `(target_title, link_text, link_type)` 三元组；正文与文件主权
+/// 仍在宿主，插件只转发前端已经解析出的链接关系。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncNoteLinksRequest {
+    pub vault_id: String,
+    pub source_note_id: String,
+    pub links: Vec<(String, String, String)>,
+}
+
 /// Wiki 写接缝的宿主 provider。
 #[async_trait]
 pub trait WikiStoreProvider: Send + Sync {
@@ -54,6 +66,15 @@ pub trait WikiStoreProvider: Send + Sync {
     async fn get_note_backlinks(&self, _note_id: String) -> Result<Vec<BacklinkInfo>> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::get_note_backlinks 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 同步一条笔记的出链关系（写）。
+    ///
+    /// 宿主侧完成 DB 落行；要求插件声明 `write`，权限检查在 worker 分派层完成。
+    async fn sync_note_links(&self, _request: SyncNoteLinksRequest) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::sync_note_links 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

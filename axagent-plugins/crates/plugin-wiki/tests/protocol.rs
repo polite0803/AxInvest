@@ -364,6 +364,39 @@ fn get_note_backlinks_is_a_read_only_seam_call() {
 }
 
 #[test]
+fn sync_note_links_is_a_write_seam_call_with_camel_case_input() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_sync_note_links",
+        serde_json::json!({
+            "vaultId": "v1",
+            "sourceNoteId": "note-1",
+            "links": [["note-2", "目标", "wiki"]],
+        }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "sync_note_links");
+    // 接缝入参嵌在 `request` 下，字段 camelCase；链接三元组逐字透传（禁区 13）。
+    assert_eq!(call.args["args"]["request"]["vaultId"], "v1");
+    assert_eq!(call.args["args"]["request"]["sourceNoteId"], "note-1");
+    assert_eq!(
+        call.args["args"]["request"]["links"],
+        serde_json::json!([["note-2", "目标", "wiki"]])
+    );
+    // 宿主返回 `()` ⇒ 序列化成 null，插件不包装额外结构。
+    worker.send_response(
+        &FrameResponse::success(serde_json::Value::Null)
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert!(response.kind == ResponseKind::Success, "宿主空回执应透出成功：{response:?}");
+    worker.shutdown();
+}
+
+#[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
     worker.send(&command(PLUGIN_ID, "wiki_not_a_command", serde_json::json!({})));

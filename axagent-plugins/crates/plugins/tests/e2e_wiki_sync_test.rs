@@ -86,6 +86,17 @@ impl WikiStoreProvider for FixedWikiStore {
         Ok(Vec::new())
     }
 
+    async fn get_note_backlinks(
+        &self,
+        note_id: String,
+    ) -> axagent_harness::core_error::Result<Vec<axagent_harness::types::BacklinkInfo>> {
+        Ok(vec![axagent_harness::types::BacklinkInfo {
+            note_id: note_id.clone(),
+            title: "来源笔记".into(),
+            snippets: vec![format!("指向 {note_id}")],
+        }])
+    }
+
     async fn get_note(
         &self,
         id: String,
@@ -238,6 +249,19 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
     let links: Value = serde_json::from_str(&links).expect("出链输出应是 JSON 文本");
     assert_eq!(links, json!([]));
     assert_eq!(created["title"], "新笔记");
+
+    let backlinks = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_get_note_backlinks",
+            &json!({ "noteId": "note-created" }),
+        )
+        .expect("wiki 反链命令应可执行");
+    let backlinks: Value = serde_json::from_str(&backlinks).expect("反链输出应是 JSON 文本");
+    assert_eq!(
+        backlinks,
+        json!([{ "noteId": "note-created", "title": "来源笔记", "snippets": ["指向 note-created"] }])
+    );
 
     let updated = manager
         .execute_plugin_command(

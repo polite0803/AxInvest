@@ -336,6 +336,33 @@ fn get_note_links_is_a_read_only_seam_call() {
     assert_command_value(&response, &links);
     worker.shutdown();
 }
+
+#[test]
+fn get_note_backlinks_is_a_read_only_seam_call() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_get_note_backlinks",
+        serde_json::json!({ "noteId": "note-1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "get_note_backlinks");
+    assert_eq!(call.args["args"]["noteId"], "note-1");
+    let backlinks = serde_json::json!([{
+        "noteId": "note-9",
+        "title": "来源笔记",
+        "snippets": ["前 [[目标]] 后"]
+    }]);
+    worker.send_response(
+        &FrameResponse::success(backlinks.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &backlinks);
+    worker.shutdown();
+}
+
 #[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);

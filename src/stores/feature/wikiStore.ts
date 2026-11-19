@@ -203,7 +203,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   getNoteBacklinks: async (noteId) => {
     try {
-      return await invoke<BacklinkInfo[]>("wiki_notes_get_backlinks", {
+      return await invokePluginCommand<BacklinkInfo[]>("wiki_get_note_backlinks", {
         noteId,
       });
     } catch (e) {

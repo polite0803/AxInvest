@@ -118,14 +118,6 @@ fn enqueue_wiki_note_indexing(
     );
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BacklinkInfo {
-    pub note_id: String,
-    pub title: String,
-    pub snippets: Vec<String>,
-}
-
 #[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "列出 Wiki 下的笔记")]
 #[tauri::command]
 pub async fn wiki_notes_list(
@@ -360,111 +352,6 @@ pub async fn rebuild_wiki_index(
     }));
 
     Ok(())
-}
-
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取笔记反向链接")]
-#[tauri::command]
-pub async fn wiki_notes_get_backlinks(
-    state: State<'_, AppState>,
-    note_id: String,
-) -> Result<Vec<BacklinkInfo>, String> {
-    let links = axagent_dao::repo::note::get_note_backlinks(state.harness.db(), &note_id)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-
-    let target_note = axagent_dao::repo::note::get_note(state.harness.db(), &note_id).await.ok();
-    let target_title = target_note.as_ref().map(|n| n.title.as_str()).unwrap_or("");
-
-    // 优化：批量查询所有 source_notes，避免 N+1（原实现每个 backlink 单独查一次）
-    let source_ids: Vec<String> = links.iter().map(|l| l.source_note_id.clone()).collect();
-    let source_notes_map: std::collections::HashMap<String, axagent_dao::repo::note::Note> =
-        if source_ids.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            let models = axagent_entities::notes::Entity::find()
-                .filter(axagent_entities::notes::Column::Id.is_in(source_ids))
-                .all(state.harness.db())
-                .await
-                .map_err(|e| {
-                    String::from(crate::commands::error::ErrorResponse::from_error(
-                        e,
-                        crate::commands::error::ErrorCategory::Unrecoverable,
-                    ))
-                })?;
-            models
-                .into_iter()
-                .map(|m| (m.id.clone(), axagent_dao::repo::note::model_to_note(m)))
-                .collect()
-        };
-
-    let mut map: std::collections::HashMap<String, BacklinkInfo> = std::collections::HashMap::new();
-
-    for link in &links {
-        let source_note = match source_notes_map.get(&link.source_note_id) {
-            Some(n) => n,
-            None => continue,
-        };
-
-        let snippets = extract_link_context_snippets(&source_note.content, target_title, 80);
-
-        let entry = map.entry(link.source_note_id.clone()).or_insert_with(|| BacklinkInfo {
-            note_id: link.source_note_id.clone(),
-            title: source_note.title.clone(),
-            snippets: Vec::new(),
-        });
-        entry.snippets.extend(snippets);
-    }
-
-    Ok(map.into_values().collect())
-}
-
-fn extract_link_context_snippets(
-    content: &str,
-    target_title: &str,
-    context_chars: usize,
-) -> Vec<String> {
-    if target_title.is_empty() {
-        return Vec::new();
-    }
-
-    let link_pattern = format!("[[{}]]", target_title);
-    let chars: Vec<char> = content.chars().collect();
-    let total_len = chars.len();
-    let pattern_chars: Vec<char> = link_pattern.chars().collect();
-    let pattern_len = pattern_chars.len();
-
-    let mut snippets = Vec::new();
-    let mut i = 0;
-
-    while i + pattern_len <= total_len {
-        let window: Vec<char> = chars[i..i + pattern_len].to_vec();
-        if window == pattern_chars {
-            let start = i.saturating_sub(context_chars);
-            let end = (i + pattern_len + context_chars).min(total_len);
-
-            let mut snippet = String::new();
-            if start > 0 {
-                snippet.push_str("...");
-            }
-            snippet.push_str(&chars[start..end].iter().collect::<String>());
-            if end < total_len {
-                snippet.push_str("...");
-            }
-
-            snippets.push(snippet);
-            i += pattern_len;
-        } else {
-            i += 1;
-        }
-    }
-
-    snippets
 }
 
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "同步笔记链接关系")]

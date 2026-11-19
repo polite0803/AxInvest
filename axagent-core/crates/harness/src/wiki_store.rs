@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::core_error::{AxAgentError, Result};
-use crate::types::NoteLink;
+use crate::types::{BacklinkInfo, NoteLink};
 
 /// `sync_note_to_knowledge_base` op 的入参。
 ///
@@ -47,6 +47,13 @@ pub trait WikiStoreProvider: Send + Sync {
     async fn get_note_links(&self, _note_id: String) -> Result<Vec<NoteLink>> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::get_note_links 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出指向该笔记的反链，含 source 笔记标题与上下文片段。
+    async fn get_note_backlinks(&self, _note_id: String) -> Result<Vec<BacklinkInfo>> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_note_backlinks 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Wiki 业务功能包 worker（P6.3 第一片）。
 //!
-//! 当前命令面覆盖笔记创建、更新、删除、列表、读取、出链，以及同步到知识库。
+//! 当前命令面覆盖笔记创建、更新、删除、列表、读取、出链、反链，以及同步到知识库。
 //! 它**不查库、不读文件**，只把命令参数转成宿主 `wiki.store` 接缝的入参；
 //! 笔记正文、markdown 落盘、知识库文档行与索引入队全部在宿主 provider 内完成
 //!（数据主权在宿主）。
@@ -25,6 +25,7 @@ const COMMAND_UPDATE_NOTE: &str = "wiki_update_note";
 const COMMAND_DELETE_NOTE: &str = "wiki_delete_note";
 const COMMAND_SYNC_NOTE: &str = "wiki_sync_note_to_knowledge_base";
 const COMMAND_LIST_NOTES: &str = "wiki_list_notes";
+const COMMAND_GET_NOTE_BACKLINKS: &str = "wiki_get_note_backlinks";
 const COMMAND_GET_NOTE_LINKS: &str = "wiki_get_note_links";
 const COMMAND_GET_NOTE: &str = "wiki_get_note";
 const COMMAND_GET_NOTE_BY_PATH: &str = "wiki_get_note_by_path";
@@ -124,6 +125,15 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("get_note_links", json!({ "noteId": note_id }))
+        },
+        COMMAND_GET_NOTE_BACKLINKS => {
+            let note_id = match require_str(&frame.input, "noteId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("get_note_backlinks", json!({ "noteId": note_id }))
         },
         COMMAND_GET_NOTE => {
             let id = match require_str(&frame.input, "id") {

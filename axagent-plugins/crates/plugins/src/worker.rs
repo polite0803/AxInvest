@@ -2915,6 +2915,22 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            "wiki.store" if op == "get_note_backlinks" => {
+                let note_id: String = match deserialize_arg(&args, "noteId", seam) {
+                    Ok(note_id) => note_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_note_backlinks(note_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(backlinks) => to_value("Vec<BacklinkInfo>", &backlinks),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "wiki.store" if op == "create_note" => {
                 let input: axagent_harness::note_dtos::CreateNoteInput =
                     match deserialize_arg(&args, "input", seam) {

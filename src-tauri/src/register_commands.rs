@@ -1125,7 +1125,6 @@ macro_rules! register_all_commands {
             commands::wiki::wiki_notes_create,
             commands::wiki::wiki_notes_delete,
             commands::wiki::wiki_notes_get,
-            commands::wiki::wiki_notes_get_backlinks,
             commands::wiki::wiki_notes_get_by_path,
             commands::wiki::wiki_notes_list,
             commands::wiki::wiki_notes_search,

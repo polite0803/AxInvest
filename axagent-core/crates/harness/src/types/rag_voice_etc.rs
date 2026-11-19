@@ -550,6 +550,15 @@ pub struct NoteLink {
     pub created_at: i64,
 }
 
+/// 一条笔记的反链投影（source 笔记 + 命中上下文片段）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacklinkInfo {
+    pub note_id: String,
+    pub title: String,
+    pub snippets: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryItem {

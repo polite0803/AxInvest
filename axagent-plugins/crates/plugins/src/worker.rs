@@ -493,6 +493,9 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("wiki.store", "restore_note_version") => Some(PluginPermission::Write),
         ("wiki.store", "create_note_from_template") => Some(PluginPermission::Write),
         ("wiki.store", "create_daily_note") => Some(PluginPermission::Write),
+        // 图谱缓存失效：删缓存行 ⇒ 写面。同接缝的 `get_graph` / `detect_communities`
+        // 是**实时计算**（不读也不写缓存）⇒ 仍是读面，必须保持 `None`。
+        ("wiki.store", "invalidate_graph_cache") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -3320,6 +3323,54 @@ impl HostPeer {
                 };
                 match result {
                     Ok(communities) => to_value("LouvainResult", &communities),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "get_graph" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_graph(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(graph) => to_value("GraphData", &graph),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "detect_communities" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.detect_communities(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(communities) => to_value("LouvainResult", &communities),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "invalidate_graph_cache" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.invalidate_graph_cache(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => to_value("()", &()),
                     Err(e) => seam_provider_error(e),
                 }
             },

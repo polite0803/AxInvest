@@ -717,6 +717,87 @@ fn graph_cache_commands_reject_missing_wiki_id() {
 }
 
 #[test]
+fn raw_graph_commands_map_to_host_wiki_store_seam() {
+    let graph = serde_json::json!({
+        "nodes": [{ "id": "n1", "title": "节点", "type": "note" }],
+        "edges": [],
+        "danglingEdges": { "totalEdges": 0, "dangling": 0, "missingSourceOnly": 0, "missingTargetOnly": 0, "missingBoth": 0, "sampleEdgeIds": [] },
+        "unresolvedTypes": [],
+        "unresolvedRelations": [],
+    });
+    let communities = serde_json::json!({
+        "communities": { "n1": 1 },
+        "entityCommunities": null,
+        "colorPalette": [],
+    });
+
+    // 实时原图：读面 op（不读也不写缓存）。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_get_graph", serde_json::json!({ "wikiId": "w1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "get_graph");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(graph.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &graph);
+    worker.shutdown();
+
+    // 实时社区检测：读面 op（不写缓存）。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_detect_communities",
+        serde_json::json!({ "wikiId": "w1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "detect_communities");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(communities.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &communities);
+    worker.shutdown();
+
+    // 缓存失效：写面 op。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_invalidate_graph_cache",
+        serde_json::json!({ "wikiId": "w1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "invalidate_graph_cache");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(serde_json::Value::Null)
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &serde_json::Value::Null);
+    worker.shutdown();
+}
+
+#[test]
+fn raw_graph_commands_reject_missing_wiki_id() {
+    for name in ["wiki_get_graph", "wiki_detect_communities", "wiki_invalidate_graph_cache"] {
+        let mut worker = Worker::spawn_as(PLUGIN_ID);
+        worker.send(&command(PLUGIN_ID, name, serde_json::json!({})));
+        let response = worker.recv_response();
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+            "命令 `{name}` 缺 wikiId 时必须拒收"
+        );
+        worker.shutdown();
+    }
+}
+
+#[test]
 fn note_version_commands_map_to_host_wiki_store_seam() {
     let versions = serde_json::json!([{
         "id": 7,

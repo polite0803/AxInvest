@@ -634,12 +634,11 @@ pub(crate) fn extract_highlight_snippet(
     snippet
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取 Wiki 图谱数据")]
-#[tauri::command]
-pub async fn get_wiki_graph(
-    state: State<'_, AppState>,
-    wiki_id: String,
-) -> Result<GraphData, String> {
+/// `get_wiki_graph` 的宿主实现体（笔记图原样，**不含**实体融合与缓存）。
+///
+/// 原宿主命令 `get_wiki_graph` 已于 2026-11-19 P6.3 Wiki 图谱原图片退役，
+/// 调用面改走插件命令 `wiki_get_graph` ⇒ 实现体由 `wiki.store::get_graph` 接缝复用。
+pub(crate) async fn graph_core(state: &AppState, wiki_id: String) -> Result<GraphData, String> {
     axagent_dao::repo::note::get_vault_graph(state.harness.db(), &wiki_id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
@@ -648,10 +647,11 @@ pub async fn get_wiki_graph(
     })
 }
 
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "Wiki 社区发现")]
-#[tauri::command]
-pub async fn wiki_graph_communities(
-    state: State<'_, AppState>,
+/// `wiki_graph_communities` 的宿主实现体（实时 Louvain，**不写缓存**）。
+///
+/// 原宿主命令已退役，调用面改走插件命令 `wiki_detect_communities`。
+pub(crate) async fn communities_core(
+    state: &AppState,
     wiki_id: String,
 ) -> Result<LouvainResult, String> {
     let graph_data = axagent_dao::repo::note::get_vault_graph(state.harness.db(), &wiki_id)
@@ -1045,11 +1045,12 @@ pub(crate) async fn cached_communities_core(
     Ok(result)
 }
 
-/// 手动失效缓存（前端在导入/批量编辑后可调用）。
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "失效 Wiki 图谱缓存")]
-#[tauri::command]
-pub async fn invalidate_wiki_graph_cache(
-    state: State<'_, AppState>,
+/// `invalidate_wiki_graph_cache` 的宿主实现体（删缓存行）。
+///
+/// 原宿主命令已退役，调用面改走插件命令 `wiki_invalidate_graph_cache`
+/// ⇒ 经 `wiki.store::invalidate_graph_cache` 接缝复用本实现体。
+pub(crate) async fn invalidate_graph_cache_core(
+    state: &AppState,
     wiki_id: String,
 ) -> Result<(), String> {
     axagent_dao::repo::wiki_graph_cache::invalidate_cache(state.harness.db(), &wiki_id)

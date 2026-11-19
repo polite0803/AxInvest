@@ -7465,6 +7465,25 @@ async function executeCommand<T>(
       const fx = await loadWikiGraphFixture();
       return (fx ? fx.communitiesResult : { communities: {} }) as T;
     }
+    case "wiki_get_graph": {
+      // 实时原图（不含实体融合与缓存）：浏览器模式只有 fixture 一份图谱数据源，
+      // 与 `wiki_get_graph_cached` 共用同一份 fixture（两者口径差异在真机才体现）。
+      const fx = await loadWikiGraphFixture();
+      const wikiId = String(args?.wikiId ?? args?.wiki_id ?? "");
+      if (fx && (!wikiId || fx.wiki.id === wikiId)) {
+        return fx.graph as T;
+      }
+      return { nodes: [], edges: [] } as T;
+    }
+    case "wiki_detect_communities": {
+      // 实时 Louvain（不写缓存）：浏览器模式没有社区计算内核 ⇒ 回 fixture 的社区集。
+      const fx = await loadWikiGraphFixture();
+      return (fx ? fx.communitiesResult : { communities: {} }) as T;
+    }
+    case "wiki_invalidate_graph_cache": {
+      // 缓存失效是写面：浏览器模式无缓存表 ⇒ 空回执。
+      return null as unknown as T;
+    }
     case "wiki_list_notes": {
       const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");
       return seedWikiNotes(vaultId) as unknown as T;

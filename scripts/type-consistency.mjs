@@ -629,7 +629,6 @@ const RUST_COMMANDS = [
   "llm_wiki_update_purpose",
   // Wiki notes
   "wiki_notes_delete",
-  "get_wiki_graph",
   // Agency expert
   "import_agency_experts",
   "list_agency_experts",

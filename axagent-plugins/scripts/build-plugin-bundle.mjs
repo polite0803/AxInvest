@@ -5758,6 +5758,41 @@ function wikiManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        name: "wiki_get_graph",
+        description: "读取 Wiki 原图（笔记 + 链接，不含实体融合与缓存；经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_get_graph",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_detect_communities",
+        description: "对 Wiki 笔记图实时跑一次 Louvain 社区检测（不写缓存；经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_detect_communities",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_invalidate_graph_cache",
+        description: "失效 Wiki 图谱缓存（经宿主 wiki.store 写面）",
+        command: "worker://wiki_invalidate_graph_cache",
+        // 宿主等价命令 `invalidate_wiki_graph_cache` 是 `safety = Caution`
+        // ⇒ 清单对齐 `workspace-write`（投影同为 Caution），档位不等阶才需升档。
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
+      {
         name: "wiki_note_versions",
         description: "读取笔记版本历史（经宿主 wiki.store 只读接缝）",
         command: "worker://wiki_note_versions",

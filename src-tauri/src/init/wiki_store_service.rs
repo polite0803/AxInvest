@@ -53,6 +53,28 @@ impl HostWikiStore {
             .map_err(AxAgentError::Provider)
     }
 
+    /// `get_graph` 的宿主实现：笔记图原样（**不含**实体融合与缓存）。
+    pub async fn graph(&self, wiki_id: String) -> Result<GraphData> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::graph_core(&state, wiki_id).await.map_err(AxAgentError::Provider)
+    }
+
+    /// `detect_communities` 的宿主实现：实时 Louvain（**不写缓存**）。
+    pub async fn communities(&self, wiki_id: String) -> Result<LouvainResult> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::communities_core(&state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    /// `invalidate_graph_cache` 的宿主实现：删缓存行。
+    pub async fn invalidate_graph_cache(&self, wiki_id: String) -> Result<()> {
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::invalidate_graph_cache_core(&state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
     /// `list_note_versions` 的宿主实现：只读历史版本列表。
     pub async fn note_versions(&self, note_id: String) -> Result<Vec<NoteVersion>> {
         let state = self.app.state::<crate::AppState>();
@@ -376,6 +398,31 @@ impl WikiStoreProvider for HostWikiStore {
             ));
         }
         self.cached_communities(wiki_id).await
+    }
+
+    async fn get_graph(&self, wiki_id: String) -> Result<GraphData> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation("wiki.store::get_graph 需要非空 wikiId".into()));
+        }
+        self.graph(wiki_id).await
+    }
+
+    async fn detect_communities(&self, wiki_id: String) -> Result<LouvainResult> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::detect_communities 需要非空 wikiId".into(),
+            ));
+        }
+        self.communities(wiki_id).await
+    }
+
+    async fn invalidate_graph_cache(&self, wiki_id: String) -> Result<()> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::invalidate_graph_cache 需要非空 wikiId".into(),
+            ));
+        }
+        self.invalidate_graph_cache(wiki_id).await
     }
 
     async fn list_note_versions(&self, note_id: String) -> Result<Vec<NoteVersion>> {

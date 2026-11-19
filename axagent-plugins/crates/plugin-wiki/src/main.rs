@@ -43,6 +43,9 @@ const COMMAND_UPDATE_TEMPLATE: &str = "wiki_update_template";
 const COMMAND_DELETE_TEMPLATE: &str = "wiki_template_delete";
 const COMMAND_GET_GRAPH_CACHED: &str = "wiki_get_graph_cached";
 const COMMAND_GET_GRAPH_COMMUNITIES_CACHED: &str = "wiki_get_graph_communities_cached";
+const COMMAND_GET_GRAPH: &str = "wiki_get_graph";
+const COMMAND_DETECT_COMMUNITIES: &str = "wiki_detect_communities";
+const COMMAND_INVALIDATE_GRAPH_CACHE: &str = "wiki_invalidate_graph_cache";
 const COMMAND_LIST_NOTE_VERSIONS: &str = "wiki_note_versions";
 const COMMAND_GET_NOTE_VERSION: &str = "wiki_note_get_version";
 const COMMAND_RESTORE_NOTE_VERSION: &str = "wiki_note_restore_version";
@@ -481,6 +484,33 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("get_cached_communities", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_GET_GRAPH => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("get_graph", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_DETECT_COMMUNITIES => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("detect_communities", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_INVALIDATE_GRAPH_CACHE => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("invalidate_graph_cache", json!({ "wikiId": wiki_id }))
         },
         COMMAND_LIST_NOTE_VERSIONS => {
             let note_id = match require_str(&frame.input, "noteId") {

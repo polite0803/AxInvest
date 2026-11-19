@@ -139,6 +139,36 @@ pub trait WikiStoreProvider: Send + Sync {
         ))
     }
 
+    /// 读取一个 Wiki 的**原图**（笔记 + 链接，**不含**实体融合与缓存）（读）。
+    ///
+    /// 与 `get_cached_graph` 是**两个不同口径**：后者是「融合图谱 + 缓存 + 实体侧」，
+    /// 本条是「笔记图原样 + 每次实时算」。两者都留在宿主 provider 内完成；
+    /// 插件只提交 `wikiId`，不复制构图算法。
+    async fn get_graph(&self, _wiki_id: String) -> Result<GraphData> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_graph 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 对一个 Wiki 的笔记图跑一次 Louvain 社区检测（读，**不写缓存**）。
+    ///
+    /// 与 `get_cached_communities` 的差别同上：后者读/写社区缓存，本条每次实时算。
+    /// CPU 密集计算（`spawn_blocking`）留在宿主 provider 内。
+    async fn detect_communities(&self, _wiki_id: String) -> Result<LouvainResult> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::detect_communities 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 手动失效一个 Wiki 的图谱缓存（写）。
+    ///
+    /// 缓存行删除属写面 ⇒ 要求插件声明 `write`，权限检查在 worker 分派层完成。
+    async fn invalidate_graph_cache(&self, _wiki_id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::invalidate_graph_cache 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 列出一条笔记的历史版本（读）。
     async fn list_note_versions(&self, _note_id: String) -> Result<Vec<NoteVersion>> {
         Err(AxAgentError::Provider(

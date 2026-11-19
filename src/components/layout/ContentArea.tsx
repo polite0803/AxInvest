@@ -2,6 +2,7 @@
 
 import { AppHeader } from "@/components/layout/AppHeader";
 import { IpcReconnectBanner } from "@/components/layout/IpcReconnectBanner";
+import { PluginPageRouteHost } from "@/components/plugin/PluginPageRouteHost";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageContextProvider } from "@/components/shared/PageContextProvider";
 import { useIpcHealth } from "@/hooks/useIpcHealth";
@@ -9,7 +10,7 @@ import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { useDomainPageRoutes } from "@/lib/domainPageRegistry";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
-import { usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
+import { usePluginDomainRouteMappings, usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { workspaceTabPath } from "@/lib/workspaceTabs";
 
 import { Button, Result, Spin } from "antd";
@@ -75,6 +76,27 @@ function PageLoader() {
     >
       <Spin size="large" />
     </div>
+  );
+}
+
+/**
+ * 旧 OPC 域路径的插件页渲染口：有插件投影时渲染同一个插件页；
+ * 插件未加载/已禁用时回落到 OPC 聚合页，不保留第二套旧页组件。
+ */
+function PluginLegacyDomainPageRoute() {
+  const { t } = useTranslation();
+  const location = useLocation();
+  const mapping = usePluginDomainRouteMappings()
+    .find((item) => item.legacyPath === location.pathname);
+  if (!mapping) {
+    return <Navigate to="/opc" replace />;
+  }
+  return (
+    <PageErrorBoundary title={t("error.page")}>
+      <Suspense fallback={<PageLoader />}>
+        <PluginPageRouteHost pluginSlug={mapping.pluginSlug} pageId={mapping.pageId} />
+      </Suspense>
+    </PageErrorBoundary>
   );
 }
 
@@ -196,6 +218,7 @@ export const ContentArea = memo(function ContentArea() {
             path={`${BUILTIN_PAGE_PATH.chat}/marketplace`}
             element={<Navigate to={workspaceTabPath("workflow")} replace />}
           />
+          <Route path="/opc/domain/:pageId" element={<PluginLegacyDomainPageRoute />} />
           {
             /* 2026-10-28：chat 类旧路由（/dashboard、/workflow、/terminal、/files、
               /multi-agent、/marketplace）已删除，统一走 /chat/<tab>。 */

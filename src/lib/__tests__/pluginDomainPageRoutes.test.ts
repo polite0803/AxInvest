@@ -40,7 +40,7 @@ function domainPack(id: string): PluginDomainPacksInfoDto["domainPacks"][number]
     id,
     pluginId: `plugin-${id}`,
     transportOwner: "plugin-opc-common",
-    page: { id: `domain:${id}`, path: `/opc/domain/${id}` },
+    page: { id: `domain:${id}`, path: `/opc/domain/${id.replace(/_/g, "-")}` },
     capabilities: [],
     commands: [],
     calls: [],
@@ -64,7 +64,20 @@ describe("pluginDomainPageRoutes", () => {
       pluginName: "opc-security@bundled",
       pageId: "opc-security",
       path: "/plugins/opc-security-bundled/opc-security",
+      legacyPath: "/opc/domain/security",
       navKey: "plugin-page:opc-security@bundled:opc-security",
+    });
+  });
+
+  it("域包 id 中的下划线映射为运行期页面 id 的连字符", () => {
+    const routes = resolvePluginDomainPageRoutes(
+      [pageInfo("opc-ai-research@bundled", true, [page("opc-ai-research")])],
+      [packInfo("opc-ai-research@bundled", true, [domainPack("ai_research")])],
+    );
+    expect(routes).toHaveLength(1);
+    expect(routes[0]).toMatchObject({
+      pageId: "opc-ai-research",
+      legacyPath: "/opc/domain/ai-research",
     });
   });
 

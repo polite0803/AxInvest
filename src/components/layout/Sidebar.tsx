@@ -260,8 +260,11 @@ export function Sidebar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const activePage = pathToPageKey(location.pathname);
   const pluginPages = usePluginPageRoutes();
+  const activePluginRoute = pluginPages.find(
+    (entry) => entry.path === location.pathname || entry.legacyPath === location.pathname,
+  );
+  const activePage = activePluginRoute?.navKey ?? pathToPageKey(location.pathname);
   const profile = useUserProfileStore((s) => s.profile);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const resolvedAvatarSrc = useResolvedAvatarSrc(

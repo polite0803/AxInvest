@@ -39,6 +39,8 @@ const COMPAT_ROUTES = new Set([
   "/devtools", // redirectToDevTools
   "/link", // /gateway 的别名（同一组件），侧栏入口在 /gateway
   "/opc/industry/:packId", // 旧链 → /opc/domain/:packId
+  // 旧主壳域页：启用插件由运行期投影渲染；无映射时 Navigate 回 /opc。
+  "/opc/domain/:pageId",
   "*", // NotFound
 ]);
 

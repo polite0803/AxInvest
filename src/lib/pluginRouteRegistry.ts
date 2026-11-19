@@ -19,6 +19,13 @@ export interface PluginPageRouteEntry extends PluginDomainPageRoute {
   readonly Page: LazyExoticComponent<ComponentType>;
 }
 
+/** 旧 `/opc/domain/:pageId` → 插件页 `{pluginSlug, pageId}` 的兼容映射。 */
+export interface PluginDomainRouteMapping {
+  readonly legacyPath: string;
+  readonly pluginSlug: string;
+  readonly pageId: string;
+}
+
 let snapshot: readonly PluginPageRouteEntry[] = [];
 let loadPromise: Promise<readonly PluginPageRouteEntry[]> | null = null;
 const listeners = new Set<() => void>();
@@ -103,6 +110,25 @@ export function pluginPageNavItem(entry: PluginPageRouteEntry): {
 
 export function getPluginPageRoutes(): readonly PluginPageRouteEntry[] {
   return snapshot;
+}
+
+/** 运行期插件投影中的旧 OPC 域路径兼容映射；插件不可用或未声明时为空。 */
+export function getPluginDomainRouteMappings(): readonly PluginDomainRouteMapping[] {
+  return snapshot
+    .filter((entry): entry is PluginPageRouteEntry & { legacyPath: string } => typeof entry.legacyPath === "string")
+    .map((entry) => ({
+      legacyPath: entry.legacyPath,
+      pluginSlug: entry.pluginSlug,
+      pageId: entry.pageId,
+    }));
+}
+
+export function usePluginDomainRouteMappings(): readonly PluginDomainRouteMapping[] {
+  return useSyncExternalStore(
+    subscribePluginPageRoutes,
+    getPluginDomainRouteMappings,
+    getPluginDomainRouteMappings,
+  );
 }
 
 export function usePluginPageRoutes(): readonly PluginPageRouteEntry[] {

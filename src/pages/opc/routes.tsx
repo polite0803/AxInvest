@@ -2,23 +2,7 @@
 
 import type { ContributedNavItem, ContributedPageRoute } from "@/lib/domainPageRegistry";
 import type { CapabilityDomain } from "@/types/capability";
-import {
-  AimOutlined,
-  AppstoreFilled,
-  BgColorsOutlined,
-  BookFilled,
-  CalculatorFilled,
-  CarryOutFilled,
-  CodeFilled,
-  EnvironmentFilled,
-  PlaySquareFilled,
-  RiseOutlined,
-  RobotFilled,
-  SafetyCertificateFilled,
-  ShoppingFilled,
-  TeamOutlined,
-  VideoCameraFilled,
-} from "@ant-design/icons";
+import { AimOutlined, AppstoreFilled } from "@ant-design/icons";
 import { type ComponentType, lazy, type LazyExoticComponent, type ReactNode } from "react";
 
 /**
@@ -50,39 +34,6 @@ const LazyDomainHubPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/pages/DomainHubPage").then((m) => ({ default: m.DomainHubPage }))
 );
 
-const LazyFinanceInvestDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.FinanceInvestPage }))
-);
-const LazyAccountingDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.AccountingPage }))
-);
-const LazySalesGrowthDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.SalesGrowthPage }))
-);
-const LazyProjectManagementDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.ProjectManagementPage }))
-);
-const LazyConsultingDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.ConsultingPage }))
-);
-const LazyEcommerceDomainPage = lazy(() => import("./domains/DomainPages").then((m) => ({ default: m.EcommercePage })));
-const LazySoftwareDevDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.SoftwareDevPage }))
-);
-const LazySecurityDomainPage = lazy(() => import("./domains/DomainPages").then((m) => ({ default: m.SecurityPage })));
-const LazyGeospatialDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.GeospatialPage }))
-);
-const LazyAiResearchDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.AiResearchPage }))
-);
-const LazyContentMediaDomainPage = lazy(() =>
-  import("./domains/DomainPages").then((m) => ({ default: m.ContentMediaPage }))
-);
-const LazyDesignDomainPage = lazy(() => import("./domains/DomainPages").then((m) => ({ default: m.DesignPage })));
-const LazyEducationDomainPage = lazy(() => import("./domains/DomainPages").then((m) => ({ default: m.EducationPage })));
-const LazyGameDevDomainPage = lazy(() => import("./domains/DomainPages").then((m) => ({ default: m.GameDevPage })));
-
 /** 带侧栏入口的页面：一次声明同时产出路由与导航项（path 只写一次）。 */
 interface NavPageDeclaration {
   readonly id: string;
@@ -97,8 +48,8 @@ interface NavPageDeclaration {
 }
 
 /**
- * 顺序即域聚合页（DomainHubPage）的展示顺序；侧栏按 `group` + `groupOrder` 归组。
- * `groupOrder` 与旧 `navGroups.ts` 的排列一致，避免侧栏组内次序变化。
+ * 14 个旧 `/opc/domain/*` 业务页已由运行期插件投影接管：宿主只保留 OPC 壳层、
+ * 需求发现与域聚合页，避免编译期页与插件页并行造成同一页面两套来源。
  */
 const NAV_PAGE_DECLARATIONS: readonly NavPageDeclaration[] = [
   {
@@ -122,160 +73,6 @@ const NAV_PAGE_DECLARATIONS: readonly NavPageDeclaration[] = [
     labelKey: "nav.automationOperations",
     icon: navIcon(AppstoreFilled),
     Page: LazyOpcPage,
-  },
-  {
-    id: "domain:finance-analysis",
-    pageKey: "finance-analysis",
-    path: "/opc/domain/finance-invest",
-    domain: "finance",
-    group: "packs",
-    groupOrder: 0,
-    labelKey: "nav.financeAnalysis",
-    icon: navIcon(TeamOutlined),
-    Page: LazyFinanceInvestDomainPage,
-  },
-  {
-    id: "domain:finance-accounting",
-    pageKey: "finance-accounting",
-    path: "/opc/domain/accounting",
-    domain: "finance",
-    group: "packs",
-    groupOrder: 1,
-    labelKey: "nav.financeAccounting",
-    icon: navIcon(CalculatorFilled),
-    Page: LazyAccountingDomainPage,
-  },
-  {
-    id: "domain:automation-sales",
-    pageKey: "automation-sales",
-    path: "/opc/domain/sales-growth",
-    domain: "automation",
-    group: "packs",
-    groupOrder: 2,
-    labelKey: "nav.automationSales",
-    icon: navIcon(RiseOutlined),
-    Page: LazySalesGrowthDomainPage,
-  },
-  {
-    id: "domain:automation-projects",
-    pageKey: "automation-projects",
-    path: "/opc/domain/project-management",
-    domain: "automation",
-    group: "packs",
-    groupOrder: 3,
-    labelKey: "nav.automationProjects",
-    icon: navIcon(CarryOutFilled),
-    Page: LazyProjectManagementDomainPage,
-  },
-  {
-    id: "domain:automation-consulting",
-    pageKey: "automation-consulting",
-    path: "/opc/domain/consulting",
-    domain: "automation",
-    group: "packs",
-    groupOrder: 4,
-    labelKey: "nav.automationConsulting",
-    icon: navIcon(TeamOutlined),
-    Page: LazyConsultingDomainPage,
-  },
-  {
-    id: "domain:automation-ecommerce",
-    pageKey: "automation-ecommerce",
-    path: "/opc/domain/ecommerce",
-    domain: "automation",
-    group: "packs",
-    groupOrder: 5,
-    labelKey: "nav.automationEcommerce",
-    icon: navIcon(ShoppingFilled),
-    Page: LazyEcommerceDomainPage,
-  },
-  {
-    id: "domain:devops-software",
-    pageKey: "devops-software",
-    path: "/opc/domain/software-dev",
-    domain: "devops",
-    group: "packs",
-    groupOrder: 6,
-    labelKey: "nav.devopsSoftware",
-    icon: navIcon(CodeFilled),
-    Page: LazySoftwareDevDomainPage,
-  },
-  {
-    id: "domain:devops-security",
-    pageKey: "devops-security",
-    path: "/opc/domain/security",
-    domain: "devops",
-    group: "packs",
-    groupOrder: 7,
-    labelKey: "nav.devopsSecurity",
-    icon: navIcon(SafetyCertificateFilled),
-    Page: LazySecurityDomainPage,
-  },
-  {
-    id: "domain:data-geospatial",
-    pageKey: "data-geospatial",
-    path: "/opc/domain/geospatial",
-    domain: "data_analysis",
-    group: "packs",
-    groupOrder: 8,
-    labelKey: "nav.dataGeospatial",
-    icon: navIcon(EnvironmentFilled),
-    Page: LazyGeospatialDomainPage,
-  },
-  {
-    id: "domain:data-ai-research",
-    pageKey: "data-ai-research",
-    path: "/opc/domain/ai-research",
-    domain: "data_analysis",
-    group: "packs",
-    groupOrder: 9,
-    labelKey: "nav.dataAiResearch",
-    icon: navIcon(RobotFilled),
-    Page: LazyAiResearchDomainPage,
-  },
-  {
-    id: "domain:content-media",
-    pageKey: "content-media",
-    path: "/opc/domain/content-media",
-    domain: "content_creation",
-    group: "packs",
-    groupOrder: 10,
-    labelKey: "nav.contentMedia",
-    icon: navIcon(VideoCameraFilled),
-    Page: LazyContentMediaDomainPage,
-  },
-  {
-    id: "domain:content-design",
-    pageKey: "content-design",
-    path: "/opc/domain/design",
-    domain: "content_creation",
-    group: "packs",
-    groupOrder: 11,
-    labelKey: "nav.contentDesign",
-    icon: navIcon(BgColorsOutlined),
-    Page: LazyDesignDomainPage,
-  },
-  {
-    id: "domain:content-education",
-    pageKey: "content-education",
-    path: "/opc/domain/education",
-    domain: "content_creation",
-    group: "packs",
-    groupOrder: 12,
-    labelKey: "nav.contentEducation",
-    icon: navIcon(BookFilled),
-    Page: LazyEducationDomainPage,
-  },
-  {
-    id: "domain:ai-media-game",
-    pageKey: "ai-media-game",
-    path: "/opc/domain/game-dev",
-    domain: "ai_media",
-    group: "packs",
-    groupOrder: 13,
-    labelKey: "nav.aiMediaGame",
-    icon: navIcon(PlaySquareFilled),
-    Page: LazyGameDevDomainPage,
   },
 ];
 
@@ -302,7 +99,7 @@ const EXTRA_ROUTES: readonly ContributedPageRoute[] = [
   { id: "opc:domain-hub", path: "/opc/domains/:domainId", pageKey: "automation-operations", Page: LazyDomainHubPage },
 ];
 
-/** 交给宿主注册表登记的路由表：16 个带侧栏入口的页面 + 2 条同页子路由。 */
+/** 交给宿主注册表登记的路由表：OPC 壳层与需求发现页 + 2 条同页子路由。 */
 export const DOMAIN_PAGES: readonly ContributedPageRoute[] = [
   ...NAV_PAGE_DECLARATIONS.map(navRouteOf),
   ...EXTRA_ROUTES,

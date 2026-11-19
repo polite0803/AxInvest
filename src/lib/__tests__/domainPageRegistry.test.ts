@@ -37,13 +37,13 @@ describe("domainPageRegistry", () => {
     expect(sources.filter((s) => s.includes("pages/invest/routes"))).toHaveLength(1);
   });
 
-  it("注册表共 19 条路由：OPC 18（主页两段 + 需求发现 + 14 个能力包页 + 域聚合页）+ 投资域 1", () => {
+  it("注册表共 5 条路由：OPC 4（主页两段 + 需求发现 + 域聚合页）+ 投资域 1", () => {
     const routes = getDomainPageRoutes();
-    expect(routes).toHaveLength(19);
-    expect(routes.filter((r) => r.id.startsWith("domain:"))).toHaveLength(14);
-    // 带侧栏入口的 16 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口；
+    expect(routes).toHaveLength(5);
+    expect(routes.filter((r) => r.id.startsWith("domain:"))).toHaveLength(0);
+    // 带侧栏入口的 2 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口；
     // 投资域 `/invest` 无入口（侧栏项仍由宿主 builtinNavItems 持有，见 invest/routes.tsx 头注）
-    expect(routes.filter((r) => r.nav)).toHaveLength(16);
+    expect(routes.filter((r) => r.nav)).toHaveLength(2);
   });
 
   it("path 由域模块字面量声明，宿主 BUILTIN_PAGE_PATH 已不再登记域页面", () => {
@@ -52,44 +52,22 @@ describe("domainPageRegistry", () => {
     expect(byId.get("opc:tab")?.path).toBe("/opc/:tab");
     expect(byId.get("demand-discovery")?.path).toBe("/demand-discovery");
     expect(byId.get("opc:domain-hub")?.path).toBe("/opc/domains/:domainId");
-    // 能力包页逐条回查：id 必须是 `domain:<pageKey>`，path 必须在 `/opc/domain/` 下，
+    // 域内页面逐条回查：path 由域模块字面量声明，
     // 且宿主表里查不到该 pageKey（查得到 = 命名权又回到主壳）
-    for (const route of byId.values()) {
-      if (!route.id.startsWith("domain:")) { continue; }
-      expect(route.id).toBe(`domain:${route.pageKey}`);
-      expect(route.path.startsWith("/opc/domain/")).toBe(true);
-      expect(BUILTIN_PAGE_PATH[route.pageKey]).toBeUndefined();
-    }
-    expect(byId.get("domain:finance-analysis")?.pageKey).toBe("finance-analysis");
-    expect(byId.get("domain:ai-media-game")?.pageKey).toBe("ai-media-game");
+    expect(byId.get("opc:index")?.pageKey).toBe("automation-operations");
+    expect(byId.get("demand-discovery")?.pageKey).toBe("demand-discovery");
     // 负控：宿主自有页面仍在表里（证明上面的 `toBeUndefined` 不是因为表空了）
     expect(BUILTIN_PAGE_PATH.chat).toBe("/chat");
   });
 
-  it("侧栏入口随路由声明：16 项，组归属与组内次序不变", () => {
+  it("侧栏入口随路由声明：2 项，组归属与组内次序不变", () => {
     const nav = getContributedNavItems();
-    expect(nav).toHaveLength(16);
+    expect(nav).toHaveLength(2);
     const ordered = (group: string) =>
       nav.filter((n) => n.group === group).sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0));
     expect(ordered("opc").map((n) => [n.key, n.path, n.groupOrder])).toEqual([
       ["automation-operations", "/opc", 0],
       ["demand-discovery", "/demand-discovery", 1],
-    ]);
-    expect(ordered("packs").map((n) => n.key)).toEqual([
-      "finance-analysis",
-      "finance-accounting",
-      "automation-sales",
-      "automation-projects",
-      "automation-consulting",
-      "automation-ecommerce",
-      "devops-software",
-      "devops-security",
-      "data-geospatial",
-      "data-ai-research",
-      "content-media",
-      "content-design",
-      "content-education",
-      "ai-media-game",
     ]);
     // path 只写一次：入口路径必须等于其所属路由的 path
     for (const entry of nav) {
@@ -101,7 +79,7 @@ describe("domainPageRegistry", () => {
     expect(resolveContributedPageKey("/opc")).toBe("automation-operations");
     expect(resolveContributedPageKey("/opc/finance")).toBe("automation-operations");
     expect(resolveContributedPageKey("/opc/domains/finance")).toBe("automation-operations");
-    expect(resolveContributedPageKey("/opc/domain/security")).toBe("devops-security");
+    expect(resolveContributedPageKey("/opc/domain/security")).toBe("automation-operations");
     expect(resolveContributedPageKey("/demand-discovery")).toBe("demand-discovery");
     expect(resolveContributedPageKey("/knowledge")).toBeUndefined();
   });

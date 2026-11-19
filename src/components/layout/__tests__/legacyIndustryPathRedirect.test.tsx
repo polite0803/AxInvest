@@ -23,6 +23,20 @@ vi.mock("antd", () => ({
   Button: ({ children }: { children?: React.ReactNode }) => <button>{children}</button>,
   Result: () => <div data-testid="not-found" />,
   Spin: () => <div data-testid="spin" />,
+  Typography: { Text: ({ children }: { children?: React.ReactNode }) => <span>{children}</span> },
+}));
+
+// 旧域路径现在由运行期插件投影接管；本用例只验证路由接线，不加载真实插件页。
+vi.mock("@/lib/pluginRouteRegistry", () => ({
+  usePluginDomainRouteMappings: () => [{
+    legacyPath: "/opc/domain/ai-research",
+    pluginSlug: "opc-ai-research",
+    pageId: "opc-ai-research",
+  }],
+  usePluginPageRoutes: () => [],
+}));
+vi.mock("@/components/plugin/PluginPageRouteHost", () => ({
+  PluginPageRouteHost: () => <div data-testid="plugin-domain-page" />,
 }));
 
 // 能力包页面本身不是本用例的被测对象，替换为桩，避免把整条 UI 依赖链拖进来
@@ -72,7 +86,7 @@ describe("旧链兼容 /opc/industry/* → /opc/domain/*", () => {
     expect(screen.queryByTestId("not-found")).toBeNull();
   });
 
-  it("新链 /opc/domain/* 直连无需重定向", async () => {
+  it("新链 /opc/domain/* 命中插件投影路由而非 404", async () => {
     const { ContentArea } = await import("../ContentArea");
 
     render(
@@ -84,6 +98,6 @@ describe("旧链兼容 /opc/industry/* → /opc/domain/*", () => {
 
     const loc = await screen.findByTestId("loc");
     expect(loc).toHaveTextContent("/opc/domain/ai-research");
-    expect(await screen.findByTestId("domain-page")).toBeInTheDocument();
+    expect(await screen.findByTestId("plugin-domain-page")).toBeInTheDocument();
   });
 });

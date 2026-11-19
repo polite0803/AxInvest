@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::core_error::{AxAgentError, Result};
+use crate::types::NoteLink;
 
 /// `sync_note_to_knowledge_base` op 的入参。
 ///
@@ -42,6 +43,13 @@ pub struct SyncNoteToKnowledgeBaseOutcome {
 /// Wiki 写接缝的宿主 provider。
 #[async_trait]
 pub trait WikiStoreProvider: Send + Sync {
+    /// 列出笔记的出链（`note_links` 中以该 note 为 source 的行）。
+    async fn get_note_links(&self, _note_id: String) -> Result<Vec<NoteLink>> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::get_note_links 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 创建一条 Wiki 笔记（写）。
     ///
     /// 入参 `crate::note_dtos::CreateNoteInput` 是 harness 权威 DTO；宿主 provider 在
@@ -72,10 +80,7 @@ pub trait WikiStoreProvider: Send + Sync {
     /// 删除一条 Wiki 笔记（写，危险）。
     ///
     /// 宿主侧同步完成向量删除、缓存失效与 DB 行删除。要求插件声明 `write`。
-    async fn delete_note(
-        &self,
-        _id: String,
-    ) -> Result<()> {
+    async fn delete_note(&self, _id: String) -> Result<()> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::delete_note 未实现（该提供者不支持此数据面）".into(),
         ))

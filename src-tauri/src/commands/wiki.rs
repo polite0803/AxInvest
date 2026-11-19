@@ -5,7 +5,7 @@ use crate::commands::spawn_guard::catch_unwind_logged;
 use axagent_agent_macro::agent_command;
 use axagent_dao::repo::index_jobs as jobs;
 use axagent_dao::repo::louvain;
-use axagent_dao::repo::note::{CreateNoteInput, GraphData, Note, NoteLink, UpdateNoteInput};
+use axagent_dao::repo::note::{CreateNoteInput, GraphData, Note, UpdateNoteInput};
 use axagent_dao::repo::wiki::{
     self, CreateWikiTemplateInput, NoteVersion, UpdateWikiTemplateInput, WikiTemplate,
 };
@@ -360,20 +360,6 @@ pub async fn rebuild_wiki_index(
     }));
 
     Ok(())
-}
-
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取笔记链接列表")]
-#[tauri::command]
-pub async fn wiki_notes_get_links(
-    state: State<'_, AppState>,
-    note_id: String,
-) -> Result<Vec<NoteLink>, String> {
-    axagent_dao::repo::note::get_note_links(state.harness.db(), &note_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
 }
 
 #[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取笔记反向链接")]

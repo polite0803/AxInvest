@@ -306,6 +306,36 @@ fn update_and_delete_notes_are_write_seam_calls() {
     assert_command_value(&response, &serde_json::json!({}));
     worker.shutdown();
 }
+
+#[test]
+fn get_note_links_is_a_read_only_seam_call() {
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_get_note_links",
+        serde_json::json!({ "noteId": "note-1" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "get_note_links");
+    assert_eq!(call.args["args"]["noteId"], "note-1");
+    let links = serde_json::json!([{
+        "id": 1,
+        "vaultId": "v1",
+        "sourceNoteId": "note-1",
+        "targetNoteId": "note-2",
+        "linkText": "目标",
+        "linkType": "wiki",
+        "createdAt": 1
+    }]);
+    worker.send_response(
+        &FrameResponse::success(links.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &links);
+    worker.shutdown();
+}
 #[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);

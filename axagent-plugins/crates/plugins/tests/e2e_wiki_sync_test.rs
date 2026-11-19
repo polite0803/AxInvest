@@ -79,6 +79,13 @@ impl WikiStoreProvider for FixedWikiStore {
         Ok(sample_note(format!("note-at-{file_path}")))
     }
 
+    async fn get_note_links(
+        &self,
+        _note_id: String,
+    ) -> axagent_harness::core_error::Result<Vec<axagent_harness::types::NoteLink>> {
+        Ok(Vec::new())
+    }
+
     async fn get_note(
         &self,
         id: String,
@@ -220,6 +227,16 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         .expect("wiki 创建命令应可执行");
     let created: Value = serde_json::from_str(&created).expect("创建输出应是 JSON 文本");
     assert_eq!(created["id"], "note-created");
+
+    let links = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_get_note_links",
+            &json!({ "noteId": "note-created" }),
+        )
+        .expect("wiki 出链命令应可执行");
+    let links: Value = serde_json::from_str(&links).expect("出链输出应是 JSON 文本");
+    assert_eq!(links, json!([]));
     assert_eq!(created["title"], "新笔记");
 
     let updated = manager

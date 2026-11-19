@@ -113,6 +113,16 @@ impl HostWikiStore {
 
 #[async_trait]
 impl WikiStoreProvider for HostWikiStore {
+    async fn get_note_links(
+        &self,
+        note_id: String,
+    ) -> Result<Vec<axagent_harness::types::NoteLink>> {
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::note::get_note_links(state.harness.db(), &note_id)
+            .await
+            .map_err(to_provider_error)
+    }
+
     async fn create_note(
         &self,
         input: axagent_harness::note_dtos::CreateNoteInput,

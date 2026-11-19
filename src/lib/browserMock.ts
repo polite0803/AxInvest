@@ -7487,6 +7487,10 @@ async function executeCommand<T>(
       if (!note) { throw new Error(`Note ${filePath} not found`); }
       return note as unknown as T;
     }
+    case "wiki_get_note_links": {
+      // 真机由宿主 note_links 表读取；浏览器模式没有链接表 ⇒ 显式空数组。
+      return [] as unknown as T;
+    }
     case "wiki_notes_search": {
       const vaultId = String(args?.vault_id ?? "");
       const query = String(args?.query ?? "").toLowerCase();

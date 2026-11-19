@@ -5457,6 +5457,17 @@ function wikiManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        name: "wiki_get_note_links",
+        description: "读取一条 Wiki 笔记的出链（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_get_note_links",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { noteId: { type: "string", description: "宿主侧笔记 id" } },
+          required: ["noteId"],
+        },
+      },
+      {
         name: "wiki_get_note",
         description: "按 id 读取一条 Wiki 笔记（经宿主 wiki.store 只读接缝）",
         command: "worker://wiki_get_note",

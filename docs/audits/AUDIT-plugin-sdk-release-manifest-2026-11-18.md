@@ -9,7 +9,7 @@
 | crate | manifest | version | license | publish | package-list sha256 前缀 | 入口 |
 |---|---|---|---|---|---|---|
 | `axagent-plugin-proto` | `axagent-core/crates/plugin-proto/Cargo.toml` | 3.0.0 | AGPL-3.0-only | false | 55bc9d177a860d5c | ✓ |
-| `axagent-harness` | `axagent-core/crates/harness/Cargo.toml` | workspace | AGPL-3.0-only | false | 91f83f1a73364570 | ✓ |
+| `axagent-harness` | `axagent-core/crates/harness/Cargo.toml` | workspace | AGPL-3.0-only | false | 51cfb8c1f05ea65f | ✓ |
 | `axagent-plugin-testkit` | `axagent-plugins/crates/plugin-testkit/Cargo.toml` | workspace | workspace | false | 66a638cc28e71b84 | ✓ |
 
 ## 二、依赖边
@@ -274,6 +274,10 @@
 - `src/speech.rs`
 - `src/ssrf_guard.rs`
 - `src/stock_analysis.rs`
+- `src/stock_costs.rs`
+- `src/stock_factors.rs`
+- `src/stock_hit_outcome.rs`
+- `src/stock_intent_parser.rs`
 - `src/stock_market_types.rs`
 - `src/stock_monitor.rs`
 - `src/stock_service.rs`
@@ -326,6 +330,7 @@
 - `src/verification_recipe.rs`
 - `src/webhook_subscription.rs`
 - `src/wiki_dtos.rs`
+- `src/wiki_store.rs`
 - `src/workflow_evolution.rs`
 - `src/workflow_graph.rs`
 - `src/workflow_hook_sink.rs`

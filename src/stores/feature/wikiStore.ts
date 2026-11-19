@@ -194,7 +194,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   getNoteLinks: async (noteId) => {
     try {
-      return await invoke<NoteLink[]>("wiki_notes_get_links", { noteId });
+      return await invokePluginCommand<NoteLink[]>("wiki_get_note_links", { noteId });
     } catch (e) {
       set({ error: translateBackendError(e) });
       return [];

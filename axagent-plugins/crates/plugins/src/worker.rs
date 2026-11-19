@@ -2899,6 +2899,22 @@ impl HostPeer {
                 }
             },
             // ── wiki.store 接缝：宿主把「笔记 → 知识库文档」同步写面暴露给插件 ──
+            "wiki.store" if op == "get_note_links" => {
+                let note_id: String = match deserialize_arg(&args, "noteId", seam) {
+                    Ok(note_id) => note_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_note_links(note_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(links) => to_value("Vec<NoteLink>", &links),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             "wiki.store" if op == "create_note" => {
                 let input: axagent_harness::note_dtos::CreateNoteInput =
                     match deserialize_arg(&args, "input", seam) {

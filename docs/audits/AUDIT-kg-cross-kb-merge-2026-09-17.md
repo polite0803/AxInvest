@@ -71,7 +71,7 @@ edges_both_endpoints_visible = 0
 **可逆性（先量再谈修）**：`lifecycle->>'merged_into'` 的反向映射**不是 1:1** ——
 fanout 分布最大到 **11**，另有 772 组是 2:1 ⇒ 简单「把 lifecycle 清空」恢复不了，反向重指有歧义。
 
-**现有「修复图谱」按钮无效**：`repair_wiki_graph`（`commands/wiki.rs:2786-2865`）只重建 `note_links`
+**现有「修复图谱」按钮无效**：`repair_wiki_graph`（`commands/wiki.rs:2697-2776`）只重建 `note_links`
 + 按 `{wiki.name}图谱` 名字自动绑 KB，对本缺陷**零覆盖**。
 
 ## 4. 第二个独立成因：`link` 边落屏对比度 ≈ 1 个色阶

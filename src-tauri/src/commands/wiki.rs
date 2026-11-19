@@ -6,9 +6,7 @@ use axagent_agent_macro::agent_command;
 use axagent_dao::repo::index_jobs as jobs;
 use axagent_dao::repo::louvain;
 use axagent_dao::repo::note::{CreateNoteInput, GraphData, Note, UpdateNoteInput};
-use axagent_dao::repo::wiki::{
-    self, CreateWikiTemplateInput, NoteVersion, UpdateWikiTemplateInput, WikiTemplate,
-};
+use axagent_dao::repo::wiki::{self, NoteVersion};
 use axagent_harness::IpcEventName;
 use axagent_harness::WikiStoreProvider;
 use axagent_harness::graph_dtos::{GraphEdge, LinkGraph};
@@ -1315,48 +1313,6 @@ pub async fn wiki_note_restore_version(
     }
 
     Ok(updated)
-}
-
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "列出 Wiki 模板")]
-#[tauri::command]
-pub async fn wiki_template_list(
-    state: State<'_, AppState>,
-    wiki_id: String,
-) -> Result<Vec<WikiTemplate>, String> {
-    wiki::list_wiki_templates(state.harness.db(), &wiki_id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "创建 Wiki 模板")]
-#[tauri::command]
-pub async fn wiki_template_create(
-    state: State<'_, AppState>,
-    input: CreateWikiTemplateInput,
-) -> Result<WikiTemplate, String> {
-    wiki::create_wiki_template(state.harness.db(), input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "更新 Wiki 模板")]
-#[tauri::command]
-pub async fn wiki_template_update(
-    state: State<'_, AppState>,
-    input: UpdateWikiTemplateInput,
-) -> Result<WikiTemplate, String> {
-    wiki::update_wiki_template(state.harness.db(), input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
 }
 
 #[agent_command(domain = wiki, safety = Dangerous, call_mode = StateInput, description = "删除 Wiki 模板")]

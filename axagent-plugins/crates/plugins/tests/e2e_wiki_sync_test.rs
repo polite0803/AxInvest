@@ -18,6 +18,7 @@ use std::sync::Arc;
 use axagent_harness::{
     SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
     WikiStoreProvider, get_capability_registry,
+    wiki_dtos::{CreateWikiTemplateInput, UpdateWikiTemplateInput, WikiTemplate},
 };
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use serde_json::{Value, json};
@@ -138,6 +139,57 @@ impl WikiStoreProvider for FixedWikiStore {
         _request: SyncNoteLinksRequest,
     ) -> axagent_harness::core_error::Result<()> {
         Ok(())
+    }
+
+    async fn list_wiki_templates(
+        &self,
+        wiki_id: String,
+    ) -> axagent_harness::core_error::Result<Vec<WikiTemplate>> {
+        Ok(vec![WikiTemplate {
+            id: "tpl-1".into(),
+            wiki_id,
+            name: "模板".into(),
+            description: None,
+            content: "# body".into(),
+            page_type: None,
+            is_builtin: false,
+            created_at: 1,
+            updated_at: 2,
+        }])
+    }
+
+    async fn create_wiki_template(
+        &self,
+        input: CreateWikiTemplateInput,
+    ) -> axagent_harness::core_error::Result<WikiTemplate> {
+        Ok(WikiTemplate {
+            id: "tpl-created".into(),
+            wiki_id: input.wiki_id,
+            name: input.name,
+            description: input.description,
+            content: input.content,
+            page_type: input.page_type,
+            is_builtin: input.is_builtin,
+            created_at: 1,
+            updated_at: 2,
+        })
+    }
+
+    async fn update_wiki_template(
+        &self,
+        input: UpdateWikiTemplateInput,
+    ) -> axagent_harness::core_error::Result<WikiTemplate> {
+        Ok(WikiTemplate {
+            id: input.id,
+            wiki_id: "w1".into(),
+            name: input.name.unwrap_or_else(|| "模板".into()),
+            description: input.description,
+            content: input.content.unwrap_or_else(|| "# body".into()),
+            page_type: input.page_type,
+            is_builtin: false,
+            created_at: 1,
+            updated_at: 3,
+        })
     }
 }
 
@@ -310,6 +362,46 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
         deleted.is_null() || deleted.as_object().is_some_and(|o| o.is_empty()),
         "删除回执应为 null 或空对象：{deleted:?}"
     );
+
+    let listed_templates = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_list_templates",
+            &json!({ "wikiId": "w1" }),
+        )
+        .expect("wiki 模板列表命令应可执行");
+    let listed_templates: Value =
+        serde_json::from_str(&listed_templates).expect("模板列表输出应是 JSON 文本");
+    assert_eq!(listed_templates[0]["id"], "tpl-1");
+
+    let created_template = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_create_template",
+            &json!({
+                "input": {
+                    "wikiId": "w1", "name": "新模板", "description": null,
+                    "content": "# body", "pageType": null, "isBuiltin": false,
+                }
+            }),
+        )
+        .expect("wiki 模板创建命令应可执行");
+    let created_template: Value =
+        serde_json::from_str(&created_template).expect("模板创建输出应是 JSON 文本");
+    assert_eq!(created_template["id"], "tpl-created");
+    assert_eq!(created_template["name"], "新模板");
+
+    let updated_template = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_update_template",
+            &json!({ "input": { "id": "tpl-1", "name": "改过的模板" } }),
+        )
+        .expect("wiki 模板更新命令应可执行");
+    let updated_template: Value =
+        serde_json::from_str(&updated_template).expect("模板更新输出应是 JSON 文本");
+    assert_eq!(updated_template["id"], "tpl-1");
+    assert_eq!(updated_template["name"], "改过的模板");
 
     drop(manager);
     handle.undo();

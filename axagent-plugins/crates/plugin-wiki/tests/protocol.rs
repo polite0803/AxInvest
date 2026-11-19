@@ -397,6 +397,69 @@ fn sync_note_links_is_a_write_seam_call_with_camel_case_input() {
 }
 
 #[test]
+fn wiki_template_commands_map_to_the_host_wiki_store_seam() {
+    // ① 列表是读 op：标量 wikiId，不额外包装。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_list_templates", serde_json::json!({ "wikiId": "w1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["seam"], "wiki.store");
+    assert_eq!(call.args["op"], "list_wiki_templates");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    let templates = serde_json::json!([{
+        "id": "tpl-1", "wikiId": "w1", "name": "模板", "description": null,
+        "content": "# body", "pageType": null, "isBuiltin": false,
+        "createdAt": 1, "updatedAt": 2,
+    }]);
+    worker.send_response(
+        &FrameResponse::success(templates.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &templates);
+    worker.shutdown();
+
+    // ② 创建是写 op：整个 input 透传，字段保持 camelCase。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_create_template",
+        serde_json::json!({
+            "input": {
+                "wikiId": "w1", "name": "模板", "description": "说明",
+                "content": "# body", "pageType": "note", "isBuiltin": false,
+            }
+        }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "create_wiki_template");
+    assert_eq!(call.args["args"]["input"]["wikiId"], "w1");
+    assert_eq!(call.args["args"]["input"]["pageType"], "note");
+    worker.send_response(
+        &FrameResponse::success(templates[0].clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &templates[0]);
+    worker.shutdown();
+
+    // ③ 更新是写 op：id 留在 input 内，与宿主权威 DTO 同形。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_update_template",
+        serde_json::json!({ "input": { "id": "tpl-1", "name": "新名" } }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "update_wiki_template");
+    assert_eq!(call.args["args"]["input"]["id"], "tpl-1");
+    assert_eq!(call.args["args"]["input"]["name"], "新名");
+    worker.send_response(
+        &FrameResponse::success(templates[0].clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &templates[0]);
+    worker.shutdown();
+}
+
+#[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);
     worker.send(&command(PLUGIN_ID, "wiki_not_a_command", serde_json::json!({})));

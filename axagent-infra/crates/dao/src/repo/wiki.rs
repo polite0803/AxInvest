@@ -14,6 +14,9 @@ use axagent_harness::util_fns::gen_id;
 // Wiki DTO 在 harness 里定义（提升到 harness 让 search 等下游 crate 不用反向依赖 dao），
 // 这里 re-export 保持向后兼容。
 pub use axagent_harness::types::Wiki;
+pub use axagent_harness::wiki_dtos::{
+    CreateWikiTemplateInput, UpdateWikiTemplateInput, WikiTemplate,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateWikiInput {
@@ -297,42 +300,6 @@ pub async fn delete_old_versions(
     }
 
     Ok(count)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WikiTemplate {
-    pub id: String,
-    pub wiki_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub content: String,
-    pub page_type: Option<String>,
-    pub is_builtin: bool,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateWikiTemplateInput {
-    pub wiki_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub content: String,
-    pub page_type: Option<String>,
-    pub is_builtin: bool,
-}
-
-/// 更新 Wiki 模板的输入（部分更新，None 字段不覆盖）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateWikiTemplateInput {
-    pub id: String,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub content: Option<String>,
-    pub page_type: Option<String>,
 }
 
 fn model_to_template(m: wiki_templates::Model) -> WikiTemplate {

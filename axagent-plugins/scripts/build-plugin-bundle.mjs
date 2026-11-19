@@ -5580,6 +5580,49 @@ function wikiManifest({ version, binaryName, sha256 }) {
           required: ["vaultId", "sourceNoteId", "links"],
         },
       },
+      {
+        name: "wiki_list_templates",
+        description: "列出 Wiki 模板（经宿主 wiki.store 只读接缝）",
+        command: "worker://wiki_list_templates",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_create_template",
+        description: "创建 Wiki 模板（经宿主 wiki.store 写面）",
+        command: "worker://wiki_create_template",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              description: "宿主 CreateWikiTemplateInput（camelCase）",
+            },
+          },
+          required: ["input"],
+        },
+      },
+      {
+        name: "wiki_update_template",
+        description: "更新 Wiki 模板（经宿主 wiki.store 写面）",
+        command: "worker://wiki_update_template",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              description: "宿主 UpdateWikiTemplateInput（camelCase）",
+            },
+          },
+          required: ["input"],
+        },
+      },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };

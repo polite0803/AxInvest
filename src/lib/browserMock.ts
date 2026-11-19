@@ -7599,19 +7599,41 @@ async function executeCommand<T>(
       setWikiNotes([...getWikiNotes(), note]);
       return note as unknown as T;
     }
-    case "wiki_template_create": {
+    case "wiki_list_templates":
+      return [] as unknown as T;
+    case "wiki_template_create":
+    case "wiki_create_template": {
       const input = (args?.input ?? {}) as Record<string, unknown>;
       const ts = nowTs();
       const tpl: WikiTemplate = {
         id: genId(),
-        wikiId: String(input.wiki_id ?? ""),
+        wikiId: String(input.wikiId ?? input.wiki_id ?? ""),
         name: String(input.name ?? "模板"),
         description: input.description !== undefined ? String(input.description) : undefined,
         content: String(input.content ?? ""),
-        pageType: input.page_type !== undefined ? String(input.page_type) : undefined,
-        isBuiltin: Boolean(input.is_builtin),
+        pageType: input.pageType !== undefined
+          ? String(input.pageType)
+          : input.page_type !== undefined
+          ? String(input.page_type)
+          : undefined,
+        isBuiltin: Boolean(input.isBuiltin ?? input.is_builtin),
         createdAt: ts,
         updatedAt: ts,
+      };
+      return tpl as unknown as T;
+    }
+    case "wiki_update_template": {
+      const input = (args?.input ?? {}) as Record<string, unknown>;
+      const tpl: WikiTemplate = {
+        id: String(input.id ?? ""),
+        wikiId: String(input.wikiId ?? ""),
+        name: String(input.name ?? "模板"),
+        description: input.description !== undefined ? String(input.description) : undefined,
+        content: String(input.content ?? ""),
+        pageType: input.pageType !== undefined ? String(input.pageType) : undefined,
+        isBuiltin: false,
+        createdAt: nowTs(),
+        updatedAt: nowTs(),
       };
       return tpl as unknown as T;
     }

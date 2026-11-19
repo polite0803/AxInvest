@@ -104,6 +104,44 @@ pub struct NoteBacklink {
     pub created_at: i64,
 }
 
+/// Wiki 模板视图（从 dao 提升到 harness，供 `wiki.store` 接缝承载）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiTemplate {
+    pub id: String,
+    pub wiki_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub page_type: Option<String>,
+    pub is_builtin: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 创建 Wiki 模板的权威入参（DAO 与插件接缝共用）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWikiTemplateInput {
+    pub wiki_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub page_type: Option<String>,
+    pub is_builtin: bool,
+}
+
+/// 更新 Wiki 模板的权威入参；`None` 字段不覆盖，`is_builtin` 不允许翻转。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWikiTemplateInput {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub content: Option<String>,
+    pub page_type: Option<String>,
+}
+
 // ── WikiRepository trait ────────────────────────────────────────
 
 /// Version record for a wiki page.

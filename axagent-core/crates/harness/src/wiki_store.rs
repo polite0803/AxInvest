@@ -78,6 +78,36 @@ pub trait WikiStoreProvider: Send + Sync {
         ))
     }
 
+    /// 列出一个 vault 下的 Wiki 模板（读）。
+    async fn list_wiki_templates(
+        &self,
+        _wiki_id: String,
+    ) -> Result<Vec<crate::wiki_dtos::WikiTemplate>> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::list_wiki_templates 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 创建一个 Wiki 模板（写）。
+    async fn create_wiki_template(
+        &self,
+        _input: crate::wiki_dtos::CreateWikiTemplateInput,
+    ) -> Result<crate::wiki_dtos::WikiTemplate> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::create_wiki_template 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 更新一个 Wiki 模板（写）。
+    async fn update_wiki_template(
+        &self,
+        _input: crate::wiki_dtos::UpdateWikiTemplateInput,
+    ) -> Result<crate::wiki_dtos::WikiTemplate> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::update_wiki_template 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 创建一条 Wiki 笔记（写）。
     ///
     /// 入参 `crate::note_dtos::CreateNoteInput` 是 harness 权威 DTO；宿主 provider 在

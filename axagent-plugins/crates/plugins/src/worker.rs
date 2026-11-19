@@ -481,6 +481,8 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("wiki.store", "update_note") => Some(PluginPermission::Write),
         ("wiki.store", "delete_note") => Some(PluginPermission::Write),
         ("wiki.store", "sync_note_links") => Some(PluginPermission::Write),
+        ("wiki.store", "create_wiki_template") => Some(PluginPermission::Write),
+        ("wiki.store", "update_wiki_template") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -3079,6 +3081,56 @@ impl HostPeer {
                 };
                 match result {
                     Ok(()) => to_value("()", &()),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "list_wiki_templates" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_wiki_templates(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(templates) => to_value("Vec<WikiTemplate>", &templates),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "create_wiki_template" => {
+                let input: axagent_harness::wiki_dtos::CreateWikiTemplateInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.create_wiki_template(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(template) => to_value("WikiTemplate", &template),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "update_wiki_template" => {
+                let input: axagent_harness::wiki_dtos::UpdateWikiTemplateInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_wiki_template(input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(template) => to_value("WikiTemplate", &template),
                     Err(e) => seam_provider_error(e),
                 }
             },

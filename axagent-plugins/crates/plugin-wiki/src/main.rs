@@ -30,6 +30,9 @@ const COMMAND_GET_NOTE_BACKLINKS: &str = "wiki_get_note_backlinks";
 const COMMAND_GET_NOTE_LINKS: &str = "wiki_get_note_links";
 const COMMAND_GET_NOTE: &str = "wiki_get_note";
 const COMMAND_GET_NOTE_BY_PATH: &str = "wiki_get_note_by_path";
+const COMMAND_LIST_TEMPLATES: &str = "wiki_list_templates";
+const COMMAND_CREATE_TEMPLATE: &str = "wiki_create_template";
+const COMMAND_UPDATE_TEMPLATE: &str = "wiki_update_template";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -257,6 +260,43 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                     }
                 }),
             )
+        },
+        COMMAND_LIST_TEMPLATES => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("list_wiki_templates", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_CREATE_TEMPLATE => {
+            let input = match frame.input.get("input") {
+                Some(value @ Value::Object(_)) => value.clone(),
+                _ => {
+                    return CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                        "命令 `wiki_create_template` 需要对象参数 `input`",
+                    )
+                    .into_frame_response();
+                },
+            };
+            seam_call("create_wiki_template", json!({ "input": input }))
+        },
+        COMMAND_UPDATE_TEMPLATE => {
+            let input = match frame.input.get("input") {
+                Some(value @ Value::Object(_)) => value.clone(),
+                _ => {
+                    return CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                        "命令 `wiki_update_template` 需要对象参数 `input`",
+                    )
+                    .into_frame_response();
+                },
+            };
+            seam_call("update_wiki_template", json!({ "input": input }))
         },
         other => {
             return CommandFault::for_frame(

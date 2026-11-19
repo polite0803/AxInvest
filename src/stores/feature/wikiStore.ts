@@ -262,7 +262,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   loadTemplates: async (wikiId) => {
     try {
-      const templates = await invoke<WikiTemplate[]>("wiki_template_list", {
+      const templates = await invokePluginCommand<WikiTemplate[]>("wiki_list_templates", {
         wikiId,
       });
       set({ templates });
@@ -273,7 +273,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   createTemplate: async (input) => {
     try {
-      const template = await invoke<WikiTemplate>("wiki_template_create", {
+      const template = await invokePluginCommand<WikiTemplate>("wiki_create_template", {
         input,
       });
       set((s) => ({ templates: [...s.templates, template], error: null }));

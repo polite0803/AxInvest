@@ -191,6 +191,51 @@ impl WikiStoreProvider for HostWikiStore {
         .map_err(to_provider_error)
     }
 
+    async fn list_wiki_templates(
+        &self,
+        wiki_id: String,
+    ) -> Result<Vec<axagent_harness::wiki_dtos::WikiTemplate>> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::list_wiki_templates 需要非空 wikiId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::wiki::list_wiki_templates(state.harness.db(), &wiki_id)
+            .await
+            .map_err(to_provider_error)
+    }
+
+    async fn create_wiki_template(
+        &self,
+        input: axagent_harness::wiki_dtos::CreateWikiTemplateInput,
+    ) -> Result<axagent_harness::wiki_dtos::WikiTemplate> {
+        if input.wiki_id.trim().is_empty() || input.name.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::create_wiki_template 需要非空 wikiId / name".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::wiki::create_wiki_template(state.harness.db(), input)
+            .await
+            .map_err(to_provider_error)
+    }
+
+    async fn update_wiki_template(
+        &self,
+        input: axagent_harness::wiki_dtos::UpdateWikiTemplateInput,
+    ) -> Result<axagent_harness::wiki_dtos::WikiTemplate> {
+        if input.id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::update_wiki_template 需要非空 id".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        axagent_dao::repo::wiki::update_wiki_template(state.harness.db(), input)
+            .await
+            .map_err(to_provider_error)
+    }
+
     async fn create_note(
         &self,
         input: axagent_harness::note_dtos::CreateNoteInput,

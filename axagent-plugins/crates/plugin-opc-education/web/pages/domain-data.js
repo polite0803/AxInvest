@@ -7,74 +7,74 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:WebSearch",
     "tool:OpcCreateContentAsset",
     "tool:OpcCreateLandingPage",
-    "tool:FileWrite"
+    "tool:FileWrite",
   ],
   "kpis": [
     {
       "key": "student_count",
       "name": "学员数量",
-      "unit": "人"
+      "unit": "人",
     },
     {
       "key": "course_completion_rate",
       "name": "课程完成率",
-      "unit": "%"
+      "unit": "%",
     },
     {
       "key": "avg_score",
       "name": "平均分数",
-      "unit": "分"
+      "unit": "分",
     },
     {
       "key": "student_satisfaction",
       "name": "学员满意度",
-      "unit": "%"
-    }
+      "unit": "%",
+    },
   ],
   "workflowSteps": [
     {
       "id": "a-curriculum",
       "name": "课程设计",
-      "description": "设计课程目标、大纲和评估方式"
+      "description": "设计课程目标、大纲和评估方式",
     },
     {
       "id": "a-content",
       "name": "内容制作",
-      "description": "制作课程内容讲义、练习和测验"
+      "description": "制作课程内容讲义、练习和测验",
     },
     {
       "id": "a-enroll",
       "name": "学员管理",
-      "description": "创建学员信息，设置学习路径"
-    }
+      "description": "创建学员信息，设置学习路径",
+    },
   ],
   "dataSources": [
     {
       "id": "business_stats",
       "chain": [
         "db",
-        "cache"
-      ]
-    }
+        "cache",
+      ],
+    },
   ],
   "acceptanceCriteria": [
     {
       "id": "ed-outcomes",
       "name": "学习成果",
       "description": "学员掌握核心知识点",
-      "critical": true
+      "critical": true,
     },
     {
       "id": "ed-engagement",
       "name": "参与度",
       "description": "学员积极参与互动",
-      "critical": false
+      "critical": false,
     },
     {
       "id": "ed-application",
       "name": "实践应用",
       "description": "知识可应用于实际场景",
-      "critical": false
-    }
-  ]
+      "critical": false,
+    },
+  ],
 };

@@ -8,6 +8,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -141,6 +142,18 @@ function renderData(data) {
   return `globalThis.AX_OPC_DOMAIN_DATA = ${JSON.stringify(data, null, 2)};\n`;
 }
 
+function formatJs(source, path) {
+  const result = spawnSync(
+    process.execPath,
+    [join(ROOT, "node_modules", "dprint", "bin.cjs"), "fmt", "--stdin", path],
+    { cwd: ROOT, input: source, encoding: "utf8" },
+  );
+  if (result.status !== 0 || result.error) {
+    throw new Error(`dprint 格式化 ${relative(ROOT, path)} 失败：${result.stderr || result.error?.message || result.status}`);
+  }
+  return result.stdout;
+}
+
 function writeOrCheck(path, content, problems) {
   if (CHECK) {
     const actual = existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -162,8 +175,10 @@ function main() {
       continue;
     }
     const pageDir = join(ROOT, "axagent-plugins", "crates", slice.pluginId, "web", "pages");
-    writeOrCheck(join(pageDir, "index.html"), PAGE_HTML, problems);
-    writeOrCheck(join(pageDir, "domain-data.js"), renderData(buildData(pack.id, pack.capabilities)), problems);
+    const indexPath = join(pageDir, "index.html");
+    const dataPath = join(pageDir, "domain-data.js");
+    writeOrCheck(indexPath, PAGE_HTML, problems);
+    writeOrCheck(dataPath, formatJs(renderData(buildData(pack.id, pack.capabilities)), dataPath), problems);
   }
   if (problems.length) {
     for (const problem of problems) { console.error(`FAIL: ${problem}`); }

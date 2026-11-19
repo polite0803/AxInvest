@@ -8,94 +8,94 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:WebSearch",
     "tool:OpcGetDashboard",
     "tool:OpcCreateContentAsset",
-    "tool:FileWrite"
+    "tool:FileWrite",
   ],
   "kpis": [
     {
       "key": "consulting_count",
       "name": "咨询项目数",
-      "unit": "个"
+      "unit": "个",
     },
     {
       "key": "client_satisfaction",
       "name": "客户满意度",
-      "unit": "%"
+      "unit": "%",
     },
     {
       "key": "delivery_quality_score",
       "name": "交付质量分",
-      "unit": "分"
+      "unit": "分",
     },
     {
       "key": "market_insight_depth",
       "name": "市场洞察深度",
-      "unit": "分"
-    }
+      "unit": "分",
+    },
   ],
   "workflowSteps": [
     {
       "id": "a-intake",
       "name": "调研启动",
-      "description": "明确咨询目标和调研范围"
+      "description": "明确咨询目标和调研范围",
     },
     {
       "id": "a-research",
       "name": "信息采集",
-      "description": "系统性收集行业数据和情报"
+      "description": "系统性收集行业数据和情报",
     },
     {
       "id": "a-validate",
       "name": "调研验证",
-      "description": "验证采集信息的质量和充分性"
+      "description": "验证采集信息的质量和充分性",
     },
     {
       "id": "a-design",
       "name": "方案设计",
-      "description": "设计针对性的咨询方案"
+      "description": "设计针对性的咨询方案",
     },
     {
       "id": "a-approval",
       "name": "方案审批",
-      "description": "客户审批咨询方案"
+      "description": "客户审批咨询方案",
     },
     {
       "id": "a-report",
       "name": "报告撰写",
-      "description": "生成完整的行业咨询报告"
+      "description": "生成完整的行业咨询报告",
     },
     {
       "id": "a-deliver",
       "name": "交付归档",
-      "description": "整理最终交付物包"
-    }
+      "description": "整理最终交付物包",
+    },
   ],
   "dataSources": [
     {
       "id": "business_stats",
       "chain": [
         "db",
-        "cache"
-      ]
-    }
+        "cache",
+      ],
+    },
   ],
   "acceptanceCriteria": [
     {
       "id": "ic-insight-depth",
       "name": "洞察深度",
       "description": "分析深入业务本质",
-      "critical": true
+      "critical": true,
     },
     {
       "id": "ic-recommendation",
       "name": "建议质量",
       "description": "建议具体可执行",
-      "critical": true
+      "critical": true,
     },
     {
       "id": "ic-data-support",
       "name": "数据支撑",
       "description": "结论有充分数据支撑",
-      "critical": false
-    }
-  ]
+      "critical": false,
+    },
+  ],
 };

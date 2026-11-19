@@ -6,75 +6,75 @@ globalThis.AX_OPC_DOMAIN_DATA = {
   "capabilities": [
     "tool:WebSearch",
     "tool:FileWrite",
-    "tool:FileRead"
+    "tool:FileRead",
   ],
   "kpis": [
     {
       "key": "task_count",
       "name": "任务数量",
-      "unit": "个"
+      "unit": "个",
     },
     {
       "key": "completion_rate",
       "name": "完成率",
-      "unit": "%"
-    }
+      "unit": "%",
+    },
   ],
   "workflowSteps": [
     {
       "id": "step1",
       "name": "分析阶段",
-      "description": "需求分析"
+      "description": "需求分析",
     },
     {
       "id": "step2",
       "name": "设计阶段",
-      "description": "方案设计"
+      "description": "方案设计",
     },
     {
       "id": "step3",
       "name": "执行阶段",
-      "description": "执行实施"
+      "description": "执行实施",
     },
     {
       "id": "step4",
       "name": "评估阶段",
-      "description": "结果评估"
-    }
+      "description": "结果评估",
+    },
   ],
   "dataSources": [
     {
       "id": "business_stats",
       "chain": [
         "db",
-        "cache"
-      ]
-    }
+        "cache",
+      ],
+    },
   ],
   "acceptanceCriteria": [
     {
       "id": "gd-gameplay",
       "name": "游戏玩法",
       "description": "玩法有趣且具有足够深度",
-      "critical": true
+      "critical": true,
     },
     {
       "id": "gd-balance",
       "name": "平衡性",
       "description": "游戏数值和系统保持平衡",
-      "critical": true
+      "critical": true,
     },
     {
       "id": "gd-performance",
       "name": "性能表现",
       "description": "游戏帧率稳定，无明显卡顿",
-      "critical": true
+      "critical": true,
     },
     {
       "id": "gd-player-satisfaction",
       "name": "玩家满意度",
       "description": "玩家测试反馈积极",
-      "critical": false
-    }
-  ]
+      "critical": false,
+    },
+  ],
 };

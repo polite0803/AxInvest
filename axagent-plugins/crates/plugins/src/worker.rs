@@ -478,6 +478,8 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // embedding 计费的索引入队）⇒ 必须 `write`。同接缝将来开的读 op 一律 `None`。
         ("wiki.store", "sync_note_to_knowledge_base") => Some(PluginPermission::Write),
         ("wiki.store", "create_note") => Some(PluginPermission::Write),
+        ("wiki.store", "update_note") => Some(PluginPermission::Write),
+        ("wiki.store", "delete_note") => Some(PluginPermission::Write),
         // `stock.analysis` 的唯一写 op：批量 upsert 改 `market_mainlines` 表（插入 / 更新 /
         // 可选归档当日未提及的主线，归档后要再 upsert 才回到 active ⇒ 不可逆）。
         // 另两个 op（`industry_constituents` / `stock_factor`）是纯读面 ⇒ **必须仍是
@@ -2928,6 +2930,44 @@ impl HostPeer {
                 };
                 match result {
                     Ok(notes) => to_value("Vec<Note>", &notes),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "update_note" => {
+                // 入参：`id` 标量 + `input` 对象（宿主 UpdateNoteInput）。
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let input: axagent_harness::note_dtos::UpdateNoteInput =
+                    match deserialize_arg(&args, "input", seam) {
+                        Ok(input) => input,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_note(id, input)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(note) => to_value("Note", &note),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "delete_note" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.delete_note(id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => to_value("()", &()),
                     Err(e) => seam_provider_error(e),
                 }
             },

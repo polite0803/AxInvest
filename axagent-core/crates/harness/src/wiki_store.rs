@@ -69,6 +69,18 @@ pub trait WikiStoreProvider: Send + Sync {
         ))
     }
 
+    /// 删除一条 Wiki 笔记（写，危险）。
+    ///
+    /// 宿主侧同步完成向量删除、缓存失效与 DB 行删除。要求插件声明 `write`。
+    async fn delete_note(
+        &self,
+        _id: String,
+    ) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::delete_note 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 列出一个 vault 下的全部未删除笔记（按标题升序，与宿主 `list_notes` 同口径）。
     async fn list_notes(&self, _vault_id: String) -> Result<Vec<crate::note_dtos::Note>> {
         Err(AxAgentError::Provider(

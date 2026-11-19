@@ -86,6 +86,25 @@ impl WikiStoreProvider for FixedWikiStore {
         Ok(sample_note(id))
     }
 
+    async fn update_note(
+        &self,
+        id: String,
+        input: axagent_harness::note_dtos::UpdateNoteInput,
+    ) -> axagent_harness::core_error::Result<axagent_harness::note_dtos::Note> {
+        let mut note = sample_note(id);
+        if let Some(title) = input.title {
+            note.title = title;
+        }
+        if let Some(content) = input.content {
+            note.content = content;
+        }
+        Ok(note)
+    }
+
+    async fn delete_note(&self, _id: String) -> axagent_harness::core_error::Result<()> {
+        Ok(())
+    }
+
     async fn sync_note_to_knowledge_base(
         &self,
         request: SyncNoteToKnowledgeBaseRequest,
@@ -202,6 +221,30 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
     let created: Value = serde_json::from_str(&created).expect("创建输出应是 JSON 文本");
     assert_eq!(created["id"], "note-created");
     assert_eq!(created["title"], "新笔记");
+
+    let updated = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_update_note",
+            &json!({ "id": "note-created", "input": { "title": "改过的标题" } }),
+        )
+        .expect("wiki 更新命令应可执行");
+    let updated: Value = serde_json::from_str(&updated).expect("更新输出应是 JSON 文本");
+    assert_eq!(updated["title"], "改过的标题");
+
+    let deleted = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "wiki_delete_note",
+            &json!({ "id": "note-created" }),
+        )
+        .expect("wiki 删除命令应可执行");
+    let deleted: Value = serde_json::from_str(&deleted).expect("删除输出应是 JSON 文本");
+    // 单位回执：宿主返回 `()` ⇒ 序列化后是 `null`（插件侧不包装任何结构）。
+    assert!(
+        deleted.is_null() || deleted.as_object().is_some_and(|o| o.is_empty()),
+        "删除回执应为 null 或空对象：{deleted:?}"
+    );
 
     drop(manager);
     handle.undo();

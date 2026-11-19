@@ -7535,7 +7535,8 @@ async function executeCommand<T>(
       setWikiNotes([...getWikiNotes(), note]);
       return note as unknown as T;
     }
-    case "wiki_notes_update": {
+    case "wiki_notes_update":
+    case "wiki_update_note": {
       const id = String(args?.id ?? "");
       const input = (args?.input ?? {}) as Record<string, unknown>;
       const notes = getWikiNotes();
@@ -7545,10 +7546,14 @@ async function executeCommand<T>(
         ...notes[idx],
         title: input.title !== undefined ? String(input.title) : notes[idx].title,
         content: input.content !== undefined ? String(input.content) : notes[idx].content,
-        pageType: input.page_type !== undefined
+        pageType: input.pageType !== undefined
+          ? String(input.pageType)
+          : input.page_type !== undefined
           ? String(input.page_type)
           : notes[idx].pageType,
-        relatedPages: Array.isArray(input.related_pages)
+        relatedPages: Array.isArray(input.relatedPages)
+          ? (input.relatedPages as string[])
+          : Array.isArray(input.related_pages)
           ? (input.related_pages as string[])
           : notes[idx].relatedPages,
         userEdited: true,
@@ -7560,7 +7565,8 @@ async function executeCommand<T>(
       setWikiNotes(next);
       return updated as unknown as T;
     }
-    case "wiki_notes_delete": {
+    case "wiki_notes_delete":
+    case "wiki_delete_note": {
       const id = String(args?.id ?? "");
       setWikiNotes(getWikiNotes().filter((n) => n.id !== id));
       return undefined as T;

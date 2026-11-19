@@ -5498,6 +5498,34 @@ function wikiManifest({ version, binaryName, sha256 }) {
         },
       },
       {
+        name: "wiki_update_note",
+        description: "更新一条 Wiki 笔记（经宿主 wiki.store 写面）",
+        command: "worker://wiki_update_note",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "宿主侧笔记 id" },
+            input: {
+              type: "object",
+              description: "宿主 UpdateNoteInput（camelCase：title/content/pageType/relatedPages）",
+            },
+          },
+          required: ["id", "input"],
+        },
+      },
+      {
+        name: "wiki_delete_note",
+        description: "删除一条 Wiki 笔记（经宿主 wiki.store 写面）",
+        command: "worker://wiki_delete_note",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { id: { type: "string", description: "宿主侧笔记 id" } },
+          required: ["id"],
+        },
+      },
+      {
         name: "wiki_sync_note_to_knowledge_base",
         description: "把一条 Wiki 笔记同步进知识库（经宿主 wiki.store 写面）",
         command: "worker://wiki_sync_note_to_knowledge_base",

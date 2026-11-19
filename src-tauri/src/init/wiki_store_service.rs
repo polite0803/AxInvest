@@ -248,9 +248,7 @@ impl WikiStoreProvider for HostWikiStore {
 
     async fn list_notes(&self, vault_id: String) -> Result<Vec<axagent_harness::note_dtos::Note>> {
         if vault_id.trim().is_empty() {
-            return Err(AxAgentError::Validation(
-                "wiki.store::list_notes 需要非空 vaultId".into(),
-            ));
+            return Err(AxAgentError::Validation("wiki.store::list_notes 需要非空 vaultId".into()));
         }
         let state = self.app.state::<crate::AppState>();
         axagent_dao::repo::note::list_notes(state.harness.db(), &vault_id)
@@ -258,14 +256,82 @@ impl WikiStoreProvider for HostWikiStore {
             .map_err(to_provider_error)
     }
 
+    async fn delete_note(&self, id: String) -> Result<()> {
+        if id.trim().is_empty() {
+            return Err(AxAgentError::Validation("wiki.store::delete_note 需要非空 id".into()));
+        }
+        let state = self.app.state::<crate::AppState>();
+
+        // 删除前先取出 vault_id，用于清理向量嵌入和失效图谱缓存
+        // 区分 NotFound（直接返回 Ok）和 DB 错误（返回错误），避免向量残留
+        let (vault_id, existing_content) =
+            match axagent_dao::repo::note::get_note(state.harness.db(), &id).await {
+                Ok(existing) => {
+                    let collection_id = format!("wiki_{}", existing.vault_id);
+                    // 向量删不掉就中止删除，避免向量残留
+                    state
+                        .vector_store
+                        .delete_document_embeddings(&collection_id, &id)
+                        .await
+                        .map_err(|e| {
+                            crate::commands::error::ErrorResponse::err_with_detail(
+                                crate::commands::error_code::wiki::DELETE_NOTE_FAILED,
+                                format!("清理笔记 {id} 的向量失败: {e}"),
+                            )
+                        })?;
+                    (existing.vault_id, Some(existing.content))
+                },
+                Err(e) => {
+                    if e.to_string().contains("NotFound") {
+                        // 已不存在，直接返回 Ok
+                        return Ok(());
+                    }
+                    return Err(AxAgentError::Provider(format!(
+                        "wiki.store::delete_note 读取笔记失败: {e}"
+                    )));
+                },
+            };
+
+        // 删除笔记行
+        axagent_dao::repo::note::delete_note(state.harness.db(), &id)
+            .await
+            .map_err(to_provider_error)?;
+
+        // 失效图谱缓存
+        let _ =
+            axagent_dao::repo::wiki_graph_cache::invalidate_cache(state.harness.db(), &vault_id)
+                .await;
+
+        // 写入反馈数据湖
+        if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
+            let record = axagent_harness::WikiEditRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                conversation_id: None,
+                wiki_id: vault_id.clone(),
+                note_id: id.clone(),
+                operation: "delete".to_string(),
+                before_snippet: existing_content.map(|c| {
+                    axagent_harness::util_fns::truncate_to_char_boundary(&c, 500).to_string()
+                }),
+                after_snippet: None,
+                reason: None,
+                quality_score: None,
+                created_at: chrono::Utc::now().timestamp_millis(),
+            };
+            if let Err(e) = lake.insert_wiki_edit(record).await {
+                tracing::warn!("Wiki 删除反馈写入失败 note_id={}: {}", id, e);
+            }
+        }
+
+        Ok(())
+    }
+
     async fn get_note(&self, id: String) -> Result<axagent_harness::note_dtos::Note> {
         if id.trim().is_empty() {
             return Err(AxAgentError::Validation("wiki.store::get_note 需要非空 id".into()));
         }
         let state = self.app.state::<crate::AppState>();
-        axagent_dao::repo::note::get_note(state.harness.db(), &id)
-            .await
-            .map_err(to_provider_error)
+        axagent_dao::repo::note::get_note(state.harness.db(), &id).await.map_err(to_provider_error)
     }
 
     async fn get_note_by_path(

@@ -277,78 +277,14 @@ pub async fn wiki_notes_update(
 
 #[agent_command(domain = wiki, safety = Dangerous, call_mode = StateInput, description = "删除 Wiki 笔记")]
 #[tauri::command]
-pub async fn wiki_notes_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    // 删除前先取出 vault_id，用于清理向量嵌入和失效图谱缓存
-    // 区分 NotFound（直接返回 Ok）和 DB 错误（返回错误），避免向量残留
-    let (vault_id, existing_content) =
-        match axagent_dao::repo::note::get_note(state.harness.db(), &id).await {
-            Ok(existing) => {
-                let collection_id = format!("wiki_{}", existing.vault_id);
-                // 向量删不掉就中止删除（2026-09-15 修）：此前 `let _ =` 吞错，于是笔记
-                // 记录被删而旧向量残留 —— 已删除笔记的内容继续被检索命中。
-                state.vector_store.delete_document_embeddings(&collection_id, &id).await.map_err(
-                    |e| {
-                        crate::commands::error::ErrorResponse::err_with_detail(
-                            crate::commands::error_code::wiki::DELETE_NOTE_FAILED,
-                            format!("清理笔记 {id} 的向量失败: {e}"),
-                        )
-                    },
-                )?;
-                (Some(existing.vault_id), Some(existing.content))
-            },
-            Err(e) if e.to_string().contains("NotFound") || e.to_string().contains("not found") => {
-                // 笔记不存在，视为已删除，直接返回成功
-                return Ok(());
-            },
-            Err(e) => {
-                // DB 错误：返回错误，避免在不知道 vault_id 的情况下删除导致向量残留
-                return Err(String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                )));
-            },
-        };
-
-    axagent_dao::repo::note::delete_note(state.harness.db(), &id).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    // 失效图谱缓存（notes 表有删除）
-    if let Some(ref vid) = vault_id {
-        let _ =
-            axagent_dao::repo::wiki_graph_cache::invalidate_cache(state.harness.db(), vid).await;
-    }
-
-    // 写入反馈数据湖
-    if let (Some(vid), Some(content)) = (&vault_id, &existing_content) {
-        if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
-            let before_snippet = if content.len() > 500 {
-                content[..500].to_string()
-            } else {
-                content.clone()
-            };
-            let record = axagent_harness::WikiEditRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                conversation_id: None,
-                wiki_id: vid.clone(),
-                note_id: id.clone(),
-                operation: "delete".to_string(),
-                before_snippet: Some(before_snippet),
-                after_snippet: None,
-                reason: None,
-                quality_score: None,
-                created_at: chrono::Utc::now().timestamp_millis(),
-            };
-            if let Err(e) = lake.insert_wiki_edit(record).await {
-                tracing::warn!("Wiki 编辑反馈写入失败 note_id={}: {}", id, e);
-            }
-        }
-    }
-
-    Ok(())
+pub async fn wiki_notes_delete(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    // 向量清理、DB 行删除、缓存失效与反馈数据湖已下沉 wiki.store provider。
+    let service = crate::init::wiki_store_service::HostWikiStore::new(app);
+    service.delete_note(id).await.map_err(|e| e.to_string())
 }
 
 #[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "重建 Wiki 索引")]

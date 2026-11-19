@@ -268,6 +268,44 @@ fn create_note_is_a_write_seam_call_with_camel_case_input() {
     assert_command_value(&response, &note);
     worker.shutdown();
 }
+
+#[test]
+fn update_and_delete_notes_are_write_seam_calls() {
+    // ① 更新：id 标量 + input 对象。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    let input = serde_json::json!({ "title": "改标题", "content": "# 新" });
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_update_note",
+        serde_json::json!({ "id": "note-3", "input": input }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "update_note");
+    assert_eq!(call.args["args"]["id"], "note-3");
+    assert_eq!(call.args["args"]["input"]["title"], "改标题");
+    let note = sample_note("note-3");
+    worker.send_response(
+        &FrameResponse::success(note.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &note);
+    worker.shutdown();
+
+    // ② 删除：只有 id；宿主回执是空对象。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_delete_note", serde_json::json!({ "id": "note-3" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "delete_note");
+    assert_eq!(call.args["args"]["id"], "note-3");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({}))
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(&response, &serde_json::json!({}));
+    worker.shutdown();
+}
 #[test]
 fn unknown_commands_are_rejected() {
     let mut worker = Worker::spawn_as(PLUGIN_ID);

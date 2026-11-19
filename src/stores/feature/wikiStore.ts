@@ -153,7 +153,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   updateNote: async (id, input) => {
     try {
-      const updated = await invoke<Note>("wiki_notes_update", { id, input });
+      const updated = await invokePluginCommand<Note>("wiki_update_note", { id, input });
       set((s) => ({
         notes: s.notes.map((n) => (n.id === id ? updated : n)),
         error: null,
@@ -167,7 +167,7 @@ export const useWikiStore = create<WikiState>((set, get) => ({
 
   deleteNote: async (id) => {
     try {
-      await invoke("wiki_notes_delete", { id });
+      await invokePluginCommand("wiki_delete_note", { id });
       set((s) => ({
         notes: s.notes.filter((n) => n.id !== id),
         selectedNoteId: s.selectedNoteId === id ? null : s.selectedNoteId,

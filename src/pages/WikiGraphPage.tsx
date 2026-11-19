@@ -214,13 +214,13 @@ export function WikiGraphPage() {
     if (!wikiIdFromUrl) { return; }
     setRepairing(true);
     try {
-      const result = await invoke<{
+      const result = await invokePluginCommand<{
         wikiId: string;
         kbId: string | null;
         repairedNotes: number;
         kbLinked: boolean;
         message: string;
-      }>("repair_wiki_graph", { wikiId: wikiIdFromUrl });
+      }>("wiki_repair_graph", { wikiId: wikiIdFromUrl });
 
       if (result.kbLinked) {
         message.success(

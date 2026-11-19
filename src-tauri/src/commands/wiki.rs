@@ -12,6 +12,7 @@ use axagent_harness::WikiStoreProvider;
 use axagent_harness::graph_dtos::{GraphEdge, LinkGraph};
 use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::NoteSearchResult;
+use axagent_harness::{RepairWikiGraphResult, WikiUpdateResult};
 use axagent_search::hybrid_search::HybridSearcher;
 use axagent_search::rag::{RAGSource, WikiVaultRAG, collection_id};
 use sea_orm::{ConnectionTrait, DatabaseConnection};
@@ -116,12 +117,13 @@ pub(crate) fn enqueue_wiki_note_indexing(
     );
 }
 
-/// 更新 Wiki 元数据，目前主要用于修改 embedding_provider。
+/// `update_wiki` 的宿主实现体（更新元数据，目前主要用于修改 embedding_provider）。
+///
+/// 原宿主命令 `update_wiki` 已于 2026-11-19 P6.3 Wiki 元数据/重建/修复片退役，
+/// 调用面改走插件命令 `wiki_update_wiki` ⇒ 经 `wiki.store::update_wiki` 接缝复用本实现体。
 /// 仅当字段非空时才更新对应列。
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "更新 Wiki 信息")]
-#[tauri::command]
-pub async fn update_wiki(
-    state: State<'_, AppState>,
+pub(crate) async fn update_wiki_core(
+    state: &AppState,
     id: String,
     name: Option<String>,
     description: Option<String>,
@@ -162,19 +164,6 @@ pub async fn update_wiki(
         knowledge_base_id: updated.knowledge_base_id.clone(),
         embedding_changed: before.embedding_provider != updated.embedding_provider,
     })
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WikiUpdateResult {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub embedding_provider: Option<String>,
-    /// v118: 关联的知识库 ID
-    pub knowledge_base_id: Option<String>,
-    /// 旧 provider 与新 provider 是否不同；前端据此决定是否触发重建索引
-    pub embedding_changed: bool,
 }
 
 /// 删除 Wiki 容器：清理向量集合 + 删除数据库记录。
@@ -220,11 +209,16 @@ pub async fn wiki_notes_delete(
     service.delete_note(id).await.map_err(|e| e.to_string())
 }
 
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "重建 Wiki 索引")]
-#[tauri::command]
-pub async fn rebuild_wiki_index(
+/// `rebuild_wiki_index` 的宿主实现体（清库 + 后台逐篇重索引，fire-and-forget）。
+///
+/// 原宿主命令已于同日退役，调用面改走插件命令 `wiki_rebuild_index`
+/// ⇒ 经 `wiki.store::rebuild_index` 接缝复用本实现体。后台任务的按篇
+/// `wiki-note-indexed` 与完成 `wiki-rebuild-complete` 事件仍由宿主 `AppHandle` 发出。
+/// `app` 按**值**传入（内部引用计数）：`tokio::spawn` 的 `'static` 约束
+/// 不接受 `&AppHandle` 借用。
+pub(crate) async fn rebuild_wiki_index_core(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
     wiki_id: String,
 ) -> Result<(), String> {
     let wiki =
@@ -2348,30 +2342,15 @@ fn replace_inline_links(text: &str) -> String {
     result
 }
 
-/// 修复 Wiki 图谱关联结果
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepairWikiGraphResult {
-    /// Wiki ID
-    pub wiki_id: String,
-    /// 关联的 KB ID
-    pub kb_id: Option<String>,
-    /// 修复的笔记数量
-    pub repaired_notes: usize,
-    /// 是否成功关联了 KB
-    pub kb_linked: bool,
-    /// 消息
-    pub message: String,
-}
-
 /// 修复 Wiki 图谱关联：
 /// 1. 自动关联 Wiki 与 KB（如未关联）
 /// 2. 遍历所有笔记，重新解析 [[wikilink]] 并同步到 note_links 表
 /// 3. 失效图谱缓存，确保下次加载获取最新数据
-#[agent_command(domain = wiki, safety = Caution, call_mode = StateInput, description = "修复 Wiki 图谱关联")]
-#[tauri::command]
-pub async fn repair_wiki_graph(
-    state: State<'_, AppState>,
+///
+/// 原宿主命令 `repair_wiki_graph` 已于 2026-11-19 P6.3 Wiki 元数据/重建/修复片退役，
+/// 调用面改走插件命令 `wiki_repair_graph` ⇒ 经 `wiki.store::repair_graph` 接缝复用本实现体。
+pub(crate) async fn repair_wiki_graph_core(
+    state: &AppState,
     wiki_id: String,
 ) -> Result<RepairWikiGraphResult, String> {
     let db = state.harness.db();

@@ -965,3 +965,90 @@ fn unknown_commands_are_rejected() {
     assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_UNKNOWN));
     worker.shutdown();
 }
+
+#[test]
+fn wiki_metadata_and_maintenance_commands_map_to_host_wiki_store_seam() {
+    // 元数据更新：命令面 `id` + 四个可选字段 ⇒ 接缝侧包一层 `request`，
+    // 缺省 / null 字段一律透传 null（宿主保持原值）。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_update_wiki",
+        serde_json::json!({ "id": "w1", "embeddingProvider": "openai" }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "update_wiki");
+    assert_eq!(call.args["args"]["request"]["wikiId"], "w1");
+    assert_eq!(call.args["args"]["request"]["embeddingProvider"], "openai");
+    assert!(call.args["args"]["request"]["name"].is_null());
+    assert!(call.args["args"]["request"]["description"].is_null());
+    assert!(call.args["args"]["request"]["knowledgeBaseId"].is_null());
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({
+            "id": "w1", "name": "w", "description": null,
+            "embeddingProvider": "openai", "knowledgeBaseId": null,
+            "embeddingChanged": true,
+        }))
+        .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(
+        &response,
+        &serde_json::json!({
+            "id": "w1", "name": "w", "description": null,
+            "embeddingProvider": "openai", "knowledgeBaseId": null,
+            "embeddingChanged": true,
+        }),
+    );
+    worker.shutdown();
+
+    // 索引重建：fire-and-forget，宿主清库后立即回空回执（void）。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_rebuild_index", serde_json::json!({ "wikiId": "w1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "rebuild_index");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    worker.send_response(
+        &FrameResponse::success(serde_json::Value::Null)
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &serde_json::Value::Null);
+    worker.shutdown();
+
+    // 图谱修复：返回结构化回执（自动关联 KB + 重建链接数）。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(PLUGIN_ID, "wiki_repair_graph", serde_json::json!({ "wikiId": "w1" })));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "repair_graph");
+    assert_eq!(call.args["args"]["wikiId"], "w1");
+    let repair = serde_json::json!({
+        "wikiId": "w1", "kbId": "kb1", "repairedNotes": 3,
+        "kbLinked": true, "message": "修复完成",
+    });
+    worker.send_response(
+        &FrameResponse::success(repair.clone())
+            .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    assert_command_value(&worker.recv_response(), &repair);
+    worker.shutdown();
+}
+
+#[test]
+fn wiki_metadata_and_maintenance_commands_reject_missing_wiki_id() {
+    for (name, input) in [
+        ("wiki_update_wiki", serde_json::json!({})),
+        ("wiki_rebuild_index", serde_json::json!({})),
+        ("wiki_repair_graph", serde_json::json!({})),
+        // `wiki_update_wiki` 的可选字段必须是非空字符串或 null，数字一律拒收。
+        ("wiki_update_wiki", serde_json::json!({ "id": "w1", "embeddingProvider": 7 })),
+    ] {
+        let mut worker = Worker::spawn_as(PLUGIN_ID);
+        worker.send(&command(PLUGIN_ID, name, input));
+        assert_eq!(
+            worker.recv_response().code.as_deref(),
+            Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+            "命令 `{name}` 缺 wikiId / 传非法可选字段时必须拒收"
+        );
+        worker.shutdown();
+    }
+}

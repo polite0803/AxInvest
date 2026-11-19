@@ -51,6 +51,9 @@ const COMMAND_GET_NOTE_VERSION: &str = "wiki_note_get_version";
 const COMMAND_RESTORE_NOTE_VERSION: &str = "wiki_note_restore_version";
 const COMMAND_NOTE_FROM_TEMPLATE: &str = "wiki_note_create_from_template";
 const COMMAND_CREATE_DAILY_NOTE: &str = "wiki_create_daily_note";
+const COMMAND_UPDATE_WIKI: &str = "wiki_update_wiki";
+const COMMAND_REBUILD_INDEX: &str = "wiki_rebuild_index";
+const COMMAND_REPAIR_GRAPH: &str = "wiki_repair_graph";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -106,6 +109,22 @@ fn optional_title(input: &Value) -> Result<Option<String>, (String, String)> {
             error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
             "命令 `wiki_note_create_from_template` 的可选参数 `title` 必须是非空字符串或 null"
                 .into(),
+        )),
+    }
+}
+
+/// 取可选字符串参数；缺失 / `null` 返回 `None`（保持原值），非字符串报参数非法。
+fn optional_str(
+    input: &Value,
+    key: &str,
+    command: &str,
+) -> Result<Option<String>, (String, String)> {
+    match input.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        _ => Err((
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            format!("命令 `{command}` 的可选参数 `{key}` 必须是字符串或 null"),
         )),
     }
 }
@@ -577,6 +596,75 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("create_daily_note", json!({ "vaultId": vault_id }))
+        },
+        COMMAND_UPDATE_WIKI => {
+            let id = match require_str(&frame.input, "id") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            // 命令面键名沿用宿主原 `update_wiki`（`id` + 四个可选字段，全部 camelCase）；
+            // 接缝侧包一层 `request`，缺省 / null 字段一律透传 null ⇒ 宿主保持原值。
+            let name = match optional_str(&frame.input, "name", COMMAND_UPDATE_WIKI) {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let description = match optional_str(&frame.input, "description", COMMAND_UPDATE_WIKI) {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let embedding_provider =
+                match optional_str(&frame.input, "embeddingProvider", COMMAND_UPDATE_WIKI) {
+                    Ok(value) => value,
+                    Err((code, message)) => {
+                        return CommandFault::for_frame(&frame, code, message)
+                            .into_frame_response();
+                    },
+                };
+            let knowledge_base_id =
+                match optional_str(&frame.input, "knowledgeBaseId", COMMAND_UPDATE_WIKI) {
+                    Ok(value) => value,
+                    Err((code, message)) => {
+                        return CommandFault::for_frame(&frame, code, message)
+                            .into_frame_response();
+                    },
+                };
+            seam_call(
+                "update_wiki",
+                json!({
+                    "request": {
+                        "wikiId": id,
+                        "name": name,
+                        "description": description,
+                        "embeddingProvider": embedding_provider,
+                        "knowledgeBaseId": knowledge_base_id,
+                    }
+                }),
+            )
+        },
+        COMMAND_REBUILD_INDEX => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            // fire-and-forget：宿主清库后立即返回，逐篇进度走 `wiki-note-indexed` 事件。
+            seam_call("rebuild_index", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_REPAIR_GRAPH => {
+            let wiki_id = match require_str(&frame.input, "wikiId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call("repair_graph", json!({ "wikiId": wiki_id }))
         },
         other => {
             return CommandFault::for_frame(

@@ -5854,6 +5854,56 @@ function wikiManifest({ version, binaryName, sha256 }) {
           required: ["vaultId"],
         },
       },
+      {
+        name: "wiki_update_wiki",
+        description: "更新 Wiki 元数据（当前主要用途：改 embeddingProvider；经宿主 wiki.store 写面）",
+        command: "worker://wiki_update_wiki",
+        // 宿主等价命令 `update_wiki` 是 `safety = Caution` ⇒ 清单对齐 `workspace-write`
+        // （投影同为 Caution），档位等阶，无需升档。
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "宿主侧 wiki id" },
+            name: { type: "string", description: "可选新名称，缺省 / null 保持原值" },
+            description: { type: "string", description: "可选新描述，缺省 / null 保持原值" },
+            embeddingProvider: {
+              type: "string",
+              description: "可选新 embedding provider，缺省 / null 保持原值",
+            },
+            knowledgeBaseId: {
+              type: "string",
+              description: "可选关联知识库 id，缺省 / null 保持原值",
+            },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "wiki_rebuild_index",
+        description:
+          "重建 Wiki 向量索引（清库后后台逐篇重索引，进度走 wiki-note-indexed 事件；经宿主 wiki.store 写面）",
+        command: "worker://wiki_rebuild_index",
+        // 宿主等价命令 `rebuild_wiki_index` 是 `safety = Caution` ⇒ 等阶 `workspace-write`。
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_repair_graph",
+        description: "修复 Wiki 图谱关联（自动关联 KB + 全量重建链接表 + 失效图谱缓存；经宿主 wiki.store 写面）",
+        command: "worker://wiki_repair_graph",
+        // 宿主等价命令 `repair_wiki_graph` 是 `safety = Caution` ⇒ 等阶 `workspace-write`。
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
+          required: ["wikiId"],
+        },
+      },
     ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };

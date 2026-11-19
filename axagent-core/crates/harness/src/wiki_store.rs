@@ -55,9 +55,79 @@ pub struct SyncNoteLinksRequest {
     pub links: Vec<(String, String, String)>,
 }
 
+/// `update_wiki` op 的入参。
+///
+/// 只有 `wikiId` 必填；其余四个字段缺省 / `null` 都表示「保持原值」，
+/// 与宿主 dao `update_wiki` 的判空语义逐字对齐。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWikiRequest {
+    pub wiki_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub embedding_provider: Option<String>,
+    pub knowledge_base_id: Option<String>,
+}
+
+/// `update_wiki` op 的回执。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiUpdateResult {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub embedding_provider: Option<String>,
+    /// 关联的知识库 ID
+    pub knowledge_base_id: Option<String>,
+    /// 旧 provider 与新 provider 是否不同；前端据此决定是否触发重建索引
+    pub embedding_changed: bool,
+}
+
+/// `repair_wiki_graph` op 的回执。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairWikiGraphResult {
+    pub wiki_id: String,
+    /// 修复后关联到的 KB（无匹配 KB 时为 `None`）
+    pub kb_id: Option<String>,
+    pub repaired_notes: usize,
+    pub kb_linked: bool,
+    /// 宿主生成的本地化中文消息；插件侧只透传，不参与判定
+    pub message: String,
+}
+
 /// Wiki 写接缝的宿主 provider。
 #[async_trait]
 pub trait WikiStoreProvider: Send + Sync {
+    /// 更新一个 Wiki 的元数据（写）。
+    ///
+    /// 只有 `request.wikiId` 必填；其余四个字段缺省 / `null` 都表示「保持原值」，
+    /// 与宿主 dao `update_wiki` 的判空语义逐字对齐。回执里的 `embeddingChanged`
+    /// 由宿主对比更新前后的 provider 得出，前端据此决定是否触发一次重建索引。
+    async fn update_wiki(&self, _request: UpdateWikiRequest) -> Result<WikiUpdateResult> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::update_wiki 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 重建一个 Wiki 的向量索引（写，**异步**）。
+    ///
+    /// 宿主清掉旧 collection 后在后台逐篇重索引，并按篇发 `wiki-note-indexed` 事件、
+    /// 完成时发 `wiki-rebuild-complete` 事件；本 op 在**清库后立即返回**，
+    /// 不等后台任务结束（前端靠事件刷新进度，不靠本 op 的回执）。
+    async fn rebuild_index(&self, _wiki_id: String) -> Result<()> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::rebuild_index 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 修复一个 Wiki 的图谱关联（写）：自动关联 KB + 全量重建链接表 + 失效图谱缓存。
+    async fn repair_graph(&self, _wiki_id: String) -> Result<RepairWikiGraphResult> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::repair_graph 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
     /// 列出笔记的出链（`note_links` 中以该 note 为 source 的行）。
     async fn get_note_links(&self, _note_id: String) -> Result<Vec<NoteLink>> {
         Err(AxAgentError::Provider(

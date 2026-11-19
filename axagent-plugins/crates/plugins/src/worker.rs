@@ -493,6 +493,13 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         ("wiki.store", "restore_note_version") => Some(PluginPermission::Write),
         ("wiki.store", "create_note_from_template") => Some(PluginPermission::Write),
         ("wiki.store", "create_daily_note") => Some(PluginPermission::Write),
+        // 元数据更新 / 索引重建 / 图谱修复：均写宿主数据（元数据列 / 清空重索引 /
+        // 链接表全量重建 + 缓存失效）⇒ 写面。同接缝的 `get_graph` / `detect_communities`
+        // 是**实时计算**（不读也不写缓存）⇒ 仍是读面，必须保持 `None`。
+        (
+            "wiki.store",
+            "update_wiki" | "rebuild_index" | "repair_graph",
+        ) => Some(PluginPermission::Write),
         // 图谱缓存失效：删缓存行 ⇒ 写面。同接缝的 `get_graph` / `detect_communities`
         // 是**实时计算**（不读也不写缓存）⇒ 仍是读面，必须保持 `None`。
         ("wiki.store", "invalidate_graph_cache") => Some(PluginPermission::Write),
@@ -3225,6 +3232,57 @@ impl HostPeer {
                 };
                 match result {
                     Ok(()) => to_value("()", &()),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "update_wiki" => {
+                // 入参：`request` 对象（宿主 UpdateWikiRequest，只有 wikiId 必填）。
+                let request: axagent_harness::UpdateWikiRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.update_wiki(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("WikiUpdateResult", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "rebuild_index" => {
+                // fire-and-forget：宿主清库后立即返回，后台逐篇重索引并按篇发事件。
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.rebuild_index(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(()) => to_value("()", &()),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "repair_graph" => {
+                let wiki_id: String = match deserialize_arg(&args, "wikiId", seam) {
+                    Ok(wiki_id) => wiki_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.repair_graph(wiki_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("RepairWikiGraphResult", &outcome),
                     Err(e) => seam_provider_error(e),
                 }
             },

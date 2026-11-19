@@ -7613,6 +7613,38 @@ async function executeCommand<T>(
       setWikiNotes(getWikiNotes().filter((n) => n.id !== id));
       return undefined as T;
     }
+    case "wiki_update_wiki": {
+      // 元数据更新：浏览器模式无真实 DB ⇒ 回一份「provider 已改」的回执，
+      // 让前端 `embeddingChanged` 分支（提示重建索引）在 dev 模式也可走通。
+      const id = String(args?.id ?? "");
+      return {
+        id,
+        name: args?.name !== undefined ? String(args.name) : "Mock Wiki",
+        description: args?.description !== undefined ? String(args.description) : null,
+        embeddingProvider: args?.embeddingProvider !== undefined
+          ? String(args.embeddingProvider)
+          : null,
+        knowledgeBaseId: args?.knowledgeBaseId !== undefined
+          ? String(args.knowledgeBaseId)
+          : null,
+        embeddingChanged: args?.embeddingProvider !== undefined,
+      } as unknown as T;
+    }
+    case "wiki_rebuild_index": {
+      // 索引重建是宿主后台任务：浏览器模式无向量库 ⇒ 立即空回执（void）。
+      return undefined as T;
+    }
+    case "wiki_repair_graph": {
+      // 图谱修复：浏览器模式无链接表 ⇒ 空修复回执（0 篇、未关联 KB）。
+      const wikiId = String(args?.wikiId ?? args?.wiki_id ?? "");
+      return {
+        wikiId,
+        kbId: null,
+        repairedNotes: 0,
+        kbLinked: false,
+        message: "修复完成：修复 0 篇笔记的链接（未找到匹配的 KB）",
+      } as unknown as T;
+    }
     case "wiki_note_create_from_template":
     case "wiki_create_daily_note": {
       const vaultId = String(args?.vaultId ?? args?.vault_id ?? "");

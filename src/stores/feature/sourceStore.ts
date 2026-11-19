@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { SourceConfig, UnifiedSource } from "@/types";
 import { create } from "zustand";
 
@@ -134,7 +135,7 @@ export const useSourceStore = create<SourceState>((set, get) => ({
         break;
       }
       case "wiki": {
-        await invoke("update_wiki", {
+        await invokePluginCommand("wiki_update_wiki", {
           id: source.id,
           // dao::repo::wiki::update_wiki 仅在 Some 时更新；传 undefined 保持原值
           embeddingProvider: newProvider,
@@ -166,7 +167,7 @@ export const useSourceStore = create<SourceState>((set, get) => ({
         await invoke("rebuild_memory_index", { namespaceId: containerId });
         break;
       case "wiki":
-        await invoke("rebuild_wiki_index", { wikiId: containerId });
+        await invokePluginCommand("wiki_rebuild_index", { wikiId: containerId });
         break;
       default:
         throw new Error(`Unsupported container type: ${containerType}`);

@@ -17,8 +17,8 @@ use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::BacklinkInfo;
 use axagent_harness::wiki_dtos::NoteVersion;
 use axagent_harness::{
-    SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest,
-    WikiStoreProvider,
+    RepairWikiGraphResult, SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome,
+    SyncNoteToKnowledgeBaseRequest, UpdateWikiRequest, WikiStoreProvider, WikiUpdateResult,
 };
 use tauri::{AppHandle, Manager};
 
@@ -249,6 +249,49 @@ impl HostWikiStore {
 
 #[async_trait]
 impl WikiStoreProvider for HostWikiStore {
+    async fn update_wiki(&self, request: UpdateWikiRequest) -> Result<WikiUpdateResult> {
+        if request.wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation("wiki.store::update_wiki 需要非空 wikiId".into()));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::update_wiki_core(
+            &state,
+            request.wiki_id,
+            request.name,
+            request.description,
+            request.embedding_provider,
+            request.knowledge_base_id,
+        )
+        .await
+        .map_err(AxAgentError::Provider)
+    }
+
+    async fn rebuild_index(&self, wiki_id: String) -> Result<()> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::rebuild_index 需要非空 wikiId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        // 后台任务按 `'static` 派发 ⇒ AppHandle 按**值**传入（内部廉价引用计数），
+        // 不能借 `&self.app`：借用撑不过 spawn 的 `'static` 约束。
+        crate::commands::wiki::rebuild_wiki_index_core(self.app.clone(), &state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
+    async fn repair_graph(&self, wiki_id: String) -> Result<RepairWikiGraphResult> {
+        if wiki_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::repair_graph 需要非空 wikiId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::repair_wiki_graph_core(&state, wiki_id)
+            .await
+            .map_err(AxAgentError::Provider)
+    }
+
     async fn get_note_links(
         &self,
         note_id: String,

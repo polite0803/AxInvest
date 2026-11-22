@@ -4,13 +4,14 @@
  * 从主仓 `config/opc/domain_packs/**` 生成声明式 OPC 插件页面数据。
  *
  * 产物随插件 workspace 提交，所以拷出独立 SDK 树后打包不再依赖主仓 `config/`。
- * `--check` 用同一生成结果与盘上文件逐字比较；YAML 改了而生成物未更新时 CI 会红。
+ * `--check` 按同一生成结果比对盘上文件：HTML 逐字，数据按 JSON 语义（独立仓产物由旧版
+ * dprint 排版，尾逗号 / 长串折行差异不算过期）；YAML 改了而数据未更新时 CI 会红。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
-import { PLUGIN_CONTRACT } from "./lib/plugin-repos.mjs";
+import { PLUGIN_CONTRACT, pluginWebPagesDir } from "./lib/plugin-repos.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const REGISTRY = join(ROOT, "axagent-plugins", "scripts", "opc-domain-pack-plugins.json");
@@ -148,6 +149,21 @@ function renderData(data) {
   return `globalThis.AX_OPC_DOMAIN_DATA = ${JSON.stringify(data, null, 2)};\n`;
 }
 
+/**
+ * 取出页面数据本体用于比对。独立仓产物由旧版 dprint 排版（尾逗号 / 长串折行），
+ * 与当前 dprint 逐字不同但数据相同；只验 YAML → 数据是否同步，不验排版漂移。
+ */
+function dataFingerprint(source) {
+  const match = /^globalThis\.AX_OPC_DOMAIN_DATA = ([\s\S]*);\s*$/.exec(source);
+  if (!match) return null;
+  try {
+    // 旧产物的尾逗号不是严格 JSON，只去掉 JSON 结构中的尾逗号再解析。
+    return JSON.stringify(JSON.parse(match[1].replace(/,(\s*[}\]])/g, "$1")));
+  } catch {
+    return null;
+  }
+}
+
 function formatJs(source, path) {
   const result = spawnSync(
     process.execPath,
@@ -163,7 +179,9 @@ function formatJs(source, path) {
 function writeOrCheck(path, content, problems) {
   if (CHECK) {
     const actual = existsSync(path) ? readFileSync(path, "utf8") : "";
-    if (actual !== content) { problems.push(`${relative(ROOT, path)} 已过期，请运行 node scripts/generate-declarative-opc-pages.mjs`); }
+    const expected = path.endsWith("domain-data.js") ? dataFingerprint(content) : content;
+    const got = path.endsWith("domain-data.js") ? dataFingerprint(actual) : actual;
+    if (got === null || got !== expected) { problems.push(`${relative(ROOT, path)} 已过期，请运行 node scripts/generate-declarative-opc-pages.mjs`); }
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
@@ -195,7 +213,8 @@ function main() {
       continue;
     }
     const withBundle = byPluginId.get(slice.pluginId).pageAssets.includes("bundle.js");
-    const pageDir = join(ROOT, "axagent-plugins", "crates", slice.pluginId, "web", "pages");
+    // 插件源码权威在独立仓；主仓 `axagent-plugins/crates/` 副本已删除，不再写入。
+    const pageDir = pluginWebPagesDir(ROOT, slice.pluginId.replace(/^plugin-/, ""));
     const indexPath = join(pageDir, "index.html");
     const dataPath = join(pageDir, "domain-data.js");
     writeOrCheck(indexPath, pageHtml(withBundle), problems);

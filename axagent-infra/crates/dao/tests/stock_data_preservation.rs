@@ -76,14 +76,28 @@ async fn upgrade_reconciliation_preserves_stock_business_rows() {
     seed_stock_rows(db).await;
 
     assert_eq!(stock_analyses::Entity::find().all(db).await.expect("查分析").len(), 1);
-    assert_eq!(reco_picks::Entity::find().all(db).await.expect("查荐股").len(), 1);
+    assert!(
+        reco_picks::Entity::find_by_id("reco-preserve-1".to_string())
+            .one(db)
+            .await
+            .expect("查荐股")
+            .is_some(),
+        "升级前荐股 fixture 行应存在"
+    );
     assert_eq!(portfolio_holdings::Entity::find().all(db).await.expect("查持仓").len(), 1);
 
     let outcome = bootstrap_schema(db).await.expect("股票表升级收敛应成功");
     assert!(outcome.refusal.is_none(), "升级收敛不得被拒");
 
     assert_eq!(stock_analyses::Entity::find().all(db).await.expect("查分析").len(), 1);
-    assert_eq!(reco_picks::Entity::find().all(db).await.expect("查荐股").len(), 1);
+    assert!(
+        reco_picks::Entity::find_by_id("reco-preserve-1".to_string())
+            .one(db)
+            .await
+            .expect("查荐股")
+            .is_some(),
+        "升级后荐股 fixture 行应保留"
+    );
     assert_eq!(portfolio_holdings::Entity::find().all(db).await.expect("查持仓").len(), 1);
 
     let analysis = stock_analyses::Entity::find_by_id("analysis-preserve-1".to_string())

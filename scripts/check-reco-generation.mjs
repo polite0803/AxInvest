@@ -201,6 +201,10 @@ const EXEMPT = new Map([
     "src-tauri/src/commands/stock_workflow/reco_history.rs|delete_serenity_pick",
     "R1：find_by_id 单行读删，主键即代际",
   ],
+  [
+    `${crateRel("dao", "tests/stock_data_preservation.rs")}|upgrade_reconciliation_preserves_stock_business_rows`,
+    "R1：数据保留测试按固定主键回查 fixture 行，主键即代际；不统计候选池分母",
+  ],
 ]);
 
 /**
@@ -319,6 +323,10 @@ const POOL_C = new Map([
   [
     `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}|load_pick_versions`,
     "按 pick_id 主键回查 reco_version，与降级无关",
+  ],
+  [
+    `${crateRel("dao", "tests/stock_data_preservation.rs")}|upgrade_reconciliation_preserves_stock_business_rows`,
+    "数据保留测试按固定主键回查 fixture 行，与 synthetic 降级无关",
   ],
   ["src-tauri/src/commands/backtest_validation.rs|compute_validation_report", "报告侧主键回查"],
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail_core", "按主键取详情"],

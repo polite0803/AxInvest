@@ -31,6 +31,8 @@ const MANAGER_RS = join(ROOT, "axagent-plugins", "crates", "plugins", "src", "ma
 const PLUGIN_CMD_RS = join(ROOT, "src-tauri", "src", "commands", "plugin.rs");
 const GALLERY_TSX = join(ROOT, "src", "components", "chat", "PluginGallery.tsx");
 const BUNDLE_SCRIPT = pluginBundleScript(ROOT, "opc");
+/** CI 安全面只读主仓打包器；独立仓副本由本地集成入口验证。 */
+const MAIN_BUNDLE_SCRIPT = join(ROOT, "axagent-plugins", "scripts", "build-plugin-bundle.mjs");
 
 function run(command, args, cwd = ROOT) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8", windowsHide: true });
@@ -275,8 +277,8 @@ function verifyFrontendFreezeContract() {
   );
 }
 
-function verifyBundleReleaseShape() {
-  const source = readFileSync(BUNDLE_SCRIPT, "utf8");
+function verifyBundleReleaseShape(script = BUNDLE_SCRIPT) {
+  const source = readFileSync(script, "utf8");
   for (const required of ["plugin.json", "pages/index.html"]) {
     assert(source.includes(required), `打包器未声明发布地址安装所需资产：${required}`);
   }
@@ -303,7 +305,7 @@ async function main() {
   // 逐项断言；它是子集，但**不是** `|| true` 静默放行，输出也明确标注范围。
   if (process.argv.includes("--ci-safe")) {
     run(process.execPath, [RELEASE_GEN, "--selftest"]);
-    verifyBundleReleaseShape();
+    verifyBundleReleaseShape(MAIN_BUNDLE_SCRIPT);
     await verifyFrontendNormalization();
     verifyFrontendFreezeContract();
     verifyRustContract();

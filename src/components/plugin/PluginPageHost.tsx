@@ -249,7 +249,13 @@ function PluginBundlePage({
         return;
       }
       if (isSandboxContentErrorFrame(msg)) {
+        const runtimeError = typeof msg.error === "string" && msg.error.trim()
+          ? msg.error
+          : i18n.t("error.loadFailed");
         logIpcError(i18n.t("skill.runtimeError", { name: pluginName ?? pluginId }))(msg.error);
+        clearTimeout(loadTimer);
+        setError(runtimeError);
+        setLoading(false);
         return;
       }
       if (isRpcRequestFrame(msg)) {

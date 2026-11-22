@@ -199,7 +199,7 @@ P2 涉及 migration 与超时策略，独立批次。
 | P1-b「应用层 match 缺 started，`_ => return` 吞掉」 | ❌ **分支已有** —— `core.rs:518` 有 `"running" => ("workflow-step-start", …)`                                                                                                                                                                                                                  | 仅补 3 个字段（见下）      |
 | P3「前端无法区分在跑/卡死」                         | ✅ **真缺口** —— `executionStore.ts:857` 早已订阅 `workflow-step-start`，但 **`stockAnalysisStore` 从未订阅** → 股票分析面板全程无当前节点信息                                                                                                                                                 | ✅ 已实施                  |
 | P2「无执行级超时，需新增」                          | ❌ **已存在** —— `stock_workflow/core.rs:833-836` 已有 `tokio::time::timeout(total_timeout, engine.run_workflow)` + `tokio::select!` 监听 shutdown，超时分支执行 `cancel_workflow` + emit `workflow-error` + DB 置 `timeout`（注释标 `P0-T5`）；且 `total_timeout` 由模板变量暴露，可在设置面板调整（`stock_workflow/core.rs:640-641`） | **零改动**                 |
-| 缺口 B「`node_executions` 执行中无快照」            | ✅ **真缺口** —— `node_records` 仅内存累积（`execution_state.rs:437`），只在 `complete_execution()`（`engine/mod.rs:5932`）一次性序列化写出                                                                                                                                                    | ⏸ **本次不做**，理由见 9.3 |
+| 缺口 B「`node_executions` 执行中无快照」            | ✅ **真缺口** —— `node_records` 仅内存累积（`execution_state.rs:437`），只在 `complete_execution()`（`engine/mod.rs:6069`）一次性序列化写出                                                                                                                                                    | ⏸ **本次不做**，理由见 9.3 |
 
 ### 9.2 本次实际改动清单
 

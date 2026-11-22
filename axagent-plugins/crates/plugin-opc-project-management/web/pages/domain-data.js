@@ -7,6 +7,10 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:OpcCreateProject",
     "tool:OpcAddMilestone",
     "tool:OpcListProjects",
+    "tool:OpcProjectManagementOpcCreateProject",
+    "tool:OpcProjectManagementOpcAddMilestone",
+    "tool:OpcProjectManagementOpcListProjects",
+    "tool:OpcProjectManagementRunAutomationRules",
   ],
   "kpis": [
     {

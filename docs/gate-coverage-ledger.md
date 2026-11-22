@@ -46,4 +46,4 @@
 |---|---|---|---|---|
 | 1 | 36 个未继承 `[lints]` 的 crate 是否真有 `module_name_repetitions` 违规 | 继承事实已验（34 = 4 个 `[lints.rust]` 内联 + 3 个空表/注释壳 + 27 个完全无段；全景 36 = 34 + 根包 `axagent` + `schema-gen`）；违规与否**未验** | be-dev 用 `cargo clippy -p axagent-cache --all-targets --all-features -- -D warnings`（依赖链最短）先探一个；证实后再决定台账行 6 降级还是划掉 | 需真实 clippy 一次（min 最便宜入口） |
 | 2 | `sqlite-vec 0.1.8-alpha.1` 是否被 deny 规则覆盖 | 依赖版本 + 注释自陈（RUSTSEC 不为 Alpha 发公告）+ `deny.toml`/`audit.toml` 存在，**均已验**；覆盖与否**未验** | be-dev 跑 `cargo deny check licenses bans sources` | 需 cargo deny 一次 |
-| 3 | `check:routes` 默认形态是否恒绿 | 静态已可判定：`check-route-reachability.mjs:17-18` 自陈「总是 exit 0」+ `:637` 仅 `STRICT` 下设 1 + `package.json:108` 不带 `--strict`；**但接 CI 前需实跑确认 `--strict` 形态真会红** | 谁要把它接 CI，谁先跑 `node scripts/check-route-reachability.mjs --strict` 确认会红 | 无人接 CI 前无实际暴露面 |
+| 3 | `check:routes` 默认形态是否恒绿 | 静态已可判定：`check-route-reachability.mjs:17-18` 自陈「总是 exit 0」+ `:26` 仅 `STRICT` 下设 1 + `package.json:108` 不带 `--strict`；**但接 CI 前需实跑确认 `--strict` 形态真会红** | 谁要把它接 CI，谁先跑 `node scripts/check-route-reachability.mjs --strict` 确认会红 | 无人接 CI 前无实际暴露面 |

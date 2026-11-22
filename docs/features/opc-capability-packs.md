@@ -1,6 +1,6 @@
 # OPC 能力包体系
 
-> 状态：active ｜ 日期：2026-11-04 ｜ 对应版本：v3.0.0 ｜ 功能点：opc-capability-packs
+> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.1 ｜ 功能点：opc-capability-packs
 
 ## 定位
 
@@ -45,7 +45,7 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 
 ### 3. manifest 驱动
 
-域包根目录常量 `config/opc/domain_packs`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:22`），旧目录 `config/opc/industries` 仅作存量只读回退，且刻意用 `concat!` 拼接防止批量改名脚本把回退目标一起改掉（`:24-33`）。目录解析入口 `resolve_capability_packs_dir`（`:801`）。
+域包根目录常量 `config/opc/domain_packs`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:22`），旧目录 `config/opc/industries` 仅作存量只读回退，且刻意用 `concat!` 拼接防止批量改名脚本把回退目标一起改掉（`:24-33`）。目录解析入口 `resolve_capability_packs_dir`（`:689`）。
 
 `CapabilityPackManifest` 的关键字段（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:37-85`）：
 
@@ -84,6 +84,12 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 合计 14 包、76 条承诺，**全部谓词均为 `id_exact`**（没有包使用 `All` / `IdPrefix`）。证据：各 `manifest.yaml` 的 `capabilities` 段，以及 `src-tauri/src/commands/opc_workflows/mod.rs:397-412` 的映射表。
 
 （对应版本：v3.0.0；manifest 名册数据驱动化与 `domain:` 实况，证据 351f254d9）
+
+### 6. 域包交付形态：14 域独立 worker（2026-11-22）
+
+域包**自身仍是数据资产**（`manifest.yaml` / `roles.yaml` / `workflows/*.yaml`），但 14 个域的交付载体已统一为独立 Rust worker 插件：原 11 个只有 HTML/JS 的声明式域补齐完整域命令集，声明式域降为 0。每域的命令名、页面资产、owner 与版本都由 `scripts/lib/plugin-contract.json` 单点定义，`scripts/check-plugin-contract.mjs` 对账打包器、独立仓、bundle manifest、底册与 staging；`scripts/generate-opc-worker-source.mjs` 生成 worker 源码并按字节校验。
+
+worker 只做入参形状校验、固定 `domain_pack_id` 注入与接缝转发：工具命令走 `tool.set/exec`，自动化规则走 `opc.store`。`finance_invest` / `software_dev` 另有 `batch_validate_entities` 读 op，元素裁剪语义仍归宿主。域包 logical manifest 的 `transportOwner` 一域一 owner，公共 `plugin-opc` 不再吞并已迁域。
 
 ## 关键代码入口
 
@@ -151,3 +157,4 @@ manifest 的 `capabilities` 是「承诺集合」，每个条目描述「来源 
 | v3.0.0 | 2026-09-26 | 域包办公室数据驱动化（manifest 名册覆盖 + `office_scene.yaml` + 门禁 e 判据） | `351f254d9`；`CHANGELOG.md:145` |
 | v3.0.0 | 2026-10-31 | 版本基线确立（本文件所述实现即此版本状态） | `CHANGELOG.md:133` |
 | unreleased | 2026-11-01 | `src-tauri/crates` 拆为 7 个 workspace 根，能力包路径随迁（无行为变更） | `8dfaeb4db` |
+| v3.0.1 | 2026-11-22 | 14 域统一为独立 worker（0 声明式域）：命令面单一契约源 + 生成器强校验，接缝复用宿主实现 | `scripts/lib/plugin-contract.json`、`PLAN-plugin-completion-handoff.md` |

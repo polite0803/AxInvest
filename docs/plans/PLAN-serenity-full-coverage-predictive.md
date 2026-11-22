@@ -205,7 +205,7 @@ top10_hot **+0.57/+1.56/+2.34%** ⇒ 方向为正；q5 跑赢池均：全窗 49.
 | 通道 | 现场读数 | 结论 |
 |---|---|---|
 | `harness::market_data::StockQuote`（实时批量） | 已带 `volume` / `amount` / **`turnover_rate`** / `pe` / `pb` / `total_mv` / `circulating_mv` | 采集侧**已在手上但丢弃** ⇒ 走「扩字段」，不新建表、不换 vendor |
-| `harness::market_data::KLine`（日K线回填） | 带 `volume`（`vendors/tencent.rs:381`，手→股）；**`turnover_rate` 恒 `None`**（同文件 :383）；2026 年 API 日线仅 6 字段、`amount` 常缺 | **量能族可回填历史**；换手率/市值**不可回填**，只能从加列当天往后攒 |
+| `harness::market_data::KLine`（日K线回填） | 带 `volume`（`vendors/tencent.rs:381`，手→股）；**`turnover_rate` 恒 `None`**（同文件 :370）；2026 年 API 日线仅 6 字段、`amount` 常缺 | **量能族可回填历史**；换手率/市值**不可回填**，只能从加列当天往后攒 |
 | `market_daily_close` 实体 | `pe_ttm` / `pb` 已由并行会话于 2026-11-01 加列并接通写侧（服务荐股价值桶） | ⚠ **不重复实现**；本批只补 volume / turnover_rate / total_mv / circulating_mv |
 | 库内表清单 | 无 index/kline 专表；`astock_daily_snapshot` 仅个股 scope；`portfolio_metrics_daily` 只存 beta 不存基准序列；归档白名单不含指数 | 阶段4 的「沪深300」缺口属**数据面缺失**，非读侧漏接 |
 

@@ -1352,10 +1352,51 @@ fn default_tool_permission_label() -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginInstallSource {
-    LocalPath { path: PathBuf },
-    GitUrl { url: String },
-    NpmPackage { name: String, version: Option<String> },
-    OpenClaw { package_id: String },
+    LocalPath {
+        path: PathBuf,
+    },
+    GitUrl {
+        url: String,
+    },
+    NpmPackage {
+        name: String,
+        version: Option<String>,
+    },
+    OpenClaw {
+        package_id: String,
+    },
+    /// 发布地址：`axagent-release+<https URL>`，清单声明成品包 URL 与 SHA-256。
+    ReleaseManifestUrl {
+        url: String,
+    },
+}
+
+/// 发布清单（`axagent-release+` 地址返回）。
+///
+/// 新格式按 `artifacts[]` 的平台组合选择成品包；顶层 `artifactUrl` / `sha256`
+/// 仅用于兼容早期单平台清单。`sha256` 是安装前必须核对的期望目录哈希，
+/// 口径与 `hash_plugin_directory` 一致。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReleaseManifest {
+    #[serde(default)]
+    pub artifact_url: String,
+    #[serde(default)]
+    pub sha256: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub artifacts: Vec<PluginReleaseArtifact>,
+}
+
+/// 发布清单中的单个平台产物。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReleaseArtifact {
+    pub os: String,
+    pub arch: String,
+    pub artifact_url: String,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1400,6 +1441,8 @@ pub struct BuiltinPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的页面 id（只读投影）。
+    pub pages: Vec<PluginPage>,
     /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
     pub commands: Vec<PluginCommandManifest>,
 }
@@ -1414,6 +1457,8 @@ pub struct BundledPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的页面 id（只读投影）。
+    pub pages: Vec<PluginPage>,
     /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
     pub commands: Vec<PluginCommandManifest>,
 }
@@ -1428,6 +1473,8 @@ pub struct ExternalPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的页面 id（只读投影）。
+    pub pages: Vec<PluginPage>,
     /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
     pub commands: Vec<PluginCommandManifest>,
 }
@@ -1442,6 +1489,8 @@ pub struct OpenClawPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的页面 id（只读投影）。
+    pub pages: Vec<PluginPage>,
     /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
     pub commands: Vec<PluginCommandManifest>,
 }

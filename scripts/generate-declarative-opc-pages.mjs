@@ -10,13 +10,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
+import { PLUGIN_CONTRACT } from "./lib/plugin-repos.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const REGISTRY = join(ROOT, "axagent-plugins", "scripts", "opc-domain-pack-plugins.json");
 const argv = process.argv.slice(2);
 const CHECK = argv.includes("--check");
+const domainFlag = argv.indexOf("--domain");
+const ONLY_DOMAIN = domainFlag >= 0 ? argv[domainFlag + 1] : null;
 
-const PAGE_HTML = `<!doctype html>
+/** 静态数据区 + 可选 worker 交互脚本。两者并列加载，不合并、不互相覆盖。 */
+function pageHtml(withBundle) {
+  return `<!doctype html>
 <html lang="zh">
   <head>
     <meta charset="utf-8" />
@@ -45,7 +50,7 @@ const PAGE_HTML = `<!doctype html>
       <section><h2>数据源</h2><ul id="data-sources"></ul></section>
       <section><h2>验收标准</h2><ul id="acceptance"></ul></section>
     </div>
-    <script src="./domain-data.js"></script>
+    <script src="./domain-data.js"></script>${withBundle ? `\n    <script src="./bundle.js"></script>` : ""}
     <script>
       const data = globalThis.AX_OPC_DOMAIN_DATA;
       if (!data) {
@@ -79,6 +84,7 @@ const PAGE_HTML = `<!doctype html>
   </body>
 </html>
 `;
+}
 
 const LIMIT = 30;
 
@@ -167,17 +173,32 @@ function writeOrCheck(path, content, problems) {
 function main() {
   const registry = JSON.parse(readFileSync(REGISTRY, "utf8"));
   const problems = [];
-  const declarative = registry.policy.verticalSlices.filter((slice) => slice.manifestStrategy === "declarative-only");
-  for (const slice of declarative) {
+  const byPluginId = new Map(PLUGIN_CONTRACT.plugins.map((p) => [p.pluginId, p]));
+  // 扫描面由契约的 pageAssets 决定：登记了 domain-data.js 的域都归本生成器管。
+  // 三个老 worker 域（accounting / sales-growth / content-media）从未有静态区，保持原样。
+  let targets = registry.policy.verticalSlices.filter((slice) =>
+    byPluginId.get(slice.pluginId)?.pageAssets.includes("domain-data.js")
+  );
+  if (ONLY_DOMAIN) {
+    targets = targets.filter((slice) =>
+      slice.pluginId === ONLY_DOMAIN || slice.domainPackId === ONLY_DOMAIN
+    );
+    if (targets.length === 0) {
+      console.error(`FAIL: --domain ${ONLY_DOMAIN} 未匹配任何登记静态页的 OPC 域`);
+      process.exit(1);
+    }
+  }
+  for (const slice of targets) {
     const pack = registry.packs.find((item) => item.id === slice.domainPackId);
     if (!pack) {
       problems.push(`底册缺少域包 ${slice.domainPackId}`);
       continue;
     }
+    const withBundle = byPluginId.get(slice.pluginId).pageAssets.includes("bundle.js");
     const pageDir = join(ROOT, "axagent-plugins", "crates", slice.pluginId, "web", "pages");
     const indexPath = join(pageDir, "index.html");
     const dataPath = join(pageDir, "domain-data.js");
-    writeOrCheck(indexPath, PAGE_HTML, problems);
+    writeOrCheck(indexPath, pageHtml(withBundle), problems);
     writeOrCheck(dataPath, formatJs(renderData(buildData(pack.id, pack.capabilities)), dataPath), problems);
   }
   if (problems.length) {
@@ -185,9 +206,9 @@ function main() {
     process.exit(1);
   }
   if (CHECK) {
-    console.log(`PASS: ${declarative.length} 个声明式 OPC 页面数据与权威 YAML 一致`);
+    console.log(`PASS: ${targets.length} 个 OPC 页面数据与权威 YAML 一致`);
   } else {
-    console.log(`已生成 ${declarative.length} 个声明式 OPC 页面数据`);
+    console.log(`已生成 ${targets.length} 个 OPC 页面数据`);
   }
 }
 

@@ -2,7 +2,13 @@
 
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import type { DynamicAction, InstallOutcomeDto, PluginManifestDto, PluginSummaryDto, UpdateOutcomeDto } from "@/types";
+import type {
+  DynamicAction,
+  InstallOutcomeDto,
+  PluginSourceValidationDto,
+  PluginSummaryDto,
+  UpdateOutcomeDto,
+} from "@/types";
 import { create } from "zustand";
 
 interface PluginState {
@@ -13,12 +19,21 @@ interface PluginState {
   validating: boolean;
 
   loadPlugins: () => Promise<void>;
-  validateSource: (source: string) => Promise<PluginManifestDto | null>;
-  installPlugin: (source: string) => Promise<InstallOutcomeDto | null>;
+  validateSource: (
+    source: string,
+    expectedSha256?: string,
+  ) => Promise<PluginSourceValidationDto | null>;
+  installPlugin: (
+    source: string,
+    expectedSha256?: string,
+  ) => Promise<InstallOutcomeDto | null>;
   enablePlugin: (pluginId: string) => Promise<boolean>;
   disablePlugin: (pluginId: string) => Promise<boolean>;
   uninstallPlugin: (pluginId: string) => Promise<boolean>;
-  updatePlugin: (pluginId: string) => Promise<UpdateOutcomeDto | null>;
+  updatePlugin: (
+    pluginId: string,
+    expectedSha256?: string,
+  ) => Promise<UpdateOutcomeDto | null>;
   runUiAction: (pluginId: string, action: DynamicAction) => Promise<unknown | null>;
 }
 
@@ -35,7 +50,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       const plugins = await invoke<PluginSummaryDto[]>("plugin_list");
       set({ plugins, loading: false });
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg, loading: false });
       if (import.meta.env.DEV) {
         console.error("Failed to load plugins:", e);
@@ -43,16 +58,17 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
   },
 
-  validateSource: async (source) => {
+  validateSource: async (source, expectedSha256) => {
     set({ validating: true, error: null });
     try {
-      const manifest = await invoke<PluginManifestDto>("plugin_validate_source", {
+      const manifest = await invoke<PluginSourceValidationDto>("plugin_validate_source", {
         source,
+        expectedSha256: expectedSha256?.trim() || undefined,
       });
       set({ validating: false });
       return manifest;
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg, validating: false });
       if (import.meta.env.DEV) {
         console.error("Failed to validate plugin source:", e);
@@ -61,10 +77,13 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
   },
 
-  installPlugin: async (source) => {
+  installPlugin: async (source, expectedSha256) => {
     set({ installing: source, error: null });
     try {
-      const outcome = await invoke<InstallOutcomeDto>("plugin_install", { source });
+      const outcome = await invoke<InstallOutcomeDto>("plugin_install", {
+        source,
+        expectedSha256: expectedSha256?.trim() || undefined,
+      });
       set((s) => ({
         installing: null,
         plugins: [
@@ -79,6 +98,12 @@ export const usePluginStore = create<PluginState>((set, get) => ({
             tools: [],
             mcpServers: [],
             skills: [],
+            source,
+            permissions: [],
+            pages: [],
+            // 刚装上还没走一遍后端投影：不能冒充 verified。
+            integrityStatus: "unknown",
+            pinnedHash: null,
             commands: [],
             // 刚装上、还没走一遍后端投影 ⇒ 计数未知（null），别拿 0 冒充「一条都没丢」。
             eventStats: null,
@@ -88,7 +113,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       await get().loadPlugins();
       return outcome;
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg, installing: null });
       if (import.meta.env.DEV) {
         console.error("Failed to install plugin:", e);
@@ -106,7 +131,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }));
       return true;
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg });
       if (import.meta.env.DEV) {
         console.error("Failed to enable plugin:", e);
@@ -124,7 +149,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }));
       return true;
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg });
       if (import.meta.env.DEV) {
         console.error("Failed to disable plugin:", e);
@@ -142,7 +167,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }));
       return true;
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg });
       if (import.meta.env.DEV) {
         console.error("Failed to uninstall plugin:", e);
@@ -151,16 +176,19 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
   },
 
-  updatePlugin: async (pluginId) => {
+  updatePlugin: async (pluginId, expectedSha256) => {
     try {
-      const outcome = await invoke<UpdateOutcomeDto>("plugin_update", { pluginId });
+      const outcome = await invoke<UpdateOutcomeDto>("plugin_update", {
+        pluginId,
+        expectedSha256: expectedSha256?.trim() || undefined,
+      });
       set((s) => ({
         plugins: s.plugins.map((p) => p.id === pluginId ? { ...p, version: outcome.newVersion } : p),
         error: null,
       }));
       return outcome;
     } catch (e) {
-      const errorMsg = String(e);
+      const errorMsg = translateBackendError(e);
       set({ error: errorMsg });
       if (import.meta.env.DEV) {
         console.error("Failed to update plugin:", e);

@@ -1,12 +1,25 @@
 # 插件体系
 
-> 状态：active ｜ 日期：2026-11-04 ｜ 对应版本：v3.0.0 ｜ 功能点：plugin-system
+> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.1 ｜ 功能点：plugin-system
 
 ## 定位
 
 插件体系把「内置功能」与「外部扩展」统一成同一套装载形态：一份 `plugin.json` 清单 + 可选的**长驻 worker 子进程** + 可选的动态 UI 资产。目标是让扩展能力与内置能力走**同一注册入口、同一权限模型、同一卸载语义**，而不是给插件另开一条特权通道。
 
 入口：`plugin_*` 命令族（安装 / 启用 / 停用 / 卸载 / 页面清单 / UI action）、设置页插件管理、动态页宿主 `DynamicPageViewer`。
+
+### 插件族统一形态（2026-11-22）
+
+17 个插件仓现统一为 worker + `v3.0.1`：14 个 OPC 域全部翻牌为独立 Rust worker，0 个纯声明式域。
+单一契约源是 `scripts/lib/plugin-contract.json`（插件名、形态、版本、crate、命令集、页面资产），
+`scripts/check-plugin-contract.mjs` 对账契约 / 打包器 `PLUGIN_SPECS` / 独立仓 metadata / bundle manifest /
+域包底册 / E2E staging；`scripts/generate-opc-worker-source.mjs` 从契约生成每域源码，
+`--check` 逐字节校验，禁止手改生成物。
+
+域 worker 只做「形状校验 + 固定域 id + 转发接缝」：工具命令走 `tool.set/exec`，
+自动化规则与实体批量校验走 `opc.store`（均为宿主实现）；命令逻辑不复制进插件。
+`finance_invest` / `software_dev` 两个特殊域另有 `*_batch_validate_entities` 命令，
+`entities` 非数组在命令层拒绝，`domain_pack_id` 由 worker 固定注入，调用方不能越域。
 
 ## 当前行为
 
@@ -53,7 +66,7 @@ Schema 存储与归属：
 
 `ComponentRegistry` 用 **namespace 前缀**隔离插件组件：`register(entry, namespace)` 的键是 `${namespace}:${entry.type}`，`resolve(type, namespace)` 先查命名空间键、再回退全局键（`src/lib/dynamicUI/ComponentRegistry.ts:14-59`）。卸载时需要 `unregister` 同 namespace，并修复反向索引避免裸类型悬空（`:75-85`）。
 
-Action 回流是单向显式链路：`DynamicPageViewer` 仅在 `record.origin === "plugin" && record.ownerId` 时把 `pluginId` 带进 `load_ok`（`src/pages/DynamicPageViewer.tsx:67-72`），`DynamicUIRenderer` 的 `onAction` 是宿主感知动作的唯一通路，直接接到 `pluginStore.runUiAction(pluginId, action)`（`:88-94`），最终落到 IPC `plugin_ui_action`（`src-tauri/src/commands/plugin.rs:495`）。渲染侧只在前端 `parseSchema` 失败时显示 `dynamicUIManager.invalidSchema`（`src/pages/DynamicPageViewer.tsx:63-65`）；后端不重复校验 JSON 结构。
+Action 回流是单向显式链路：`DynamicPageViewer` 仅在 `record.origin === "plugin" && record.ownerId` 时把 `pluginId` 带进 `load_ok`（`src/pages/DynamicPageViewer.tsx:67-72`），`DynamicUIRenderer` 的 `onAction` 是宿主感知动作的唯一通路，直接接到 `pluginStore.runUiAction(pluginId, action)`（`:88-94`），最终落到 IPC `plugin_ui_action`（`src-tauri/src/commands/plugin.rs:498`）。渲染侧只在前端 `parseSchema` 失败时显示 `dynamicUIManager.invalidSchema`（`src/pages/DynamicPageViewer.tsx:63-65`）；后端不重复校验 JSON 结构。
 
 （对应版本：v3.0.0+（unreleased；页面装载通道 A，证据 `CHANGELOG.md:120`、45221a824））
 
@@ -63,9 +76,9 @@ Action 回流是单向显式链路：`DynamicPageViewer` 仅在 `record.origin =
 
 | 阶段 | 实现入口 |
 |---|---|
-| ② 静态审计 | `plugin_source_audit`（`src-tauri/src/commands/plugin.rs:166`）→ `axagent-plugins/crates/plugins/src/source_audit.rs` |
-| ③ 隔离构建 | `plugin_source_build`（`src-tauri/src/commands/plugin.rs:193`）→ `axagent-plugins/crates/plugins/src/source_build.rs:177-207` |
-| ④ 装载 | `plugin_enable`（`src-tauri/src/commands/plugin.rs:329`）→ `LoadedPlugin::load`（`axagent-plugins/crates/plugins/src/worker.rs:5063-5080`） |
+| ② 静态审计 | `plugin_source_audit`（`src-tauri/src/commands/plugin.rs:185`）→ `axagent-plugins/crates/plugins/src/source_audit.rs` |
+| ③ 隔离构建 | `plugin_source_build`（`src-tauri/src/commands/plugin.rs:212`）→ `axagent-plugins/crates/plugins/src/source_build.rs:177-207` |
+| ④ 装载 | `plugin_enable`（`src-tauri/src/commands/plugin.rs:332`）→ `LoadedPlugin::load`（`axagent-plugins/crates/plugins/src/worker.rs:5063-5080`） |
 | ⑤ 回滚 | `LoadedPlugin::rollback` 逐句柄 LIFO 撤销（`axagent-plugins/crates/plugins/src/worker.rs:5211-5215`） |
 
 审计是**形式合规清单**，不是安全边界：`build.rs`、白名单外 proc-macro、git/path 依赖被列为首要禁止项，因为它们在编译期以宿主用户身份执行任意代码（`docs/plans/PLAN-everything-is-plugin.md` §12.2，`:741-758`）。
@@ -169,3 +182,4 @@ ENV 白名单常量 `DEFAULT_ENV_WHITELIST` 仅含 `PATH` / `HOME` / `USERPROFIL
 | unreleased | 2026-11-02 | stdin 写不再持锁阻塞，超时判连接不可用 | `3b4c5c58c`；`CHANGELOG.md:56` |
 | unreleased | 2026-11-03 | 接缝写操作加 op 级 write 权限闸 | `ac89e1606` |
 | unreleased | 2026-11-04 | 事件总线每订阅者兜底超时 + 两级丢弃计数 | `088d5a189` |
+| v3.0.1 | 2026-11-22 | 17 仓统一 worker：14 个 OPC 域补齐完整命令集、0 声明式域；单一契约源 + 生成器逐字节校验 | `scripts/lib/plugin-contract.json`、`PLAN-plugin-completion-handoff.md` |

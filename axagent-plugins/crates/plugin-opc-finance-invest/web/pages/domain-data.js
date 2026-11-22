@@ -10,6 +10,18 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:OpcListProjects",
     "tool:OpcGetFinancialReport",
     "tool:OpcRecordKpi",
+    "tool:OpcListCustomers",
+    "tool:WebSearch",
+    "tool:OpcFinanceInvestOpcGetDashboard",
+    "tool:OpcFinanceInvestOpcListKpis",
+    "tool:OpcFinanceInvestOpcSearchWiki",
+    "tool:OpcFinanceInvestOpcListProjects",
+    "tool:OpcFinanceInvestOpcGetFinancialReport",
+    "tool:OpcFinanceInvestOpcRecordKpi",
+    "tool:OpcFinanceInvestBatchValidateEntities",
+    "tool:OpcFinanceInvestOpcListCustomers",
+    "tool:OpcFinanceInvestWebSearch",
+    "tool:OpcFinanceInvestRunAutomationRules",
   ],
   "kpis": [
     {

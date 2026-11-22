@@ -26,89 +26,89 @@
         "phase": 2,
         "domainPackId": "security",
         "pluginId": "plugin-opc-security",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 三条能力均为宿主共享 Tool（OpcSearchWiki/WebSearch/FileWrite），无 OPC worker 命令；独立插件贡献域包清单与页面资产，不复制公共底座"
+        "transportOwner": "opc-security",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 3,
         "domainPackId": "game_dev",
         "pluginId": "plugin-opc-game-dev",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 三条能力均为宿主通用 Tool，无 OPC worker 命令；验证声明式插件模板可连续复制"
+        "transportOwner": "opc-game-dev",
+        "manifestStrategy": "independent-worker",
+        "reason": "统一插件规范试点：域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 4,
         "domainPackId": "ai_research",
         "pluginId": "plugin-opc-ai-research",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-ai-research",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 5,
         "domainPackId": "consulting",
         "pluginId": "plugin-opc-consulting",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-consulting",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 6,
         "domainPackId": "design",
         "pluginId": "plugin-opc-design",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-design",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 7,
         "domainPackId": "ecommerce",
         "pluginId": "plugin-opc-ecommerce",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-ecommerce",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 8,
         "domainPackId": "education",
         "pluginId": "plugin-opc-education",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-education",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 9,
         "domainPackId": "finance_invest",
         "pluginId": "plugin-opc-finance-invest",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-finance-invest",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 10,
         "domainPackId": "geospatial",
         "pluginId": "plugin-opc-geospatial",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-geospatial",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 11,
         "domainPackId": "project_management",
         "pluginId": "plugin-opc-project-management",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-project-management",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 12,
         "domainPackId": "software_dev",
         "pluginId": "plugin-opc-software-dev",
-        "transportOwner": "plugin-opc-common",
-        "manifestStrategy": "declarative-only",
-        "reason": "manifest 无专属 worker 命令；独立插件贡献域包清单与页面资产，共享能力归公共底座"
+        "transportOwner": "opc-software-dev",
+        "manifestStrategy": "independent-worker",
+        "reason": "域专属 worker 声明完整命令集，经 tool.set / opc.store 接缝复用宿主实现，不复制工具逻辑"
       },
       {
         "phase": 13,
@@ -180,7 +180,14 @@
         "tool:WebSearch",
         "tool:FileRead",
         "tool:Bash",
-        "tool:FileWrite"
+        "tool:FileWrite",
+        "tool:OpcAiResearchOpcListProjects",
+        "tool:OpcAiResearchOpcSearchWiki",
+        "tool:OpcAiResearchWebSearch",
+        "tool:OpcAiResearchFileRead",
+        "tool:OpcAiResearchBash",
+        "tool:OpcAiResearchFileWrite",
+        "tool:OpcAiResearchRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/ai_research"
     },
@@ -197,7 +204,13 @@
         "tool:WebSearch",
         "tool:OpcGetDashboard",
         "tool:OpcCreateContentAsset",
-        "tool:FileWrite"
+        "tool:FileWrite",
+        "tool:OpcConsultingOpcSearchWiki",
+        "tool:OpcConsultingWebSearch",
+        "tool:OpcConsultingOpcGetDashboard",
+        "tool:OpcConsultingOpcCreateContentAsset",
+        "tool:OpcConsultingFileWrite",
+        "tool:OpcConsultingRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/consulting"
     },
@@ -238,7 +251,12 @@
         "tool:WebSearch",
         "tool:FileWrite",
         "tool:OpcCreateContentAsset",
-        "tool:OpcCreateLandingPage"
+        "tool:OpcCreateLandingPage",
+        "tool:OpcDesignWebSearch",
+        "tool:OpcDesignFileWrite",
+        "tool:OpcDesignOpcCreateContentAsset",
+        "tool:OpcDesignOpcCreateLandingPage",
+        "tool:OpcDesignRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/design"
     },
@@ -255,7 +273,13 @@
         "tool:OpcSearchWiki",
         "tool:OpcListCustomers",
         "tool:OpcCreateContentAsset",
-        "tool:OpcCreateLandingPage"
+        "tool:OpcCreateLandingPage",
+        "tool:OpcEcommerceWebSearch",
+        "tool:OpcEcommerceOpcSearchWiki",
+        "tool:OpcEcommerceOpcListCustomers",
+        "tool:OpcEcommerceOpcCreateContentAsset",
+        "tool:OpcEcommerceOpcCreateLandingPage",
+        "tool:OpcEcommerceRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/ecommerce"
     },
@@ -271,7 +295,12 @@
         "tool:WebSearch",
         "tool:OpcCreateContentAsset",
         "tool:OpcCreateLandingPage",
-        "tool:FileWrite"
+        "tool:FileWrite",
+        "tool:OpcEducationWebSearch",
+        "tool:OpcEducationOpcCreateContentAsset",
+        "tool:OpcEducationOpcCreateLandingPage",
+        "tool:OpcEducationFileWrite",
+        "tool:OpcEducationRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/education"
     },
@@ -289,7 +318,19 @@
         "tool:OpcSearchWiki",
         "tool:OpcListProjects",
         "tool:OpcGetFinancialReport",
-        "tool:OpcRecordKpi"
+        "tool:OpcRecordKpi",
+        "tool:OpcListCustomers",
+        "tool:WebSearch",
+        "tool:OpcFinanceInvestOpcGetDashboard",
+        "tool:OpcFinanceInvestOpcListKpis",
+        "tool:OpcFinanceInvestOpcSearchWiki",
+        "tool:OpcFinanceInvestOpcListProjects",
+        "tool:OpcFinanceInvestOpcGetFinancialReport",
+        "tool:OpcFinanceInvestOpcRecordKpi",
+        "tool:OpcFinanceInvestBatchValidateEntities",
+        "tool:OpcFinanceInvestOpcListCustomers",
+        "tool:OpcFinanceInvestWebSearch",
+        "tool:OpcFinanceInvestRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/finance_invest"
     },
@@ -304,7 +345,11 @@
       "capabilities": [
         "tool:WebSearch",
         "tool:FileWrite",
-        "tool:FileRead"
+        "tool:FileRead",
+        "tool:OpcGameDevWebSearch",
+        "tool:OpcGameDevFileWrite",
+        "tool:OpcGameDevFileRead",
+        "tool:OpcGameDevRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/game_dev"
     },
@@ -321,7 +366,13 @@
         "tool:WebSearch",
         "tool:OpcCreateContentAsset",
         "tool:OpcCreateProject",
-        "tool:FileWrite"
+        "tool:FileWrite",
+        "tool:OpcGeospatialOpcSearchWiki",
+        "tool:OpcGeospatialWebSearch",
+        "tool:OpcGeospatialOpcCreateContentAsset",
+        "tool:OpcGeospatialOpcCreateProject",
+        "tool:OpcGeospatialFileWrite",
+        "tool:OpcGeospatialRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/geospatial"
     },
@@ -336,7 +387,11 @@
       "capabilities": [
         "tool:OpcCreateProject",
         "tool:OpcAddMilestone",
-        "tool:OpcListProjects"
+        "tool:OpcListProjects",
+        "tool:OpcProjectManagementOpcCreateProject",
+        "tool:OpcProjectManagementOpcAddMilestone",
+        "tool:OpcProjectManagementOpcListProjects",
+        "tool:OpcProjectManagementRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/project_management"
     },
@@ -370,7 +425,11 @@
       "capabilities": [
         "tool:OpcSearchWiki",
         "tool:WebSearch",
-        "tool:FileWrite"
+        "tool:FileWrite",
+        "tool:OpcSecurityOpcSearchWiki",
+        "tool:OpcSecurityWebSearch",
+        "tool:OpcSecurityFileWrite",
+        "tool:OpcSecurityRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/security"
     },
@@ -387,7 +446,14 @@
         "tool:OpcCreateProject",
         "tool:FileWrite",
         "tool:WebSearch",
-        "tool:OpcAddMilestone"
+        "tool:OpcAddMilestone",
+        "tool:OpcSoftwareDevOpcListProjects",
+        "tool:OpcSoftwareDevOpcCreateProject",
+        "tool:OpcSoftwareDevFileWrite",
+        "tool:OpcSoftwareDevWebSearch",
+        "tool:OpcSoftwareDevOpcAddMilestone",
+        "tool:OpcSoftwareDevBatchValidateEntities",
+        "tool:OpcSoftwareDevRunAutomationRules"
       ],
       "assetDir": "config/opc/domain_packs/software_dev"
     }

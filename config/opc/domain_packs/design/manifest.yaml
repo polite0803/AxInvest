@@ -19,3 +19,19 @@ capabilities:
   - source: tool
     capability_type: opc_tool
     predicate: {kind: id_exact, id: "tool:OpcCreateLandingPage"}
+  # 域专属 worker 命令：由该域 Rust worker 声明，经 tool.set / opc.store 接缝复用宿主工具实现。
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcDesignWebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcDesignFileWrite"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcDesignOpcCreateContentAsset"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcDesignOpcCreateLandingPage"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcDesignRunAutomationRules"}

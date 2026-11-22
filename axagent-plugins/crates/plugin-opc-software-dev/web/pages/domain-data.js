@@ -10,6 +10,13 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:FileWrite",
     "tool:WebSearch",
     "tool:OpcAddMilestone",
+    "tool:OpcSoftwareDevOpcListProjects",
+    "tool:OpcSoftwareDevOpcCreateProject",
+    "tool:OpcSoftwareDevFileWrite",
+    "tool:OpcSoftwareDevWebSearch",
+    "tool:OpcSoftwareDevOpcAddMilestone",
+    "tool:OpcSoftwareDevBatchValidateEntities",
+    "tool:OpcSoftwareDevRunAutomationRules",
   ],
   "kpis": [
     {

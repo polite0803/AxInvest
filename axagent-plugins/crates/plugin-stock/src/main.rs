@@ -2549,9 +2549,7 @@ fn parse_intent(input: &Value) -> Result<Value, (String, String)> {
 /// 入参解码严格：缺字段 / 类型不符报 `PLUGIN_COMMAND_INVALID_ARGS`，**不**用默认值兜底 ——
 /// 权重算错的后果是决策方向被改写，静默降级比报错危险得多（同 §86 的 v133 观察）。
 fn evidence_weights(input: &Value) -> Result<Value, (String, String)> {
-    use axagent_analysis_engine::evidence_weight::{
-        EvidenceWeightRequest, compute_evidence_weights,
-    };
+    use axagent_stock_core::evidence_weight::{EvidenceWeightRequest, compute_evidence_weights};
     let request: EvidenceWeightRequest = serde_json::from_value(input.clone()).map_err(|e| {
         (
             error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
@@ -3377,8 +3375,8 @@ fn portfolio_risk(
     call_chain: &[String],
     peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
 ) -> Result<Value, (String, String)> {
-    use axagent_analysis_engine::portfolio_risk::PortfolioRiskManager;
-    use axagent_analysis_engine::trading::PositionSummary;
+    use axagent_harness::PositionSummary;
+    use axagent_stock_core::portfolio_risk::PortfolioRiskManager;
 
     let raw = call_trading_seam(peer, call_chain, "get_positions", json!({}))?;
     let positions: Vec<PositionSummary> = serde_json::from_value(raw).map_err(|e| {
@@ -3426,8 +3424,8 @@ fn scan_sector_coherence(
     call_chain: &[String],
     peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
 ) -> Result<Value, (String, String)> {
-    use axagent_analysis_engine::concept_index::{build_sample_index, seed_ashare_ontology};
-    use axagent_analysis_engine::sector_coherence::{StockQuote, scan_sectors};
+    use axagent_stock_core::concept_index::{build_sample_index, seed_ashare_ontology};
+    use axagent_stock_core::sector_coherence::{StockQuote, scan_sectors};
     use std::collections::HashMap;
 
     let concept_ids = parse_string_array(input, "conceptIds")?;
@@ -3473,9 +3471,9 @@ fn discover_stock_candidates(
     call_chain: &[String],
     peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
 ) -> Result<Value, (String, String)> {
-    use axagent_analysis_engine::recommender::FALLBACK_STOCKS;
+    use axagent_stock_core::FALLBACK_STOCKS;
     // harness 类型一律经引擎 screener 转发取（插件不直接依赖 harness，依赖面判据①）。
-    use axagent_analysis_engine::screener::{HotStock, IndustryRank, StockQuote, StockScreener};
+    use axagent_stock_core::screener::{HotStock, IndustryRank, StockQuote, StockScreener};
     use std::collections::HashSet;
 
     let mut seen = HashSet::new();
@@ -4075,13 +4073,12 @@ fn analyze_sentiment_depth(input: &Value) -> Result<Value, (String, String)> {
     let history_json = input.get("historyJson").and_then(Value::as_str).ok_or_else(|| {
         (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `historyJson`".to_string())
     })?;
-    let history: Vec<axagent_analysis_engine::sentiment_analysis::SentimentSnapshot> =
+    let history: Vec<axagent_stock_core::sentiment_analysis::SentimentSnapshot> =
         serde_json::from_str(history_json).map_err(|e| {
             (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), format!("解析历史数据失败: {e}"))
         })?;
-    let report = axagent_analysis_engine::sentiment_analysis::analyze_sentiment(
-        stock_code, stock_name, &history,
-    );
+    let report =
+        axagent_stock_core::sentiment_analysis::analyze_sentiment(stock_code, stock_name, &history);
     serde_json::to_value(report)
         .map_err(|e| (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("报告序列化失败: {e}")))
 }
@@ -4091,7 +4088,7 @@ fn analyze_sentiment_depth(input: &Value) -> Result<Value, (String, String)> {
 /// 映射逐字照搬宿主命令体：`category` 走 `format!("{:?}", …)`（枚举变体名 Debug
 /// 形态；同 crate 同输出，因子清单口径不漂移）。
 fn factor_analysis_list() -> Result<Value, (String, String)> {
-    let registry = axagent_analysis_engine::factor_analysis::FactorRegistry::new();
+    let registry = axagent_stock_core::factor_analysis::FactorRegistry::new();
     let factors = registry.all_factors();
     let items: Vec<Value> = factors
         .iter()
@@ -4117,24 +4114,21 @@ fn fetch_quote_and_financials(
     stock_code: &str,
     call_chain: &[String],
     peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
-) -> Result<
-    (axagent_astock_data::types::StockQuote, Vec<axagent_astock_data::types::FinancialReport>),
-    (String, String),
-> {
+) -> Result<(axagent_harness::StockQuote, Vec<axagent_harness::FinancialReport>), (String, String)>
+{
     let quote_raw =
         fetch_market_batch("get_quote", json!({ "stock_code": stock_code }), call_chain, peer)?;
-    let quote: axagent_astock_data::types::StockQuote =
-        serde_json::from_value(quote_raw).map_err(|e| {
-            (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("行情出参形状异常: {e}"))
-        })?;
+    let quote: axagent_harness::StockQuote = serde_json::from_value(quote_raw).map_err(|e| {
+        (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("行情出参形状异常: {e}"))
+    })?;
     let financials_raw = fetch_market_batch(
         "get_financials",
         json!({ "stock_code": stock_code }),
         call_chain,
         peer,
     )?;
-    let financials: Vec<axagent_astock_data::types::FinancialReport> =
-        serde_json::from_value(financials_raw).map_err(|e| {
+    let financials: Vec<axagent_harness::FinancialReport> = serde_json::from_value(financials_raw)
+        .map_err(|e| {
             (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("财务出参形状异常: {e}"))
         })?;
     Ok((quote, financials))
@@ -4155,7 +4149,7 @@ fn generate_fundamentals_report(
     })?;
     let include_md = input.get("includeMarkdown").and_then(Value::as_bool).unwrap_or(true);
     let (quote, financials) = fetch_quote_and_financials(stock_code, call_chain, peer)?;
-    let report = axagent_astock_data::fundamentals_report::FundamentalsAnalyzer::generate(
+    let report = axagent_stock_core::fundamentals_report::FundamentalsAnalyzer::generate(
         stock_code,
         &quote,
         &financials,
@@ -4180,7 +4174,7 @@ fn get_fundamentals_report_markdown(
         (error_codes::SEAM_CALL_INVALID_ARGS.to_string(), "缺 `stockCode`".to_string())
     })?;
     let (quote, financials) = fetch_quote_and_financials(stock_code, call_chain, peer)?;
-    let report = axagent_astock_data::fundamentals_report::FundamentalsAnalyzer::generate(
+    let report = axagent_stock_core::fundamentals_report::FundamentalsAnalyzer::generate(
         stock_code,
         &quote,
         &financials,

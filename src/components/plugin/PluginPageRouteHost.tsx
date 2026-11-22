@@ -2,6 +2,7 @@
 
 import { PluginPageHost } from "@/components/plugin/PluginPageHost";
 import { usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
+import { Result } from "antd";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 
@@ -22,7 +23,11 @@ export function PluginPageRouteHost(props: {
     (item) => item.pluginSlug === pluginSlug && item.pageId === pageId,
   );
   if (!route) {
-    return <div style={{ padding: 24 }}>{t("common.loading")}</div>;
+    return (
+      <div style={{ padding: 48, textAlign: "center" }}>
+        <Result status="404" title="404" subTitle={t("error.pageNotFound")} />
+      </div>
+    );
   }
   return (
     <PluginPageHost

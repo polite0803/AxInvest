@@ -13,7 +13,7 @@
     /** 宿主 → 沙箱：事件推送 */
     hostEvent: "host:event",
     /** 宿主 → 沙箱：生命周期（挂载 / 卸载） */
-    hostLifecycle: "host:lifecycle",
+    hostLifecycle: "host:lifecycle"
   };
   var SANDBOX_RPC_METHODS = {
     apiInvoke: "api.invoke",
@@ -23,7 +23,7 @@
     uiGetTheme: "ui.getTheme",
     uiGetLocale: "ui.getLocale",
     storeRead: "store.read",
-    storeWrite: "store.write",
+    storeWrite: "store.write"
   };
   var SANDBOX_FRAME_FIELDS = {
     type: "type",
@@ -38,7 +38,7 @@
     props: "props",
     source: "source",
     line: "line",
-    col: "col",
+    col: "col"
   };
   var SANDBOX_RPC_ARG_KEYS = {
     command: "command",
@@ -50,7 +50,7 @@
     type: "type",
     storeName: "storeName",
     selector: "selector",
-    value: "value",
+    value: "value"
   };
   var SANDBOX_RPC_TIMEOUT_MS = 15e3;
   var SANDBOX_RPC_FAILURE_ERROR_TYPE = "string";
@@ -61,14 +61,14 @@
     /** `srcdoc` 沙箱内容（Skill 与插件 panel）向宿主发起 RPC */
     sandbox: "skill_",
     /** 走 asset 协议装载的插件 bundle（page 粒度）向宿主发起 RPC */
-    plugin: "plugin_",
+    plugin: "plugin_"
   };
   function buildRpcRequestFrame(callId, method, args) {
     const f = SANDBOX_FRAME_FIELDS;
     const frame = {
       [f.type]: SANDBOX_FRAME_TYPES.request,
       [f.callId]: callId,
-      [f.method]: method,
+      [f.method]: method
     };
     if (args !== void 0) {
       frame[f.args] = args;
@@ -111,11 +111,11 @@
     /** 动态 UI / 沙箱内容把用户动作回流给**该插件自己的** worker（后端 `plugin_ui_action`）。 */
     uiAction: "plugin_ui_action",
     /** 按名字调用该插件声明的命令（后端 `plugin_execute_command`）。 */
-    executeCommand: "plugin_execute_command",
+    executeCommand: "plugin_execute_command"
   };
   var PLUGIN_BRIDGE_COMMANDS = [
     PLUGIN_BRIDGE_COMMAND_NAMES.uiAction,
-    PLUGIN_BRIDGE_COMMAND_NAMES.executeCommand,
+    PLUGIN_BRIDGE_COMMAND_NAMES.executeCommand
   ];
   function isPluginBridgeCommand(command) {
     return PLUGIN_BRIDGE_COMMANDS.includes(command);
@@ -136,7 +136,7 @@
     return {
       postMessage: (message, targetOrigin) => {
         parent.postMessage(message, targetOrigin);
-      },
+      }
     };
   }
   function adaptWindowSource(win) {
@@ -146,7 +146,7 @@
       },
       removeEventListener: (type, listener) => {
         win.removeEventListener(type, listener);
-      },
+      }
     };
   }
   function createAxAgentPluginClient(options = {}) {
@@ -155,7 +155,7 @@
     const rawSource = options.messageSource ?? (globalWindow ? adaptWindowSource(globalWindow) : void 0);
     if (!rawTarget || !rawSource) {
       throw new Error(
-        "createAxAgentPluginClient: \u9700\u8981\u6D4F\u89C8\u5668\u7A97\u53E3\u73AF\u5883\uFF08window.parent / window\uFF09\u6216\u663E\u5F0F\u6CE8\u5165 postTarget \u4E0E messageSource",
+        "createAxAgentPluginClient: \u9700\u8981\u6D4F\u89C8\u5668\u7A97\u53E3\u73AF\u5883\uFF08window.parent / window\uFF09\u6216\u663E\u5F0F\u6CE8\u5165 postTarget \u4E0E messageSource"
       );
     }
     const target = rawTarget;
@@ -196,11 +196,7 @@
     source.addEventListener("message", handleMessage);
     function request(command, args) {
       if (disposed) {
-        return Promise.reject(
-          new Error(
-            "\u63D2\u4EF6\u6865\u5BA2\u6237\u7AEF\u5DF2\u91CA\u653E\uFF08dispose \u540E\u4E0D\u53EF\u518D\u8C03\u7528\uFF09",
-          ),
-        );
+        return Promise.reject(new Error("\u63D2\u4EF6\u6865\u5BA2\u6237\u7AEF\u5DF2\u91CA\u653E\uFF08dispose \u540E\u4E0D\u53EF\u518D\u8C03\u7528\uFF09"));
       }
       const callId = formatCallId(SANDBOX_CALL_ID_PREFIX.plugin, ++sequence);
       const envelope = { [SANDBOX_RPC_ARG_KEYS.command]: command };
@@ -210,16 +206,12 @@
       const frame = buildRpcRequestFrame(
         callId,
         SANDBOX_RPC_METHODS.apiInvoke,
-        envelope,
+        envelope
       );
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(callId);
-          reject(
-            new Error(
-              `\u63D2\u4EF6\u6865\u8C03\u7528\u300C${command}\u300D\u8D85\u65F6\uFF08${timeoutMs}ms \u672A\u6536\u5230\u5BBF\u4E3B\u54CD\u5E94\uFF09`,
-            ),
-          );
+          reject(new Error(`\u63D2\u4EF6\u6865\u8C03\u7528\u300C${command}\u300D\u8D85\u65F6\uFF08${timeoutMs}ms \u672A\u6536\u5230\u5BBF\u4E3B\u54CD\u5E94\uFF09`));
         }, timeoutMs);
         pending.set(callId, { resolve, reject, timer });
         try {
@@ -236,18 +228,15 @@
         if (!isPluginBridgeCommand(command)) {
           return Promise.reject(
             new Error(
-              `\u63D2\u4EF6\u6865\u767D\u540D\u5355\u5916\u7684\u547D\u4EE4\u300C${
-                String(command)
-              }\u300D\uFF1A\u53EF\u7528\u6E05\u5355\u89C1 AX_AGENT_PLUGIN_BRIDGE_COMMANDS\uFF0C\u65B0\u589E\u901A\u9053\u9700\u6539 pluginBridgeProtocol.ts \u5E76\u7ECF\u5BBF\u4E3B\u4FA7\u8BC4\u5BA1`,
-            ),
+              `\u63D2\u4EF6\u6865\u767D\u540D\u5355\u5916\u7684\u547D\u4EE4\u300C${String(command)}\u300D\uFF1A\u53EF\u7528\u6E05\u5355\u89C1 AX_AGENT_PLUGIN_BRIDGE_COMMANDS\uFF0C\u65B0\u589E\u901A\u9053\u9700\u6539 pluginBridgeProtocol.ts \u5E76\u7ECF\u5BBF\u4E3B\u4FA7\u8BC4\u5BA1`
+            )
           );
         }
         return request(command, args);
       },
-      uiAction: (action) =>
-        request(PLUGIN_BRIDGE_COMMAND_NAMES.uiAction, {
-          [PLUGIN_UI_ACTION_ARG_KEY]: action,
-        }),
+      uiAction: (action) => request(PLUGIN_BRIDGE_COMMAND_NAMES.uiAction, {
+        [PLUGIN_UI_ACTION_ARG_KEY]: action
+      }),
       executeCommand: (args) => request(PLUGIN_BRIDGE_COMMAND_NAMES.executeCommand, args),
       announceReady() {
         if (disposed) {
@@ -267,7 +256,7 @@
           entry.reject(new Error("\u63D2\u4EF6\u6865\u5BA2\u6237\u7AEF\u5DF2\u91CA\u653E\uFF08dispose\uFF09"));
         }
         pending.clear();
-      },
+      }
     };
   }
 
@@ -355,7 +344,7 @@
     setState(blogState, "\u52A0\u8F7D\u4E2D\u2026");
     try {
       const rows = parseRows(
-        await client.executeCommand({ name: "opc_list_blog_posts", input: {} }),
+        await client.executeCommand({ name: "opc_list_blog_posts", input: {} })
       );
       fillRows(
         "#blog-posts",
@@ -366,8 +355,8 @@
           row.slug,
           row.published === true ? "\u5DF2\u53D1\u5E03" : "\u8349\u7A3F",
           row.viewCount,
-          formattedTime(row.updatedAt),
-        ]),
+          formattedTime(row.updatedAt)
+        ])
       );
       if (rows.length > 0) {
         setState(blogState, `\u5171 ${rows.length} \u7BC7\u535A\u5BA2`);
@@ -380,7 +369,7 @@
     setState(assetState, "\u52A0\u8F7D\u4E2D\u2026");
     try {
       const rows = parseRows(
-        await client.executeCommand({ name: "opc_list_content_assets", input: {} }),
+        await client.executeCommand({ name: "opc_list_content_assets", input: {} })
       );
       fillRows(
         "#content-assets",
@@ -405,9 +394,9 @@
               } catch (error) {
                 setState(assetState, `\u5220\u9664\u5931\u8D25\uFF1A${errorText(error)}`, true);
               }
-            }),
+            })
           ];
-        }),
+        })
       );
       if (rows.length > 0) {
         setState(assetState, `\u5171 ${rows.length} \u6761\u5185\u5BB9\u8D44\u4EA7`);
@@ -420,7 +409,7 @@
     setState(scheduleState, "\u52A0\u8F7D\u4E2D\u2026");
     try {
       const rows = parseRows(
-        await client.executeCommand({ name: "opc_list_publish_schedules", input: {} }),
+        await client.executeCommand({ name: "opc_list_publish_schedules", input: {} })
       );
       fillRows(
         "#publish-schedules",
@@ -441,15 +430,15 @@
               try {
                 await client.executeCommand({
                   name: "opc_cancel_publish_schedule",
-                  input: { id },
+                  input: { id }
                 });
                 await loadSchedules();
               } catch (error) {
                 setState(scheduleState, `\u53D6\u6D88\u5931\u8D25\uFF1A${errorText(error)}`, true);
               }
-            }),
+            })
           ];
-        }),
+        })
       );
       if (rows.length > 0) {
         setState(scheduleState, `\u5171 ${rows.length} \u6761\u53D1\u5E03\u8BA1\u5212`);
@@ -464,18 +453,14 @@
     const excerpt = document.querySelector("#blog-excerpt")?.value.trim() ?? "";
     const content = document.querySelector("#blog-content")?.value ?? "";
     if (!title || !slug || !excerpt || !content.trim()) {
-      setState(
-        blogCreateState,
-        "\u8BF7\u586B\u5199\u6807\u9898\u3001\u8DEF\u5F84\u3001\u6458\u8981\u4E0E\u6B63\u6587",
-        true,
-      );
+      setState(blogCreateState, "\u8BF7\u586B\u5199\u6807\u9898\u3001\u8DEF\u5F84\u3001\u6458\u8981\u4E0E\u6B63\u6587", true);
       return;
     }
     setState(blogCreateState, "\u521B\u5EFA\u4E2D\u2026");
     try {
       await client.executeCommand({
         name: "opc_create_blog_post",
-        input: { title, slug, excerpt, content, tags: [] },
+        input: { title, slug, excerpt, content, tags: [] }
       });
       setState(blogCreateState, "\u535A\u5BA2\u521B\u5EFA\u6210\u529F");
       form.reset();
@@ -496,7 +481,7 @@
     try {
       await client.executeCommand({
         name: "opc_create_content_asset",
-        input: { title, contentType, body, tags: [] },
+        input: { title, contentType, body, tags: [] }
       });
       setState(assetCreateState, "\u5185\u5BB9\u8D44\u4EA7\u521B\u5EFA\u6210\u529F");
       form.reset();
@@ -510,11 +495,7 @@
     const contentRefId = document.querySelector("#schedule-id")?.value.trim() ?? "";
     const rawTime = document.querySelector("#schedule-time")?.value ?? "";
     if (!contentRefType || !contentRefId || !rawTime) {
-      setState(
-        scheduleCreateState,
-        "\u8BF7\u586B\u5199\u5173\u8054\u7C7B\u578B\u3001\u5173\u8054 ID \u4E0E\u8BA1\u5212\u65F6\u95F4",
-        true,
-      );
+      setState(scheduleCreateState, "\u8BF7\u586B\u5199\u5173\u8054\u7C7B\u578B\u3001\u5173\u8054 ID \u4E0E\u8BA1\u5212\u65F6\u95F4", true);
       return;
     }
     const millis = new Date(rawTime).getTime();
@@ -529,8 +510,8 @@
         input: {
           contentRefType,
           contentRefId,
-          scheduledAt: Math.floor(millis / 1e3),
-        },
+          scheduledAt: Math.floor(millis / 1e3)
+        }
       });
       setState(scheduleCreateState, "\u53D1\u5E03\u8BA1\u5212\u521B\u5EFA\u6210\u529F");
       form.reset();

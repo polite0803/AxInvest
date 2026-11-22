@@ -1,0 +1,1173 @@
+//! 证据质量驱动的决策权重系统 (P0-1)
+//!
+//! 借鉴 TradingAgents-AShare 的"证据质量驱动决策"理念，废弃简单阈值投票，
+//! 根据市场环境(regime)、投资周期(horizon)、历史表现(weight_decay)动态分配分析师权重。
+//!
+//! ## 核心设计
+//!
+//! 1. **三层权重融合**:
+//!    - 市场周期层 (RegimeLayer): 牛市→技术面+资金面权重↑, 熊市→基本面+宏观权重↑
+//!    - 时间维度层 (HorizonLayer): 短线→情绪+动量权重↑, 长线→价值权重↑
+//!    - 历史表现层 (HistoryLayer): 从 weight_decay 模块获取的贝叶斯平滑后胜率权重
+//!
+//! 2. **BUY/SELL/HOLD 对称化门控**:
+//!    - HOLD 必须满足: 技术面无趋势 + 资金面无方向 + 基本面/新闻面无催化剂
+//!    - BUY/SELL 统一门槛: 任一维度有明确信号即必须选方向
+//!
+//! 3. **输出结构**:
+//!    - `EvidenceWeightReport`: 包含每个分析师的最终权重、决策方向、置信度、门控条件
+
+use axagent_harness::Period;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tracing::debug;
+
+// ── 常量定义 ──
+
+/// 共识方向判定阈值：净得分占总权重比例超过该值才判定为明确方向（bullish/bearish）
+///
+/// ⚠ **它不是「分析师共识」标签的判据**（2026-10-25 收口）：面板与荐股交叉验证显示的
+/// 那个「看多/看空/分歧/分歧」标签，唯一出口是前端票数口径
+/// （`src/lib/stock-analysis-utils.ts` 的 `deriveAnalystConsensus`，65% 占比）。
+/// 本常量产出的 [`EvidenceConsensus::consensus`] 前端只取 `bullish_score` /
+/// `bear_score` / `net_score` 三个加权和当「证据评分」展示，**不消费本标签** ——
+/// 再引一个消费者，就会出现「同一屏两个同名不同值的共识」。
+pub const CONSENSUS_DIRECTION_THRESHOLD: f64 = 0.15;
+/// 置信度映射基准（中性/分歧场景的基础置信度）
+pub const CONSENSUS_CONFIDENCE_BASE: f64 = 30.0;
+/// 方向明确时置信度缩放系数（净占比映射到 [BASE, DIR_MAX]）
+pub const CONSENSUS_CONFIDENCE_DIR_SCALE: f64 = 70.0;
+/// 方向明确时置信度上限
+pub const CONSENSUS_CONFIDENCE_DIR_MAX: f64 = 95.0;
+/// 分歧时置信度缩放系数（较强方占比映射到 [0, DIVIDED_MAX]）
+pub const CONSENSUS_CONFIDENCE_DIVIDED_SCALE: f64 = 50.0;
+/// 分歧时置信度上限
+pub const CONSENSUS_CONFIDENCE_DIVIDED_MAX: f64 = 60.0;
+
+/// **产出证据的分析师节点 id —— 全仓唯一权威清单。**
+///
+/// 为什么需要它（2026-10-03 实测）：本仓一度并存**三套**分析师 id 写法 ——
+/// 逐档权重表用 `a-market`/`a-technical`/`capital`/`macro`/`fundamental`/`sentiment`、
+/// 腿桥表用 `a-technical`/`capital`、`stock_workflow/decision.rs` 的 `expert_mapping` 用
+/// 专家 id（`market-analyst` …），而运行时 `reports` 的键是**图里的节点 id**。
+/// 逐档权重是 `horizon_weights.get(analyst_id)` **精确查表、无兜底** ⇒ 表里那些
+/// 不存在的名字一律静默退 1.0：技术面与研报两档最要紧的权重差从未生效，
+/// 而 `classify_role` 有 `contains` 后缀兜底，域分类看着正常，反而把查表落空盖住了。
+///
+/// 判据 = 「seed 里真有这样的 Agent 节点，且其输出进黑版 `report.*`」
+/// （键形态来自 `crates/analysis-engine/src/blackboard.rs` 的
+/// `id.starts_with("a-") => format!("report.{id}")`；`value-investor`/`research-mgr`
+/// 两个证据方节点无 `a-` 前缀）。
+///
+/// ⚠ **不含 `a-macro`** —— 图里没有宏观分析师节点（宏观进决策流 = PLAN 的 P9-2，未做）。
+/// 留着一个「有权重、无证据来源」的键，正是本清单要消灭的形态。
+/// ⚠ v133（B2-2）：**`a-news` 已摘除**（公告方向通道由 `a-catalyst` 承载，同域双挂=重复计数，
+/// 见 harness `holding_period.rs` 的 `VERDICT_FACTOR_OWNERS` 注释）—— 它不再是「产出证据的
+/// 分析师节点」，故从本清单与权重表同步删除；旧快照回放遇到 `a-news` 会走 classify_role 的
+/// 保留臂与查表 warn（1.0），属历史数据的如实降级。
+pub const EVIDENCE_ANALYST_IDS: &[&str] = &[
+    "a-market-analyst",
+    "a-fundamentals",
+    "value-investor",
+    "a-research",
+    "research-mgr",
+    "a-catalyst",
+    "a-sentiment",
+    "a-hot-money",
+    "a-lockup",
+    "a-sector",
+    "a-policy",
+];
+
+/// 历史名，内容等价于 [`EVIDENCE_ANALYST_IDS`]；新代码请用后者。
+pub const ANALYST_IDS: &[&str] = EVIDENCE_ANALYST_IDS;
+
+/// 把黑版报告键归一成裸节点 id（`report.a-fundamentals` → `a-fundamentals`）。
+///
+/// 权重表、腿桥表、前端表都按裸节点 id 索引；只有黑版键带 `report.` 前缀
+/// （见 `crates/analysis-engine/src/blackboard.rs` 的 `report.{id}` 规则）。
+/// 归一放在查表入口这一处，而不是让每个消费端各自 `replace`（历史上
+/// `HistoricalAnalysisPanel` 就是自己 replace 了一次，别处全忘）。
+///
+/// v133（B2-2）：节点 id 现在可能是**逐档实例**（`report.a-market-analyst--mid`）——
+/// 权重表 / 腿桥表按 **base** 索引 ⇒ 这里统一剥档位后缀（`analyst_base_of`）。
+/// 不剥的后果是每实例精确查表 miss ⇒ 静默退 1.0（本文件 `EVIDENCE_ANALYST_IDS`
+/// 头注释记载的同一缺陷形态：幽灵 id 让权重差从不生效）。
+/// **各档实例共用同一份 base 权重**：权重表按「决策档」（`time_horizon`）逐档给不同值，
+/// 实例自身的档位后缀只用于「本档决策消费本档实例」的选取（上游按档构造 analysts 列表）。
+fn analyst_key(id: &str) -> &str {
+    let id = id.strip_prefix("report.").unwrap_or(id);
+    axagent_harness::holding_period::analyst_base_of(id).unwrap_or(id)
+}
+
+/// 分析师**角色**分类（**不是**能力域 `CapabilityDomain`）——基本面/宏观/技术面/情绪/裁决，
+/// 是投资域内部的分工粒度，不可复用为通用能力轴。划界见 `PLAN-domain-single-source.md` §5。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AnalystRole {
+    /// 基本面/价值
+    Fundamental,
+    /// 宏观/行业
+    Macro,
+    /// 技术面/市场
+    Technical,
+    /// 情绪/新闻/资金
+    Sentiment,
+    /// 综合裁决(Research Manager)
+    Research,
+}
+
+fn classify_role(analyst_id: &str) -> AnalystRole {
+    // B2-1 接线：先剥档位后缀再分类。裸 base id 与 `value-investor` / `research-mgr`
+    // 这类无分隔符的名目会原样通过（`analyst_base_of` 对它们返回 `None`），所以今天的行为
+    // 逐字不变；等带档分析师节点（`a-sentiment--mid`）出现后，这里不会静默落到后缀推断。
+    let analyst_id =
+        axagent_harness::holding_period::analyst_base_of(analyst_id).unwrap_or(analyst_id);
+    match analyst_id {
+        "a-fundamentals" | "value-investor" => AnalystRole::Fundamental,
+        "a-sector" | "a-policy" => AnalystRole::Macro,
+        "a-market-analyst" => AnalystRole::Technical,
+        // v133（B2-2）：`a-news` 已摘除（公告通道由 a-catalyst 承载）——原臂删除；
+        // 旧快照回放遇到它会走下方 `_` 臂（后缀推断 + warn），属历史数据的如实降级。
+        "a-sentiment" | "a-hot-money" | "a-lockup" | "a-catalyst" => AnalystRole::Sentiment,
+        "research-mgr" | "a-research" => AnalystRole::Research,
+        _ => {
+            // 未登记名：仍按关键词后缀推断（保持既有分类结果），但**必须留声** ——
+            // 静默兜底正是「权重表里的幽灵 id」能活这么久的原因之一。
+            tracing::warn!(
+                "[evidence_weight] 分析师 '{analyst_id}' 不在 EVIDENCE_ANALYST_IDS 里，按后缀推断角色（新增分析师请同时登记该清单）"
+            );
+            if analyst_id.contains("fundamental") || analyst_id.contains("value") {
+                AnalystRole::Fundamental
+            } else if analyst_id.contains("macro") || analyst_id.contains("sector") {
+                AnalystRole::Macro
+            } else if analyst_id.contains("market") || analyst_id.contains("technical") {
+                AnalystRole::Technical
+            } else {
+                AnalystRole::Sentiment
+            }
+        },
+    }
+}
+
+// ── 输入结构 ──
+
+/// 市场环境信息（来自 stock-analysis 的 market_regime.rs 或 astock-data 的 regime.rs）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketRegimeInfo {
+    /// "bull" / "bear" / "sideways" / "volatile"
+    pub regime: String,
+    /// 置信度 0-1
+    pub confidence: f64,
+    /// "high" / "low" / "normal"
+    pub volatility: String,
+    /// 可读描述
+    pub description: String,
+    /// 20 日年化波动率(%)
+    pub volatility_pct: Option<f64>,
+    /// 连续上涨天数（前端可选，缺失时视为 0）
+    #[serde(default)]
+    pub consecutive_up: Option<i32>,
+    /// 连续下跌天数（前端可选，缺失时视为 0）
+    #[serde(default)]
+    pub consecutive_down: Option<i32>,
+}
+
+/// 单个分析师的运行时信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalystInput {
+    /// 分析师 ID
+    pub analyst_id: String,
+    /// 该分析师的原始报告文本（用于情感分类）
+    pub report_text: Option<String>,
+    /// 结构化输出的立场（如果有）
+    pub stance: Option<String>,
+    /// 该分析师的 bull_score (0-100，与 VERDICT 契约一致)
+    pub bull_score: Option<f64>,
+    /// 该分析师的 bear_score (0-100，与 VERDICT 契约一致)
+    pub bear_score: Option<f64>,
+    /// 建议仓位 (0-100)
+    pub position_pct: Option<f64>,
+    /// 不可信输出标记（来自上游解析失败/幻觉检测）
+    #[serde(default)]
+    pub untrusted: Option<bool>,
+}
+
+/// 证据权重计算请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceWeightRequest {
+    /// 市场环境
+    pub market_regime: MarketRegimeInfo,
+    /// 投资周期: "ultra_short" | "short" | "mid" | "long"
+    pub time_horizon: String,
+    /// 各分析师输入
+    pub analysts: Vec<AnalystInput>,
+    /// 历史表现权重（来自 weight_decay 模块）(analyst_id, period) → adjusted_weight
+    pub historical_weights: Option<HashMap<String, f64>>,
+}
+
+// ── 输出结构 ──
+
+/// 单个分析师的最终权重
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalystWeight {
+    pub analyst_id: String,
+    /// 领域分类
+    pub domain: String,
+    /// 时间维度权重
+    pub horizon_weight: f64,
+    /// 市场周期调节系数
+    pub regime_modifier: f64,
+    /// 历史表现系数
+    pub history_modifier: f64,
+    /// 最终合成权重
+    pub final_weight: f64,
+    /// 该分析师的立场方向
+    pub stance_direction: String,
+    /// 该分析师的分析置信度（基于报告内容）
+    pub stance_confidence: f64,
+    /// 是否为不可信输出（解析失败/幻觉/上游标记）
+    pub is_untrusted: bool,
+}
+
+/// 共识结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceConsensus {
+    /// 加权 bullish 总分
+    pub bullish_score: f64,
+    /// 加权 bearish 总分
+    pub bearish_score: f64,
+    /// 加权 neutral 总分
+    pub neutral_score: f64,
+    /// 总权重
+    pub total_weight: f64,
+    /// 净得分 (bullish - bearish)
+    pub net_score: f64,
+    /// "bullish" | "bearish" | "neutral" | "divided"
+    pub consensus: String,
+    /// 置信度 0-100
+    pub confidence: f64,
+}
+
+/// BUY/SELL/HOLD 门控条件检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HoldGateResult {
+    /// HOLD 是否被允许
+    pub hold_allowed: bool,
+    /// 原因
+    pub reason: String,
+    /// 技术面是否有趋势
+    pub technical_has_trend: bool,
+    /// 资金面是否有方向
+    pub moneyflow_has_direction: bool,
+    /// 基本面/新闻面是否有催化剂
+    pub fundamental_has_catalyst: bool,
+    /// 建议动作: "BUY" | "SELL" | "HOLD" | "FORCE_DIRECTION"
+    pub suggested_action: String,
+}
+
+/// 完整证据权重报告
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceWeightReport {
+    /// 市场环境
+    pub market_regime: MarketRegimeInfo,
+    /// 投资周期
+    pub time_horizon: String,
+    /// 各分析师权重详情
+    pub analyst_weights: Vec<AnalystWeight>,
+    /// 加权共识
+    pub consensus: EvidenceConsensus,
+    /// HOLD 门控
+    pub hold_gate: HoldGateResult,
+    /// 推荐决策
+    pub recommended_action: String,
+    /// 推荐仓位百分比
+    pub recommended_position_pct: f64,
+    /// 整体置信度
+    pub overall_confidence: f64,
+}
+
+// ── 核心计算 ──
+
+/// 时间维度基础权重表 (与前端 ANALYST_TIME_HORIZON_WEIGHT 对应)
+///
+/// ⚠ 四档必须**逐档显式**：`mid` 曾靠 `_` 兜底命中，
+/// 新增档位或脏值都会静默套用中线权重（〇-B G4「退化即声明」）。
+fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
+    // ⚠ 键必须是 [`EVIDENCE_ANALYST_IDS`] 里的**节点 id**。历史上这里写的是
+    //   `a-market`/`a-technical`/`capital`/`macro`/`fundamental`/`sentiment` —— 图中无此节点，
+    //   精确查表恒落空 ⇒ 技术面与研报的档间权重从未生效（静默 1.0）。
+    // ⚠ 值为 1.0 的条目是**显式声明「本档不偏置该证据」**，不是「没想过」：
+    //   `a-catalyst`/`a-lockup`/`a-policy`/`a-research` 历史上压根不在表里，
+    //   本次统一 id 时不替它们编造档间差异（要出数值，等 P6/P7 由命中率反推）。
+    let mut w = HashMap::new();
+    match horizon {
+        "ultra_short" => {
+            w.insert("a-hot-money", 2.0);
+            w.insert("a-sentiment", 1.5);
+            w.insert("a-market-analyst", 1.3);
+            w.insert("research-mgr", 0.5);
+            w.insert("a-sector", 0.5);
+            w.insert("a-fundamentals", 0.3);
+            w.insert("value-investor", 0.3);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
+        },
+        "short" => {
+            w.insert("a-market-analyst", 1.5);
+            w.insert("a-hot-money", 1.5);
+            w.insert("a-sentiment", 1.3);
+            w.insert("a-fundamentals", 0.6);
+            w.insert("value-investor", 0.5);
+            w.insert("a-sector", 0.8);
+            w.insert("research-mgr", 1.0);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
+        },
+        // 中线：四档中唯一接近「不加权」的基准档，仍逐条显式列出不靠 `_` 兜底
+        "mid" => {
+            w.insert("a-fundamentals", 1.2);
+            // P0-3（PLAN-stock-decision-reliability）：估值腿在 28 日窗内无方向预测力，
+            // 偏置 1.2 → 0.32，归一化后占比 0.32/(0.9+1.0+0.32+1.0)=9.94% ≤10%
+            // （旧值 1.2 时占 29.3%，DCF/PE 分位事实上主导了中档方向）。
+            // 估值保留小幅方向权重作弱参考；长档已彻底降为高估否决腿（见 harness
+            // holding_period.rs 的 valuationFilterOnly）。
+            w.insert("value-investor", 0.32);
+            w.insert("a-sector", 1.1);
+            w.insert("research-mgr", 1.1);
+            w.insert("a-market-analyst", 1.0);
+            w.insert("a-sentiment", 1.0);
+            w.insert("a-hot-money", 0.9);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
+        },
+        "long" => {
+            w.insert("value-investor", 2.0);
+            w.insert("a-fundamentals", 1.5);
+            w.insert("research-mgr", 1.5);
+            w.insert("a-sector", 1.2);
+            w.insert("a-market-analyst", 0.6);
+            w.insert("a-sentiment", 0.7);
+            w.insert("a-hot-money", 0.5);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
+        },
+        // 未知周期：按中线基准，但**必须留可检痕迹**（日志/面板可区分声明与兜底）
+        _ => {
+            tracing::warn!("[evidence_weight] 未知持有周期 '{horizon}'，按中线基准加权");
+            return get_horizon_base_weights("mid");
+        },
+    }
+    w
+}
+
+/// 决策腿（`portfolio-mgr.rhai` 的 f1~f13）→ 分析师 id 的**唯一桥表**。
+///
+/// **它现在的用途（2026-10-04 R-11 之后）**：登记表，不是投影表。原先它被
+/// `horizon_leg_multipliers()` 用来把「按分析师索引的周期权重」乘到「按因子腿融合的
+/// 决策脚本」上 —— 那张乘数表连同投影一起删除了（「同一批腿 × 四个标量」正是 R-11 判为
+/// 构造性错误的那个形态）。留下来的这份属主映射仍然承重，因为它锁的是两条与算法无关的
+/// 结构不变量：① 每条参与融合的腿必须有**唯一**的证据域属主（否则同一域被计两次方向，
+/// 见下面 f3/f10 两处实证错位）；② 桥到的分析师 ∪ 显式登记「无腿」的分析师 = 权威清单
+/// （`scripts/check-horizon-weight-parity.mjs` 判据 ⑦⑧ + 本文件的同名闭合测试）。
+///
+/// `None` 的腿**不是分析师证据**（风险分类、数据质量、trader 观点都是元约束），
+/// 不得为了「看起来四档有差异」硬塞一个分析师进去。
+///
+/// **归因口径（2026-10-03 逐腿核对 `seed_stock_analysis.rs` 的 portfolio-mgr
+/// `input_mapping` 后订正）**：腿的信号多数由**算法/工具节点**产出（`t-scoring`、
+/// `t-valuation`、`t-lockup-data`、`pace-calc`、`serenity_context`），LLM 分析师并不
+/// 直接产出该变量。因此桥按**证据域唯一属主**归因 —— 该域在 12 个分析师里有且仅有一个
+/// 职责相符的属主时桥到它（否则逐档权重无从作用），无属主 ⇒ `None`。
+/// id 统一后这些归因**会真的改变乘数**：此前两侧 id 对不上 ⇒ 全表恒 1.0、写错也无人察觉，
+/// 所以订正不是洁癖而是行为变更的前提。两处实证错位：
+/// - `f3` 的变量是 `catalyst_level`，路径 `a-catalyst.content.verdict.catalyst_level`
+///   ⇒ 属主 `a-catalyst`（催化剂与叙事完整度），原写 `a-news`（消息面评估，另一节点）。
+/// - `f10` 的变量是 `lockup_bundle`，来自 `t-lockup-data`（解禁 + 增减持 + 大宗 + 股东户数）
+///   ⇒ 属主 `a-lockup`（解禁减持与质押风险排查），原写 `a-hot-money`（那是 `f9` 的
+///   `money_flow` 域）⇒ 旧形态把资金流权重同时套在两条腿上，等于给同一域计了两次方向。
+pub const DECISION_LEG_ANALYST: &[(&str, Option<&str>)] = &[
+    ("f1", Some("a-market-analyst")), // 技术面 / 趋势（历史上写 `a-technical`，图里无此节点）
+    ("f2", Some("research-mgr")),     // 共识裁决域属主（变量本身出自 debate-convergence）
+    ("f3", Some("a-catalyst")),       // 催化剂等级（原误写 a-news）
+    ("f4", None),                     // 风险分类（元约束）
+    ("f5", Some("value-investor")),   // 估值（DCF / 格雷厄姆 / PE 分位腿）
+    ("f6", None),                     // 数据质量（元约束）
+    ("f7", None),                     // trader 观点（不属于四档分析师证据）
+    ("f9", Some("a-hot-money")),      // 资金流 `get_stock_money_flow`（历史上写 `capital`）
+    ("f10", Some("a-lockup")),        // 筹码面（原误归 a-hot-money）
+    ("f11", Some("a-sentiment")),     // PACE 情绪
+    ("f12", Some("a-market-analyst")), // 动量（技术侧）
+    ("f13", Some("a-sector")),        // 产业链瓶颈（serenity 合成分，行业/链域唯一属主）
+];
+
+/// **当前没有决策腿**的分析师 —— 显式登记，不许由「桥表里查不到」静默表达。
+///
+/// 与 [`DECISION_LEG_ANALYST`] 的并集必须等于 [`EVIDENCE_ANALYST_IDS`]（测试
+/// `bridged_plus_unbridged_covers_every_analyst` 锁闭合）。存在理由：id 统一后逐档权重
+/// 真的会作用到桥上 ⇒「不在桥上」= 该分析师的证据对贝叶斯融合**零影响**，这是结论而不是缺省。
+/// 每一项都写明它的路在何处，或为什么刻意不做：
+/// - `a-fundamentals`（PE/PB/ROE 财务质量）：P4′ 九因子中的 `earningsQuality` 承载
+///   （见 `harness::holding_period::Period::verdict_spec`），本档之后才有腿。
+/// - `a-research`（券商研报观点汇总）：P4′ 的 `expectationRevision`。
+/// - `a-policy`（宏观政策影响）：P4′ 的 `macroRegime`（其数据侧已由 P9-1 五条真序列供上）。
+///
+/// v133（B2-2）：原第 4 项 `a-news` 已随节点摘除而移出本清单（公告方向通道由 `a-catalyst`
+/// 的 `f3` 承载，同域双挂=重复计数）—— 「无腿」的诚实登记以「节点存在」为前提，
+/// 节点不在了就不再是登记对象。
+pub const UNBRIDGED_ANALYST_IDS: &[&str] = &["a-fundamentals", "a-research", "a-policy"];
+
+/// 因子 → 数值来源通道（P4′ 子图的 `input_mapping` 必须满足这张表的声明）。
+///
+/// 三种语义，**不是**「模型想不想给」而是「数字从哪儿拿」：
+/// - `tierScore`：该档**自己的**评分节点（`t-scoring-hour|day|week|month`）——
+///   这是 R-11「逐档取该档数据」的正解，跨档共用一份评分正是被退役的形态；
+/// - `sharedTool`：与持有尺度无关的确定性工具输出（涨停池 / 估值带 / 一致预期 / 宏观快照 /
+///   解禁包 / 行业排名），四档共用同一次取数，但**只有该档参与该因子时**才进融合；
+/// - `verdict`：只有 LLM 分析师能给的判断（资金持续性、催化剂等级），由 P3′ 注入的逐档契约
+///   要求该分析师必须输出该字段。
+///
+/// `microstructure`（封单额 / 炸板次数）与 `breadthState`（家数 / 封板率）都指到
+/// `get_limit_up_pool` —— 同一份响应的**两组不同字段**，不是一个因子的两次计数（域属主也不同：
+/// 封单是资金行为、家数是情绪状态）。
+pub const VERDICT_FACTOR_SOURCES: &[(&str, &str, &str)] = &[
+    ("momentumSignal", "tierScore", "macd"),
+    ("trendStrength", "tierScore", "totalScore"),
+    ("microstructure", "sharedTool", "get_limit_up_pool"),
+    ("breadthState", "sharedTool", "get_limit_up_pool"),
+    ("flowPersistence", "verdict", ""),
+    ("eventCatalyst", "verdict", ""),
+    ("valuationBand", "sharedTool", "t-valuation-band"),
+    ("earningsQuality", "sharedTool", "t-valuation"),
+    ("expectationRevision", "sharedTool", "get_consensus_eps"),
+    ("macroRegime", "sharedTool", "macro_data_snapshot"),
+    ("supplyShock", "sharedTool", "t-lockup-data"),
+    ("sectorRotation", "sharedTool", "get_industry_ranking"),
+    // 阶段 1（2026-10-19）：`injectedVar` —— 值由 wiring 层（`hooks::build_stock_analysis_variables`）
+    // 复用**已在拉的基准指数序列**算好后注入，既不是 LLM 判定（verdict）、也没有跑它的节点
+    // （sharedTool）。第三种通道类别必须显式登记：填 `sharedTool` 会要求一条快照键映射
+    // （`every_shared_tool_channel_has_a_snapshot_key` 那条测试当场红），填 `tierScore`
+    // 会让审计把「没在场」判成「不适用」而放走静默缺席。
+    ("relativeStrength", "injectedVar", "relative_strength"),
+];
+
+/// **通道 → 快照落库键**（`blackboard_snapshot` 里的 `result.*`）。裁定 P-B5 要求的唯一权威表。
+///
+/// 为什么必须单独登记：`VERDICT_FACTOR_SOURCES` 第 3 列对 `sharedTool` 给的是**工具名**
+/// （如 `get_limit_up_pool`），而快照里落的是**跑该工具的节点 id**（`result.t-limitup-pool`）——
+/// 两者不但字面不同，连拼法都不一致（通道写 `get_consensus_eps`，工具注册名是
+/// `get_stock_consensus_eps`）。审计侧原先只能「channel 字面量恰好等于节点键」才判在场，
+/// 于是 **7 条 sharedTool 通道里只有 3 条判得了**；补本表后 7 条全部可判。
+///
+/// 与 `VERDICT_FACTOR_SOURCES` 的分工：那边说「这个因子的数字从**哪个工具**拿」，
+/// 本表说「那个工具的产出**落在哪个键**」。两张表的键域必须一一对上 ——
+/// 由 `every_shared_tool_channel_has_a_snapshot_key` 逐条锁，且每个节点 id 还得
+/// 在播种源码里真实存在（见 `snapshot_node_ids_exist_in_seed`）。
+///
+/// **不含 `tierScore` 通道**（`macd` / `totalScore`）：那是逐档评分节点
+/// （`Period::scoring_node_id()`）的产出，阶段 0 实测**不落主快照**（最近 49 条记录里
+/// 含 `t-scoring-hour|day|week|month` 的为 0 条）⇒ 审计对该类只能报「不适用」，
+/// 登记一条假键会把「拿不到」伪装成「查过且在场」。
+pub const CHANNEL_SNAPSHOT_KEYS: &[(&str, &str)] = &[
+    // 通道（工具名 / 节点 id 二者混用，见上）→ 快照键
+    ("get_limit_up_pool", "result.t-limitup-pool"),
+    ("t-valuation-band", "result.t-valuation-band"),
+    ("t-valuation", "result.t-valuation"),
+    ("get_consensus_eps", "result.t-consensus-data"),
+    ("macro_data_snapshot", "result.t-macro-data"),
+    ("t-lockup-data", "result.t-lockup-data"),
+    ("get_industry_ranking", "result.t-sector-data"),
+];
+
+/// 查「某通道的产出落在哪个快照键」。表外通道 ⇒ `None`（审计侧据此报「不适用」）。
+pub fn channel_snapshot_key(channel: &str) -> Option<&'static str> {
+    CHANNEL_SNAPSHOT_KEYS.iter().find(|(c, _)| *c == channel).map(|(_, k)| *k)
+}
+
+/// 波动带统计窗口（交易日）。**唯一权威在这里**：
+///
+/// 主链 `src/commands/portfolio-mgr.rhai` 里有一份同名的脚本内常量（`let VOL_LOOKBACK_DAYS = 20;`），
+/// 两份数字必须永远相等 —— 由 `seed_consistency_tests::main_chain_vol_lookback_matches_injected_const`
+/// 逐字比对钉住（本仓的教训：两处一致地不同，比一处缺失更难发现）。
+pub const VOL_LOOKBACK_DAYS: i64 = 20;
+
+/// 该档分支的置信推导口径名（P4′-b 的四份决策脚本各自实现其一）。
+///
+/// 四档不同**不是**为了看起来不同：每一档的「怎么算赢」由它的出场口径决定，
+/// 置信与出场必须同族，否则胜率与止损来自两套假设。
+/// - `edge_no_time_scaling`：2 日窗内不做跨期缩放（√h 类变换在持有期短于噪声半衰期时无意义）；
+/// - `dual_confirmation`：趋势与资金持续性**同号**才允许加仓（联合门，不是加权平均）；
+/// - `sigma_band_position`：价格在 k·σ 带内的位置决定置信与出场（波动带法）；
+/// - `margin_of_safety`：估值带 / 安全边际定置信，出场为「到达目标 或 论点被证伪」。
+fn confidence_method(p: Period) -> &'static str {
+    match p {
+        Period::UltraShort => "edge_no_time_scaling",
+        Period::Short => "dual_confirmation",
+        Period::Mid => "sigma_band_position",
+        Period::Long => "margin_of_safety",
+    }
+}
+
+/// 该档的**入场必要条件门**（不是权重，是「不满足就不许出买入」的结构门）。
+fn entry_gate(p: Period) -> &'static str {
+    match p {
+        // 超短：情绪广度（涨停家数 / 封板率）不达标时，个股形态再好也不给出买入。
+        Period::UltraShort => "breadth_required",
+        // 短：趋势与资金同向；中：σ 带内才允许建仓；长：必须有正的安全边际。
+        Period::Short => "trend_and_flow_same_sign",
+        Period::Mid => "inside_sigma_band",
+        Period::Long => "positive_margin_of_safety",
+    }
+}
+
+/// 无分析师属主的腿（当前只有 `injectedVar` 通道）参与配比时的中性偏置。
+///
+/// 不能从 [`get_horizon_base_weights`] 取：那张表的键域是**分析师 id**，而 injectedVar
+/// 的值由 wiring 层直接算出、不经任何模型转述（给它安一个分析师属主就是假归因，
+/// 见 `VERDICT_FACTOR_SOURCES` 的注释）。取 1.0 与本表「值为 1.0 = 本档不偏置该证据」
+/// 的既有语义一致；它照常参与该档归一，不额外放大或缩小其它腿的相对配比。
+pub const INJECTED_VAR_NEUTRAL_BIAS: f64 = 1.0;
+
+/// 注入 Rhai 的**逐档分支表**：`{ultra_short: {legs:[…], analysts:[…], …}, …}`。
+///
+/// 与已删除的乘数表（`leg_mult` / 「同一批腿 × 四个标量」）的区别就是 R-11 的区别：
+/// 本表是「每档**自己的腿集合**、每腿自己的角色与来源」。数值仍然全部派生自
+/// [`get_horizon_base_weights`]（腿间配比 = 该档分析师偏置在**本档方向腿**上的归一化），
+/// 本函数不新增任何一个数 —— 手抄第二份权重就是 §二十四 那批缺陷的成因。
+///
+/// 腿的 `role`：`direction`（进方向加权）/ `filter`（只作入场时机过滤）/
+/// `riskNote`（只作风险提示）/ `partial`（有信息但来源不全覆盖，不进方向）。
+/// **非 `direction` 的腿权重恒为 0.0**，并带 `constraint` 说明凭什么打折 —— 否则
+/// 「它参与了」与「它只是被看了看」在面板上长得一样。
+pub fn horizon_branch_specs() -> serde_json::Value {
+    let mut tiers = serde_json::Map::new();
+    for p in Period::ALL {
+        let spec = p.verdict_spec();
+        let bias = get_horizon_base_weights(p.as_str());
+        let constraint_of = |f: &str| -> Option<&'static str> {
+            spec.qualified.iter().find(|(qf, _)| *qf == f).map(|(_, k)| *k)
+        };
+
+        // 本档的腿 = 进方向加权的因子 ∪ 只作过滤/提示/部分来源的条件因子（后者 role 非 direction）
+        let direction = spec.participating.clone();
+        let filtered_only: Vec<&'static str> =
+            spec.qualified.iter().map(|(qf, _)| *qf).filter(|qf| !direction.contains(qf)).collect();
+
+        let mut legs: Vec<serde_json::Value> = Vec::new();
+        for (f, is_direction) in direction
+            .iter()
+            .copied()
+            .map(|f| (f, true))
+            .chain(filtered_only.into_iter().map(|f| (f, false)))
+        {
+            let owner = Period::factor_owner(f);
+            let source = VERDICT_FACTOR_SOURCES.iter().find(|(cf, _, _)| *cf == f);
+            let Some((_, kind, channel)) = source else {
+                tracing::warn!(
+                    "[evidence_weight] 分支表：因子 {f} 缺来源登记 ⇒ 该腿不进融合（档 {}）",
+                    p.as_str()
+                );
+                continue;
+            };
+            // injectedVar **没有分析师属主是设计使然**（值由 wiring 层直接注入）；
+            // 其它通道缺属主仍视为登记缺口，不得借这条豁免蒙混过关。
+            if *kind != "injectedVar" && owner.is_none() {
+                tracing::warn!(
+                    "[evidence_weight] 分支表：因子 {f} 缺属主 ⇒ 该腿不进融合（档 {}）",
+                    p.as_str()
+                );
+                continue;
+            }
+            let b = match owner {
+                Some(o) => match bias.get(o) {
+                    Some(v) => *v,
+                    None => {
+                        tracing::warn!(
+                            "[evidence_weight] 档 {} 权重表缺分析师 '{o}'（因子 {f}）⇒ 配比按 1.0",
+                            p.as_str()
+                        );
+                        1.0
+                    },
+                },
+                None => INJECTED_VAR_NEUTRAL_BIAS,
+            };
+            let constraint = constraint_of(f);
+            legs.push(serde_json::json!({
+                "factor": f,
+                "owner": owner,
+                "role": if is_direction {
+                    "direction"
+                } else {
+                    role_of_marker(constraint.unwrap_or(""))
+                },
+                "bias": b,
+                "weight": b,
+                "source": { "kind": kind, "channel": channel },
+                "constraint": constraint,
+            }));
+        }
+
+        // 腿间配比只归一化**方向腿**；其余腿权重置 0（角色已在 role 里声明）
+        let sum: f64 = legs
+            .iter()
+            .filter(|l| l["role"] == "direction")
+            .filter_map(|l| l["weight"].as_f64())
+            .sum();
+        if sum <= 0.0 {
+            tracing::warn!(
+                "[evidence_weight] 档 {} 方向腿配比合计为 0 ⇒ 该档分支不出结论（不得静默退等权）",
+                p.as_str()
+            );
+        }
+        let direction_sum_ok = sum > 0.0;
+
+        for l in legs.iter_mut() {
+            if l["role"] == "direction" && direction_sum_ok {
+                let w = l["weight"].as_f64().unwrap_or(0.0) / sum;
+                l["weight"] = serde_json::Value::from((w * 1e6).round() / 1e6);
+            } else if l["role"] != "direction" {
+                l["weight"] = serde_json::Value::from(0.0);
+            }
+        }
+
+        tiers.insert(
+            p.as_str().to_string(),
+            serde_json::json!({
+                "tier": p.as_str(),
+                "days": p.default_holding_days(),
+                "volLookbackDays": VOL_LOOKBACK_DAYS,
+                "positionMultiplier": p.position_multiplier(),
+                "exitRule": spec.exit_rule,
+                "confidenceMethod": confidence_method(p),
+                "entryGate": entry_gate(p),
+                // 方向腿配比合计为 0 时置真：脚本必须据此**不出结论**（点名的退化），
+                // 而不是退成等权 —— 等权就是拿简化填架构缺口。
+                "degraded": !direction_sum_ok,
+                "analysts": p.analyst_subset(),
+                "legs": legs,
+            }),
+        );
+    }
+    serde_json::Value::Object(tiers)
+}
+
+/// 标记键 → 腿角色（`qualified` 里「只作过滤 / 只作风险提示」与「来源不全」的三分）。
+fn role_of_marker(key: &str) -> &'static str {
+    match key {
+        "trendFilterOnly" => "filter",
+        // 情绪广度（超短 / 短档）：市场级量，只作入场必要条件 / 背景过滤，不进方向加权。
+        "breadthGateOnly" => "filter",
+        // P0-3：长档估值腿只作高估否决（便宜不是买入理由），不进方向加权。
+        "valuationFilterOnly" => "filter",
+        "supplyAsRiskNoteOnly" => "riskNote",
+        _ => "partial",
+    }
+}
+
+/// 计算市场周期调节系数
+///
+/// 核心逻辑:
+/// - **牛市**: 技术面+资金面权重显著提升 (趋势跟踪有效)，基本面+宏观轻微提升
+/// - **熊市**: 基本面+宏观权重显著提升 (防御价值凸显)，技术面+情绪面被削弱
+/// - **高波动**: 所有 domain 降低权重，风控优先
+/// - **震荡市**: 基本面+情绪面权重提升 (精选个股+预期差)，技术面中性
+fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystRole, f64> {
+    let mut modifiers = HashMap::new();
+
+    let vol_penalty = match regime.volatility.as_str() {
+        "high" => 0.85, // 高波动 → 所有 domain ×0.85
+        "low" => 1.05,  // 低波动 → 轻微提升
+        _ => 1.0,
+    };
+
+    match regime.regime.as_str() {
+        "bull" => {
+            modifiers.insert(AnalystRole::Technical, 1.30 * vol_penalty);
+            modifiers.insert(AnalystRole::Sentiment, 1.20 * vol_penalty);
+            modifiers.insert(AnalystRole::Fundamental, 1.10 * vol_penalty);
+            modifiers.insert(AnalystRole::Macro, 1.05 * vol_penalty);
+            modifiers.insert(AnalystRole::Research, 1.05 * vol_penalty);
+        },
+        "bear" => {
+            modifiers.insert(AnalystRole::Fundamental, 1.35 * vol_penalty);
+            modifiers.insert(AnalystRole::Macro, 1.30 * vol_penalty);
+            modifiers.insert(AnalystRole::Research, 1.20 * vol_penalty);
+            modifiers.insert(AnalystRole::Technical, 0.80 * vol_penalty);
+            modifiers.insert(AnalystRole::Sentiment, 0.75 * vol_penalty);
+        },
+        "volatile" => {
+            // 高波动: 全 domain 降权
+            modifiers.insert(AnalystRole::Fundamental, 0.80);
+            modifiers.insert(AnalystRole::Macro, 0.85);
+            modifiers.insert(AnalystRole::Technical, 0.70);
+            modifiers.insert(AnalystRole::Sentiment, 0.65);
+            modifiers.insert(AnalystRole::Research, 0.90);
+        },
+        // sideways / 震荡: 精选个股模式
+        _ => {
+            modifiers.insert(AnalystRole::Fundamental, 1.15 * vol_penalty);
+            modifiers.insert(AnalystRole::Sentiment, 1.10 * vol_penalty);
+            modifiers.insert(AnalystRole::Research, 1.10 * vol_penalty);
+            modifiers.insert(AnalystRole::Macro, 1.00 * vol_penalty);
+            modifiers.insert(AnalystRole::Technical, 0.95 * vol_penalty);
+        },
+    }
+
+    modifiers
+}
+
+/// 从分析师的报告文本提取立场方向
+///
+/// 返回三元组: (direction, confidence, is_untrusted)
+/// - is_untrusted=true 表示无可信结构化数据，立场为回退推断，不应参与仓位贡献
+fn extract_stance(analyst: &AnalystInput) -> (String, f64, bool) {
+    // 优先使用结构化字段
+    if let Some(ref stance) = analyst.stance {
+        let lower = stance.to_lowercase();
+        if lower.contains("买")
+            || lower.contains("多")
+            || lower.contains("涨")
+            || lower.contains("bull")
+            || lower.contains("buy")
+            || lower.contains("乐观")
+            || lower.contains("上行")
+            || lower.contains("流入")
+        {
+            return ("bullish".into(), 0.8, false);
+        }
+        if lower.contains("卖")
+            || lower.contains("空")
+            || lower.contains("跌")
+            || lower.contains("bear")
+            || lower.contains("sell")
+            || lower.contains("悲观")
+            || lower.contains("下行")
+            || lower.contains("流出")
+        {
+            return ("bearish".into(), 0.8, false);
+        }
+        if lower.contains("中性")
+            || lower.contains("观望")
+            || lower.contains("持有")
+            || lower.contains("hold")
+            || lower.contains("neutral")
+            || lower.contains("震荡")
+        {
+            return ("neutral".into(), 0.7, false);
+        }
+    }
+
+    // 使用 bull_score / bear_score
+    //
+    // 口径：`bull_score` / `bear_score` 是 **0-100**（`agent_executor` 四处 VERDICT 提醒语
+    // 逐字声明），差值的百分比即置信 —— 早先这里按 0-10 除以 10，导致任何真实差值
+    // （如 60/40）都被 `.min(0.9)` 饱和成 0.9，等于把所有「有立场」的分析师都当成
+    // 90% 确信。除以 100 后置信才是「分歧幅度」的单调映射。
+    if let (Some(bs), Some(bs2)) = (analyst.bull_score, analyst.bear_score) {
+        if bs > bs2 {
+            return ("bullish".into(), ((bs - bs2) / 100.0).min(0.9), false);
+        }
+        if bs2 > bs {
+            return ("bearish".into(), ((bs2 - bs) / 100.0).min(0.9), false);
+        }
+        return ("neutral".into(), 0.5, false);
+    }
+
+    // 使用仓位建议
+    if let Some(pct) = analyst.position_pct {
+        if pct >= 6.0 {
+            return ("bullish".into(), (pct / 100.0).min(0.9), false);
+        }
+        if pct < 0.0 {
+            return ("bearish".into(), 0.7, false);
+        }
+        return ("neutral".into(), 0.5, false);
+    }
+
+    // 没有结构化数据 → 从报告文本做简单情感分类
+    if let Some(ref text) = analyst.report_text {
+        let lower = text.to_lowercase();
+        let mut bull_count = 0;
+        let mut bear_count = 0;
+
+        let bull_kw =
+            ["买入", "增持", "看多", "看涨", "利好", "上涨", "bull", "buy", "增长", "改善"];
+        let bear_kw =
+            ["卖出", "减持", "看空", "看跌", "利空", "下跌", "bear", "sell", "下滑", "恶化"];
+
+        for kw in &bull_kw {
+            if lower.contains(kw) {
+                bull_count += 1;
+            }
+        }
+        for kw in &bear_kw {
+            if lower.contains(kw) {
+                bear_count += 1;
+            }
+        }
+
+        if bull_count > bear_count {
+            let conf = 0.5 + (bull_count as f64 - bear_count as f64) * 0.05;
+            return ("bullish".into(), conf.min(0.85), false);
+        }
+        if bear_count > bull_count {
+            let conf = 0.5 + (bear_count as f64 - bull_count as f64) * 0.05;
+            return ("bearish".into(), conf.min(0.85), false);
+        }
+    }
+
+    // 无任何可信数据 → 标记为不可信，position_pct 应为 0
+    ("neutral".into(), 0.4, true)
+}
+
+/// 检查 HOLD 门控条件
+///
+/// 借鉴 TradingAgents 的"对称化门控"逻辑:
+/// HOLD 仅当**同时满足**以下三个条件时才允许:
+/// 1. 技术面无明确趋势 (技术面分析师为 neutral)
+/// 2. 资金面无明确方向 (资金面/情绪面分析师为 neutral)
+/// 3. 基本面/新闻面无催化剂 (基本面/新闻面分析师为 neutral)
+///
+/// 任一条件不满足 → 必须选 BUY 或 SELL
+fn check_hold_gate(analysts: &[AnalystWeight]) -> HoldGateResult {
+    let mut tech_has_trend = false;
+    let mut money_has_dir = false;
+    let mut fund_has_catalyst = false;
+
+    for a in analysts {
+        let domain = classify_role(&a.analyst_id);
+        match domain {
+            AnalystRole::Technical
+                if a.stance_direction != "neutral" && a.stance_confidence > 0.5 =>
+            {
+                tech_has_trend = true;
+            },
+            AnalystRole::Sentiment
+                if a.stance_direction != "neutral" && a.stance_confidence > 0.5 =>
+            {
+                money_has_dir = true;
+            },
+            AnalystRole::Fundamental | AnalystRole::Macro
+                if (a.stance_direction == "bullish" || a.stance_direction == "bearish")
+                    && a.stance_confidence > 0.5 =>
+            {
+                fund_has_catalyst = true;
+            },
+            _ => {},
+        }
+    }
+
+    let hold_allowed = !tech_has_trend && !money_has_dir && !fund_has_catalyst;
+
+    let (reason, suggested_action) = if hold_allowed {
+        ("技术面无趋势 + 资金面无方向 + 基本面无催化剂 → HOLD 允许".into(), "HOLD".into())
+    } else if tech_has_trend && money_has_dir {
+        (
+            format!(
+                "技术面有趋势({}) + 资金面有方向({}) → 必须选方向",
+                if tech_has_trend { "是" } else { "否" },
+                if money_has_dir { "是" } else { "否" }
+            ),
+            "FORCE_DIRECTION".into(),
+        )
+    } else if tech_has_trend {
+        ("技术面有明确趋势 → 必须选 BUY 或 SELL".into(), "FORCE_DIRECTION".into())
+    } else if fund_has_catalyst {
+        ("基本面/新闻面有催化剂 → 必须选 BUY 或 SELL".into(), "FORCE_DIRECTION".into())
+    } else {
+        ("资金面/情绪面有明确方向 → 必须选方向".into(), "FORCE_DIRECTION".into())
+    };
+
+    HoldGateResult {
+        hold_allowed,
+        reason,
+        technical_has_trend: tech_has_trend,
+        moneyflow_has_direction: money_has_dir,
+        fundamental_has_catalyst: fund_has_catalyst,
+        suggested_action,
+    }
+}
+
+/// 综合共识判定（证据质量驱动）
+///
+/// 不再简单"数人头"，而是按分析师权重 * 立场方向 * 置信度 加权计算
+fn compute_evidence_consensus(analysts: &[AnalystWeight]) -> EvidenceConsensus {
+    let mut bullish_score = 0.0;
+    let mut bearish_score = 0.0;
+    let mut neutral_score = 0.0;
+
+    for a in analysts {
+        let weighted = a.final_weight * a.stance_confidence;
+        match a.stance_direction.as_str() {
+            "bullish" => bullish_score += weighted,
+            "bearish" => bearish_score += weighted,
+            _ => neutral_score += weighted,
+        }
+    }
+
+    let total_weight = bullish_score + bearish_score + neutral_score;
+
+    let (consensus, confidence) = if total_weight == 0.0 {
+        debug!("共识计算边界：所有分析师权重之和为 0，回退为 neutral（无可用证据）");
+        ("neutral".into(), 0.0)
+    } else {
+        let net = bullish_score - bearish_score;
+        let max_possible = total_weight;
+        // 置信度: 净得分占总权重的比例
+        let raw_confidence = (net.abs() / max_possible).clamp(0.0, 1.0);
+        let consensus = if net > total_weight * CONSENSUS_DIRECTION_THRESHOLD {
+            "bullish"
+        } else if net < -total_weight * CONSENSUS_DIRECTION_THRESHOLD {
+            "bearish"
+        } else if bullish_score > 0.0 && bearish_score > 0.0 {
+            "divided"
+        } else {
+            "neutral"
+        };
+
+        let confidence = match consensus {
+            "bullish" | "bearish" => {
+                // 方向明确时，用净占比作为信心
+                (raw_confidence * CONSENSUS_CONFIDENCE_DIR_SCALE + CONSENSUS_CONFIDENCE_BASE)
+                    .min(CONSENSUS_CONFIDENCE_DIR_MAX)
+            },
+            "divided" => {
+                // 分歧时，看哪方更强
+                let max_side = bullish_score.max(bearish_score);
+                (max_side / total_weight * CONSENSUS_CONFIDENCE_DIVIDED_SCALE)
+                    .min(CONSENSUS_CONFIDENCE_DIVIDED_MAX)
+            },
+            _ => CONSENSUS_CONFIDENCE_BASE,
+        };
+
+        (consensus.to_string(), confidence)
+    };
+
+    EvidenceConsensus {
+        bullish_score: (bullish_score * 100.0).round() / 100.0,
+        bearish_score: (bearish_score * 100.0).round() / 100.0,
+        neutral_score: (neutral_score * 100.0).round() / 100.0,
+        total_weight: (total_weight * 100.0).round() / 100.0,
+        net_score: ((bullish_score - bearish_score) * 100.0).round() / 100.0,
+        consensus,
+        confidence,
+    }
+}
+
+/// 计算推荐仓位
+///
+/// `pub(crate)`：单周期乘数的判据需要**绕过** HorizonLayer 的分析师权重
+/// （那会同时改变共识置信度，端到端比值就不是纯乘数），直测这一段算术。
+pub(crate) fn compute_recommended_position(
+    consensus: &EvidenceConsensus,
+    hold_gate: &HoldGateResult,
+    horizon: &str,
+) -> f64 {
+    if hold_gate.suggested_action == "HOLD" {
+        return 0.0; // HOLD = 不持仓
+    }
+
+    // 根据共识方向和置信度计算仓位
+    let base_pct = match consensus.consensus.as_str() {
+        "bullish" => consensus.confidence * 0.8, // 0-80%
+        "bearish" => 0.0,                        // 看空 → 不持仓
+        "divided" => consensus.confidence * 0.3, // 分歧 → 0-30%
+        _ => 0.0,
+    };
+
+    // 周期修正（〇-B v2：决策链仓位乘数的唯一权威源是 `Period::position_multiplier`，
+    //   见 `axagent_harness::holding_period`；`portfolio-mgr.rhai` 主决策消费**同一个**数字）。
+    //   旧实现在此处再抄一份 0.6/0.8/1.0/1.2 且用 `_ => 1.0` 把 mid 混进「未知兜底」——
+    //   两份数字一旦分叉，面板与决策就会各说各话。
+    let horizon_mult = horizon.parse::<Period>().unwrap_or(Period::Mid).position_multiplier();
+
+    ((base_pct * horizon_mult * 100.0).round() / 100.0).clamp(0.0, 80.0)
+}
+
+// ── 主入口 ──
+
+/// 执行证据质量驱动的权重计算
+///
+/// # 参数
+/// - `request`: 包含市场环境、分析师输入、历史权重的完整请求
+///
+/// # 返回
+/// 包含每个分析师最终权重、共识结果、HOLD 门控的完整报告
+pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeightReport {
+    // 1. 获取时间维度基础权重
+    let horizon_weights = get_horizon_base_weights(&request.time_horizon);
+
+    // 2. 计算市场周期调节系数
+    let regime_modifiers = compute_regime_modifiers(&request.market_regime);
+
+    // 3. 对每个分析师计算最终权重
+    let mut analyst_weights: Vec<AnalystWeight> = request
+        .analysts
+        .iter()
+        .map(|analyst| {
+            let domain = classify_role(analyst_key(&analyst.analyst_id));
+
+            // 时间维度基础权重 —— 先剥黑版前缀再查。
+            // `reports` 的键是 `report.{节点 id}`（blackboard.rs 的键规则），而权重表按**裸节点 id**
+            // 索引 ⇒ 不剥就是每个分析师都查不到、全员静默退 1.0（本次实测的主缺陷）。
+            let bare_id = analyst_key(&analyst.analyst_id);
+            let found = horizon_weights.contains_key(bare_id);
+            let horizon_w = horizon_weights.get(bare_id).copied().unwrap_or(1.0);
+            if !found {
+                tracing::warn!(
+                    "[evidence_weight] 分析师 '{bare_id}' 在 {} 权重表里没有条目 ⇒ 按 1.0 计（该档未声明对它的偏置）",
+                    request.time_horizon
+                );
+            }
+
+            // 市场周期调节
+            let regime_m = regime_modifiers.get(&domain).copied().unwrap_or(1.0);
+
+            // 历史表现权重（如果有）
+            let history_m = request
+                .historical_weights
+                .as_ref()
+                .and_then(|hw| hw.get(&analyst.analyst_id))
+                .copied()
+                .unwrap_or(1.0);
+
+            // 最终权重 = 时间维度 * 市场周期 * 历史表现
+            let final_w = (horizon_w * regime_m * history_m).clamp(0.1, 3.0);
+
+            // 提取立场（含不可信标记）
+            let (direction, conf, untrusted) = extract_stance(analyst);
+            let is_untrusted = untrusted || analyst.untrusted.unwrap_or(false);
+
+            AnalystWeight {
+                analyst_id: analyst.analyst_id.clone(),
+                domain: format!("{:?}", domain),
+                horizon_weight: (horizon_w * 100.0).round() / 100.0,
+                regime_modifier: (regime_m * 100.0).round() / 100.0,
+                history_modifier: (history_m * 100.0).round() / 100.0,
+                final_weight: (final_w * 100.0).round() / 100.0,
+                stance_direction: direction,
+                stance_confidence: conf,
+                is_untrusted,
+            }
+        })
+        .collect();
+
+    // 4. 对 analyst_weights 按 analyst_id 去重（如果前端传了同一个 ID 的不同表示）
+    //    用 last-write-wins 策略
+    let mut deduped: HashMap<String, AnalystWeight> = HashMap::new();
+    for aw in analyst_weights.drain(..) {
+        deduped.insert(aw.analyst_id.clone(), aw);
+    }
+    let mut analyst_weights: Vec<AnalystWeight> = deduped.into_values().collect();
+    analyst_weights.sort_by(|a, b| a.analyst_id.cmp(&b.analyst_id));
+
+    // 5. 检查 HOLD 门控
+    let hold_gate = check_hold_gate(&analyst_weights);
+
+    // 6. 计算证据驱动共识
+    let consensus = compute_evidence_consensus(&analyst_weights);
+
+    // 7. 计算推荐动作
+    let suggested_action = hold_gate.suggested_action.clone();
+    let recommended_action = if suggested_action == "FORCE_DIRECTION" {
+        match consensus.consensus.as_str() {
+            "bullish" => "BUY",
+            "bearish" => "SELL",
+            "divided" | "neutral" => "HOLD",
+            _ => "HOLD",
+        }
+    } else {
+        &suggested_action
+    };
+
+    // 8. 计算推荐仓位
+    let recommended_position_pct =
+        compute_recommended_position(&consensus, &hold_gate, &request.time_horizon);
+
+    // 9. 整体置信度
+    let overall_confidence = match recommended_action {
+        "BUY" | "SELL" => {
+            // 方向明确 → 用共识置信度
+            consensus.confidence
+        },
+        "HOLD" => {
+            // HOLD → 通常信心较高(因为经过了门槛筛选)
+            60.0
+        },
+        _ => consensus.confidence,
+    };
+
+    // 10. 权重坍缩三层策略（不可信信号防护，决策安全最后一道防线）
+    //     - 层1：trusted_weight<0.3 或 untrusted_count≥2 → 0%仓位 + confidence×0.5
+    //     - 层2：untrusted_count==1 且 posterior≥0.70 → 30%上限 + confidence×0.85（保留买入/增持）
+    //     - 层3：untrusted_count==1 且 posterior<0.70 → 禁止加仓 + confidence×0.70
+    let untrusted_count = analyst_weights.iter().filter(|a| a.is_untrusted).count();
+    let trusted_weight: f64 =
+        analyst_weights.iter().filter(|a| !a.is_untrusted).map(|a| a.final_weight).sum();
+    let posterior = overall_confidence / 100.0;
+
+    let mut final_position_pct = recommended_position_pct;
+    let mut final_confidence = overall_confidence;
+    let mut final_action = recommended_action.to_string();
+
+    if trusted_weight < 0.3 || untrusted_count >= 2 {
+        // 层1：完全坍缩 — 不可信信号过多，清仓
+        final_position_pct = 0.0;
+        final_confidence = overall_confidence * 0.5;
+        if final_action == "BUY" {
+            final_action = "HOLD".to_string();
+        }
+        tracing::warn!(
+            "[权重坍缩-层1] untrusted_count={}, trusted_weight={:.2} → 0%仓位, confidence×0.5",
+            untrusted_count,
+            trusted_weight
+        );
+    } else if untrusted_count == 1 {
+        if posterior >= 0.70 {
+            // 层2：单一不可信但后验充足 → 限制仓位 30% 上限，保留 BUY 信号
+            final_position_pct = recommended_position_pct.min(30.0);
+            final_confidence = overall_confidence * 0.85;
+            tracing::warn!(
+                "[权重坍缩-层2] untrusted_count=1, posterior={:.2} → 30%仓位上限, confidence×0.85",
+                posterior
+            );
+        } else {
+            // 层3：单一不可信且后验不足 → 禁止加仓
+            final_position_pct = 0.0;
+            final_confidence = overall_confidence * 0.70;
+            if final_action == "BUY" {
+                final_action = "HOLD".to_string();
+            }
+            tracing::warn!(
+                "[权重坍缩-层3] untrusted_count=1, posterior={:.2} → 禁止加仓, confidence×0.70",
+                posterior
+            );
+        }
+    }
+
+    EvidenceWeightReport {
+        market_regime: request.market_regime,
+        time_horizon: request.time_horizon,
+        analyst_weights,
+        consensus,
+        hold_gate,
+        recommended_action: final_action,
+        recommended_position_pct: final_position_pct,
+        overall_confidence: final_confidence,
+    }
+}

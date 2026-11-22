@@ -8,9 +8,10 @@
 
 | crate | manifest | version | license | publish | package-list sha256 前缀 | 入口 |
 |---|---|---|---|---|---|---|
-| `axagent-plugin-proto` | `axagent-core/crates/plugin-proto/Cargo.toml` | 3.0.0 | AGPL-3.0-only | false | 55bc9d177a860d5c | ✓ |
-| `axagent-harness` | `axagent-core/crates/harness/Cargo.toml` | workspace | AGPL-3.0-only | false | 51cfb8c1f05ea65f | ✓ |
-| `axagent-plugin-testkit` | `axagent-plugins/crates/plugin-testkit/Cargo.toml` | workspace | workspace | false | 66a638cc28e71b84 | ✓ |
+| `axagent-plugin-proto` | `axagent-core/crates/plugin-proto/Cargo.toml` | 3.0.0 | AGPL-3.0-only | 未显式声明（Cargo 默认允许发布） | 55bc9d177a860d5c | ✓ |
+| `axagent-harness` | `axagent-core/crates/harness/Cargo.toml` | workspace | AGPL-3.0-only | 未显式声明（Cargo 默认允许发布） | 51cfb8c1f05ea65f | ✓ |
+| `axagent-plugin-opc-core` | `axagent-plugins/crates/plugin-opc-core/Cargo.toml` | workspace | workspace | 未显式声明（Cargo 默认允许发布） | ac641ec9c8955e74 | ✓ |
+| `axagent-plugin-testkit` | `axagent-plugins/crates/plugin-testkit/Cargo.toml` | workspace | workspace | 未显式声明（Cargo 默认允许发布） | 66a638cc28e71b84 | ✓ |
 
 ## 二、依赖边
 
@@ -40,6 +41,8 @@
 | `axagent-harness` | `tracing` | registry / workspace |
 | `axagent-harness` | `ts-rs` | registry / workspace |
 | `axagent-harness` | `uuid` | registry / workspace |
+| `axagent-plugin-opc-core` | `axagent-plugin-proto` | `../../../axagent-core/crates/plugin-proto` |
+| `axagent-plugin-opc-core` | `serde_json` | registry / workspace |
 | `axagent-plugin-testkit` | `axagent-plugin-proto` | `../../../axagent-core/crates/plugin-proto` |
 | `axagent-plugin-testkit` | `serde_json` | registry / workspace |
 
@@ -347,6 +350,18 @@
 - `src/workflow_types.rs`
 - `tests/serialization_contracts.rs`
 
+### `axagent-plugin-opc-core`
+
+仓库：https://github.com/polite0803/AxInvest
+
+包内文件：
+
+- `.cargo_vcs_info.json`
+- `Cargo.lock`
+- `Cargo.toml`
+- `Cargo.toml.orig`
+- `src/lib.rs`
+
 ### `axagent-plugin-testkit`
 
 仓库：https://github.com/polite0803/AxInvest
@@ -361,7 +376,7 @@
 
 ## 四、判读
 
-- 三件套当前均满足“可组装包表面”：包内含 `Cargo.toml` 与 `src/lib.rs`。
-- 当前 `publish` 仍为 `false`（或由 workspace 继承），因此**没有正式发布事实**。
-- `plugin-testkit` 仍有指向 `axagent-plugin-proto` 的跨根 path 依赖；正式发布前必须改由 registry / 版本解析，或建立私有 registry。
+- 四个 SDK 包均满足“可组装包表面”：包内含 `Cargo.toml` 与 `src/lib.rs`。
+- `axagent-plugin-opc-core` 是 OPC worker 的领域 SDK；它随协议 SDK 一起按版本发布。
+- 源清单仍保留跨根 path 依赖供仓内开发；`cargo package` 会把它归一化为版本依赖，实际发布演练由 `verify-plugin-sdk-release-rehearsal.mjs` 验证。
 - 本清单只记录发布前置，不替代 `cargo publish --dry-run`、签名/撤销通道或私有 registry 实测。

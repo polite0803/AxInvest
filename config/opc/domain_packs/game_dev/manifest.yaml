@@ -16,3 +16,17 @@ capabilities:
   - source: tool
     capability_type: general_tool
     predicate: {kind: id_exact, id: "tool:FileRead"}
+  # 域专属 worker 命令（统一插件规范试点）：由 plugin-opc-game-dev 声明，
+  # 经 tool.set / opc.store 接缝复用宿主工具实现，不把实现搬进 worker。
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcGameDevWebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcGameDevFileWrite"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcGameDevFileRead"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcGameDevRunAutomationRules"}

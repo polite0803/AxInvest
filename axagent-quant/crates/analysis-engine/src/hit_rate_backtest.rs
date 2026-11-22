@@ -38,11 +38,13 @@ use std::collections::HashMap;
 
 use crate::recommender::types::RecoPick;
 
-// 命中结果判定的权威定义已下沉到 foundation 层（`axagent-stock-core`，纯函数、零 IO）。
+// 命中结果判定的权威定义位于 harness foundation（纯函数、零 IO）。
 // 此处 re-export 保留 `crate::hit_rate_backtest::compute_hit_outcome` 与
 // `axagent_analysis_engine::hit_rate_backtest::…` 两个旧路径，消费端零改动
 // （`src-tauri/src/commands/backtest_validation.rs` 与 `bin/axagent-validate-backfill.rs`）。
-pub use axagent_stock_core::hit_outcome::{compute_hit_outcome, hit_outcome_to_binary_outcome};
+pub use axagent_harness::stock_hit_outcome::{
+    compute_hit_outcome, hit_outcome_to_binary_outcome,
+};
 
 // ── 数据结构 ──
 

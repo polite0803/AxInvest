@@ -1,7 +1,7 @@
 {
   "id": "game_dev",
   "pluginId": "plugin-opc-game-dev",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-game-dev",
   "page": {
     "id": "domain:ai-media-game",
     "path": "/opc/domain/game-dev"
@@ -9,10 +9,20 @@
   "capabilities": [
     "tool:WebSearch",
     "tool:FileWrite",
-    "tool:FileRead"
+    "tool:FileRead",
+    "tool:OpcGameDevWebSearch",
+    "tool:OpcGameDevFileWrite",
+    "tool:OpcGameDevFileRead",
+    "tool:OpcGameDevRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_game_dev_web_search",
+    "opc_game_dev_file_write",
+    "opc_game_dev_file_read",
+    "opc_game_dev_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

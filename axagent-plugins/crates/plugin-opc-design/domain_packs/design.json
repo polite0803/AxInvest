@@ -1,7 +1,7 @@
 {
   "id": "design",
   "pluginId": "plugin-opc-design",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-design",
   "page": {
     "id": "domain:content-design",
     "path": "/opc/domain/design"
@@ -10,10 +10,22 @@
     "tool:WebSearch",
     "tool:FileWrite",
     "tool:OpcCreateContentAsset",
-    "tool:OpcCreateLandingPage"
+    "tool:OpcCreateLandingPage",
+    "tool:OpcDesignWebSearch",
+    "tool:OpcDesignFileWrite",
+    "tool:OpcDesignOpcCreateContentAsset",
+    "tool:OpcDesignOpcCreateLandingPage",
+    "tool:OpcDesignRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_design_web_search",
+    "opc_design_file_write",
+    "opc_design_opc_create_content_asset",
+    "opc_design_opc_create_landing_page",
+    "opc_design_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

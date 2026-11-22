@@ -29,7 +29,7 @@
 ### 方向分歧合流
 
 - 分歧归因由 `src-tauri/src/commands/stock_workflow/hooks.rs:146` 的 `divergence_attribution` 生成，随决策快照输出（`:259` 调用、`:297` 落 `divergence` 键）。
-- 主方向 `consensusDirection` 作为常量注入脚本作用域：`src-tauri/src/commands/stock_analysis.rs:265-285`；没有显式面板参数时只能从快照 `input_params` 取，取不到也不得伪造（`:278`）。
+- 主方向 `consensusDirection` 作为常量注入脚本作用域：`src-tauri/src/commands/stock_analysis.rs:265-285`；没有显式面板参数时只能从快照 `input_params` 取，取不到也不得伪造（`:227`）。
 - `consensus_score` 通过 debate-convergence 的 `f2` 因子（权重 0.25）进入决策，注释见 `src-tauri/src/commands/stock_workflow/hooks.rs:603`。
 - 主档的「来源」不自由填写：值域单点声明在 `holding_period.rs:242-248` 的 `HORIZON_SOURCES`（`branch_pick` / `formula_no_branch` / `formula` / `model` / `user`），落库白名单与门禁共用该数组。
 - 从决策 JSON 中抽取 `horizonSource` 的实现在 `src-tauri/src/commands/stock_workflow/decision.rs:635`；`branch_pick` 表示主档由四档分支结论选出，`formula_no_branch` 表示四路分支全部未产出、退回后验阈值（必须与前一值可区分）。

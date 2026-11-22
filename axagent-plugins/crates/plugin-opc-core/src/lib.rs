@@ -15,6 +15,19 @@ use serde_json::{Map, Value, json};
 /// `opc.store` 是宿主提供给出站接缝；少声明一条 = 运行时被拒。
 pub const OPC_STORE_SEAM: &str = "opc.store";
 
+/// `tool.set` 是宿主提供给插件的工具集接缝；`exec` op 按工具名执行宿主内置工具。
+///
+/// 域 worker 只转发命令形状，不复制工具实现（禁区 12）。声明此接缝的插件必须在
+/// `PluginDeclaration.calls` 中登记它，否则运行时会被准入闸拒绝。
+pub const TOOL_SET_SEAM: &str = "tool.set";
+pub const TOOL_SET_EXEC: &str = "exec";
+
+/// `run_automation_rules` 是 `opc.store` 的写 op（规则动作会改库）。
+pub const OPC_STORE_RUN_AUTOMATION_RULES: &str = "run_automation_rules";
+
+/// `batch_validate_entities` 是 `opc.store` 的读 op（只校验、不落库）。
+pub const OPC_STORE_BATCH_VALIDATE_ENTITIES: &str = "batch_validate_entities";
+
 /// 三条会计命令的 seam op 名。
 pub const OPC_STORE_LIST_INVOICES: &str = "list_invoices";
 pub const OPC_STORE_TRANSITION_INVOICE: &str = "transition_invoice";
@@ -395,11 +408,120 @@ pub fn list_rows_no_args<R: Read, W: Write>(
     call_opc_store(peer, seam_op, json!({}), call_chain)
 }
 
-fn invalid_shape(message: String) -> (String, String) {
+/// 命令层入参必须是对象：工具型命令的 `input` 逐字作为工具 args 透传，非对象在命令层
+/// 拦下，避免宿主工具收到数组 / 字符串造成含义漂移。
+pub fn require_object_input(input: &Value, op: &str) -> Result<Value, (String, String)> {
+    if input.is_object() {
+        Ok(input.clone())
+    } else {
+        Err(invalid_shape(format!("{op} 的入参必须是对象（形状判在命令层）")))
+    }
+}
+
+/// 经 `tool.set/exec` 调用宿主内置工具；`name` 是宿主工具集的 PascalCase 工具名
+/// （`WebSearch` / `FileWrite` / `FileRead` 等），`args` 是该工具的原始入参。
+///
+/// 泛型参数不可省：与 `call_opc_store` 同理，`Peer<R, W>` 的收发端由调用方的 `serve` 决定。
+/// 错误码分两层：接缝调用本身失败用 `PLUGIN_COMMAND_FAILED`；接缝明确回错时原样透传它的码，
+/// 让命令层拿到宿主鉴权 / 参数错误的真实语义。
+pub fn call_builtin_tool<R: Read, W: Write>(
+    peer: &mut Peer<R, W>,
+    name: &str,
+    args: Value,
+    call_chain: &[String],
+) -> Result<Value, (String, String)> {
+    let reply = peer
+        .call_seam(
+            TOOL_SET_SEAM,
+            TOOL_SET_EXEC,
+            json!({ "name": name, "args": args }),
+            call_chain.to_vec(),
+        )
+        .map_err(|e| {
+            (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("工具接缝调用失败：{e}"))
+        })?;
+    match reply.kind {
+        ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "工具接缝返回错误但未说明".to_string()),
+        )),
+    }
+}
+
+/// 域专属批量实体校验（读 op）。`domain_id` 由 worker 按自身身份固定注入；调用方不能
+/// 通过 `capabilityPackId` 越域校验别的域包。
+///
+/// 只做 `entities` 数组形状闸与 `opc.store` 转发：元素内 `entityType` / `data` 的裁剪语义
+/// 由宿主实现体持有（见 harness 的 `batch_validate_entities` 文档），worker 不复制。
+pub fn run_domain_batch_validate_entities<R: Read, W: Write>(
+    domain_id: &str,
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_batch_validate_entities";
+    let entities = input
+        .get("entities")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_shape(format!("{OP} 的 `entities` 必须是数组（形状判在命令层）")))?;
+    call_opc_store(
+        peer,
+        OPC_STORE_BATCH_VALIDATE_ENTITIES,
+        json!({ "domain_pack_id": domain_id, "entities": entities }),
+        call_chain,
+    )
+}
+
+/// 触发域包自动化规则（写 op）。`domain_id` 由 worker 按自身身份固定注入，调用方不能
+/// 通过 `capabilityPackId` 越域指定；其余字段沿用 `opc_run_automation_rules` 的 camelCase
+/// 命令面，转成 `opc.store` 的 snake_case 接缝键，可选键缺省不传。
+pub fn run_domain_automation_rules<R: Read, W: Write>(
+    domain_id: &str,
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<R, W>,
+) -> Result<Value, (String, String)> {
+    const OP: &str = "opc_run_automation_rules";
+    let entity_type = require_str(input, OP, "entityType")?;
+    let entity_id = require_str(input, OP, "entityId")?;
+    let mut args = Map::new();
+    args.insert("capability_pack_id".to_string(), json!(domain_id));
+    args.insert("entity_type".to_string(), json!(entity_type));
+    args.insert("entity_id".to_string(), json!(entity_id));
+    copy_optional_strings(input, OP, &mut args, &["status"])?;
+    for (from, to) in [("overdueDays", "overdue_days"), ("createdDays", "created_days")] {
+        match input.get(from) {
+            None | Some(Value::Null) => {},
+            Some(value) if value.as_u64().is_some_and(|n| n <= u64::from(u32::MAX)) => {
+                args.insert(to.to_string(), value.clone());
+            },
+            Some(_) => {
+                return Err(invalid_shape(format!(
+                    "{OP} 的 `{from}` 必须是非负整数（形状判在命令层）"
+                )));
+            },
+        }
+    }
+    match input.get("fields") {
+        None | Some(Value::Null) => {},
+        Some(value) if value.is_object() => {
+            args.insert("fields".to_string(), value.clone());
+        },
+        Some(_) => {
+            return Err(invalid_shape(format!("{OP} 的 `fields` 必须是对象（形状判在命令层）")));
+        },
+    }
+    call_opc_store(peer, OPC_STORE_RUN_AUTOMATION_RULES, Value::Object(args), call_chain)
+}
+
+/// 命令层形状闸的统一错误构造：11 个域 worker 共用，避免各写一份错误码。
+pub fn invalid_shape(message: String) -> (String, String) {
     (error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(), message)
 }
 
-fn require_str<'a>(input: &'a Value, op: &str, key: &str) -> Result<&'a str, (String, String)> {
+/// 命令层必填字符串字段提取：11 个域 worker 共用。
+pub fn require_str<'a>(input: &'a Value, op: &str, key: &str) -> Result<&'a str, (String, String)> {
     input
         .get(key)
         .and_then(Value::as_str)
@@ -415,7 +537,8 @@ fn object_array(input: &Value, op: &str, key: &str) -> Result<Value, (String, St
     Ok(Value::Array(items.clone()))
 }
 
-fn copy_optional_strings(
+/// 命令层可选字符串字段透传（缺键 / null 都不写入请求）：11 个域 worker 共用。
+pub fn copy_optional_strings(
     input: &Value,
     op: &str,
     request: &mut Map<String, Value>,

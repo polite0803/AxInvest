@@ -3,7 +3,6 @@ name = "axagent-harness"
 version.workspace = true
 edition.workspace = true
 license = "AGPL-3.0-only"
-publish = false
 repository = "https://github.com/polite0803/AxInvest"
 description = "Harness contract layer — trait interfaces for dependency inversion"
 

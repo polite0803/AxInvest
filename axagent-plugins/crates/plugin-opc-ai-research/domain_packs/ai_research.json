@@ -1,7 +1,7 @@
 {
   "id": "ai_research",
   "pluginId": "plugin-opc-ai-research",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-ai-research",
   "page": {
     "id": "domain:data-ai-research",
     "path": "/opc/domain/ai-research"
@@ -12,10 +12,26 @@
     "tool:WebSearch",
     "tool:FileRead",
     "tool:Bash",
-    "tool:FileWrite"
+    "tool:FileWrite",
+    "tool:OpcAiResearchOpcListProjects",
+    "tool:OpcAiResearchOpcSearchWiki",
+    "tool:OpcAiResearchWebSearch",
+    "tool:OpcAiResearchFileRead",
+    "tool:OpcAiResearchBash",
+    "tool:OpcAiResearchFileWrite",
+    "tool:OpcAiResearchRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_ai_research_opc_list_projects",
+    "opc_ai_research_opc_search_wiki",
+    "opc_ai_research_web_search",
+    "opc_ai_research_file_read",
+    "opc_ai_research_bash",
+    "opc_ai_research_file_write",
+    "opc_ai_research_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

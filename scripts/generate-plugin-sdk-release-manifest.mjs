@@ -26,6 +26,7 @@ const SELFTEST = process.argv.includes("--selftest");
 const PACKAGES = [
   ["axagent-plugin-proto", "axagent-core/crates/plugin-proto/Cargo.toml"],
   ["axagent-harness", "axagent-core/crates/harness/Cargo.toml"],
+  ["axagent-plugin-opc-core", "axagent-plugins/crates/plugin-opc-core/Cargo.toml"],
   ["axagent-plugin-testkit", "axagent-plugins/crates/plugin-testkit/Cargo.toml"],
 ];
 
@@ -200,9 +201,9 @@ ${packageSections}
 
 ## 四、判读
 
-- 三件套当前均满足“可组装包表面”：包内含 \`Cargo.toml\` 与 \`src/lib.rs\`。
-- 当前 \`publish\` 仍为 \`false\`（或由 workspace 继承），因此**没有正式发布事实**。
-- \`plugin-testkit\` 仍有指向 \`axagent-plugin-proto\` 的跨根 path 依赖；正式发布前必须改由 registry / 版本解析，或建立私有 registry。
+- 四个 SDK 包均满足“可组装包表面”：包内含 \`Cargo.toml\` 与 \`src/lib.rs\`。
+- \`axagent-plugin-opc-core\` 是 OPC worker 的领域 SDK；它随协议 SDK 一起按版本发布。
+- 源清单仍保留跨根 path 依赖供仓内开发；\`cargo package\` 会把它归一化为版本依赖，实际发布演练由 \`verify-plugin-sdk-release-rehearsal.mjs\` 验证。
 - 本清单只记录发布前置，不替代 \`cargo publish --dry-run\`、签名/撤销通道或私有 registry 实测。
 `;
 }

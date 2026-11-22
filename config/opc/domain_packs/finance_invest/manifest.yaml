@@ -26,3 +26,39 @@ capabilities:
   - source: tool
     capability_type: opc_tool
     predicate: {kind: id_exact, id: "tool:OpcRecordKpi"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcListCustomers"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:WebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcGetDashboard"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcListKpis"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcSearchWiki"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcListProjects"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcGetFinancialReport"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcRecordKpi"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestBatchValidateEntities"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestOpcListCustomers"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestWebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcFinanceInvestRunAutomationRules"}

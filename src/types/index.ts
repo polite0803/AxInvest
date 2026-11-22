@@ -2070,6 +2070,16 @@ export interface PluginSummaryDto {
   tools: string[];
   mcpServers: string[];
   skills: string[];
+  /** 安装来源的可读描述；只展示，不参与路径构造或权限判定。 */
+  source: string;
+  /** manifest 声明的权限名；只展示，判定始终在后端。 */
+  permissions: string[];
+  /** manifest 声明的页面 id；路径由后端按 (pluginId, pageId) 解析。 */
+  pages: string[];
+  /** 安装目录完整性：verified / mismatch / unpinned / unknown。 */
+  integrityStatus: string;
+  /** 安装时固定的期望 SHA-256；本地源或旧安装可能没有。 */
+  pinnedHash: string | null;
   /** 插件声明的命名命令（阶段3-① 执行分发的可见面）。 */
   commands: { name: string; description: string }[];
   /**
@@ -2097,6 +2107,8 @@ export interface PluginManifestDto {
   version: string;
   description: string;
   permissions: string[];
+  /** 插件声明的页面 id；路径由后端按 (pluginId, pageId) 解析。 */
+  pages: string[];
   defaultEnabled: boolean;
   hooks: Record<string, string[]>;
   tools: { name: string; description: string }[];
@@ -2108,6 +2120,11 @@ export interface PluginManifestDto {
     version: string;
     description: string;
   }[];
+}
+
+/** `plugin_validate_source` 的返回值：预览通过后冻结 expectedSha256，避免确认内容漂移。 */
+export interface PluginSourceValidationDto extends PluginManifestDto {
+  expectedSha256: string | null;
 }
 
 export interface InstallOutcomeDto {

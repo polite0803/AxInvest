@@ -12,7 +12,7 @@
 
 ### 多源适配与统一契约
 
-- 契约侧：`axagent-core/crates/harness/src/market_data.rs:266` 的 `trait MarketDataProvider`，行情入口 `get_quote` 在 `:203`，市场类型判定 `detect_market_type` 在 `:710`。
+- 契约侧：`axagent-core/crates/harness/src/market_data.rs:266` 的 `trait MarketDataProvider`，行情入口 `get_quote` 在 `:268`，市场类型判定 `detect_market_type` 在 `:814`。
 - 实现侧：`axagent-quant/crates/astock-data/src/lib.rs:6641` 的 `impl axagent_harness::market_data::MarketDataProvider for AStockClient`；`AStockClient` 结构在 `:373`，内含 moka L1 缓存字段（`:379`）。
 - 路由表：`axagent-quant/crates/astock-data/src/lib.rs:125` 的 `struct VendorRouting`，`impl` 在 `:172`，默认路由 `default_routing()` 在 `:188`——按「数据面 × 市场」决定 vendor 顺序，quote 与 klines 走不同链。
 - 个股数据面方法在 v3.0.0 的 `unreleased` 阶段扩到 25 个，且显式带 `as_of`（提交 `dd96731d6`、`0e55104b8`）；DTO 上收 harness 由 `e45649bd3` 完成。
@@ -71,7 +71,7 @@
 
 ## 关键代码入口
 
-- 契约：`axagent-core/crates/harness/src/market_data.rs:201`（`MarketDataProvider`）、`:710`（`detect_market_type`）。
+- 契约：`axagent-core/crates/harness/src/market_data.rs:266`（`MarketDataProvider`）、`:710`（`detect_market_type`）。
 - 引擎/实现：`axagent-quant/crates/astock-data/src/lib.rs:373`（`AStockClient`）、`:6641`（trait 实现）、`:188`（默认路由）、`:2877`（复权 K 线）、`:2344`（健康探活）。
 - 跨市场：`axagent-quant/crates/astock-data/src/code_form.rs:108`（美股符号）、`:173`（A 股交易所分档）。
 - 缓存：`axagent-quant/crates/astock-data/src/disk_cache.rs:60`（`DiskCache`）。

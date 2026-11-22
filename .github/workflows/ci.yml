@@ -1098,11 +1098,11 @@ jobs:
       - name: Check workspace boundary (plugin path deps ratchet)
         run: node scripts/check-workspace-boundary.mjs
 
-      - name: Check plugin source audit selftest
-        run: node axagent-plugins/scripts/check-plugin-source-audit.mjs --selftest
+      - name: Check plugin contract selftest (positive and negative fixtures)
+        run: node scripts/check-plugin-contract.mjs --selftest
 
-      - name: Check plugin source audit (path/git deps ratchet)
-        run: node axagent-plugins/scripts/check-plugin-source-audit.mjs
+      - name: Check plugin contract (single source of truth parity)
+        run: node scripts/check-plugin-contract.mjs
 
       - name: Check declarative OPC page data (generated from YAML)
         run: node scripts/generate-declarative-opc-pages.mjs --check
@@ -1113,17 +1113,17 @@ jobs:
       - name: Check plugin SDK release manifest (generated)
         run: node scripts/generate-plugin-sdk-release-manifest.mjs --check
 
+      - name: Check plugin release manifest generator selftest
+        run: node scripts/generate-plugin-release-manifest.mjs --selftest
+
       - name: Check SDK package surface selftest
         run: node scripts/check-sdk-package-surface.mjs --selftest
 
       - name: Check SDK package surface (Cargo.toml / src/lib.rs / no target)
         run: node scripts/check-sdk-package-surface.mjs
 
-      - name: Verify OPC plugin SDK standalone tree
-        run: node scripts/verify-opc-plugin-sdk.mjs
-
-      - name: Verify full plugin SDK standalone tree
-        run: node scripts/verify-opc-plugin-sdk.mjs --full
+      - name: Verify plugin release address flow contract
+        run: node scripts/verify-plugin-release-flow.mjs
 
       # 多 workspace cargo 命令组装自检（纯 Node，不起 cargo）。
       # 为什么要单列：`--manifest-path` 若落到 `--` 之后，rustc/clippy-driver 会报

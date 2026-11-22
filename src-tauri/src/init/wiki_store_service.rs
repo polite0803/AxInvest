@@ -17,8 +17,9 @@ use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::BacklinkInfo;
 use axagent_harness::wiki_dtos::NoteVersion;
 use axagent_harness::{
-    RepairWikiGraphResult, SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome,
-    SyncNoteToKnowledgeBaseRequest, UpdateWikiRequest, WikiStoreProvider, WikiUpdateResult,
+    AutoConnectWikiRequest, AutoConnectWikiResult, RepairWikiGraphResult, SyncNoteLinksRequest,
+    SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest, UpdateWikiRequest,
+    WikiStoreProvider, WikiUpdateResult,
 };
 use tauri::{AppHandle, Manager};
 
@@ -290,6 +291,27 @@ impl WikiStoreProvider for HostWikiStore {
         crate::commands::wiki::repair_wiki_graph_core(&state, wiki_id)
             .await
             .map_err(AxAgentError::Provider)
+    }
+
+    async fn auto_connect_wiki(
+        &self,
+        request: AutoConnectWikiRequest,
+    ) -> Result<AutoConnectWikiResult> {
+        if request.vault_id.trim().is_empty() {
+            return Err(AxAgentError::Validation(
+                "wiki.store::auto_connect_wiki 需要非空 vaultId".into(),
+            ));
+        }
+        let state = self.app.state::<crate::AppState>();
+        crate::commands::wiki::auto_connect_wiki_core(
+            &state,
+            request.vault_id,
+            request.threshold,
+            request.max_links_per_note,
+            request.dry_run,
+        )
+        .await
+        .map_err(AxAgentError::Provider)
     }
 
     async fn get_note_links(

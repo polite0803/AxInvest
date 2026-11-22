@@ -23,3 +23,24 @@ capabilities:
   - source: tool
     capability_type: opc_tool
     predicate: {kind: id_exact, id: "tool:OpcAddMilestone"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevOpcListProjects"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevOpcCreateProject"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevFileWrite"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevWebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevOpcAddMilestone"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevBatchValidateEntities"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcSoftwareDevRunAutomationRules"}

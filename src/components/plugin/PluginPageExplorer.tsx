@@ -18,7 +18,9 @@
  * （tauri）下照常走 PluginPageHost。
  */
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri } from "@/lib/invoke";
+import { subscribePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import type { PluginPageDto, PluginPagesInfoDto } from "@/types";
 import { Alert, Empty, Select, Spin, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -55,30 +57,37 @@ export function PluginPageExplorer() {
   // 选中项存「pluginId/pageId」复合键而非索引：清单刷新后顺序变化也不会指向错页。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
+  // 插件启停/卸载会刷新插件页路由快照；该通知同时驱动本列表重读 `plugin_list_pages`。
+  // 真值源仍是后端实时投影，这里只重新拉一次，不在前端维护第二份 enabled 状态。
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    invoke<PluginPagesInfoDto[]>("plugin_list_pages")
-      .then((list) => {
-        if (cancelled) {
-          return;
-        }
-        setInfos(Array.isArray(list) ? list : []);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+    const load = (initial: boolean) => {
+      setLoading(initial);
+      setError(null);
+      invoke<PluginPagesInfoDto[]>("plugin_list_pages")
+        .then((list) => {
+          if (cancelled) {
+            return;
+          }
+          setInfos(Array.isArray(list) ? list : []);
+        })
+        .catch((e: unknown) => {
+          if (cancelled) {
+            return;
+          }
+          setError(translateBackendError(e));
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        });
+    };
+    load(true);
+    const unsubscribe = subscribePluginPageRoutes(() => load(false));
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 

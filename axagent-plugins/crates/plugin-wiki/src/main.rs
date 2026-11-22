@@ -54,6 +54,7 @@ const COMMAND_CREATE_DAILY_NOTE: &str = "wiki_create_daily_note";
 const COMMAND_UPDATE_WIKI: &str = "wiki_update_wiki";
 const COMMAND_REBUILD_INDEX: &str = "wiki_rebuild_index";
 const COMMAND_REPAIR_GRAPH: &str = "wiki_repair_graph";
+const COMMAND_AUTO_CONNECT_WIKI: &str = "wiki_auto_connect_wiki";
 /// 宿主提供的出站接缝；少声明一条 = 运行时被拒。
 const WIKI_STORE_SEAM: &str = "wiki.store";
 const WIKI_STORE_SYNC_NOTE: &str = "sync_note_to_knowledge_base";
@@ -125,6 +126,54 @@ fn optional_str(
         _ => Err((
             error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
             format!("命令 `{command}` 的可选参数 `{key}` 必须是字符串或 null"),
+        )),
+    }
+}
+
+/// 取可选 f64 参数；缺失 / `null` 返回 `None`（用宿主默认值），非数字报参数非法。
+fn optional_f64(input: &Value, key: &str, command: &str) -> Result<Option<f64>, (String, String)> {
+    match input.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => match value.as_f64() {
+            Some(number) => Ok(Some(number)),
+            None => Err((
+                error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                format!("命令 `{command}` 的可选参数 `{key}` 必须是数字或 null"),
+            )),
+        },
+    }
+}
+
+/// 取可选 usize 参数；缺失 / `null` 返回 `None`（用宿主默认值），非非负整数报参数非法。
+fn optional_usize(
+    input: &Value,
+    key: &str,
+    command: &str,
+) -> Result<Option<usize>, (String, String)> {
+    match input.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => match value.as_u64() {
+            Some(number) => Ok(Some(number as usize)),
+            None => Err((
+                error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+                format!("命令 `{command}` 的可选参数 `{key}` 必须是非负整数或 null"),
+            )),
+        },
+    }
+}
+
+/// 取可选 bool 参数；缺失 / `null` 返回 `None`（用宿主默认值），非布尔报参数非法。
+fn optional_bool(
+    input: &Value,
+    key: &str,
+    command: &str,
+) -> Result<Option<bool>, (String, String)> {
+    match input.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        _ => Err((
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            format!("命令 `{command}` 的可选参数 `{key}` 必须是布尔值或 null"),
         )),
     }
 }
@@ -665,6 +714,46 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
                 },
             };
             seam_call("repair_graph", json!({ "wikiId": wiki_id }))
+        },
+        COMMAND_AUTO_CONNECT_WIKI => {
+            let vault_id = match require_str(&frame.input, "vaultId") {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let threshold = match optional_f64(&frame.input, "threshold", COMMAND_AUTO_CONNECT_WIKI)
+            {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            let max_links_per_note =
+                match optional_usize(&frame.input, "maxLinksPerNote", COMMAND_AUTO_CONNECT_WIKI) {
+                    Ok(value) => value,
+                    Err((code, message)) => {
+                        return CommandFault::for_frame(&frame, code, message)
+                            .into_frame_response();
+                    },
+                };
+            let dry_run = match optional_bool(&frame.input, "dryRun", COMMAND_AUTO_CONNECT_WIKI) {
+                Ok(value) => value,
+                Err((code, message)) => {
+                    return CommandFault::for_frame(&frame, code, message).into_frame_response();
+                },
+            };
+            seam_call(
+                "auto_connect_wiki",
+                json!({
+                    "request": {
+                        "vaultId": vault_id,
+                        "threshold": threshold,
+                        "maxLinksPerNote": max_links_per_note,
+                        "dryRun": dry_run,
+                    }
+                }),
+            )
         },
         other => {
             return CommandFault::for_frame(

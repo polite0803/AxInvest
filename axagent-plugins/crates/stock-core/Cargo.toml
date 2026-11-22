@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # 股票域纯逻辑（foundation）——宿主与插件过渡期共用。
 #
-# 角色：**foundation**。零 `axagent-*` 依赖（只有 serde）⇒ 插件侧 worker 可以直接链接，
-# 不必把 `analysis-engine`（implementor：dao / entities / astock-data）拖进插件进程。
+# 角色：**foundation**。只依赖 harness 契约与纯数据工具（serde / serde_json / tracing）
+# ⇒ 插件侧 worker 可以直接链接，不必把 `analysis-engine`（implementor：dao / entities / astock-data）
+# 拖进插件进程。
 # 终局随插件独立仓走；宿主在完成本体搬迁后断开对本 crate 的依赖即可。
 #
 # ⚠ 这里只放**纯函数**：不查库、不读文件、不取时钟、不碰 AppState。
@@ -14,11 +15,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "股票域纯逻辑（意图解析等）：零 axagent 依赖，插件与宿主过渡期共用"
+description = "股票域纯逻辑（意图解析等）：仅依赖 harness 契约与纯数据工具，插件与宿主过渡期共用"
 
 [dependencies]
 axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
 
 [lints]
 workspace = true

@@ -34,9 +34,9 @@ pub mod horizon_prior;
 pub mod industry_chain;
 // 阶段 2「候选池改趋势→全关联股票」：行业→全成分股确定性查询（三档词表对齐）
 pub mod industry_constituents;
-// 意图解析（`intent_parser`）已整体迁到 foundation 层 `axagent-stock-core`，消费方只剩
+// 意图解析（`intent_parser`）的权威实现位于插件侧 `axagent-stock-core`，消费方只剩
 // 插件 `plugin-stock`（B4-k，2026-11-04）：宿主同名命令删除后，本 crate 不再 re-export，
-// 也不再依赖 `axagent-stock-core` —— 主壳不能借道 analysis-engine 又把它链回来。
+// 也不再依赖插件业务 crate —— 主壳不能借道 analysis-engine 把插件源码链回来。
 pub mod knowledge_loader;
 /// P4′-b：逐档分支的腿信号单一实现（因子原始量 → `[-1,1]`，缺失=None）
 pub mod leg_signal;
@@ -58,15 +58,15 @@ pub use theme_resolver::{
 pub mod conditional_order;
 pub mod conditional_order_bridge;
 // 交易成本口径（佣金/印花税/滑点）与决策时刻因子计算（`chg1` / `dist_lo20` / `rev20` /
-// `posshare20`）的**唯一权威**已下沉到 foundation 层 `axagent-stock-core`（纯函数、零 IO、
-// 零 `axagent-*` 依赖），2026-11-08 整文件迁出。此处**路径级 re-export** 保留
+// `posshare20`）的**唯一权威**位于 harness foundation（纯函数、零 IO），2026-11-08 整文件
+// 迁出插件业务 crate。此处**路径级 re-export** 保留
 // `crate::costs::…` / `crate::factors::…` 与 `axagent_analysis_engine::costs::…` /
 // `::factors::…` 全部旧路径，消费端零改动；任何地方都不得再立第二份定义（禁区 12）。
 // ⚠ 与上方 `intent_parser` 的处置不同：本 crate 的回测链（`backtest.rs`）与命中率链
 // （`net_return_pct(_default)`）**自己就在用**这两个模块 ⇒ 这是真实依赖，
-// 不是给宿主保留的「借道」后门；宿主本轮已改为直连 `axagent-stock-core`。
-pub use axagent_stock_core::costs;
-pub use axagent_stock_core::factors;
+// 不是给插件保留的「借道」后门。
+pub use axagent_harness::stock_costs as costs;
+pub use axagent_harness::stock_factors as factors;
 // P3-1: 跨股票信号聚合器 — 在 signals.rs（单股）和 portfolio_monitor.rs（持仓指标）之间填补信号聚合层
 pub mod cross_stock_aggregator;
 // P3-2: 板块联动分析 — 基于 ConceptIndex 识别同板块龙头-从属传导模式

@@ -1,7 +1,7 @@
 {
   "id": "consulting",
   "pluginId": "plugin-opc-consulting",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-consulting",
   "page": {
     "id": "domain:automation-consulting",
     "path": "/opc/domain/consulting"
@@ -11,10 +11,24 @@
     "tool:WebSearch",
     "tool:OpcGetDashboard",
     "tool:OpcCreateContentAsset",
-    "tool:FileWrite"
+    "tool:FileWrite",
+    "tool:OpcConsultingOpcSearchWiki",
+    "tool:OpcConsultingWebSearch",
+    "tool:OpcConsultingOpcGetDashboard",
+    "tool:OpcConsultingOpcCreateContentAsset",
+    "tool:OpcConsultingFileWrite",
+    "tool:OpcConsultingRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_consulting_opc_search_wiki",
+    "opc_consulting_web_search",
+    "opc_consulting_opc_get_dashboard",
+    "opc_consulting_opc_create_content_asset",
+    "opc_consulting_file_write",
+    "opc_consulting_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

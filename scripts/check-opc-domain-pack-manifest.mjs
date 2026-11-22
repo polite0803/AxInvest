@@ -14,48 +14,36 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  PLUGIN_CONTRACT,
+  pluginDomainPacksDir,
+  pluginRepo,
+} from "./lib/plugin-repos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const JSON_OUT = process.argv.includes("--json");
 const SELFTEST = process.argv.includes("--selftest");
 const REGISTRY_REL = "axagent-plugins/scripts/opc-domain-pack-plugins.json";
-const MANIFEST_DIRS = new Map([
-  ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
-  ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
-  ["plugin-opc-ai-research", "axagent-plugins/crates/plugin-opc-ai-research/domain_packs"],
-  ["plugin-opc-consulting", "axagent-plugins/crates/plugin-opc-consulting/domain_packs"],
-  ["plugin-opc-design", "axagent-plugins/crates/plugin-opc-design/domain_packs"],
-  ["plugin-opc-ecommerce", "axagent-plugins/crates/plugin-opc-ecommerce/domain_packs"],
-  ["plugin-opc-education", "axagent-plugins/crates/plugin-opc-education/domain_packs"],
-  ["plugin-opc-finance-invest", "axagent-plugins/crates/plugin-opc-finance-invest/domain_packs"],
-  ["plugin-opc-game-dev", "axagent-plugins/crates/plugin-opc-game-dev/domain_packs"],
-  ["plugin-opc-geospatial", "axagent-plugins/crates/plugin-opc-geospatial/domain_packs"],
-  ["plugin-opc-project-management", "axagent-plugins/crates/plugin-opc-project-management/domain_packs"],
-  ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
-  ["plugin-opc-software-dev", "axagent-plugins/crates/plugin-opc-software-dev/domain_packs"],
-  ["plugin-opc-sales-growth", "axagent-plugins/crates/plugin-opc-sales-growth/domain_packs"],
-  ["plugin-opc-content-media", "axagent-plugins/crates/plugin-opc-content-media/domain_packs"],
-]);
+// owner 名册从单一契约派生：`plugin-opc` 是公共壳，其余每个 OPC 域一 owner。
+const DOMAIN_PLUGINS = PLUGIN_CONTRACT.plugins.filter((p) => p.domainPackId);
+const DOMAIN_PLUGIN_IDS = ["opc", ...DOMAIN_PLUGINS.map((p) => p.name).sort()];
+const MANIFEST_DIRS = new Map(
+  DOMAIN_PLUGIN_IDS.map((plugin) => [
+    `plugin-${plugin}`,
+    pluginDomainPacksDir(ROOT, plugin),
+  ]),
+);
 const EXPECTED_COUNTS = new Map([
   ["plugin-opc", 0],
-  ["plugin-opc-accounting", 1],
-  ["plugin-opc-ai-research", 1],
-  ["plugin-opc-consulting", 1],
-  ["plugin-opc-design", 1],
-  ["plugin-opc-ecommerce", 1],
-  ["plugin-opc-education", 1],
-  ["plugin-opc-finance-invest", 1],
-  ["plugin-opc-game-dev", 1],
-  ["plugin-opc-geospatial", 1],
-  ["plugin-opc-project-management", 1],
-  ["plugin-opc-security", 1],
-  ["plugin-opc-software-dev", 1],
-  ["plugin-opc-sales-growth", 1],
-  ["plugin-opc-content-media", 1],
+  ...DOMAIN_PLUGINS.map((p) => [`plugin-${p.name}`, 1]),
 ]);
 
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
+const fail = (message) => {
+  console.error(`FAIL: ${message}`);
+  process.exit(1);
+};
 
 export function validateManifest(m, expected, options = {}) {
   const problems = [];
@@ -125,17 +113,17 @@ function main() {
   const manifests = [];
   const commandOwners = new Map();
   for (const [owner, dir] of MANIFEST_DIRS) {
-    if (!existsSync(join(ROOT, dir))) {
+    if (!existsSync(dir)) {
       fail(`域包 manifest 目录不存在：${dir}`);
     }
-    const files = readdirSync(join(ROOT, dir)).filter((f) => f.endsWith(".json")).sort();
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
     const expectedCount = EXPECTED_COUNTS.get(owner);
     if (expectedCount !== undefined && files.length !== expectedCount) {
       problems.push(`${dir}: manifest 份数应为 ${expectedCount}，实得 ${files.length}`);
     }
     for (const file of files) {
-      const rel = `${dir}/${file}`;
-      const m = JSON.parse(read(rel));
+      const rel = `${pluginRepo(ROOT, owner.replace(/^plugin-/, ""))}/${file}`;
+      const m = JSON.parse(readFileSync(join(dir, file), "utf8"));
       const pack = registry.packs.find((p) => p.id === m.id);
       if (!pack) {
         problems.push(`${rel}: id=${m.id} 不在底册`);
@@ -159,8 +147,8 @@ function main() {
   }
   // P6.2 终局：公共包命令与域包命令不得双 owner。公共包的实际命令集合来自构建脚本的
   // 权威命令表；这里只校验「所有独立域声明的命令都不在公共包里」，避免 filter 漂移。
-  const publicCommandsFile = "axagent-plugins/scripts/build-plugin-bundle.mjs";
-  const publicSource = read(publicCommandsFile);
+  const publicCommandsFile = join(pluginRepo(ROOT, "opc"), "scripts", "build-plugin-bundle.mjs");
+  const publicSource = readFileSync(publicCommandsFile, "utf8");
   const opcManifestStart = publicSource.indexOf("function opcManifest(");
   const opcManifestEnd = publicSource.indexOf("function opcAccountingManifest(", opcManifestStart);
   const publicManifestSource = publicSource.slice(opcManifestStart, opcManifestEnd);

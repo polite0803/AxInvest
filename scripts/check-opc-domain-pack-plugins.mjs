@@ -17,6 +17,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PLUGIN_CONTRACT, pluginDomainPacksDir } from "./lib/plugin-repos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -26,40 +27,19 @@ const SELFTEST = process.argv.includes("--selftest");
 const REGISTRY_REL = "axagent-plugins/scripts/opc-domain-pack-plugins.json";
 // YAML manifest 权威目录（id / domain / capabilities 的唯一来源）。
 const MANIFEST_DIR = "config/opc/domain_packs";
-// P6.2 logical manifest 按插件归属分区：公共 0 份 + accounting/sales_growth/content_media 独立 worker 各 1 份 + 11 个声明式独立域各 1 份。
-const MANIFEST_DIRS = new Map([
-  ["plugin-opc", "axagent-plugins/crates/plugin-opc/domain_packs"],
-  ["plugin-opc-accounting", "axagent-plugins/crates/plugin-opc-accounting/domain_packs"],
-  ["plugin-opc-ai-research", "axagent-plugins/crates/plugin-opc-ai-research/domain_packs"],
-  ["plugin-opc-consulting", "axagent-plugins/crates/plugin-opc-consulting/domain_packs"],
-  ["plugin-opc-design", "axagent-plugins/crates/plugin-opc-design/domain_packs"],
-  ["plugin-opc-ecommerce", "axagent-plugins/crates/plugin-opc-ecommerce/domain_packs"],
-  ["plugin-opc-education", "axagent-plugins/crates/plugin-opc-education/domain_packs"],
-  ["plugin-opc-finance-invest", "axagent-plugins/crates/plugin-opc-finance-invest/domain_packs"],
-  ["plugin-opc-game-dev", "axagent-plugins/crates/plugin-opc-game-dev/domain_packs"],
-  ["plugin-opc-geospatial", "axagent-plugins/crates/plugin-opc-geospatial/domain_packs"],
-  ["plugin-opc-project-management", "axagent-plugins/crates/plugin-opc-project-management/domain_packs"],
-  ["plugin-opc-security", "axagent-plugins/crates/plugin-opc-security/domain_packs"],
-  ["plugin-opc-software-dev", "axagent-plugins/crates/plugin-opc-software-dev/domain_packs"],
-  ["plugin-opc-sales-growth", "axagent-plugins/crates/plugin-opc-sales-growth/domain_packs"],
-  ["plugin-opc-content-media", "axagent-plugins/crates/plugin-opc-content-media/domain_packs"],
-]);
+// P6.2 logical manifest 按插件归属分区：公共 0 份 + 14 个独立 worker 各 1 份。
+// owner 名册从单一契约派生：`plugin-opc` 是公共壳，其余每个 OPC 域一 owner。
+const DOMAIN_PLUGINS = PLUGIN_CONTRACT.plugins.filter((p) => p.domainPackId);
+const DOMAIN_PLUGIN_IDS = ["opc", ...DOMAIN_PLUGINS.map((p) => p.name).sort()];
+const MANIFEST_DIRS = new Map(
+  DOMAIN_PLUGIN_IDS.map((plugin) => [
+    `plugin-${plugin}`,
+    pluginDomainPacksDir(ROOT, plugin),
+  ]),
+);
 const EXPECTED_COUNTS = new Map([
   ["plugin-opc", 0],
-  ["plugin-opc-accounting", 1],
-  ["plugin-opc-ai-research", 1],
-  ["plugin-opc-consulting", 1],
-  ["plugin-opc-design", 1],
-  ["plugin-opc-ecommerce", 1],
-  ["plugin-opc-education", 1],
-  ["plugin-opc-finance-invest", 1],
-  ["plugin-opc-game-dev", 1],
-  ["plugin-opc-geospatial", 1],
-  ["plugin-opc-project-management", 1],
-  ["plugin-opc-security", 1],
-  ["plugin-opc-software-dev", 1],
-  ["plugin-opc-sales-growth", 1],
-  ["plugin-opc-content-media", 1],
+  ...DOMAIN_PLUGINS.map((p) => [`plugin-${p.name}`, 1]),
 ]);
 const CONFIG_REL = "axagent-quant/crates/company-runtime/src/opc/capability_pack_config.rs";
 const MAPPING_REL = "src-tauri/src/commands/opc_workflows/mod.rs";
@@ -91,20 +71,20 @@ export function parseOpcDomainMapping(text) {
   );
 }
 
-/** vertical slice 的 owner：accounting 必须独立 worker，security 必须保持共享底座。 */
+/**
+ * vertical slice 的 owner 从统一契约逐域读取，不再按域名硬编码。
+ * 11 个域陆续翻牌为 worker 时，硬编码清单会先于契约漂移而误判（security 首当其冲）。
+ */
+const OWNER_BY_DOMAIN = new Map(
+  PLUGIN_CONTRACT.plugins.filter((p) => p.domainPackId).map((p) => [p.domainPackId, p.transportOwner]),
+);
+
 export function parseVerticalOwner(slice, id) {
+  const expected = OWNER_BY_DOMAIN.get(id);
+  if (!expected) throw new Error(`域 ${id} 不在统一契约的域包清单中`);
   const owner = slice?.transportOwner;
-  if (id === "accounting" && owner !== "opc-accounting") {
-    throw new Error(`accounting: transportOwner=${owner}，期望 opc-accounting`);
-  }
-  if (id === "security" && owner !== "plugin-opc-common") {
-    throw new Error(`security: transportOwner=${owner}，期望 plugin-opc-common`);
-  }
-  if (id === "sales_growth" && owner !== "opc-sales-growth") {
-    throw new Error(`sales_growth: transportOwner=${owner}，期望 opc-sales-growth`);
-  }
-  if (id === "content_media" && owner !== "opc-content-media") {
-    throw new Error(`content_media: transportOwner=${owner}，期望 opc-content-media`);
+  if (owner !== expected) {
+    throw new Error(`${id}: transportOwner=${owner}，期望契约值 ${expected}`);
   }
   return owner;
 }
@@ -130,25 +110,19 @@ function selftest() {
   t("集合比较判缺值", !equalSet(["a"], ["a", "b"]));
   t("集合比较判等", equalSet(["a", "b"], ["b", "a"]));
   t("14 独立 + 0 公共 计数口径", EXPECTED_COUNTS.size === 15 && EXPECTED_COUNTS.get("plugin-opc") === 0 && [...EXPECTED_COUNTS.values()].filter((n) => n === 1).length === 14);
-  t("独立 owner 合法", parseVerticalOwner({ transportOwner: "opc-accounting" }, "accounting") === "opc-accounting");
-  t("错误 owner 被拦", (() => {
-    try {
-      parseVerticalOwner({ transportOwner: "plugin-opc-common" }, "accounting");
-      return false;
-    } catch {
-      return true;
-    }
-  })());
-  t("security 共享 owner 合法", parseVerticalOwner({ transportOwner: "plugin-opc-common" }, "security") === "plugin-opc-common");
-  t("security 错误 owner 被拦", (() => {
-    try {
-      parseVerticalOwner({ transportOwner: "opc-security" }, "security");
-      return false;
-    } catch {
-      return true;
-    }
-  })());
-  t("content_media 独立 owner 合法", parseVerticalOwner({ transportOwner: "opc-content-media" }, "content_media") === "opc-content-media");
+  const ownerOf = (id) => OWNER_BY_DOMAIN.get(id);
+  for (const id of ["accounting", "security", "content_media"]) {
+    const expected = ownerOf(id);
+    t(`${id} 契约 owner 合法`, parseVerticalOwner({ transportOwner: expected }, id) === expected);
+    t(`${id} 漂移 owner 被拦`, (() => {
+      try {
+        parseVerticalOwner({ transportOwner: expected === "plugin-opc-common" ? "opc-drift" : "plugin-opc-common" }, id);
+        return false;
+      } catch {
+        return true;
+      }
+    })());
+  }
   const failed = checks.filter((c) => !c.ok);
   for (const c of checks) console.log(`  ${c.ok ? "✔" : "✖"} ${c.name}`);
   console.log(`selftest：${checks.length - failed.length} passed / ${failed.length} failed`);
@@ -164,7 +138,7 @@ function main() {
   const logicalIds = [];
   const countProblems = [];
   for (const [owner, dir] of MANIFEST_DIRS) {
-    const files = readdirSync(join(ROOT, dir))
+    const files = readdirSync(dir)
       .filter((f) => f.endsWith(".json"))
       .map((f) => f.replace(/\.json$/, ""))
       .sort();

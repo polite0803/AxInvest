@@ -8,16 +8,29 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/plugin-opc",
-  "crates/plugin-opc-accounting",
-  "crates/plugin-opc-content-media",
   "crates/plugin-opc-core",
-  "crates/plugin-opc-sales-growth",
-  "crates/plugin-stock",
   "crates/plugin-testkit",
-  "crates/plugin-wiki",
   "crates/plugins",
   "crates/schema-gen",
+]
+exclude = [
+  "crates/plugin-opc",
+  "crates/plugin-opc-accounting",
+  "crates/plugin-opc-ai-research",
+  "crates/plugin-opc-consulting",
+  "crates/plugin-opc-content-media",
+  "crates/plugin-opc-design",
+  "crates/plugin-opc-ecommerce",
+  "crates/plugin-opc-education",
+  "crates/plugin-opc-finance-invest",
+  "crates/plugin-opc-game-dev",
+  "crates/plugin-opc-geospatial",
+  "crates/plugin-opc-project-management",
+  "crates/plugin-opc-sales-growth",
+  "crates/plugin-opc-security",
+  "crates/plugin-opc-software-dev",
+  "crates/plugin-stock",
+  "crates/plugin-wiki",
   "crates/stock-core",
 ]
 

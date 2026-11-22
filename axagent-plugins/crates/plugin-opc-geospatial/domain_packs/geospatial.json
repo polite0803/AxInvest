@@ -1,7 +1,7 @@
 {
   "id": "geospatial",
   "pluginId": "plugin-opc-geospatial",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-geospatial",
   "page": {
     "id": "domain:data-geospatial",
     "path": "/opc/domain/geospatial"
@@ -11,10 +11,24 @@
     "tool:WebSearch",
     "tool:OpcCreateContentAsset",
     "tool:OpcCreateProject",
-    "tool:FileWrite"
+    "tool:FileWrite",
+    "tool:OpcGeospatialOpcSearchWiki",
+    "tool:OpcGeospatialWebSearch",
+    "tool:OpcGeospatialOpcCreateContentAsset",
+    "tool:OpcGeospatialOpcCreateProject",
+    "tool:OpcGeospatialFileWrite",
+    "tool:OpcGeospatialRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_geospatial_opc_search_wiki",
+    "opc_geospatial_web_search",
+    "opc_geospatial_opc_create_content_asset",
+    "opc_geospatial_opc_create_project",
+    "opc_geospatial_file_write",
+    "opc_geospatial_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

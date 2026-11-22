@@ -323,7 +323,9 @@ fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 /// 而这正是本次红的成因。故改成两条**与重构形态无关**的判据：
 ///
 /// 1. **全仓扫描**（不再维护清单）：非注释行出现 `reco_picks::ActiveModel {` 的文件处数
-///    必须恰为 1 —— 新增任何第二个直接构造点（绕过 dao 的唯一落库口）当场红；
+///    必须恰为 1 —— 新增任何第二个**生产**直接构造点（绕过 dao 的唯一落库口）当场红。
+///    测试夹具按定义要构造“升级前旧行”，不能拿生产写入入口来 seed；若把 `tests/`
+///    和 `#[cfg(test)]` 也计入，则数据保留回归一落地就会假红。测试面由该回归自身覆盖。
 /// 2. **代际透传**（新增，补上唯一构造点之后的真实风险面）：共享入口
 ///    `_shared_reco_pool.rs` 里每个 `insert_picks(` / `upsert_pick(` 调用点的近邻必须出现
 ///    `RECO_ALGORITHM_VERSION` 或 `reco_version`。
@@ -333,9 +335,10 @@ fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 fn every_reco_picks_insert_stamps_algorithm_version() {
     use std::path::Path;
 
-    // 扫描面 = 仓库根下「应用壳层 + 全部逻辑 workspace」：
+    // 扫描面 = 仓库根下「应用壳层 + 全部逻辑 workspace」的**生产源码**：
     //   src-tauri/src、src-tauri/crates，以及每个含 [workspace] 的 axagent-*/crates。
     // 不手抄 workspace 名：L2 拆分/后续再搬时自动纳入，漏收由下面的下界断言兜住。
+    // `tests/` 是数据保留等回归的旧行夹具面，不能与生产写入口混计。
     let repo_root =
         Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("src-tauri 应有父目录（仓库根）");
     let mut roots: Vec<std::path::PathBuf> =
@@ -360,7 +363,8 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
         "只探测到 {workspaces} 个含 [workspace] 的 axagent-* ⇒ 扫描面塌缩（L2 拆分后应为 7 个）"
     );
 
-    // 本文件自己含判据字符串（`"reco_picks::ActiveModel {"`）⇒ 不自指排除就会多算一处
+    // 本文件自己含判据字符串（`"reco_picks::ActiveModel {"`）⇒ 不自指排除就会多算一处。
+    // 测试目录（含本文件）整体跳过；生产面之外不参与“唯一落库口”判据。
     const SELF_FILE: &str = "seed_consistency_tests.rs";
 
     let mut files: Vec<std::path::PathBuf> = Vec::new();
@@ -394,7 +398,12 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
 
     let mut sites: Vec<(String, usize)> = Vec::new();
     for path in &files {
-        if path.file_name().and_then(|s| s.to_str()) == Some(SELF_FILE) {
+        let rel = path.strip_prefix(repo_root).unwrap_or(path);
+        if rel.file_name().and_then(|s| s.to_str()) == Some(SELF_FILE) {
+            continue;
+        }
+        let in_test_dir = rel.components().any(|c| c.as_os_str() == "tests");
+        if in_test_dir {
             continue;
         }
         let src = match std::fs::read_to_string(path) {
@@ -410,8 +419,7 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
             if line.trim_start().starts_with("//") || !line.contains("reco_picks::ActiveModel {") {
                 continue;
             }
-            let rel =
-                path.strip_prefix(repo_root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            let rel = rel.to_string_lossy().replace('\\', "/");
             sites.push((rel.clone(), i + 1));
             // 字面量向后扫到首个 `};`（结构体闭合），其间必须出现 reco_version
             let rest = &src[line_start..];

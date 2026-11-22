@@ -1031,6 +1031,34 @@ fn wiki_metadata_and_maintenance_commands_map_to_host_wiki_store_seam() {
     );
     assert_command_value(&worker.recv_response(), &repair);
     worker.shutdown();
+
+    // 自动连接：只有 vaultId 必填，三个可选字段缺省 / null ⇒ 宿主用默认值。
+    let mut worker = Worker::spawn_as(PLUGIN_ID);
+    worker.send(&command(
+        PLUGIN_ID,
+        "wiki_auto_connect_wiki",
+        serde_json::json!({ "vaultId": "w1", "threshold": 0.8, "dryRun": true }),
+    ));
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "auto_connect_wiki");
+    assert_eq!(call.args["args"]["request"]["vaultId"], "w1");
+    assert_eq!(call.args["args"]["request"]["threshold"], 0.8);
+    assert!(call.args["args"]["request"]["maxLinksPerNote"].is_null());
+    assert_eq!(call.args["args"]["request"]["dryRun"], true);
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({
+            "linksCreated": 5, "pairsAnalyzed": 42, "elapsedMs": 100,
+        }))
+        .with_id(call.request_id.expect("出站请求带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_command_value(
+        &response,
+        &serde_json::json!({
+            "linksCreated": 5, "pairsAnalyzed": 42, "elapsedMs": 100,
+        }),
+    );
+    worker.shutdown();
 }
 
 #[test]
@@ -1039,6 +1067,11 @@ fn wiki_metadata_and_maintenance_commands_reject_missing_wiki_id() {
         ("wiki_update_wiki", serde_json::json!({})),
         ("wiki_rebuild_index", serde_json::json!({})),
         ("wiki_repair_graph", serde_json::json!({})),
+        ("wiki_auto_connect_wiki", serde_json::json!({})),
+        // `wiki_auto_connect_wiki` 的可选字段必须是数字 / 整数 / 布尔或 null。
+        ("wiki_auto_connect_wiki", serde_json::json!({ "vaultId": "w1", "threshold": "high" })),
+        ("wiki_auto_connect_wiki", serde_json::json!({ "vaultId": "w1", "maxLinksPerNote": 1.5 })),
+        ("wiki_auto_connect_wiki", serde_json::json!({ "vaultId": "w1", "dryRun": "yes" })),
         // `wiki_update_wiki` 的可选字段必须是非空字符串或 null，数字一律拒收。
         ("wiki_update_wiki", serde_json::json!({ "id": "w1", "embeddingProvider": 7 })),
     ] {

@@ -9,6 +9,12 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:OpcListCustomers",
     "tool:OpcCreateContentAsset",
     "tool:OpcCreateLandingPage",
+    "tool:OpcEcommerceWebSearch",
+    "tool:OpcEcommerceOpcSearchWiki",
+    "tool:OpcEcommerceOpcListCustomers",
+    "tool:OpcEcommerceOpcCreateContentAsset",
+    "tool:OpcEcommerceOpcCreateLandingPage",
+    "tool:OpcEcommerceRunAutomationRules",
   ],
   "kpis": [
     {

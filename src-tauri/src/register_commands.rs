@@ -1100,7 +1100,6 @@ macro_rules! register_all_commands {
             commands::webhook::webhook_reload,
             commands::webhook::webhook_test_subscription,
             commands::webhook::webhook_toggle_subscription,
-            commands::wiki::auto_connect_wiki,
             commands::wiki::delete_wiki,
             commands::wiki::sync_knowledge_document_to_wiki,
             commands::wiki::wiki_export_html,

@@ -1,7 +1,7 @@
 {
   "id": "security",
   "pluginId": "plugin-opc-security",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-security",
   "page": {
     "id": "domain:devops-security",
     "path": "/opc/domain/security"
@@ -9,10 +9,20 @@
   "capabilities": [
     "tool:OpcSearchWiki",
     "tool:WebSearch",
-    "tool:FileWrite"
+    "tool:FileWrite",
+    "tool:OpcSecurityOpcSearchWiki",
+    "tool:OpcSecurityWebSearch",
+    "tool:OpcSecurityFileWrite",
+    "tool:OpcSecurityRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_security_opc_search_wiki",
+    "opc_security_web_search",
+    "opc_security_file_write",
+    "opc_security_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

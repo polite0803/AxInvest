@@ -12,7 +12,7 @@
 
 ### 任务中心统一运行视图
 
-- 后台任务 API：`src-tauri/src/commands/background_tasks.rs:409` 的 `spawn_background_task`、`:704` 的 `list_background_tasks`、`:722` 的 `get_background_task_output`、`:744` 的 `stop_background_task`。
+- 后台任务 API：`src-tauri/src/commands/background_tasks.rs:409` 的 `spawn_background_task`、同文件 `:704` 的 `list_background_tasks`、`:722` 的 `get_background_task_output`、`:744` 的 `stop_background_task`。
 - 事件流：`:795` 的 `list_task_events`，环形缓冲上限 `MAX_TASK_EVENTS: u64 = 500`（`:785`）。
 - 前端入口：`src/components/tasks/JobCard.tsx`（任务卡片；任务中心页按其挂载）。
 - 视图收口：v3.0.0「任务中心 v2 统一运行视图（P2-1）」与「五源状态收口（触发来源 + 完成时刻 + 在跑登记）」（CHANGELOG v3.0.0 节；提交 `9bf92bada`）。
@@ -34,7 +34,7 @@
 
 ### 无头调度与 leader 租约
 
-- 入口：`src-tauri/src/init/services.rs:2133` 的 `start_cron_scheduler`（带 AppHandle）与 `:2104` 的 `start_cron_scheduler_headless`（无 GUI）；公共实现 `:2143` 的 `start_cron_scheduler_opt`。
+- 入口：`src-tauri/src/init/services.rs:2133` 的 `start_cron_scheduler`（带 AppHandle）与 `:2148` 的 `start_cron_scheduler_headless`（无 GUI）；公共实现 `:2187` 的 `start_cron_scheduler_opt`。
 - 无头化 + 跨进程 leader 租约属 v3.0.0：提交 `d787ebf37`（「调度器无头化 + 跨进程 leader 租约 + 决策否决门运行期可配 + 回放/验证双门禁」）。
 - 每个任务执行前显式钉 live 模式：`services.rs:2318`（`cron_live` 用 `task_local` 的显式 `None`，避免定时任务被并发回放的 as-of 栈污染）。
 - 交付通道：`services.rs:2262` 构造 `CronDeliverySink`；`:2257` 注释「任务可通过 `CronDeliveryConfig` 把执行结果推送到 webhook / 文件 / 通知渠道」。
@@ -73,7 +73,7 @@
 ### 告警与结果交付
 
 - 交付契约：`axagent-core/crates/harness/src/cron_delivery.rs:40` 的 `CronDeliveryConfig`、`:54` 的 `CronDeliveryChannel`。
-- 渠道装配：`src-tauri/src/init/services.rs:5006` 的 `create_cron_delivery_sink`（webhook / 文件 / 通知渠道）。
+- 渠道装配：`src-tauri/src/init/services.rs:5017` 的 `create_cron_delivery_sink`（webhook / 文件 / 通知渠道）。
 - 运行结果结构：`TaskRunResult`（`success` / `output` / `error` / `duration_ms` / `executed_at` / `skipped` / `partial`），在 `services.rs:2301-2314` 有构造样例。
 
 （对应版本：v3.0.0，当前实现）

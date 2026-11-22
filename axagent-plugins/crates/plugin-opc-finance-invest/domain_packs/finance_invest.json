@@ -1,7 +1,7 @@
 {
   "id": "finance_invest",
   "pluginId": "plugin-opc-finance-invest",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-finance-invest",
   "page": {
     "id": "domain:finance-analysis",
     "path": "/opc/domain/finance-invest"
@@ -12,10 +12,34 @@
     "tool:OpcSearchWiki",
     "tool:OpcListProjects",
     "tool:OpcGetFinancialReport",
-    "tool:OpcRecordKpi"
+    "tool:OpcRecordKpi",
+    "tool:OpcListCustomers",
+    "tool:WebSearch",
+    "tool:OpcFinanceInvestOpcGetDashboard",
+    "tool:OpcFinanceInvestOpcListKpis",
+    "tool:OpcFinanceInvestOpcSearchWiki",
+    "tool:OpcFinanceInvestOpcListProjects",
+    "tool:OpcFinanceInvestOpcGetFinancialReport",
+    "tool:OpcFinanceInvestOpcRecordKpi",
+    "tool:OpcFinanceInvestBatchValidateEntities",
+    "tool:OpcFinanceInvestOpcListCustomers",
+    "tool:OpcFinanceInvestWebSearch",
+    "tool:OpcFinanceInvestRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_finance_invest_opc_get_dashboard",
+    "opc_finance_invest_opc_list_kpis",
+    "opc_finance_invest_opc_search_wiki",
+    "opc_finance_invest_opc_list_projects",
+    "opc_finance_invest_opc_get_financial_report",
+    "opc_finance_invest_opc_record_kpi",
+    "opc_finance_invest_batch_validate_entities",
+    "opc_finance_invest_opc_list_customers",
+    "opc_finance_invest_web_search",
+    "opc_finance_invest_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

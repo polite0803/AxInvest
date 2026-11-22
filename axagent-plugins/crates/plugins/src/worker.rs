@@ -462,6 +462,24 @@ struct HostPeer {
 /// —— 全都要 `write`。同接缝的九个读 op **必须仍是 `None`** —— 读缝加闸会把只读插件
 /// （`opc_list_*` 那几条命令）无端拒掉，反向锁与正锁都在 `opc_store_*` 那几条用例里。
 ///
+/// `tool.set/exec` 的按工具名写权限表。
+///
+/// 接缝本身是读缝（不在 `required_permission_for` 中），但 `exec` 可以执行宿主内置工具，
+/// 其中文件写 / shell 执行是货真价实的写面。11 个 OPC 域 worker 经此缝复用宿主实现
+/// （不复制工具代码），若无这道闸，未声明 `write` 的插件也能借 `FileWrite` / `Bash` 落盘。
+///
+/// 名单只包含**会改宿主文件系统或执行外部命令**的工具；只读工具（`FileRead` /
+/// `WebSearch` / `Grep` 等）保持 `None`，避免把读缝误锁。新增写工具时必须同批登记，
+/// 长期方向是把权限元数据下沉到 `Tool` trait，由工具自报，消除这份名单的漂移风险。
+fn required_permission_for_tool_exec(tool_name: &str) -> Option<PluginPermission> {
+    match tool_name {
+        "FileWrite" | "FileEdit" | "DeleteFile" | "MoveFile" | "CreateDirectory" | "Bash" => {
+            Some(PluginPermission::Write)
+        },
+        _ => None,
+    }
+}
+
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
     match (seam, op) {
@@ -498,7 +516,7 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // 是**实时计算**（不读也不写缓存）⇒ 仍是读面，必须保持 `None`。
         (
             "wiki.store",
-            "update_wiki" | "rebuild_index" | "repair_graph",
+            "update_wiki" | "rebuild_index" | "repair_graph" | "auto_connect_wiki",
         ) => Some(PluginPermission::Write),
         // 图谱缓存失效：删缓存行 ⇒ 写面。同接缝的 `get_graph` / `detect_communities`
         // 是**实时计算**（不读也不写缓存）⇒ 仍是读面，必须保持 `None`。
@@ -862,6 +880,23 @@ impl HostPeer {
                 error_codes::PLUGIN_PERMISSION_DENIED,
                 format!(
                     "插件未声明 `{}` 权限，拒绝接缝 `{seam}` 的写操作 `{op}`",
+                    permission.as_str()
+                ),
+            );
+        }
+        // `tool.set/exec` 本身不登记在写 op 表里（接缝是工具集提供者），但它执行的工具
+        // 可能是写面。按工具名补一道闸，位置同样在取 provider / 执行工具之前 ⇒ 零触达。
+        // 工具名缺失时交给下方 `deserialize_arg` 报参数错误，不在权限层抢答。
+        if seam == "tool.set"
+            && op == "exec"
+            && let Some(name) = args.get("name").and_then(Value::as_str)
+            && let Some(permission) = required_permission_for_tool_exec(name)
+            && !self.has_permission(permission)
+        {
+            return FrameResponse::error(
+                error_codes::PLUGIN_PERMISSION_DENIED,
+                format!(
+                    "插件未声明 `{}` 权限，拒绝通过接缝 `tool.set` 执行写工具 `{name}`",
                     permission.as_str()
                 ),
             );
@@ -3283,6 +3318,24 @@ impl HostPeer {
                 };
                 match result {
                     Ok(outcome) => to_value("RepairWikiGraphResult", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "wiki.store" if op == "auto_connect_wiki" => {
+                // 入参：`request` 对象（宿主 AutoConnectWikiRequest，只有 vaultId 必填）。
+                let request: axagent_harness::AutoConnectWikiRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_wiki_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.auto_connect_wiki(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("AutoConnectWikiResult", &outcome),
                     Err(e) => seam_provider_error(e),
                 }
             },
@@ -19686,6 +19739,81 @@ mod tests {
             runtime.block_on(memory.get("k")).expect("读回应成功"),
             Some("before".to_string()),
             "被拒的写不得落库"
+        );
+    }
+
+    /// `tool.set/exec` 是 OPC 域 worker 复用宿主工具的统一通道。接缝本身不在写 op 表里，
+    /// 但写工具必须按工具名补闸，否则未声明 `write` 的插件可借 `FileWrite` 绕过权限模型。
+    #[test]
+    fn tool_set_exec_write_tools_require_write_permission() {
+        for name in ["FileWrite", "FileEdit", "DeleteFile", "MoveFile", "CreateDirectory", "Bash"] {
+            assert_eq!(
+                required_permission_for_tool_exec(name),
+                Some(PluginPermission::Write),
+                "写工具 `{name}` 必须登记 write 闸"
+            );
+        }
+        for name in ["FileRead", "WebSearch", "Grep", "ListDirectory", "FileExists"] {
+            assert_eq!(
+                required_permission_for_tool_exec(name),
+                None,
+                "只读工具 `{name}` 不得被误锁"
+            );
+        }
+
+        // 闸在取 provider 之前：registry 为空也必须拒绝，且错误码是权限拒绝而非「无 provider」。
+        let peer = HostPeer {
+            plugin_id: "plugin.no-write".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["tool.set".to_string()],
+            registry: Arc::new(CapabilityRegistry::new()),
+            runtime: None,
+            permissions: Vec::new(),
+        };
+        let denied =
+            with_watchdog(Duration::from_secs(5), "tool.set 写工具无权限", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "tool.set",
+                        "op": "exec",
+                        "args": { "name": "FileWrite", "args": {} },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "未声明 write 不得执行 FileWrite，实际 {denied:?}"
+        );
+        assert!(
+            denied.message.clone().unwrap_or_default().contains("FileWrite"),
+            "拒绝文案要点名工具，实际：{denied:?}"
+        );
+
+        // 只读工具不因权限被拒；无 provider 时是「接缝不可用」而不是权限错误。
+        let peer = HostPeer {
+            plugin_id: "plugin.no-write".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["tool.set".to_string()],
+            registry: Arc::new(CapabilityRegistry::new()),
+            runtime: None,
+            permissions: Vec::new(),
+        };
+        let read_only = with_watchdog(Duration::from_secs(5), "tool.set 只读工具", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "tool.set",
+                    "op": "exec",
+                    "args": { "name": "FileRead", "args": {} },
+                }),
+                &[],
+            )
+        });
+        assert_ne!(
+            read_only.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "FileRead 是读工具，不得被权限闸拦下，实际 {read_only:?}"
         );
     }
 }

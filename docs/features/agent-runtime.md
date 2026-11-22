@@ -20,7 +20,7 @@
 
 ### 2. 工具系统：注册 → 校验 → 执行
 
-注册表按工具名 + 别名索引，禁用列表独立于工具自身的 `is_enabled()`，`find()` 先查禁用再查别名（`axagent-runtime/crates/tools/src/registry.rs:206`、`:217`）。三类动态装载共用同一注册表：技能工具 `register_skill_tool`、运行时工具 `register_runtime_tool`、MCP 工具 `register_mcp_tool`（`:1218`、`:1227`、`:1354`）。
+注册表按工具名 + 别名索引，禁用列表独立于工具自身的 `is_enabled()`，`find()` 先查禁用再查别名（`axagent-runtime/crates/tools/src/registry.rs:206`、`:217`）。三类动态装载共用同一注册表：技能工具 `register_skill_tool`（`axagent-runtime/crates/tools/src/registry.rs:1222`）、运行时工具 `register_runtime_tool`（同文件 `:1231`）、MCP 工具 `register_mcp_tool`（同文件 `:1358`）。
 
 `execute()` 是唯一执行入口，顺序固定：启用检查 → 限流（独立错误码 `rateLimited`，不与普通执行失败混用）→ 输入脱敏 → `permission_policy` 授权 → `PreToolUse` Hooks → 网络 / Shell 沙箱检查（`axagent-runtime/crates/tools/src/registry.rs:1409-1474`）。任一前置闸门拒绝都不会进入工具实现；限流单独分码是为了让上层能区分「稍后重试」与「这个调用本身不合法」（`:1417-1428`）。
 
@@ -72,7 +72,7 @@ RAG 入口是 `RAGPipeline`：混合检索（`HybridSearchOptions`）→ 阈值�
 
 ### 7. 技能与 MCP 装载
 
-技能与 MCP 都不新造执行面，而是注册成普通工具：技能走 `register_skill_tool`（handler 为 `Fn(&str) -> Result<String, ToolError>`），MCP 走 `register_mcp_tool`（配置由 `McpManager` / `McpServerConfig` / `McpToolConfig` 承载）（`axagent-runtime/crates/tools/src/registry.rs:1218`、`:1354`）。运行时动态注册的工具通过 `register_runtime_tool` 登记，卸载时按后进先出清理副作用（同文件 `Disposer` 的 LIFO 语义）。
+技能与 MCP 都不新造执行面，而是注册成普通工具：技能走 `register_skill_tool`（handler 为 `Fn(&str) -> Result<String, ToolError>`，`axagent-runtime/crates/tools/src/registry.rs:1222`），MCP 走 `register_mcp_tool`（配置由 `McpManager` / `McpServerConfig` / `McpToolConfig` 承载，同文件 `:1358`、`:1369`）。运行时动态注册的工具通过 `register_runtime_tool` 登记（同文件 `:1231`），卸载时按后进先出清理副作用（同文件 `Disposer` 的 LIFO 语义）。
 
 MCP 服务端接入会话层后，`agent_status` / `agent_cancel` 从「占位」变成真实操作；`HarnessAgentAdapter` 注入 `SessionManager`，`execute` 返回真实 `session_id`（`CHANGELOG.md:464`、`:467`）。
 

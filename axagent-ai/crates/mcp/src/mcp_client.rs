@@ -136,8 +136,10 @@ fn read_path_from_shell(shell: &str) -> Option<String> {
     const START: &str = "__AxAgent_PATH_START__";
     const END: &str = "__AxAgent_PATH_END__";
 
+    // 不使用 `-i`：无 TTY 的后台测试和桌面进程里，交互式 shell 会尝试启用
+    // 作业控制并可能停在 SIGTTIN，导致同步 `output()` 永久等待。
     let output = std::process::Command::new(shell)
-        .args(["-i", "-l", "-c", &format!("printf '{}'; printenv PATH; printf '{}'", START, END)])
+        .args(["-l", "-c", &format!("printf '{}'; printenv PATH; printf '{}'", START, END)])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output()
@@ -2479,6 +2481,42 @@ mod tests {
         assert_eq!(env_map.get("PATH"), Some(&Some("/custom/bin".to_string())));
     }
 
+    #[cfg(all(unix, not(target_os = "android")))]
+    #[test]
+    fn login_shell_path_probe_is_non_interactive() {
+        let temp_dir = std::env::temp_dir();
+        let shell = temp_dir.join(format!("axagent-shell-probe-{}", std::process::id()));
+        std::fs::write(
+            &shell,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"${AXAGENT_SHELL_ARGS_FILE}\"\n",
+        )
+        .expect("write shell probe");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+                .expect("make shell probe executable");
+        }
+        let args_file = temp_dir.join(format!("axagent-shell-args-{}", std::process::id()));
+        // SAFETY: 本测试独占此环境变量名，且只验证 shell 探测参数。
+        unsafe {
+            std::env::set_var("AXAGENT_SHELL_ARGS_FILE", &args_file);
+        }
+
+        let _ = read_path_from_shell(shell.to_str().expect("UTF-8 temp path"));
+
+        // SAFETY: 与上面的 set_var 成对清理。
+        unsafe {
+            std::env::remove_var("AXAGENT_SHELL_ARGS_FILE");
+        }
+        let args = std::fs::read_to_string(&args_file).unwrap_or_default();
+        let _ = std::fs::remove_file(&shell);
+        let _ = std::fs::remove_file(&args_file);
+
+        assert!(args.lines().any(|arg| arg == "-l"));
+        assert!(!args.lines().any(|arg| arg == "-i"));
+    }
+
     #[cfg(not(target_os = "android"))]
     #[tokio::test]
     async fn call_tool_stdio_does_not_hang_when_initialize_stdout_is_non_json_then_eof() {
@@ -2495,7 +2533,7 @@ mod tests {
         };
 
         // 预热登录 shell PATH 解析（OnceLock 仅首次耗时）：该过程会同步拉起多个
-        // 交互式登录 shell（`-i -l`），在全量并行测试（数千用例）环境下可能拖慢数秒，
+        // 登录 shell（`-l`），在全量并行测试（数千用例）环境下可能拖慢数秒，
         // 把它挪到计时窗口之外，避免将启动开销误判为“挂起”。
         let _ = get_shell_path();
 

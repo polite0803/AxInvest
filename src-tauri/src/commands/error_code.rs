@@ -778,6 +778,8 @@ pub mod plugin {
     pub const PANEL_ASSET_UNPINNED: &str = "PLUGIN_PANEL_ASSET_UNPINNED";
     /// 安装目录内容与安装时钉下的哈希不一致 —— 真的被改过，属安全拒绝。
     pub const PANEL_ASSET_TAMPERED: &str = "PLUGIN_PANEL_ASSET_TAMPERED";
+    /// 安装或更新前提供的来源 SHA-256 缺失、格式非法，或与物化后的插件目录不一致。
+    pub const SOURCE_INTEGRITY_FAILED: &str = "PLUGIN_SOURCE_INTEGRITY_FAILED";
 }
 
 /// 进化引擎相关错误码

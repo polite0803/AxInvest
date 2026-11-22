@@ -96,6 +96,28 @@ pub struct RepairWikiGraphResult {
     pub message: String,
 }
 
+/// `auto_connect_wiki` op 的入参。
+///
+/// 只有 `vaultId` 必填；`threshold` / `maxLinksPerNote` / `dryRun` 缺省 / `null`
+/// 都表示用宿主默认值（0.7 / 5 / false）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoConnectWikiRequest {
+    pub vault_id: String,
+    pub threshold: Option<f64>,
+    pub max_links_per_note: Option<usize>,
+    pub dry_run: Option<bool>,
+}
+
+/// `auto_connect_wiki` op 的回执。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoConnectWikiResult {
+    pub links_created: usize,
+    pub pairs_analyzed: usize,
+    pub elapsed_ms: u64,
+}
+
 /// Wiki 写接缝的宿主 provider。
 #[async_trait]
 pub trait WikiStoreProvider: Send + Sync {
@@ -125,6 +147,16 @@ pub trait WikiStoreProvider: Send + Sync {
     async fn repair_graph(&self, _wiki_id: String) -> Result<RepairWikiGraphResult> {
         Err(AxAgentError::Provider(
             "WikiStoreProvider::repair_graph 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 自动连接一个 Wiki 的笔记（写，除非 `dryRun` 为 true）：按相似度建立 note 链接。
+    async fn auto_connect_wiki(
+        &self,
+        _request: AutoConnectWikiRequest,
+    ) -> Result<AutoConnectWikiResult> {
+        Err(AxAgentError::Provider(
+            "WikiStoreProvider::auto_connect_wiki 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

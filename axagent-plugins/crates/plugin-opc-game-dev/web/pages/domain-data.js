@@ -7,6 +7,10 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:WebSearch",
     "tool:FileWrite",
     "tool:FileRead",
+    "tool:OpcGameDevWebSearch",
+    "tool:OpcGameDevFileWrite",
+    "tool:OpcGameDevFileRead",
+    "tool:OpcGameDevRunAutomationRules",
   ],
   "kpis": [
     {

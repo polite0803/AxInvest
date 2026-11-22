@@ -281,6 +281,53 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
   });
 });
 
+// ── 插件独立仓 / 验收矩阵接线（2026-11-20 补）──────────────────────────────
+// 为什么单独守：五项门禁刚刚接入 ci.yml 与 ci-check.mjs，若只靠自动差集测试，
+// 步骤名被改 / 参数被降级时只看到一条泛化 diff，定位成本高。这里把主仓 CI 的
+// 发布地址链契约与本地集成门禁的职责边界做成具名断言。
+describe("插件独立仓 / 验收矩阵门禁接线", () => {
+  const RELEASE_FLOW_STEP = "Verify plugin release address flow contract";
+  const SDK_VERIFY_SRC = resolve(process.cwd(), "scripts/verify-opc-plugin-sdk.mjs");
+
+  it("主仓 CI 保留发布地址链契约且不得被静默放行", () => {
+    const yml = loadCi();
+    const block = stepBlock(yml, RELEASE_FLOW_STEP);
+    expect(block, `找不到步骤「${RELEASE_FLOW_STEP}」—— 被删或改名了？`).not.toBeNull();
+    const b = stripComments(block as string);
+    expect(b, `${RELEASE_FLOW_STEP} 用了 \`|| true\` ⇒ 门禁恒绿`).not.toMatch(/\|\|\s*true/);
+    expect(b, `${RELEASE_FLOW_STEP} 开了 continue-on-error ⇒ 门禁恒绿`).not.toMatch(
+      /continue-on-error\s*:\s*true/,
+    );
+    expect(b).toContain("verify-plugin-release-flow.mjs");
+    // 主仓 CI 不能假设旁边有 17 个插件源码仓；这些证据由本地集成门禁与各插件仓 CI 提供。
+    expect(yml).not.toContain("Verify plugin independent repo snapshots");
+    expect(yml).not.toContain("Rehearse plugin SDK release and 17/17");
+    expect(yml).not.toContain("Verify plugin acceptance matrix");
+    expect(yml).not.toContain("Verify plugin bundle launcher from independent repos");
+  });
+
+  it("本地集成入口保留 17 个外置仓的验仓、演练、矩阵与打包门禁", () => {
+    const src = readFileSync(resolve(process.cwd(), "scripts/ci-check.mjs"), "utf8");
+    expect(src).not.toContain("generate-plugin-independent-repos.mjs --all");
+    expect(src).toContain("generate-plugin-independent-repos.mjs --verify");
+    expect(src).toContain("verify-plugin-sdk-release-rehearsal.mjs");
+    expect(src).toContain("verify-plugin-acceptance-matrix.mjs");
+    expect(src).toContain("verify-plugin-release-flow.mjs");
+    expect(src).toContain("run-plugin-bundle.mjs --all --check");
+  });
+
+  it("全插件 SDK 独立树验收必须 staging stock/security 真 bundle（隔离测试不得空跑）", () => {
+    const src = readFileSync(SDK_VERIFY_SRC, "utf8");
+    expect(src).toContain('["stock", "opc-security"]');
+    expect(src).toContain("AXAGENT_STOCK_BUNDLE_DIR");
+    expect(src).toContain("AXAGENT_SECURITY_BUNDLE_DIR");
+    expect(src).toContain("AXAGENT_STOCK_WORKER_BIN");
+    // 非全量树剔除了 plugin-stock，必须显式排除 stock 隔离用例；全量树则不能带 --skip。
+    expect(src).toContain('if (!FULL && pkg === "axagent-plugins")');
+    expect(src).toContain('--skip", "uninstalling_stock_leaves_security_plugin_available');
+  });
+});
+
 // ── #5 自动提取护栏（2026-10-31）─────────────────────────────────────────────
 // 为什么需要：上面那两段「同步护栏」是**手写白名单**，只守 7 个门；ci.yml 实有约 60 个
 //   scripts/** 门，≈80% 不受保护。④⑤「只进了 ci.yml、没进本地镜像」持续近一个月无人红
@@ -292,12 +339,12 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
 //     （`npx dprint check` vs `dprint check --incremental=false` 等），v1 不纳入；
 //   · canon()：去解释器/env 前缀 → 折叠空白 → 参数 token 排序（`--tier all --strict`
 //     ≡ `--strict --tier all`）；
-//   · 已知不对称必须以 {ciYml, ciCheck, reason} 写进 allowlist（≤8 条，无 reason 即红，
+//   · 已知不对称必须以 {ciYml, ciCheck, reason} 写进 allowlist（≤12 条，无 reason 即红，
 //     失效不删也红 —— 防 allowlist 腐化成新白名单，pr-ci.workflow.test.ts 教训）；
 //   · 分母非零断言（提取器写坏 ⇒ 差集恒空 = 空转守卫）。
 describe("ci.yml ↔ ci-check.mjs 命令清单自动提取比对（对称差集）", () => {
   const MIN_COMMANDS_PER_SIDE = 40;
-  const MAX_ALLOWLIST = 8;
+  const MAX_ALLOWLIST = 12;
 
   /** 去掉 `//` 行注释与 `/* *\/` 块注释（`[^:]` 防吃掉 `node:fs` 这类协议前缀）。 */
   function stripJsComments(s: string): string {
@@ -420,6 +467,26 @@ describe("ci.yml ↔ ci-check.mjs 命令清单自动提取比对（对称差集�
       ciYml: null,
       ciCheck: "scripts/check-replay-live-consistency.mjs",
       reason: "本地跑、CI 不跑（台账类别 2）：回放↔实盘一致性门只挂在本地镜像（需本机 PG）",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/generate-plugin-independent-repos.mjs --verify",
+      reason: "本地集成门：17 个插件源码仓在主仓之外，远端主仓 CI 不检出同级仓；各插件仓由自身 CI 验收",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/verify-plugin-sdk-release-rehearsal.mjs",
+      reason: "本地集成门：SDK 发布演练需要同时读取 17 个外置仓；远端主仓 CI 不假设同级目录存在",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/verify-plugin-acceptance-matrix.mjs",
+      reason: "本地集成门：逐插件启停矩阵读取 17 个外置仓源码；远端主仓 CI 不再消费仓外源码",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/run-plugin-bundle.mjs --all --check",
+      reason: "本地集成门：17/17 bundle 构建由外置仓自带脚本完成；主仓 CI 只验宿主发布地址链",
     },
   ];
 

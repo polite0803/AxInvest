@@ -1,0 +1,12 @@
+{
+  "name": "plugin-opc-software-dev-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "OPC software_dev 插件 bundle 页面：esbuild 把 src-web/main.ts 打成 web/pages/bundle.js",
+  "scripts": {
+    "build:web": "node ../../../node_modules/esbuild/bin/esbuild src-web/main.ts --bundle --format=iife --target=es2022 --outfile=web/pages/bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

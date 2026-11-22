@@ -10,6 +10,13 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:FileRead",
     "tool:Bash",
     "tool:FileWrite",
+    "tool:OpcAiResearchOpcListProjects",
+    "tool:OpcAiResearchOpcSearchWiki",
+    "tool:OpcAiResearchWebSearch",
+    "tool:OpcAiResearchFileRead",
+    "tool:OpcAiResearchBash",
+    "tool:OpcAiResearchFileWrite",
+    "tool:OpcAiResearchRunAutomationRules",
   ],
   "kpis": [
     {

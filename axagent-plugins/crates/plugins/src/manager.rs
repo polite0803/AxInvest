@@ -8,14 +8,17 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tar::Archive;
 use tracing;
 
 use axagent_harness::{
@@ -36,6 +39,218 @@ use crate::skill_installer::SkillInstaller;
 use crate::types::*;
 use crate::ui_schema::is_declared_key_shape;
 use crate::worker::{LoadedPlugin, PluginWorkerConfig, WorkerError};
+
+const RELEASE_SOURCE_PREFIX: &str = "axagent-release+";
+
+fn is_https_url(url: &str) -> bool {
+    url.starts_with("https://") && !url.contains(char::is_whitespace)
+}
+
+fn parse_release_sha256(value: &str, source: &str) -> Result<String, PluginError> {
+    let value = value.trim();
+    validate_expected_sha256(Some(value), false, source)?;
+    Ok(value.to_ascii_lowercase())
+}
+
+/// 发布源安装/更新时，调用方回传的哈希必须与**当前**清单声明一致。
+///
+/// 回传值不是调用方自选的任意锚点：它只能确认“预览看到的清单”未被替换。
+/// 若清单在预览与安装之间换代，拒绝比悄悄安装另一份内容更安全。
+fn validate_release_expected_sha256(
+    expected_sha256: Option<&str>,
+    manifest_sha256: &str,
+    source: &str,
+) -> Result<(), PluginError> {
+    let Some(expected) = expected_sha256 else {
+        return Err(PluginError::IntegrityVerifyFailed(format!(
+            "release plugin source `{source}` requires the SHA-256 returned by preview"
+        )));
+    };
+    validate_expected_sha256(Some(expected), true, source)?;
+    if !expected.trim().eq_ignore_ascii_case(manifest_sha256) {
+        return Err(PluginError::IntegrityVerifyFailed(format!(
+            "release manifest changed after preview: expected sha256 {expected}, manifest now declares {manifest_sha256}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_release_artifact(
+    artifact_url: &str,
+    sha256: &str,
+    source: &str,
+) -> Result<String, PluginError> {
+    if !is_https_url(artifact_url)
+        || !(artifact_url.ends_with(".tar.gz") || artifact_url.ends_with(".tgz"))
+    {
+        return Err(PluginError::IntegrityVerifyFailed(format!(
+            "release artifact URL must be an HTTPS .tar.gz or .tgz archive: `{artifact_url}`"
+        )));
+    }
+    parse_release_sha256(sha256, source)
+}
+
+/// 选择当前宿主平台的发布产物，并把选中值归一化到兼容字段。
+///
+/// 新格式一旦声明了 `artifacts[]`，没有本平台组合就必须失败；回退到其它平台会把
+/// Linux worker 安装到 Windows/macOS，直到启动子进程才以不可解释的方式报错。
+fn select_release_manifest_artifact(
+    mut manifest: PluginReleaseManifest,
+    current_os: &str,
+    current_arch: &str,
+    source: &str,
+) -> Result<(PluginReleaseManifest, String), PluginError> {
+    if manifest.artifacts.is_empty() {
+        let sha256 = validate_release_artifact(&manifest.artifact_url, &manifest.sha256, source)?;
+        manifest.sha256 = sha256.clone();
+        return Ok((manifest, sha256));
+    }
+
+    let matching: Vec<_> = manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.os.eq_ignore_ascii_case(current_os)
+                && artifact.arch.eq_ignore_ascii_case(current_arch)
+        })
+        .collect();
+    let artifact = match matching.as_slice() {
+        [] => {
+            let available = manifest
+                .artifacts
+                .iter()
+                .map(|artifact| format!("{}/{}", artifact.os, artifact.arch))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(PluginError::IntegrityVerifyFailed(format!(
+                "release manifest `{source}` has no artifact for current platform `{current_os}/{current_arch}` (available: {available})"
+            )));
+        },
+        [artifact] => *artifact,
+        _ => {
+            return Err(PluginError::IntegrityVerifyFailed(format!(
+                "release manifest `{source}` declares multiple artifacts for current platform `{current_os}/{current_arch}`"
+            )));
+        },
+    };
+    let sha256 = validate_release_artifact(&artifact.artifact_url, &artifact.sha256, source)?;
+    manifest.artifact_url = artifact.artifact_url.clone();
+    manifest.sha256 = sha256.clone();
+    Ok((manifest, sha256))
+}
+
+/// 拉取发布清单并锁定清单中的 SHA-256。
+///
+/// 清单通过 HTTPS 获取，成品包只接受 HTTPS `.tar.gz` / `.tgz`；`file:`、HTTP 和本地路径
+/// 都不接受，避免把“给一个发布地址”变成任意本地文件读取或明文下载。
+fn resolve_release_manifest(url: &str) -> Result<(PluginReleaseManifest, String), PluginError> {
+    if !is_https_url(url) {
+        return Err(PluginError::IntegrityVerifyFailed(format!(
+            "release manifest URL must use https: `{url}`"
+        )));
+    }
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| PluginError::CommandFailed(format!("build release client failed: {e}")))?
+        .get(url)
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|e| {
+            PluginError::CommandFailed(format!("fetch release manifest `{url}` failed: {e}"))
+        })?;
+    let manifest: PluginReleaseManifest = response.json().map_err(|e| {
+        PluginError::InvalidManifest(format!("invalid release manifest at `{url}`: {e}"))
+    })?;
+    select_release_manifest_artifact(manifest, std::env::consts::OS, std::env::consts::ARCH, url)
+}
+
+fn extract_release_archive(data: &[u8], dest: &Path) -> Result<(), PluginError> {
+    fs::create_dir_all(dest)?;
+    let decoder = GzDecoder::new(Cursor::new(data));
+    let mut archive = Archive::new(decoder);
+    for entry in archive
+        .entries()
+        .map_err(|e| PluginError::IntegrityVerifyFailed(format!("invalid release archive: {e}")))?
+    {
+        let mut entry = entry.map_err(|e| {
+            PluginError::IntegrityVerifyFailed(format!("invalid release archive entry: {e}"))
+        })?;
+        let relative = entry.path().map_err(|e| {
+            PluginError::IntegrityVerifyFailed(format!("invalid release archive path: {e}"))
+        })?;
+        let mut target = dest.to_path_buf();
+        for component in relative.components() {
+            match component {
+                Component::Normal(part) => target.push(part),
+                _ => {
+                    return Err(PluginError::IntegrityVerifyFailed(format!(
+                        "release archive contains unsafe path: `{}`",
+                        relative.display()
+                    )));
+                },
+            }
+        }
+        if entry.header().entry_type().is_symlink() {
+            return Err(PluginError::IntegrityVerifyFailed(format!(
+                "release archive contains symlink: `{}`",
+                relative.display()
+            )));
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if entry.header().entry_type().is_file() {
+            // 直接写目标文件：tar::Entry::unpack 会重放归档权限位，可能把临时目录里的
+            // worker 变成只读并使后续安装/复制失败。这里只接受普通文件，权限由宿主决定。
+            let mut file = fs::File::create(&target).map_err(PluginError::Io)?;
+            std::io::copy(&mut entry, &mut file).map_err(|e| {
+                PluginError::IntegrityVerifyFailed(format!("release archive unpack failed: {e}"))
+            })?;
+        } else if entry.header().entry_type().is_dir() {
+            fs::create_dir_all(&target).map_err(PluginError::Io)?;
+        } else {
+            return Err(PluginError::IntegrityVerifyFailed(format!(
+                "release archive contains unsupported entry: `{}`",
+                relative.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// 下载、解压并校验成品包，返回与哈希校验完全相同的目录。
+fn materialize_release_artifact(
+    release: &PluginReleaseManifest,
+    sha256: &str,
+    temp_root: &Path,
+) -> Result<PathBuf, PluginError> {
+    static MATERIALIZE_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let unique = MATERIALIZE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time is after UNIX epoch")
+        .as_nanos();
+    let dest = temp_root.join(format!("release-{nanos}-{unique}"));
+    let bytes = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| PluginError::CommandFailed(format!("build release client failed: {e}")))?
+        .get(&release.artifact_url)
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .and_then(|response| response.bytes())
+        .map_err(|e| {
+            PluginError::CommandFailed(format!(
+                "fetch release artifact `{}` failed: {e}",
+                release.artifact_url
+            ))
+        })?;
+    extract_release_archive(&bytes, &dest)?;
+    verify_expected_directory_hash(&dest, Some(sha256))?;
+    Ok(dest)
+}
 
 #[derive(Debug, Clone)]
 pub struct PluginManagerConfig {
@@ -269,7 +484,7 @@ pub enum PluginManifestValidationError {
     },
     /// 卡片动作声明了 `mutating: true`，但清单 `permissions[]` 没有 `write`。
     ///
-    /// 权限判定**只在后端**做（`PluginSummaryDto` 不带 permissions，前端判不了），
+    /// 权限判定**只在后端**做（列表里的 permissions 只是声明投影，前端判不了），
     /// 且必须在**装载期**拦：放它装上的话，界面上会出现一颗前端无法判权、后端也不知道
     /// 该不该放行的按钮 —— 静默降级成「点了没反应」或「点了就写」，两种都不可接受。
     TaskCardActionWritePermissionMissing {
@@ -424,6 +639,12 @@ pub enum PluginError {
     /// 安装目录内容与安装时钉下的哈希不一致（被改动）。用户动作 = 移除或重装，
     /// 性质是安全拒绝，与「插件本来没声明内容」相反，故两个码分开。
     IntegrityMismatch(String),
+    /// 调用方在安装前提供了期望 SHA-256，但物化后的插件目录与之不匹配。
+    ///
+    /// 与 [`Self::IntegrityMismatch`] 分开：后者是**安装后**目录被改动，前者是
+    /// 下载/克隆内容在**写入安装目录之前**就与来源声明不符。两者的用户处置不同：
+    /// 前者移除重装，后者核对来源与哈希后重新下载。
+    IntegrityVerifyFailed(String),
     /// 插件已安装冲突 — install 时检测到 plugin_id 已存在,
     /// 调用方应提示用户使用 update 而非 install。
     AlreadyExists(String),
@@ -459,6 +680,7 @@ impl Display for PluginError {
             | Self::PermissionDenied(message)
             | Self::IntegrityUnpinned(message)
             | Self::IntegrityMismatch(message)
+            | Self::IntegrityVerifyFailed(message)
             | Self::AlreadyExists(message) => write!(f, "{message}"),
         }
     }
@@ -750,6 +972,51 @@ impl PluginManager {
 
     pub fn list_plugins(&self) -> Result<Vec<PluginSummary>, PluginError> {
         Ok(self.plugin_registry()?.summaries())
+    }
+
+    /// 市场/列表可信投影：在 [`Self::list_plugins`] 的摘要上补来源、页面与完整性状态。
+    ///
+    /// 判据只来自已安装 registry 与目录哈希；浏览器 mock 不得伪造 `verified`。
+    pub fn list_plugin_marketplace_summaries(
+        &self,
+    ) -> Result<Vec<PluginMarketplaceSummary>, PluginError> {
+        let registry = self.load_registry()?;
+        Ok(self
+            .list_plugins()?
+            .into_iter()
+            .map(|summary| {
+                let permissions = summary.permission_names.clone();
+                let pages = summary.page_ids.clone();
+                let record = registry.plugins.get(&summary.metadata.id);
+                let source = record
+                    .map(|r| describe_install_source(&r.source))
+                    .unwrap_or_else(|| summary.metadata.source.clone());
+                let pinned_hash = record
+                    .and_then(|r| r.integrity.as_ref())
+                    .map(|integrity| integrity.hash.clone());
+                let integrity_status = match record {
+                    None => PluginIntegrityStatus::Unknown,
+                    Some(record) if record.integrity.is_none() => PluginIntegrityStatus::Unpinned,
+                    Some(record) => {
+                        match verify_declared_integrity(
+                            &record.install_path,
+                            record.integrity.as_ref().expect("上一步已确认存在"),
+                        ) {
+                            Ok(()) => PluginIntegrityStatus::Verified,
+                            Err(_) => PluginIntegrityStatus::Mismatch,
+                        }
+                    },
+                };
+                PluginMarketplaceSummary {
+                    summary,
+                    source,
+                    permissions,
+                    pages,
+                    integrity_status,
+                    pinned_hash,
+                }
+            })
+            .collect())
     }
 
     pub fn list_installed_plugins(&self) -> Result<Vec<PluginSummary>, PluginError> {
@@ -1334,30 +1601,188 @@ impl PluginManager {
     }
 
     pub fn validate_plugin_source(&self, source: &str) -> Result<PluginManifest, PluginError> {
+        self.validate_plugin_source_verified(source, None)
+    }
+
+    /// 预览插件源，并返回本次**同一次物化**锁定的期望哈希。
+    ///
+    /// 宿主 `plugin_validate_source` 必须调用本方法：发布地址的哈希来自远端清单，
+    /// 若先 `validate_plugin_source_verified` 再单独拉一次清单，两次请求之间清单变化
+    /// 会让前端冻结的哈希与刚验证的内容不一致（A/B 漂移）。
+    pub fn validate_plugin_source_with_expected_hash(
+        &self,
+        source: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<(PluginManifest, Option<String>), PluginError> {
         let install_source = parse_install_source(source)?;
+        validate_expected_sha256(
+            expected_sha256,
+            false,
+            &describe_install_source(&install_source),
+        )?;
+        if let PluginInstallSource::ReleaseManifestUrl { url } = &install_source {
+            let (release, sha256) = resolve_release_manifest(url)?;
+            if expected_sha256.is_some() {
+                validate_release_expected_sha256(
+                    expected_sha256,
+                    &sha256,
+                    &describe_install_source(&install_source),
+                )?;
+            }
+            let temp_root = self.install_root().join(".tmp");
+            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+            let result = load_plugin_from_directory(&staged).map(|mut manifest| {
+                if let Some(version) = &release.version {
+                    manifest.version = version.clone();
+                }
+                (manifest, Some(sha256.clone()))
+            });
+            if staged.starts_with(&temp_root) {
+                let _ = fs::remove_dir_all(&staged);
+            }
+            return result;
+        }
+        let manifest = self.validate_plugin_source_verified(source, expected_sha256)?;
+        Ok((manifest, expected_sha256.map(str::to_ascii_lowercase)))
+    }
+
+    /// 验证插件源，并在调用方给出 `expected_sha256` 时校验**物化目录**的规范化哈希。
+    ///
+    /// 哈希规则与安装后锚点完全同源（[`hash_plugin_directory`]）：文件相对路径（按字节排序）
+    /// 与文件内容依次喂给 SHA-256。调用方不能只对压缩包/仓库归档算哈希，否则校验口径会与
+    /// 安装目录锚点不一致；这里校验的是**最终会被安装的那棵目录**。
+    ///
+    /// 期望值为 `None` 时保持旧行为；`Some` 时在临时目录被清理前完成比对，
+    /// 不匹配即返回 [`PluginError::IntegrityVerifyFailed`]，绝不返回可供安装的半验证结果。
+    pub fn validate_plugin_source_verified(
+        &self,
+        source: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<PluginManifest, PluginError> {
+        let install_source = parse_install_source(source)?;
+        validate_expected_sha256(
+            expected_sha256,
+            false,
+            &describe_install_source(&install_source),
+        )?;
+        if let PluginInstallSource::ReleaseManifestUrl { url } = &install_source {
+            let (release, sha256) = resolve_release_manifest(url)?;
+            if expected_sha256.is_some() {
+                validate_release_expected_sha256(
+                    expected_sha256,
+                    &sha256,
+                    &describe_install_source(&install_source),
+                )?;
+            }
+            let temp_root = self.install_root().join(".tmp");
+            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+            let mut manifest = load_plugin_from_directory(&staged)?;
+            if let Some(version) = &release.version {
+                manifest.version = version.clone();
+            }
+            if staged.starts_with(&temp_root) {
+                let _ = fs::remove_dir_all(&staged);
+            }
+            return Ok(manifest);
+        }
         match install_source {
-            PluginInstallSource::LocalPath { path } => load_plugin_from_directory(&path),
+            PluginInstallSource::LocalPath { path } => {
+                verify_expected_directory_hash(&path, expected_sha256)?;
+                load_plugin_from_directory(&path)
+            },
             _ => {
                 let temp_root = self.install_root().join(".tmp");
                 let staged =
                     materialize_source(&install_source, &temp_root, self.npm_registry.as_ref())?;
-                let manifest = load_plugin_from_directory(&staged)?;
+                let result = verify_expected_directory_hash(&staged, expected_sha256)
+                    .and_then(|()| load_plugin_from_directory(&staged));
                 // 清理临时目录
                 if staged.starts_with(&temp_root) {
                     let _ = std::fs::remove_dir_all(&staged);
                 }
-                Ok(manifest)
+                result
             },
         }
     }
 
     pub fn install(&mut self, source: &str) -> Result<InstallOutcome, PluginError> {
+        self.install_verified(source, None)
+    }
+
+    /// 校验期望哈希后再安装。
+    ///
+    /// 校验与安装共用**同一次物化**：下载/克隆只发生一次，且哈希比对发生在写入安装目录之前。
+    /// 这不消除外部进程在物化目录上继续修改的竞态（git/npm 下载完成后它们已退出），但避免了
+    /// 「先验证 A、再重新下载 B 安装」这类确定性 TOCTOU。
+    pub fn install_verified(
+        &mut self,
+        source: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<InstallOutcome, PluginError> {
         let install_source = parse_install_source(source)?;
+        // 一键安装通道：清单声明内容哈希，调用方回传预览时冻结的哈希；
+        // 当前清单若已换代，下载前就拒绝，不能把“验证 A、安装 B”留给竞态。
+        if let PluginInstallSource::ReleaseManifestUrl { url } = &install_source {
+            let source_description = describe_install_source(&install_source);
+            validate_expected_sha256(expected_sha256, true, &source_description)?;
+            let (release, sha256) = resolve_release_manifest(url)?;
+            validate_release_expected_sha256(expected_sha256, &sha256, &source_description)?;
+            let temp_root = self.install_root().join(".tmp");
+            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+            let mut manifest = load_plugin_from_directory(&staged)?;
+            if let Some(version) = &release.version {
+                manifest.version = version.clone();
+            }
+            let result = self.install_staged_with_manifest(
+                &install_source,
+                &staged,
+                Some(&sha256),
+                manifest,
+            );
+            let _ = fs::remove_dir_all(&staged);
+            return result;
+        }
+        validate_expected_sha256(
+            expected_sha256,
+            install_source_requires_sha256(&install_source),
+            &describe_install_source(&install_source),
+        )?;
         let temp_root = self.install_root().join(".tmp");
         let staged_source =
             materialize_source(&install_source, &temp_root, self.npm_registry.as_ref())?;
-        let cleanup_source = matches!(install_source, PluginInstallSource::GitUrl { .. });
-        let manifest = load_plugin_from_directory(&staged_source)?;
+        let cleanup_source = matches!(
+            install_source,
+            PluginInstallSource::GitUrl { .. }
+                | PluginInstallSource::NpmPackage { .. }
+                | PluginInstallSource::OpenClaw { .. }
+                | PluginInstallSource::ReleaseManifestUrl { .. }
+        );
+        let result = self.install_staged(&install_source, &staged_source, expected_sha256);
+        if cleanup_source {
+            let _ = fs::remove_dir_all(&staged_source);
+        }
+        result
+    }
+
+    fn install_staged(
+        &mut self,
+        install_source: &PluginInstallSource,
+        staged_source: &Path,
+        expected_sha256: Option<&str>,
+    ) -> Result<InstallOutcome, PluginError> {
+        verify_expected_directory_hash(staged_source, expected_sha256)?;
+        let manifest = load_plugin_from_directory(staged_source)?;
+        self.install_staged_with_manifest(install_source, staged_source, expected_sha256, manifest)
+    }
+
+    fn install_staged_with_manifest(
+        &mut self,
+        install_source: &PluginInstallSource,
+        staged_source: &Path,
+        expected_sha256: Option<&str>,
+        manifest: PluginManifest,
+    ) -> Result<InstallOutcome, PluginError> {
+        verify_expected_directory_hash(staged_source, expected_sha256)?;
 
         let plugin_id = plugin_id(&manifest.name, EXTERNAL_MARKETPLACE);
         let install_path = self.install_root().join(sanitize_plugin_id(&plugin_id));
@@ -1377,10 +1802,7 @@ impl PluginManager {
         if install_path.exists() {
             remove_dir_all_with_retry(&install_path, 5)?;
         }
-        copy_dir_all(&staged_source, &install_path)?;
-        if cleanup_source {
-            let _ = fs::remove_dir_all(&staged_source);
-        }
+        copy_dir_all(staged_source, &install_path)?;
 
         let now = unix_time_ms();
         // trust-on-install 钉死：拷贝完成后立刻对**整个安装目录**算哈希并写进 registry。
@@ -1405,7 +1827,7 @@ impl PluginManager {
             version: manifest.version.clone(),
             description: manifest.description,
             install_path: install_path.clone(),
-            source: install_source,
+            source: install_source.clone(),
             installed_at_unix_ms: now,
             updated_at_unix_ms: now,
             integrity: pinned_integrity,
@@ -1900,16 +2322,82 @@ impl PluginManager {
     }
 
     pub fn update(&mut self, plugin_id: &str) -> Result<UpdateOutcome, PluginError> {
+        self.update_verified(plugin_id, None)
+    }
+
+    /// 更新插件，并在写入安装目录前校验新内容哈希。
+    ///
+    /// 远程来源（Git / npm / OpenClaw）必须显式给出期望 SHA-256；本地目录仍可省略。
+    /// 校验与复制使用同一次物化结果，避免「验证 A、重新下载 B」的确定性 TOCTOU。
+    pub fn update_verified(
+        &mut self,
+        plugin_id: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<UpdateOutcome, PluginError> {
         let mut registry = self.load_registry()?;
         let record = registry.plugins.get(plugin_id).cloned().ok_or_else(|| {
             PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
         })?;
+        if let PluginInstallSource::ReleaseManifestUrl { url } = &record.source {
+            let source_description = describe_install_source(&record.source);
+            validate_expected_sha256(expected_sha256, true, &source_description)?;
+            let (release, sha256) = resolve_release_manifest(url)?;
+            validate_release_expected_sha256(expected_sha256, &sha256, &source_description)?;
+            let temp_root = self.install_root().join(".tmp");
+            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+            let mut manifest = load_plugin_from_directory(&staged)?;
+            if let Some(version) = &release.version {
+                manifest.version = version.clone();
+            }
+            let result = self.update_from_staged(
+                &mut registry,
+                plugin_id,
+                record,
+                &staged,
+                Some(&sha256),
+                Some(manifest),
+            );
+            let _ = fs::remove_dir_all(&staged);
+            return result;
+        }
+        validate_expected_sha256(
+            expected_sha256,
+            install_source_requires_sha256(&record.source),
+            &describe_install_source(&record.source),
+        )?;
 
         let temp_root = self.install_root().join(".tmp");
         let staged_source =
             materialize_source(&record.source, &temp_root, self.npm_registry.as_ref())?;
-        let cleanup_source = matches!(record.source, PluginInstallSource::GitUrl { .. });
-        let manifest = load_plugin_from_directory(&staged_source)?;
+        let cleanup_source = install_source_requires_sha256(&record.source);
+        let result = self.update_from_staged(
+            &mut registry,
+            plugin_id,
+            record,
+            &staged_source,
+            expected_sha256,
+            None,
+        );
+        if cleanup_source {
+            let _ = fs::remove_dir_all(&staged_source);
+        }
+        result
+    }
+
+    fn update_from_staged(
+        &mut self,
+        registry: &mut InstalledPluginRegistry,
+        plugin_id: &str,
+        record: InstalledPluginRecord,
+        staged_source: &Path,
+        expected_sha256: Option<&str>,
+        manifest_override: Option<PluginManifest>,
+    ) -> Result<UpdateOutcome, PluginError> {
+        verify_expected_directory_hash(staged_source, expected_sha256)?;
+        let manifest = match manifest_override {
+            Some(manifest) => manifest,
+            None => load_plugin_from_directory(staged_source)?,
+        };
         self.validate_dependencies(&manifest)?;
 
         // P3 安全:升级备份机制 — 在覆盖前备份旧版本到 `.bak` 目录,
@@ -1943,10 +2431,7 @@ impl PluginManager {
             }
             remove_dir_all_with_retry(&record.install_path, 5)?;
         }
-        copy_dir_all(&staged_source, &record.install_path)?;
-        if cleanup_source {
-            let _ = fs::remove_dir_all(&staged_source);
-        }
+        copy_dir_all(staged_source, &record.install_path)?;
 
         // P3 缺陷修复：若插件处于启用状态，update 后需回滚旧版本已注册的能力，
         // 再用新 manifest 重新注册，避免旧描述残留、新能力不生效。
@@ -1992,7 +2477,7 @@ impl PluginManager {
             ..record.clone()
         };
         registry.plugins.insert(plugin_id.to_string(), updated_record);
-        self.store_registry(&registry)?;
+        self.store_registry(registry)?;
 
         Ok(UpdateOutcome {
             plugin_id: plugin_id.to_string(),
@@ -2373,6 +2858,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
         mcp_servers: Vec::new(),
         skills: Vec::new(),
         permissions: Vec::new(),
+        pages: Vec::new(),
         commands: Vec::new(),
     })]
 }
@@ -2400,6 +2886,7 @@ fn load_plugin_definition(
     let mcp_servers = manifest.mcp_servers;
     let skills = manifest.skills;
     let permissions = manifest.permissions;
+    let pages = manifest.pages;
     // 阶段3-①：commands 必须一路带进 PluginDefinition —— 历史上此处丢弃字段，
     // 导致 manifest.commands[] 只有加载校验、零执行分发（「有 schema 无分发」缺口）。
     let commands = manifest.commands;
@@ -2412,6 +2899,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            pages,
             commands,
         }),
         PluginKind::Bundled => PluginDefinition::Bundled(BundledPlugin {
@@ -2422,6 +2910,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            pages,
             commands,
         }),
         PluginKind::External => PluginDefinition::External(ExternalPlugin {
@@ -2432,6 +2921,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            pages,
             commands,
         }),
         PluginKind::OpenClaw => PluginDefinition::OpenClaw(OpenClawPlugin {
@@ -2442,6 +2932,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            pages,
             commands,
         }),
     })
@@ -2815,7 +3306,7 @@ fn build_plugin_manifest(
         build_manifest_task_sources(raw.task_sources, &command_names, &ui_keys, &mut errors);
     // 卡片声明的自洽性判据与任务源同源（命令 membership + ui.json membership），
     // 额外多一条**写权限闸**：`mutating` 动作要求 `permissions[]` 含 `write`。
-    // 权限在这里判而不在前端：`PluginSummaryDto` 不带 permissions，前端无从判断。
+    // 权限在这里判而不在前端：列表里的 permissions 只是声明投影，前端无从判断。
     let task_cards = build_manifest_task_cards(
         raw.task_cards,
         &command_names,
@@ -3937,6 +4428,16 @@ fn looks_like_npm_spec(source: &str) -> bool {
 }
 
 pub(crate) fn parse_install_source(source: &str) -> Result<PluginInstallSource, PluginError> {
+    // 发布地址必须先于 git/npm 判定：它本身是一个 https URL，但语义是“成品发布清单”。
+    if let Some(url) = source.strip_prefix(RELEASE_SOURCE_PREFIX) {
+        let url = url.trim();
+        if !is_https_url(url) {
+            return Err(PluginError::InvalidManifest(format!(
+                "release source must be `{RELEASE_SOURCE_PREFIX}https://...`: `{source}`"
+            )));
+        }
+        return Ok(PluginInstallSource::ReleaseManifestUrl { url: url.to_string() });
+    }
     // OpenClaw 包检测: openclaw:package-name
     if let Some(package_id) = source.strip_prefix("openclaw:") {
         let pkg = package_id.trim();
@@ -3958,6 +4459,7 @@ pub(crate) fn parse_install_source(source: &str) -> Result<PluginInstallSource, 
     if source.starts_with("http://")
         || source.starts_with("https://")
         || source.starts_with("git@")
+        || source.starts_with("file:")
         || Path::new(source)
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("git"))
@@ -4065,6 +4567,10 @@ fn materialize_source(
                 )),
             }
         },
+        // 发布地址在 install/update/validate 入口已用清单完成物化，不应再进入 clone/npm 分支。
+        PluginInstallSource::ReleaseManifestUrl { .. } => Err(PluginError::InvalidManifest(
+            "release source must be materialized from its signed manifest".to_string(),
+        )),
     }
 }
 
@@ -4114,6 +4620,9 @@ fn describe_install_source(source: &PluginInstallSource) -> String {
             None => name.clone(),
         },
         PluginInstallSource::OpenClaw { package_id } => format!("openclaw:{package_id}"),
+        PluginInstallSource::ReleaseManifestUrl { url } => {
+            format!("{RELEASE_SOURCE_PREFIX}{url}")
+        },
     }
 }
 
@@ -4375,7 +4884,7 @@ fn validate_dashboard_panels(
     }
 }
 
-fn hash_plugin_directory(plugin_root: &Path) -> Result<String, PluginError> {
+pub(crate) fn hash_plugin_directory(plugin_root: &Path) -> Result<String, PluginError> {
     let mut hasher = sha2::Sha256::new();
     let mut files: Vec<PathBuf> = Vec::new();
     collect_files_recursive(plugin_root, &mut files)?;
@@ -4398,6 +4907,61 @@ fn hash_plugin_directory(plugin_root: &Path) -> Result<String, PluginError> {
         write!(hash_str, "{byte:02x}").expect("writing to String should never fail");
     }
     Ok(hash_str)
+}
+
+fn install_source_requires_sha256(source: &PluginInstallSource) -> bool {
+    !matches!(source, PluginInstallSource::LocalPath { .. })
+}
+
+fn validate_expected_sha256(
+    expected_sha256: Option<&str>,
+    required: bool,
+    source: &str,
+) -> Result<(), PluginError> {
+    let Some(expected) = expected_sha256 else {
+        if required {
+            return Err(PluginError::IntegrityVerifyFailed(format!(
+                "remote plugin source `{source}` requires an expected SHA-256"
+            )));
+        }
+        return Ok(());
+    };
+    let expected = expected.trim();
+    if expected.is_empty() {
+        return Err(PluginError::IntegrityVerifyFailed(format!(
+            "expected SHA-256 for plugin source `{source}` must not be empty"
+        )));
+    }
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(PluginError::IntegrityVerifyFailed(format!(
+            "expected SHA-256 for plugin source `{source}` must contain exactly 64 hexadecimal characters"
+        )));
+    }
+    Ok(())
+}
+
+/// 在材料被写入安装目录之前，核对调用方声明的内容哈希。
+///
+/// 哈希口径必须与安装后锚点共用 [`hash_plugin_directory`]：若这里改成压缩包哈希，
+/// 「来源清单签名」与「安装目录锚点」会变成两套不可互证的数。`None` 表示旧调用方
+/// 未提供声明哈希；`Some` 则必须匹配，空值也按不匹配拒绝，避免把 `""` 误当跳过校验。
+fn verify_expected_directory_hash(
+    plugin_root: &Path,
+    expected_sha256: Option<&str>,
+) -> Result<(), PluginError> {
+    let Some(expected) = expected_sha256 else {
+        return Ok(());
+    };
+    let expected = expected.trim();
+    validate_expected_sha256(Some(expected), false, plugin_root.to_string_lossy().as_ref())?;
+    let actual = hash_plugin_directory(plugin_root)?;
+    if actual.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(PluginError::IntegrityVerifyFailed(format!(
+            "plugin source integrity mismatch: expected sha256 {expected}, got {actual}"
+        )))
+    }
 }
 
 fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), PluginError> {
@@ -6779,7 +7343,7 @@ mod bundled_root_tests {
     }
 
     /// 写权限闸（leader 裁定 2）：**只对 `mutating: true` 生效**，只读动作不要求 `write`。
-    /// 判定必须在后端（`PluginSummaryDto` 不带 permissions），且必须在装载期拦。
+    /// 判定必须在后端（列表里的 permissions 只是声明投影），且必须在装载期拦。
     #[test]
     fn task_card_mutating_action_requires_write_permission() {
         let names: BTreeSet<&str> = ["rows", "act"].into_iter().collect();
@@ -7008,5 +7572,299 @@ mod domain_pack_tests {
         assert_eq!(accounting.list_plugin_domain_packs().expect("其它插件不受影响").len(), 1);
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+}
+
+#[cfg(test)]
+mod release_source_tests {
+    use super::*;
+    use crate::manager::test_support::isolated_config;
+    use std::path::PathBuf;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("plugins-{label}-{nanos}"))
+    }
+
+    #[test]
+    fn release_source_is_parsed_before_generic_https_git_url() {
+        let source = parse_install_source("axagent-release+https://example.com/manifest.json")
+            .expect("发布源应优先于普通 HTTPS Git URL 解析");
+        assert_eq!(
+            source,
+            PluginInstallSource::ReleaseManifestUrl {
+                url: "https://example.com/manifest.json".to_string(),
+            }
+        );
+
+        let error = parse_install_source("axagent-release+http://example.com/manifest.json")
+            .expect_err("发布清单只接受 HTTPS");
+        assert!(error.to_string().contains("https"), "{error}");
+
+        let git = parse_install_source("https://example.com/plugin.git")
+            .expect("裸 HTTPS 地址仍按 Git URL 解析");
+        assert!(matches!(git, PluginInstallSource::GitUrl { .. }));
+    }
+
+    #[test]
+    fn release_sha256_requires_exactly_64_hex_characters() {
+        let source = "axagent-release+https://example.com/manifest.json";
+        assert!(parse_release_sha256(&"a".repeat(64), source).is_ok());
+        assert!(parse_release_sha256(&"A".repeat(64), source).is_ok());
+        assert!(parse_release_sha256(&"g".repeat(64), source).is_err());
+        assert!(parse_release_sha256(&"a".repeat(63), source).is_err());
+        assert!(parse_release_sha256("", source).is_err());
+    }
+
+    #[test]
+    fn release_install_requires_preview_hash_before_network() {
+        let source = "axagent-release+https://127.0.0.1:9/release.json";
+        let config_home = temp_dir("release-no-preview-home");
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+
+        for expected in [None, Some("bad")] {
+            let error = manager
+                .install_verified(source, expected)
+                .expect_err("缺少或非法预览哈希必须在网络访问前拒绝");
+            assert!(
+                matches!(error, PluginError::IntegrityVerifyFailed(_)),
+                "应报 IntegrityVerifyFailed，实际 {error:?}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(config_home);
+    }
+
+    #[test]
+    fn release_hash_must_match_current_manifest() {
+        let source = "axagent-release+https://example.com/release.json";
+        let preview_hash = "a".repeat(64);
+        let current_hash = "b".repeat(64);
+
+        assert!(
+            validate_release_expected_sha256(Some(&preview_hash), &preview_hash, source).is_ok()
+        );
+        let error = validate_release_expected_sha256(Some(&preview_hash), &current_hash, source)
+            .expect_err("清单换代后必须拒绝安装");
+        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
+    }
+
+    fn release_manifest(artifacts: Vec<PluginReleaseArtifact>) -> PluginReleaseManifest {
+        PluginReleaseManifest {
+            artifact_url: String::new(),
+            sha256: String::new(),
+            version: Some("3.0.0".to_string()),
+            artifacts,
+        }
+    }
+
+    fn artifact(os: &str, arch: &str, suffix: &str, sha256: &str) -> PluginReleaseArtifact {
+        PluginReleaseArtifact {
+            os: os.to_string(),
+            arch: arch.to_string(),
+            artifact_url: format!("https://example.com/plugin-{suffix}.tar.gz"),
+            sha256: sha256.to_string(),
+        }
+    }
+
+    #[test]
+    fn release_manifest_selects_the_current_platform_artifact() {
+        let linux_hash = "a".repeat(64);
+        let windows_hash = "b".repeat(64);
+        let (manifest, selected_hash) = select_release_manifest_artifact(
+            release_manifest(vec![
+                artifact("linux", "x86_64", "linux-x86_64", &linux_hash),
+                artifact("windows", "x86_64", "windows-x86_64", &windows_hash),
+            ]),
+            "windows",
+            "x86_64",
+            "https://example.com/release.json",
+        )
+        .expect("Windows 平台应选中自己的产物");
+
+        assert_eq!(selected_hash, windows_hash);
+        assert_eq!(manifest.artifact_url, "https://example.com/plugin-windows-x86_64.tar.gz");
+    }
+
+    #[test]
+    fn release_manifest_rejects_unsupported_platform_without_fallback() {
+        let error = select_release_manifest_artifact(
+            release_manifest(vec![artifact("linux", "x86_64", "linux-x86_64", &"a".repeat(64))]),
+            "windows",
+            "aarch64",
+            "https://example.com/release.json",
+        )
+        .expect_err("没有当前平台产物时必须拒绝，不能安装 Linux 包");
+
+        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
+        assert!(error.to_string().contains("windows/aarch64"), "{error}");
+        assert!(error.to_string().contains("linux/x86_64"), "{error}");
+    }
+
+    #[test]
+    fn release_manifest_rejects_duplicate_current_platform_artifacts() {
+        let manifest = release_manifest(vec![
+            artifact("linux", "x86_64", "linux-one", &"a".repeat(64)),
+            artifact("linux", "x86_64", "linux-two", &"b".repeat(64)),
+        ]);
+        let error = select_release_manifest_artifact(
+            manifest,
+            "linux",
+            "x86_64",
+            "https://example.com/release.json",
+        )
+        .expect_err("同平台多产物歧义必须拒绝");
+
+        assert!(error.to_string().contains("multiple artifacts"), "{error}");
+    }
+
+    #[test]
+    fn legacy_release_manifest_remains_supported() {
+        let sha256 = "a".repeat(64);
+        let manifest = PluginReleaseManifest {
+            artifact_url: "https://example.com/plugin.tgz".to_string(),
+            sha256: sha256.clone(),
+            version: Some("3.0.0".to_string()),
+            artifacts: Vec::new(),
+        };
+        let (selected, selected_hash) = select_release_manifest_artifact(
+            manifest,
+            "macos",
+            "aarch64",
+            "https://example.com/release.json",
+        )
+        .expect("旧版单包清单应继续可用");
+
+        assert_eq!(selected_hash, sha256);
+        assert_eq!(selected.artifact_url, "https://example.com/plugin.tgz");
+    }
+
+    #[test]
+    fn release_manifest_rejects_invalid_artifact_url_and_hash() {
+        let manifest =
+            release_manifest(vec![artifact("linux", "x86_64", "linux-x86_64", &"a".repeat(64))]);
+        let mut insecure = manifest.clone();
+        insecure.artifacts[0].artifact_url = "http://example.com/plugin.tar.gz".to_string();
+        assert!(
+            select_release_manifest_artifact(
+                insecure,
+                "linux",
+                "x86_64",
+                "https://example.com/release.json"
+            )
+            .is_err()
+        );
+
+        let mut wrong_extension = manifest.clone();
+        wrong_extension.artifacts[0].artifact_url = "https://example.com/plugin.zip".to_string();
+        assert!(
+            select_release_manifest_artifact(
+                wrong_extension,
+                "linux",
+                "x86_64",
+                "https://example.com/release.json"
+            )
+            .is_err()
+        );
+
+        let mut bad_hash = manifest;
+        bad_hash.artifacts[0].sha256 = "not-a-sha256".to_string();
+        assert!(
+            select_release_manifest_artifact(
+                bad_hash,
+                "linux",
+                "x86_64",
+                "https://example.com/release.json"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn release_archive_rejects_unsafe_entries() {
+        // `tar::Builder` 拒绝写 `..` 路径，所以手工构造 512 字节 GNU 头再 gzip，
+        // 让生产解压器真实面对恶意条目。
+        let make_archive = |name: &str, symlink: bool| -> Vec<u8> {
+            let mut header = [0_u8; 512];
+            let bytes = name.as_bytes();
+            assert!(bytes.len() < 100, "测试路径需放进 tar 的 name 字段");
+            header[..bytes.len()].copy_from_slice(bytes);
+            header[100..108].copy_from_slice(b"0000644\0");
+            header[108..116].copy_from_slice(b"0000000\0");
+            header[116..124].copy_from_slice(b"0000000\0");
+            header[124..136].copy_from_slice(b"00000000000\0");
+            header[136..148].copy_from_slice(b"00000000000\0");
+            header[148..156].fill(b' ');
+            header[156] = if symlink { b'2' } else { b'0' };
+            if symlink {
+                header[157..165].copy_from_slice(b"target\0\0");
+            }
+            header[257..263].copy_from_slice(b"ustar\0");
+            header[263..265].copy_from_slice(b"00");
+            let checksum: u32 = header
+                .iter()
+                .enumerate()
+                .map(|(index, byte)| {
+                    if (148..156).contains(&index) {
+                        u32::from(b' ')
+                    } else {
+                        u32::from(*byte)
+                    }
+                })
+                .sum();
+            let checksum_text = format!("{checksum:06o}\0 ");
+            header[148..156].copy_from_slice(checksum_text.as_bytes());
+
+            let mut tar = header.to_vec();
+            tar.extend_from_slice(&[0_u8; 1024]);
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::none());
+            std::io::Write::write_all(&mut encoder, &tar).expect("gzip tar");
+            encoder.finish().expect("结束 gzip")
+        };
+
+        let temp = std::env::temp_dir().join(format!(
+            "plugins-release-archive-{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).expect("epoch").as_nanos()
+        ));
+        let dest = temp.join("safe");
+        let data = make_archive("../evil", false);
+        assert!(extract_release_archive(&data, &dest).is_err());
+        let data = make_archive("/absolute", false);
+        assert!(extract_release_archive(&data, &dest).is_err());
+        let data = make_archive("link", true);
+        assert!(extract_release_archive(&data, &dest).is_err());
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 真实 HTTPS E2E：`release.json` 与 tar.gz 放在公开 HTTPS 静态托管上，
+    /// 走完整 `install_verified` 链。URL 通过环境变量显式给出，避免测试依赖外部服务默认值。
+    /// 未设置时明确 SKIP，不计入通过。
+    #[test]
+    fn release_source_installs_from_https_manifest() {
+        let Some(manifest_url) = std::env::var_os("AXAGENT_RELEASE_MANIFEST_HTTPS_URL") else {
+            eprintln!("SKIP: AXAGENT_RELEASE_MANIFEST_HTTPS_URL 未设置");
+            return;
+        };
+        let manifest_url = manifest_url.to_string_lossy().into_owned();
+        assert!(manifest_url.starts_with("https://"), "测试发布地址必须是 HTTPS");
+        let source = format!("axagent-release+{manifest_url}");
+        let config_home = temp_dir("release-https-install-home");
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let (_, preview_sha256) = manager
+            .validate_plugin_source_with_expected_hash(&source, None)
+            .expect("HTTPS 发布清单预览应成功");
+        let preview_sha256 = preview_sha256.expect("发布清单预览必须返回 SHA-256");
+        let outcome = manager
+            .install_verified(&source, Some(&preview_sha256))
+            .expect("HTTPS 发布清单安装应成功");
+        assert!(!outcome.plugin_id.is_empty());
+        assert!(
+            std::path::Path::new(&outcome.install_path.to_string_lossy().into_owned()).is_dir()
+        );
+        let _ = std::fs::remove_dir_all(&config_home);
     }
 }

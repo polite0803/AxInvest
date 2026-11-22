@@ -21,6 +21,7 @@ const SELFTEST = process.argv.includes("--selftest");
 const SDK_PACKAGES = [
   "axagent-core/crates/plugin-proto/Cargo.toml",
   "axagent-core/crates/harness/Cargo.toml",
+  "axagent-plugins/crates/plugin-opc-core/Cargo.toml",
   "axagent-plugins/crates/plugin-testkit/Cargo.toml",
 ];
 

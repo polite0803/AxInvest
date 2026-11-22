@@ -50,6 +50,8 @@ pub trait Plugin {
     fn skills(&self) -> &[PluginSkillEntry];
     /// 插件声明的权限集合（来自 manifest），供沙箱执行前 capability 检查使用。
     fn permissions(&self) -> &[PluginPermission];
+    /// 插件声明的页面 id（只读投影；路径仍由宿主解析）。
+    fn pages(&self) -> &[PluginPage];
     /// 插件声明的命名命令（阶段3-① 执行分发）。
     fn commands(&self) -> &[PluginCommandManifest];
     fn validate(&self) -> Result<(), PluginError>;
@@ -95,6 +97,10 @@ macro_rules! plugin_accessors {
 
         fn permissions(&self) -> &[PluginPermission] {
             &self.permissions
+        }
+
+        fn pages(&self) -> &[PluginPage] {
+            &self.pages
         }
 
         fn commands(&self) -> &[PluginCommandManifest] {
@@ -271,6 +277,15 @@ impl Plugin for PluginDefinition {
         }
     }
 
+    fn pages(&self) -> &[PluginPage] {
+        match self {
+            Self::Builtin(plugin) => plugin.pages(),
+            Self::Bundled(plugin) => plugin.pages(),
+            Self::External(plugin) => plugin.pages(),
+            Self::OpenClaw(plugin) => plugin.pages(),
+        }
+    }
+
     fn commands(&self) -> &[PluginCommandManifest] {
         match self {
             Self::Builtin(plugin) => plugin.commands(),
@@ -375,6 +390,8 @@ impl RegisteredPlugin {
                 .map(|m| m.name.clone())
                 .collect(),
             skill_names: self.definition.skills().iter().map(|s| s.name.clone()).collect(),
+            permission_names: self.permissions().iter().map(|p| p.as_str().to_string()).collect(),
+            page_ids: self.definition.pages().iter().map(|page| page.id.clone()).collect(),
             commands: self.definition.commands().to_vec(),
         }
     }
@@ -391,8 +408,46 @@ pub struct PluginSummary {
     pub tool_names: Vec<String>,
     pub mcp_server_names: Vec<String>,
     pub skill_names: Vec<String>,
+    /// 插件声明的权限名（`plugin_list` 的只读投影；权限判定仍在宿主）。
+    pub permission_names: Vec<String>,
+    /// 插件声明的页面 id（`manifest.pages[]` 的只读投影；路径仍由宿主解析）。
+    pub page_ids: Vec<String>,
     /// 插件声明的命名命令清单（阶段3-① 执行分发；前端可见面）。
     pub commands: Vec<PluginCommandManifest>,
+}
+
+/// 前端市场列表的可信投影：在 [`PluginSummary`] 上补来源、权限、页面与完整性状态。
+///
+/// 这里只描述事实，不做权限判定；权限判定仍由宿主在装载与执行期完成。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginMarketplaceSummary {
+    pub summary: PluginSummary,
+    pub source: String,
+    pub permissions: Vec<String>,
+    pub pages: Vec<String>,
+    pub integrity_status: PluginIntegrityStatus,
+    pub pinned_hash: Option<String>,
+}
+
+/// 安装目录完整性状态；前端按此展示，不自行猜测“已验证”。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginIntegrityStatus {
+    Verified,
+    Mismatch,
+    Unpinned,
+    Unknown,
+}
+
+impl PluginIntegrityStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Mismatch => "mismatch",
+            Self::Unpinned => "unpinned",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 #[derive(Debug)]

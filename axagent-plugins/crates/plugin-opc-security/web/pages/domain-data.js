@@ -7,6 +7,10 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:OpcSearchWiki",
     "tool:WebSearch",
     "tool:FileWrite",
+    "tool:OpcSecurityOpcSearchWiki",
+    "tool:OpcSecurityWebSearch",
+    "tool:OpcSecurityFileWrite",
+    "tool:OpcSecurityRunAutomationRules",
   ],
   "kpis": [
     {

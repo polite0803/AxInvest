@@ -20,3 +20,19 @@ capabilities:
   - source: tool
     capability_type: general_tool
     predicate: {kind: id_exact, id: "tool:FileWrite"}
+  # 域专属 worker 命令：由该域 Rust worker 声明，经 tool.set / opc.store 接缝复用宿主工具实现。
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcEducationWebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcEducationOpcCreateContentAsset"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcEducationOpcCreateLandingPage"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcEducationFileWrite"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:OpcEducationRunAutomationRules"}

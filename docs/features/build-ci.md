@@ -75,7 +75,7 @@
 - **本地近似脚本**：`scripts/ci-check.mjs:2-34`。`--quick` 路径只跑纯 Node 静态门 + dprint + oxlint + tsc + rustfmt。
 - **已知未覆盖**：`npm run build`、contracts、行尾检查、PG 集成、E2E、`npm audit`、`cargo audit/deny`。
 - **已接入**：2026-11-01 起 8 根 `cargo check` 与 `nextest` 进入脚本；缺工具链时「跳过」不再算通过，只有显式 `--strict-skip` 才判失败。
-- **护栏测试**：`src/__tests__/ci.workflow.test.ts:286-298` 说明对称差集；用例入口 `src/__tests__/ci.workflow.test.ts:298`；`MAX_ALLOWLIST = 8`（`:300`）；从 `ci.yml` 提取 `scripts/**` 命令（`:315`）；只比较 `scripts/` 域（`:329`、`:348`）；allowlist 必须带 `reason`，失效不删也红（`:295-296`）。
+- **护栏测试**：`src/__tests__/ci.workflow.test.ts:286-298` 说明独立仓门禁接线；对称差集 allowlist 用例入口在同文件 `:454`；`MAX_ALLOWLIST = 8`（同文件 `:535-538`）；从 `ci.yml` 提取 `scripts/**` 命令并只比较 `scripts/` 域在 `:454-555` 的用例体内；allowlist 必须带 `reason`，失效不删也红见 `:535-538`。
 - 判据：任一侧写了 `scripts/**` 命令而另一侧没写，护栏叫停；确属已知不对称只能进 `ALLOWLIST`（上限 8 条）。
 
 （对应版本：v3.0.0，`CHANGELOG.md:433`）

@@ -19,9 +19,11 @@ export function usePluginGallery() {
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
   const validateSource = usePluginStore((s) => s.validateSource);
   const installPlugin = usePluginStore((s) => s.installPlugin);
+  const updatePlugin = usePluginStore((s) => s.updatePlugin);
   const enablePlugin = usePluginStore((s) => s.enablePlugin);
   const disablePlugin = usePluginStore((s) => s.disablePlugin);
   const uninstallPlugin = usePluginStore((s) => s.uninstallPlugin);
+  const error = usePluginStore((s) => s.error);
 
   // 能力注册表（capability_registry_dump，缺陷 #6：前端消费后端检视命令）
   const registry = useCapabilityStore((s) => s.registry);
@@ -36,9 +38,11 @@ export function usePluginGallery() {
     loadPlugins,
     validateSource,
     installPlugin,
+    updatePlugin,
     enablePlugin,
     disablePlugin,
     uninstallPlugin,
+    error,
     registry,
     registryLoading,
     loadRegistry,

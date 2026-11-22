@@ -10,6 +10,7 @@ import i18n from "@/i18n";
 
 import { CAPABILITY_DOMAIN_META, CAPABILITY_DOMAIN_PROTOCOL_ORDER, domainLabelKey } from "@/lib/domainMeta";
 import type { CreateNarrativeRequest, NarrativeStructureRecord } from "@/lib/narrativeStructure";
+import { isPluginSha256, isReleasePluginSource, isRemotePluginSource } from "@/lib/pluginSourceSecurity";
 import type { CapabilityDomain } from "@/types";
 import type {
   Conversation,
@@ -191,6 +192,53 @@ interface Provider {
 interface Settings {
   [key: string]: unknown;
 }
+
+/** 浏览器 mock 的插件安装登记：source 是更新时重放完整性门禁的唯一依据。 */
+interface MockInstalledPlugin extends Record<string, unknown> {
+  id: string;
+  source?: string;
+}
+
+function mockPluginIntegrityError(detail: string): Error {
+  return new Error(
+    JSON.stringify({
+      code: "PLUGIN_SOURCE_INTEGRITY_FAILED",
+      category: "validation",
+      detail,
+    }),
+  );
+}
+
+/** 与 Rust `validate_expected_sha256` 同语义：远程必填，填写了就必须合法。 */
+function validateMockPluginSourceHash(
+  source: string,
+  expectedSha256: string,
+  releaseManifestSha256?: string,
+): void {
+  const expected = expectedSha256.trim();
+  const isReleaseSource = isReleasePluginSource(source);
+  if ((isRemotePluginSource(source) || isReleaseSource) && !expected) {
+    throw mockPluginIntegrityError(
+      `${isReleaseSource ? "release" : "remote"} plugin source \`${source}\` requires an expected SHA-256`,
+    );
+  }
+  if (expected && !isPluginSha256(expected)) {
+    throw mockPluginIntegrityError(
+      "expected SHA-256 must contain exactly 64 hexadecimal characters",
+    );
+  }
+  if (
+    isReleaseSource && expected && releaseManifestSha256
+    && expected.toLowerCase() !== releaseManifestSha256.toLowerCase()
+  ) {
+    throw mockPluginIntegrityError(
+      `release manifest changed after preview: expected sha256 ${expected}, manifest now declares ${releaseManifestSha256}`,
+    );
+  }
+}
+
+/** 浏览器模式没有网络物化；用稳定占位值仅演练“预览→安装”的哈希冻结链。 */
+const MOCK_RELEASE_SHA256 = "0".repeat(64);
 
 // ── OPC 需求发现预置平台（浏览器模式 Mock 数据） ────────────────────
 // 与后端 DemandPlatform DTO（serde camelCase）对齐；id 与内置扫描器
@@ -5454,25 +5502,45 @@ async function executeCommand<T>(
       return plugins as T;
     }
     case "plugin_validate_source": {
-      const source = (args?.source as string) || "";
+      const source = readMockReqField<string>(args, "source") || "";
+      const expectedSha256 = readMockReqField<string>(args, "expectedSha256") || "";
+      // 发布地址的哈希来自发布清单；浏览器模式无法真的拉清单，使用确定性占位哈希供
+      // 前端演练“确认后冻结”，并在列表侧继续保持 unpinned/unknown，不伪造真实安装。
+      const isReleaseSource = isReleasePluginSource(source);
+      // 预览验证可以省略哈希；填写了仍必须通过格式校验。
+      if (expectedSha256 && !isPluginSha256(expectedSha256)) {
+        throw mockPluginIntegrityError(
+          "expected SHA-256 must contain exactly 64 hexadecimal characters",
+        );
+      }
       return {
         name: source.split("/").pop() || source,
         version: "0.0.0",
         description: `Plugin from ${source}`,
         permissions: [],
+        pages: [],
         defaultEnabled: true,
         hooks: {},
         tools: [],
         mcpServers: [],
         skills: [],
+        capabilities: [],
+        expectedSha256: isReleaseSource ? MOCK_RELEASE_SHA256 : null,
       } as T;
     }
     case "plugin_install": {
-      const plugins = getStore<Array<Record<string, unknown>>>("plugins", []);
-      const source = (args?.source as string) || "";
+      const plugins = getStore<MockInstalledPlugin[]>("plugins", []);
+      const source = readMockReqField<string>(args, "source") || "";
+      const expectedSha256 = readMockReqField<string>(args, "expectedSha256") || "";
+      validateMockPluginSourceHash(
+        source,
+        expectedSha256,
+        isReleasePluginSource(source) ? MOCK_RELEASE_SHA256 : undefined,
+      );
       const id = `plugin-${plugins.length + 1}`;
       plugins.push({
         id,
+        source,
         name: source.split("/").pop() || source,
         version: "0.0.0",
         description: `Plugin from ${source}`,
@@ -5481,6 +5549,11 @@ async function executeCommand<T>(
         tools: [],
         mcpServers: [],
         skills: [],
+        // 浏览器 mock 没有安装目录和真实哈希物化，不能伪造 verified。
+        permissions: [],
+        pages: [],
+        integrityStatus: expectedSha256 ? "unpinned" : "unknown",
+        pinnedHash: null,
       });
       setStore("plugins", plugins);
       return {
@@ -5552,10 +5625,29 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "plugin_update": {
+      const plugins = getStore<MockInstalledPlugin[]>("plugins", []);
+      const pluginId = readMockReqField<string>(args, "pluginId") || "";
+      const expectedSha256 = readMockReqField<string>(args, "expectedSha256") || "";
+      const target = plugins.find((plugin) => plugin.id === pluginId);
+      if (!target || !target.source) {
+        throw mockPluginIntegrityError(
+          `plugin \`${pluginId}\` has no recorded source; reinstall it before updating`,
+        );
+      }
+      validateMockPluginSourceHash(
+        target.source,
+        expectedSha256,
+        isReleasePluginSource(target.source) ? MOCK_RELEASE_SHA256 : undefined,
+      );
+      const oldVersion = target.version ? String(target.version) : "0.0.0";
+      const newVersion = bumpPatchVersion(oldVersion);
+      target.version = newVersion;
+      setStore("plugins", plugins);
       return {
-        pluginId: readMockReqField<string>(args, "pluginId") || "",
-        version: "0.0.0",
-        installPath: "",
+        pluginId,
+        oldVersion,
+        newVersion,
+        installPath: `/mock/plugins/${pluginId}`,
       } as T;
     }
     case "plugin_execute_command": {

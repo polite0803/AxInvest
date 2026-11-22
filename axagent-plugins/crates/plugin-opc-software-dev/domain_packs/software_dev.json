@@ -1,7 +1,7 @@
 {
   "id": "software_dev",
   "pluginId": "plugin-opc-software-dev",
-  "transportOwner": "plugin-opc-common",
+  "transportOwner": "opc-software-dev",
   "page": {
     "id": "domain:devops-software",
     "path": "/opc/domain/software-dev"
@@ -11,10 +11,26 @@
     "tool:OpcCreateProject",
     "tool:FileWrite",
     "tool:WebSearch",
-    "tool:OpcAddMilestone"
+    "tool:OpcAddMilestone",
+    "tool:OpcSoftwareDevOpcListProjects",
+    "tool:OpcSoftwareDevOpcCreateProject",
+    "tool:OpcSoftwareDevFileWrite",
+    "tool:OpcSoftwareDevWebSearch",
+    "tool:OpcSoftwareDevOpcAddMilestone",
+    "tool:OpcSoftwareDevBatchValidateEntities",
+    "tool:OpcSoftwareDevRunAutomationRules"
   ],
-  "commands": [],
+  "commands": [
+    "opc_software_dev_opc_list_projects",
+    "opc_software_dev_opc_create_project",
+    "opc_software_dev_file_write",
+    "opc_software_dev_web_search",
+    "opc_software_dev_opc_add_milestone",
+    "opc_software_dev_batch_validate_entities",
+    "opc_software_dev_run_automation_rules"
+  ],
   "calls": [
-    "opc.store"
+    "opc.store",
+    "tool.set"
   ]
 }

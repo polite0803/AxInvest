@@ -34,6 +34,10 @@ const workspaceState = {
   setActiveTab: vi.fn(),
 };
 
+const pluginState = {
+  plugins: [],
+};
+
 vi.mock("antd", () => ({
   ConfigProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   App: Object.assign(
@@ -220,6 +224,13 @@ vi.mock("@/stores", () => ({
   useTabStore: Object.assign(
     () => ({ pruneInvalidTabs: vi.fn() }),
     { getState: () => ({ pruneInvalidTabs: vi.fn() }) },
+  ),
+  usePluginStore: Object.assign(
+    (selector: (state: typeof pluginState) => unknown) => selector(pluginState),
+    {
+      getState: () => pluginState,
+      subscribe: () => () => {},
+    },
   ),
   useApprovalStore: Object.assign(
     (selector: (state: unknown) => unknown) =>

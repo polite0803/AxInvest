@@ -1025,6 +1025,61 @@ mod tests {
     }
 
     #[test]
+    fn expected_source_hash_is_checked_before_install() {
+        let _guard = env_guard();
+        let config_home = temp_dir("expected-hash-home");
+        let source_root = temp_dir("expected-hash-source");
+        write_external_plugin(&source_root, "hash-validator", "1.0.0");
+
+        let expected = crate::manager::hash_plugin_directory(&source_root).expect("夹具目录可哈希");
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let manifest = manager
+            .validate_plugin_source_verified(
+                source_root.to_str().expect("utf8 path"),
+                Some(expected.as_str()),
+            )
+            .expect("正确哈希应通过验证");
+        assert_eq!(manifest.name, "hash-validator");
+
+        let error = manager
+            .validate_plugin_source_verified(
+                source_root.to_str().expect("utf8 path"),
+                Some(&"0".repeat(64)),
+            )
+            .expect_err("错误哈希必须拒绝");
+        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
+
+        let error = manager
+            .install_verified(source_root.to_str().expect("utf8 path"), Some(""))
+            .expect_err("空白哈希不能当作跳过校验");
+        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
+
+        let outcome = manager
+            .install_verified(source_root.to_str().expect("utf8 path"), Some(expected.as_str()))
+            .expect("正确哈希应允许安装");
+        assert_eq!(outcome.plugin_id, "hash-validator@external");
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn remote_sources_require_expected_hash_before_download() {
+        let mut manager = PluginManager::new(isolated_config(temp_dir("remote-hash-home")));
+
+        for source in ["https://example.com/plugin.git", "@scope/plugin", "openclaw:plugin"] {
+            // 安装门禁必须在任何下载/物化之前拒绝；这里只调用安装调用面，
+            // 避免测试自身先通过网络验证预览行为。
+            let error =
+                manager.install_verified(source, None).expect_err("远程源缺少哈希必须在下载前拒绝");
+            assert!(
+                matches!(error, PluginError::IntegrityVerifyFailed(_)),
+                "`{source}` 应报 IntegrityVerifyFailed，实际 {error:?}"
+            );
+        }
+    }
+
+    #[test]
     fn plugin_registry_tracks_enabled_state_and_lookup() {
         let _guard = env_guard();
         let config_home = temp_dir("registry-home");

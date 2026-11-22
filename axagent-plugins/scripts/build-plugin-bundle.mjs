@@ -11,6 +11,8 @@
  *   node scripts/build-plugin-bundle.mjs                 # 构建（debug）+ 打包 + 打印路径（缺省 stock）
  *   node scripts/build-plugin-bundle.mjs --plugin opc     # 打包 opc 插件（#36 骨架）
  *   node scripts/build-plugin-bundle.mjs --release       # 构建 release
+ *   node scripts/build-plugin-bundle.mjs --target <triple> # 指定 Cargo target 构建
+ *   node scripts/build-plugin-bundle.mjs --plugin-version <版本> # 显式发布版本（声明式插件必需）
  *   node scripts/build-plugin-bundle.mjs --check         # 打包后真起一次 worker 做握手 + 停机回执
  *   node scripts/build-plugin-bundle.mjs --out <dir>     # 自定义输出目录
  *
@@ -36,7 +38,13 @@ const release = argv.includes("--release");
 const check = argv.includes("--check");
 const outFlag = argv.indexOf("--out");
 const pluginFlag = argv.indexOf("--plugin");
+const targetFlag = argv.indexOf("--target");
+const pluginVersionFlag = argv.indexOf("--plugin-version");
 const pluginName = pluginFlag >= 0 && argv[pluginFlag + 1] ? argv[pluginFlag + 1] : "stock";
+const targetTriple = targetFlag >= 0 && argv[targetFlag + 1] ? argv[targetFlag + 1] : null;
+const requestedPluginVersion = pluginVersionFlag >= 0 && argv[pluginVersionFlag + 1]
+  ? argv[pluginVersionFlag + 1]
+  : null;
 
 /**
  * 插件规格表（键 = `--plugin` 取值）。
@@ -55,73 +63,159 @@ const PLUGIN_SPECS = {
     uiSchema: null,
     manifest: opcAccountingManifest,
   },
-  // security 域包没有 worker 命令：三条能力都是宿主 Tool。插件只贡献域包清单与页面资产，
-  // 故 packageName/webDir 都走声明式形态，不构建也不 spawn worker。
   "opc-security": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-security",
     webDir: path.join("crates", "plugin-opc-security", "web"),
     uiSchema: null,
-    manifest: opcSecurityManifest,
+    commands: [
+      "opc_security_opc_search_wiki",
+      "opc_security_web_search",
+      "opc_security_file_write",
+      "opc_security_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-security", null, "security"),
   },
+  // 统一插件规范试点：本域从声明式翻为 worker。命令名在此登记一次，清单工厂按
+  // `PLUGIN_SPECS[name].commands` 派生 command 条目；契约 checker 逐项对账这份列表。
   "opc-game-dev": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-game-dev",
     webDir: path.join("crates", "plugin-opc-game-dev", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-game-dev", "游戏开发", "game_dev"),
+    commands: [
+      "opc_game_dev_web_search",
+      "opc_game_dev_file_write",
+      "opc_game_dev_file_read",
+      "opc_game_dev_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-game-dev", "游戏开发", "game_dev"),
   },
   "opc-ai-research": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-ai-research",
     webDir: path.join("crates", "plugin-opc-ai-research", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-ai-research", "AI 研究", "ai_research"),
+    commands: [
+      "opc_ai_research_opc_list_projects",
+      "opc_ai_research_opc_search_wiki",
+      "opc_ai_research_web_search",
+      "opc_ai_research_file_read",
+      "opc_ai_research_bash",
+      "opc_ai_research_file_write",
+      "opc_ai_research_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-ai-research", "AI 研究", "ai_research"),
   },
   "opc-consulting": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-consulting",
     webDir: path.join("crates", "plugin-opc-consulting", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-consulting", "咨询", "consulting"),
+    commands: [
+      "opc_consulting_opc_search_wiki",
+      "opc_consulting_web_search",
+      "opc_consulting_opc_get_dashboard",
+      "opc_consulting_opc_create_content_asset",
+      "opc_consulting_file_write",
+      "opc_consulting_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-consulting", "咨询", "consulting"),
   },
   "opc-design": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-design",
     webDir: path.join("crates", "plugin-opc-design", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-design", "设计", "design"),
+    commands: [
+      "opc_design_web_search",
+      "opc_design_file_write",
+      "opc_design_opc_create_content_asset",
+      "opc_design_opc_create_landing_page",
+      "opc_design_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-design", "设计", "design"),
   },
   "opc-ecommerce": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-ecommerce",
     webDir: path.join("crates", "plugin-opc-ecommerce", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-ecommerce", "电商", "ecommerce"),
+    commands: [
+      "opc_ecommerce_web_search",
+      "opc_ecommerce_opc_search_wiki",
+      "opc_ecommerce_opc_list_customers",
+      "opc_ecommerce_opc_create_content_asset",
+      "opc_ecommerce_opc_create_landing_page",
+      "opc_ecommerce_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-ecommerce", "电商", "ecommerce"),
   },
   "opc-education": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-education",
     webDir: path.join("crates", "plugin-opc-education", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-education", "教育", "education"),
+    commands: [
+      "opc_education_web_search",
+      "opc_education_opc_create_content_asset",
+      "opc_education_opc_create_landing_page",
+      "opc_education_file_write",
+      "opc_education_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-education", "教育", "education"),
   },
   "opc-finance-invest": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-finance-invest",
     webDir: path.join("crates", "plugin-opc-finance-invest", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-finance-invest", "金融投资", "finance_invest"),
+    commands: [
+      "opc_finance_invest_opc_get_dashboard",
+      "opc_finance_invest_opc_list_kpis",
+      "opc_finance_invest_opc_search_wiki",
+      "opc_finance_invest_opc_list_projects",
+      "opc_finance_invest_opc_get_financial_report",
+      "opc_finance_invest_opc_record_kpi",
+      "opc_finance_invest_batch_validate_entities",
+      "opc_finance_invest_opc_list_customers",
+      "opc_finance_invest_web_search",
+      "opc_finance_invest_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-finance-invest", "金融投资", "finance_invest"),
   },
   "opc-geospatial": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-geospatial",
     webDir: path.join("crates", "plugin-opc-geospatial", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-geospatial", "地理信息", "geospatial"),
+    commands: [
+      "opc_geospatial_opc_search_wiki",
+      "opc_geospatial_web_search",
+      "opc_geospatial_opc_create_content_asset",
+      "opc_geospatial_opc_create_project",
+      "opc_geospatial_file_write",
+      "opc_geospatial_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-geospatial", "地理信息", "geospatial"),
   },
   "opc-project-management": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-project-management",
     webDir: path.join("crates", "plugin-opc-project-management", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-project-management", "项目管理", "project_management"),
+    commands: [
+      "opc_project_management_opc_create_project",
+      "opc_project_management_opc_add_milestone",
+      "opc_project_management_opc_list_projects",
+      "opc_project_management_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-project-management", "项目管理", "project_management"),
   },
   "opc-software-dev": {
-    packageName: null,
+    packageName: "axagent-plugin-opc-software-dev",
     webDir: path.join("crates", "plugin-opc-software-dev", "web"),
     uiSchema: null,
-    manifest: declarativeOpcManifest("opc-software-dev", "软件开发", "software_dev"),
+    commands: [
+      "opc_software_dev_opc_list_projects",
+      "opc_software_dev_opc_create_project",
+      "opc_software_dev_file_write",
+      "opc_software_dev_web_search",
+      "opc_software_dev_opc_add_milestone",
+      "opc_software_dev_batch_validate_entities",
+      "opc_software_dev_run_automation_rules",
+    ],
+    manifest: opcWorkerDomainManifest("opc-software-dev", "软件开发", "software_dev"),
   },
   "opc-sales-growth": {
     packageName: "axagent-plugin-opc-sales-growth",
@@ -283,8 +377,10 @@ const expectedDomainPackIds = pluginName === "opc"
     .filter((p) => p.pluginId === `plugin-${pluginName}` && ownedDomainPackIds.has(p.id))
     .map((p) => p.id);
 const DOMAIN_PACK_DIR = "domain_packs";
-const declarativeDomainPackId = ownershipRegistry.policy?.verticalSlices?.find(
-  (slice) => slice.pluginId === `plugin-${pluginName}` && slice.manifestStrategy === "declarative-only",
+// 所有 OPC 域（声明式与 worker）都带静态展示区，页面自检不再按 manifestStrategy 分流；
+// 是否额外要求 bundle.js，由本插件 PLUGIN_SPECS.commands 是否非空决定。
+const opcDomainPackIdForPage = ownershipRegistry.policy?.verticalSlices?.find(
+  (slice) => slice.pluginId === `plugin-${pluginName}`,
 )?.domainPackId ?? null;
 
 /** 各插件 logical manifest 的合法 owner：由底册 verticalSlices 唯一权威。 */
@@ -312,9 +408,17 @@ let sha256 = null;
 let binaryName = null;
 let workerVersion = "1.0.0";
 if (spec.packageName) {
-  run("cargo", ["build", "-p", spec.packageName, ...(release ? ["--release"] : [])], {
-    cwd: workspaceRoot,
-  });
+  run(
+    "cargo",
+    [
+      "build",
+      "-p",
+      spec.packageName,
+      ...(release ? ["--release"] : []),
+      ...(targetTriple ? ["--target", targetTriple] : []),
+    ],
+    { cwd: workspaceRoot },
+  );
 
   // 2) 从 cargo 自己的视角取 target 目录与版本号 —— 不猜 `target/` 的位置
   //    （本机把 CARGO_TARGET_DIR 指到了 `~/.cargo/target-axagent`）。
@@ -329,12 +433,17 @@ if (spec.packageName) {
   const metadata = JSON.parse(metadataRaw.stdout);
   const workerPackage = metadata.packages.find((p) => p.name === spec.packageName);
   if (!workerPackage) { fail(`cargo metadata 里找不到 ${spec.packageName}`); }
+  if (requestedPluginVersion && requestedPluginVersion !== workerPackage.version) {
+    fail(
+      `--plugin-version=${requestedPluginVersion} 与 ${spec.packageName} 的 Cargo 版本 ${workerPackage.version} 不一致`,
+    );
+  }
   workerVersion = workerPackage.version;
 
   const targetDir = metadata.target_directory;
   const profileDir = release ? "release" : "debug";
   binaryName = process.platform === "win32" ? `${spec.packageName}.exe` : spec.packageName;
-  const builtBinary = path.join(targetDir, profileDir, binaryName);
+  const builtBinary = path.join(targetDir, ...(targetTriple ? [targetTriple] : []), profileDir, binaryName);
   if (!fs.existsSync(builtBinary)) { fail(`构建产物不存在：${builtBinary}`); }
 
   // 3) 摆放插件目录：worker 路径**必须**相对安装目录（宿主 resolve_worker_program 会拒绝
@@ -344,6 +453,8 @@ if (spec.packageName) {
   const stagedBinary = path.join(binDir, binaryName);
   fs.copyFileSync(builtBinary, stagedBinary);
   sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest("hex");
+} else if (requestedPluginVersion) {
+  workerVersion = requestedPluginVersion;
 }
 
 // 3.5) 前端资产：源目录整树拷进安装根。
@@ -465,8 +576,8 @@ async function checkStagedBundle(declared, root) {
   } else if ((declared.pages ?? []).length > 0) {
     fail("--check：本插件未声明前端源（webDir=null），清单不得声明 pages[]");
   }
-  if (declarativeDomainPackId) {
-    checkDeclarativePage(root, declarativeDomainPackId);
+  if (opcDomainPackIdForPage) {
+    checkOpcDomainPage(root, opcDomainPackIdForPage, Array.isArray(spec.commands) && spec.commands.length > 0);
   }
   checkDeclaredTaskSources(declared, root);
   if (domainPackSource) { checkDeclaredDomainPacks(root); }
@@ -605,38 +716,47 @@ function checkDeclaredPages(declared, root) {
   console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
 }
 
-/** 声明式域包页面的安装产物自检：只读随包静态数据，不依赖主机源码树。 */
-function checkDeclarativePage(root, expectedId) {
+/** OPC 域包页面的安装产物自检：静态数据区所有域都查，worker 域额外查 bundle.js。 */
+function checkOpcDomainPage(root, expectedId, withWorkerBundle) {
   const pageDir = path.join(root, "pages");
   const pagePath = path.join(pageDir, "index.html");
   const dataPath = path.join(pageDir, "domain-data.js");
   if (!fs.existsSync(pagePath) || !fs.existsSync(dataPath)) {
-    fail(`--check：声明式页面产物缺失：${pageDir}`);
+    fail(`--check：域包页面产物缺失：${pageDir}`);
   }
   const html = fs.readFileSync(pagePath, "utf8");
   if (!html.includes('src="./domain-data.js"')) {
-    fail("--check：声明式页面没有加载 domain-data.js");
+    fail("--check：域包页面没有加载 domain-data.js");
+  }
+  if (withWorkerBundle) {
+    const bundlePath = path.join(pageDir, "bundle.js");
+    if (!fs.existsSync(bundlePath)) { fail("--check：worker 域页面缺少 bundle.js"); }
+    if (!html.includes('src="./bundle.js"')) {
+      fail("--check：worker 域页面没有加载 bundle.js");
+    }
   }
   for (const selector of ["#capabilities", "#kpis", "#workflow-steps", "#data-sources", "#acceptance"]) {
-    if (!html.includes(selector)) { fail(`--check：声明式页面缺少渲染区 ${selector}`); }
+    if (!html.includes(selector)) { fail(`--check：域包页面缺少渲染区 ${selector}`); }
   }
   const raw = fs.readFileSync(dataPath, "utf8");
   const match = /^globalThis\.AX_OPC_DOMAIN_DATA\s*=\s*([\s\S]*);\s*$/.exec(raw);
   if (!match) { fail("--check：domain-data.js 不是纯数据赋值"); }
   let parsed;
   try {
-    parsed = JSON.parse(match[1]);
+    // 生成物经 dprint 格式化后会保留对象/数组尾随逗号；它是合法 JS 字面量但不是合法 JSON。
+    // 用 Function 只求值这段静态数据，避免把生成器输出格式与宿主自检口径绑死。
+    parsed = new Function(`"use strict"; return (${match[1]});`)();
   } catch (error) {
-    fail(`--check：domain-data.js 数据不是合法 JSON：${error.message}`);
+    fail(`--check：domain-data.js 不是合法静态数据：${error.message}`);
   }
   if (parsed.id !== expectedId) {
     fail(`--check：domain-data.js id=${parsed.id}，期望 ${expectedId}`);
   }
   if (!Array.isArray(parsed.capabilities) || parsed.capabilities.length === 0) {
-    fail("--check：声明式域包至少需要展示一条 capability");
+    fail("--check：域包至少需要展示一条 capability");
   }
   console.log(
-    `[plugin-bundle] --check ✅ 声明式页面数据完整（${parsed.id}：${parsed.capabilities.length} 能力 / ${parsed.kpis.length} KPI / ${parsed.workflowSteps.length} 步骤）`,
+    `[plugin-bundle] --check ✅ 域包页面数据完整（${parsed.id}：${parsed.capabilities.length} 能力 / ${parsed.kpis.length} KPI / ${parsed.workflowSteps.length} 步骤）`,
   );
 }
 
@@ -5288,6 +5408,118 @@ function opcAccountingManifest({ version, binaryName, sha256 }) {
   };
 }
 
+/**
+ * 通用域 worker 清单工厂（统一插件规范的唯一形态）。
+ *
+ * 只从插件名 / 标题 / 域包 id / 命令名列表派生清单，命令实现留在 Rust worker 内：
+ * `PLUGIN_SPECS[name].commands` 是命令面的唯一登记处，契约 checker 会逐项对账。
+ * 工具入参 schema 按命令后缀匹配四种通用形状（`web_search` / `file_read` /
+ * `file_write` / `run_automation_rules`），不为每个域另写一份 —— 11 域共用同一份
+ * 工具实现，schema 也必须同源。
+ */
+function opcWorkerDomainManifest(name, title, pack) {
+  return ({ version, binaryName, sha256 }) => {
+    const commands = (PLUGIN_SPECS[name]?.commands ?? []).map((commandName) => {
+      const description = `OPC ${title}域包命令：${commandName}`;
+      if (commandName.endsWith("_web_search")) {
+        return {
+          name: commandName,
+          description,
+          command: `worker://${commandName}`,
+          requiredPermission: "read-only",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string", description: "搜索关键词" } },
+            required: ["query"],
+          },
+        };
+      }
+      if (commandName.endsWith("_file_read")) {
+        return {
+          name: commandName,
+          description,
+          command: `worker://${commandName}`,
+          requiredPermission: "read-only",
+          inputSchema: {
+            type: "object",
+            properties: { path: { type: "string", description: "工作区相对路径" } },
+            required: ["path"],
+          },
+        };
+      }
+      if (commandName.endsWith("_file_write")) {
+        return {
+          name: commandName,
+          description,
+          command: `worker://${commandName}`,
+          requiredPermission: "workspace-write",
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "工作区相对路径" },
+              content: { type: "string", description: "写入内容" },
+            },
+            required: ["path", "content"],
+          },
+        };
+      }
+      if (commandName.endsWith("_run_automation_rules")) {
+        return {
+          name: commandName,
+          description,
+          command: `worker://${commandName}`,
+          requiredPermission: "workspace-write",
+          inputSchema: {
+            type: "object",
+            properties: {
+              // `capabilityPackId` 由 worker 按自身身份固定注入，不暴露给调用方越域。
+              entityType: { type: "string", description: "实体类型" },
+              entityId: { type: "string", description: "实体 id" },
+              status: { type: "string", description: "实体状态过滤" },
+              overdueDays: { type: "number", description: "逾期天数阈值" },
+              createdDays: { type: "number", description: "创建天数阈值" },
+              fields: { type: "object", description: "规则匹配字段" },
+            },
+            required: ["entityType", "entityId"],
+          },
+        };
+      }
+      // 其余工具命令（OpcSearchWiki / OpcCreateProject 等）的真实入参 schema 在宿主工具里，
+      // 清单只声明「对象」这一形状；worker 不做字段级校验，避免复制宿主 schema 造成双权威。
+      // 权限按命令语义保守取值：List/Search/Get/Validate 是读，其余按写处理（含 Bash / FileWrite）。
+      // 实体批量校验走 opc.store 的读 op（只校验不落库），不能因命令名不含读取动词而误标写权限。
+      const readTool = /_(?:list|search|get|read|find|query|batch_validate)_/.test(commandName);
+      return {
+        name: commandName,
+        description,
+        command: `worker://${commandName}`,
+        requiredPermission: readTool ? "read-only" : "workspace-write",
+        inputSchema: {
+          type: "object",
+          description: "参数由宿主工具校验；worker 只检查对象形状并逐字转发",
+        },
+      };
+    });
+    return {
+      name,
+      version,
+      description: `OPC ${title}域包：域专属 worker（命令经宿主接缝复用工具实现）`,
+      // 与既有域 worker 同档：`subprocess_execution` 是宿主启动命令 shell hook 的硬要求，
+      // `write` 同时满足 opc.store 写 op 与 tool.set 写工具闸（FileWrite / Bash）。
+      permissions: ["subprocess_execution", "write"],
+      mcp_servers: [],
+      skills: [],
+      agents: [],
+      defaultEnabled: true,
+      worker: { program: path.posix.join("bin", binaryName) },
+      pages: [{ id: name, title, entry: PAGE_ENTRY, loading: "bundle" }],
+      domainPacks: [path.posix.join(DOMAIN_PACK_DIR, `${pack}.json`)],
+      commands,
+      integrity: { algorithm: "sha256", hash: sha256 },
+    };
+  };
+}
+
 /** 通用声明式域包清单工厂：只贡献页面 + logical manifest，不声明 worker / 命令。 */
 function declarativeOpcManifest(name, title, pack) {
   return () => ({
@@ -5902,6 +6134,26 @@ function wikiManifest({ version, binaryName, sha256 }) {
           type: "object",
           properties: { wikiId: { type: "string", description: "宿主侧 wiki id" } },
           required: ["wikiId"],
+        },
+      },
+      {
+        name: "wiki_auto_connect_wiki",
+        description: "按相似度自动连接 Wiki 笔记（可选 dryRun 预览；经宿主 wiki.store 写面，dryRun 时只算不写）",
+        command: "worker://wiki_auto_connect_wiki",
+        // dryRun 缺省为 false，会经 wiki.store 写数据库；宿主 worker 也将该 op 标为 Write。
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          properties: {
+            vaultId: { type: "string", description: "宿主侧 vault id" },
+            threshold: { type: "number", description: "可选相似度阈值 0-1，缺省 0.7" },
+            maxLinksPerNote: {
+              type: "integer",
+              description: "可选每笔记最大链接数 1-20，缺省 5",
+            },
+            dryRun: { type: "boolean", description: "可选预览模式，缺省 false（真实写入）" },
+          },
+          required: ["vaultId"],
         },
       },
     ],

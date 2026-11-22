@@ -149,7 +149,7 @@
 2. **历史无点**：反思点随 10-14 的 v154/v156 模板才批量铺开（当天 46 行）；此前 live 分析在 `stock_reflections` 几乎零行（10/01–10/13 仅 10-11 有 2 行）。紫金三条分析（10-09/10-10/10-12）**至今没有任何反思行**——正是"误判后系统毫无自我反馈"的直接原因。
 3. **到期口径用自然日**：live 通道按自然日算 hindsight（`reflection.rs:2252-2256` 附近），ultra 10-16、short 10-19、mid 11-11、**long 落到 2027-01-12（90 自然日）**。当前 45 条 pending 全部未到期，`reflection-due-daily` 10-14 跑时 `totalPending=0`、12ms 结束——任务"成功"了，但是空转。T+N 复盘应按交易日 bar（T+2/T+5/T+28/T+90 交易日），自然日口径让长档样本成熟额外推迟约 40%，且长假后失真。
 4. **失败即终局**：约 16 条 failed 永久失败、无死信重试——4 条 LLM 上下文超限（727019/730002/629477/562181 tokens 撞 524288 窗口；根因已于 10-14 提交 c247e03e2 的三层上下文预算修复，但**旧失败行不会自动重跑**）、5 条 `ANALYSIS_SNAPSHOT_MISSING`、6 条 7 月孤儿；running 仅靠 `STALE_RUNNING_HOURS=6`（`reflection.rs:2462` 附近）回收。
-5. **兜底轮造成"反思在跑"的假象**：10-14 以来实际产出 resolved 的是 `start_batch_reflection` 的**每 6 小时系统兜底轮**（`src/init/services.rs:5416` 注释；走 `record_auxiliary_run`，`crates/runtime-core/src/cron_job.rs:653-692`，只落历史不推进档期），不是 `reflection-due-daily` 档期任务。兜底轮消费的是同一批 pending，到期口径不变，因此它无法纠正第 3 条的空转，只掩盖了"档期任务无事可做"的可见性。
+5. **兜底轮造成"反思在跑"的假象**：10-14 以来实际产出 resolved 的是 `start_batch_reflection` 的**每 6 小时系统兜底轮**（`src/init/services.rs:5427` 注释；走 `record_auxiliary_run`，`crates/runtime-core/src/cron_job.rs:653-692`，只落历史不推进档期），不是 `reflection-due-daily` 档期任务。兜底轮消费的是同一批 pending，到期口径不变，因此它无法纠正第 3 条的空转，只掩盖了"档期任务无事可做"的可见性。
 6. 与 R4 的关系：R4 讲"学习闭环读不到样本"（先验侧），R11/R12 讲"样本为什么生产不出来"（供给侧），三者合起来解释了用户感知的"整个反思机制名存实亡"。
 
 ## 三、修复方案

@@ -8,6 +8,11 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:FileWrite",
     "tool:OpcCreateContentAsset",
     "tool:OpcCreateLandingPage",
+    "tool:OpcDesignWebSearch",
+    "tool:OpcDesignFileWrite",
+    "tool:OpcDesignOpcCreateContentAsset",
+    "tool:OpcDesignOpcCreateLandingPage",
+    "tool:OpcDesignRunAutomationRules",
   ],
   "kpis": [
     {

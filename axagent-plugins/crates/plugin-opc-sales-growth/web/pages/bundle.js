@@ -13,7 +13,7 @@
     /** 宿主 → 沙箱：事件推送 */
     hostEvent: "host:event",
     /** 宿主 → 沙箱：生命周期（挂载 / 卸载） */
-    hostLifecycle: "host:lifecycle",
+    hostLifecycle: "host:lifecycle"
   };
   var SANDBOX_RPC_METHODS = {
     apiInvoke: "api.invoke",
@@ -23,7 +23,7 @@
     uiGetTheme: "ui.getTheme",
     uiGetLocale: "ui.getLocale",
     storeRead: "store.read",
-    storeWrite: "store.write",
+    storeWrite: "store.write"
   };
   var SANDBOX_FRAME_FIELDS = {
     type: "type",
@@ -38,7 +38,7 @@
     props: "props",
     source: "source",
     line: "line",
-    col: "col",
+    col: "col"
   };
   var SANDBOX_RPC_ARG_KEYS = {
     command: "command",
@@ -50,7 +50,7 @@
     type: "type",
     storeName: "storeName",
     selector: "selector",
-    value: "value",
+    value: "value"
   };
   var SANDBOX_RPC_TIMEOUT_MS = 15e3;
   var SANDBOX_RPC_FAILURE_ERROR_TYPE = "string";
@@ -61,14 +61,14 @@
     /** `srcdoc` 沙箱内容（Skill 与插件 panel）向宿主发起 RPC */
     sandbox: "skill_",
     /** 走 asset 协议装载的插件 bundle（page 粒度）向宿主发起 RPC */
-    plugin: "plugin_",
+    plugin: "plugin_"
   };
   function buildRpcRequestFrame(callId, method, args) {
     const f = SANDBOX_FRAME_FIELDS;
     const frame = {
       [f.type]: SANDBOX_FRAME_TYPES.request,
       [f.callId]: callId,
-      [f.method]: method,
+      [f.method]: method
     };
     if (args !== void 0) {
       frame[f.args] = args;
@@ -111,11 +111,11 @@
     /** 动态 UI / 沙箱内容把用户动作回流给**该插件自己的** worker（后端 `plugin_ui_action`）。 */
     uiAction: "plugin_ui_action",
     /** 按名字调用该插件声明的命令（后端 `plugin_execute_command`）。 */
-    executeCommand: "plugin_execute_command",
+    executeCommand: "plugin_execute_command"
   };
   var PLUGIN_BRIDGE_COMMANDS = [
     PLUGIN_BRIDGE_COMMAND_NAMES.uiAction,
-    PLUGIN_BRIDGE_COMMAND_NAMES.executeCommand,
+    PLUGIN_BRIDGE_COMMAND_NAMES.executeCommand
   ];
   function isPluginBridgeCommand(command) {
     return PLUGIN_BRIDGE_COMMANDS.includes(command);
@@ -136,7 +136,7 @@
     return {
       postMessage: (message, targetOrigin) => {
         parent.postMessage(message, targetOrigin);
-      },
+      }
     };
   }
   function adaptWindowSource(win) {
@@ -146,7 +146,7 @@
       },
       removeEventListener: (type, listener) => {
         win.removeEventListener(type, listener);
-      },
+      }
     };
   }
   function createAxAgentPluginClient(options = {}) {
@@ -155,7 +155,7 @@
     const rawSource = options.messageSource ?? (globalWindow ? adaptWindowSource(globalWindow) : void 0);
     if (!rawTarget || !rawSource) {
       throw new Error(
-        "createAxAgentPluginClient: \u9700\u8981\u6D4F\u89C8\u5668\u7A97\u53E3\u73AF\u5883\uFF08window.parent / window\uFF09\u6216\u663E\u5F0F\u6CE8\u5165 postTarget \u4E0E messageSource",
+        "createAxAgentPluginClient: \u9700\u8981\u6D4F\u89C8\u5668\u7A97\u53E3\u73AF\u5883\uFF08window.parent / window\uFF09\u6216\u663E\u5F0F\u6CE8\u5165 postTarget \u4E0E messageSource"
       );
     }
     const target = rawTarget;
@@ -196,11 +196,7 @@
     source.addEventListener("message", handleMessage);
     function request(command, args) {
       if (disposed) {
-        return Promise.reject(
-          new Error(
-            "\u63D2\u4EF6\u6865\u5BA2\u6237\u7AEF\u5DF2\u91CA\u653E\uFF08dispose \u540E\u4E0D\u53EF\u518D\u8C03\u7528\uFF09",
-          ),
-        );
+        return Promise.reject(new Error("\u63D2\u4EF6\u6865\u5BA2\u6237\u7AEF\u5DF2\u91CA\u653E\uFF08dispose \u540E\u4E0D\u53EF\u518D\u8C03\u7528\uFF09"));
       }
       const callId = formatCallId(SANDBOX_CALL_ID_PREFIX.plugin, ++sequence);
       const envelope = { [SANDBOX_RPC_ARG_KEYS.command]: command };
@@ -210,16 +206,12 @@
       const frame = buildRpcRequestFrame(
         callId,
         SANDBOX_RPC_METHODS.apiInvoke,
-        envelope,
+        envelope
       );
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(callId);
-          reject(
-            new Error(
-              `\u63D2\u4EF6\u6865\u8C03\u7528\u300C${command}\u300D\u8D85\u65F6\uFF08${timeoutMs}ms \u672A\u6536\u5230\u5BBF\u4E3B\u54CD\u5E94\uFF09`,
-            ),
-          );
+          reject(new Error(`\u63D2\u4EF6\u6865\u8C03\u7528\u300C${command}\u300D\u8D85\u65F6\uFF08${timeoutMs}ms \u672A\u6536\u5230\u5BBF\u4E3B\u54CD\u5E94\uFF09`));
         }, timeoutMs);
         pending.set(callId, { resolve, reject, timer });
         try {
@@ -236,18 +228,15 @@
         if (!isPluginBridgeCommand(command)) {
           return Promise.reject(
             new Error(
-              `\u63D2\u4EF6\u6865\u767D\u540D\u5355\u5916\u7684\u547D\u4EE4\u300C${
-                String(command)
-              }\u300D\uFF1A\u53EF\u7528\u6E05\u5355\u89C1 AX_AGENT_PLUGIN_BRIDGE_COMMANDS\uFF0C\u65B0\u589E\u901A\u9053\u9700\u6539 pluginBridgeProtocol.ts \u5E76\u7ECF\u5BBF\u4E3B\u4FA7\u8BC4\u5BA1`,
-            ),
+              `\u63D2\u4EF6\u6865\u767D\u540D\u5355\u5916\u7684\u547D\u4EE4\u300C${String(command)}\u300D\uFF1A\u53EF\u7528\u6E05\u5355\u89C1 AX_AGENT_PLUGIN_BRIDGE_COMMANDS\uFF0C\u65B0\u589E\u901A\u9053\u9700\u6539 pluginBridgeProtocol.ts \u5E76\u7ECF\u5BBF\u4E3B\u4FA7\u8BC4\u5BA1`
+            )
           );
         }
         return request(command, args);
       },
-      uiAction: (action) =>
-        request(PLUGIN_BRIDGE_COMMAND_NAMES.uiAction, {
-          [PLUGIN_UI_ACTION_ARG_KEY]: action,
-        }),
+      uiAction: (action) => request(PLUGIN_BRIDGE_COMMAND_NAMES.uiAction, {
+        [PLUGIN_UI_ACTION_ARG_KEY]: action
+      }),
       executeCommand: (args) => request(PLUGIN_BRIDGE_COMMAND_NAMES.executeCommand, args),
       announceReady() {
         if (disposed) {
@@ -267,7 +256,7 @@
           entry.reject(new Error("\u63D2\u4EF6\u6865\u5BA2\u6237\u7AEF\u5DF2\u91CA\u653E\uFF08dispose\uFF09"));
         }
         pending.clear();
-      },
+      }
     };
   }
 
@@ -321,7 +310,7 @@
     tbody.replaceChildren();
     try {
       const rows = parseRows(
-        await client.executeCommand({ name: "opc_list_landing_pages", input: {} }),
+        await client.executeCommand({ name: "opc_list_landing_pages", input: {} })
       );
       if (rows.length === 0) {
         setState(landingState, "\u6682\u65E0\u843D\u5730\u9875");
@@ -329,14 +318,12 @@
       }
       for (const row of rows) {
         const tr = document.createElement("tr");
-        for (
-          const value of [
-            text(row.title),
-            text(row.slug),
-            row.published === true ? "\u5DF2\u53D1\u5E03" : "\u8349\u7A3F",
-            createdAt(row.createdAt),
-          ]
-        ) {
+        for (const value of [
+          text(row.title),
+          text(row.slug),
+          row.published === true ? "\u5DF2\u53D1\u5E03" : "\u8349\u7A3F",
+          createdAt(row.createdAt)
+        ]) {
           const td = document.createElement("td");
           td.textContent = value;
           tr.append(td);
@@ -360,7 +347,7 @@
     tbody.replaceChildren();
     try {
       const rows = parseRows(
-        await client.executeCommand({ name: "opc_list_contacts", input: {} }),
+        await client.executeCommand({ name: "opc_list_contacts", input: {} })
       );
       if (rows.length === 0) {
         setState(contactsState, "\u6682\u65E0\u8054\u7CFB\u8868\u5355\u63D0\u4EA4");
@@ -368,15 +355,13 @@
       }
       for (const row of rows) {
         const tr = document.createElement("tr");
-        for (
-          const value of [
-            text(row.name),
-            text(row.email),
-            text(row.source),
-            row.read === true ? "\u5DF2\u8BFB" : "\u672A\u8BFB",
-            createdAt(row.createdAt),
-          ]
-        ) {
+        for (const value of [
+          text(row.name),
+          text(row.email),
+          text(row.source),
+          row.read === true ? "\u5DF2\u8BFB" : "\u672A\u8BFB",
+          createdAt(row.createdAt)
+        ]) {
           const td = document.createElement("td");
           td.textContent = value;
           tr.append(td);
@@ -401,7 +386,7 @@
     try {
       await client.executeCommand({
         name: "opc_create_customer",
-        input: { name, email, company: company || void 0 },
+        input: { name, email, company: company || void 0 }
       });
       setState(customerState, "\u5BA2\u6237\u521B\u5EFA\u6210\u529F");
       form.reset();

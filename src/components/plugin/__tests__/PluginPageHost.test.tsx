@@ -233,6 +233,35 @@ describe("ready 是唯一开闸信号（§20.4 A/B）", () => {
     expect(iframe.getAttribute("src")).toBe(`asset://localhost/${ABSOLUTE_PATH}`);
   });
 
+  it("宿主文档报运行时错误 ⇒ 立即显示错误并撤掉加载超时，不继续挂着 loading", async () => {
+    vi.useFakeTimers();
+    const { iframe } = renderBundleHost();
+    await flush();
+
+    sendFromSandbox(
+      { type: SANDBOX_FRAME_TYPES.contentError, error: "插件页面渲染失败" },
+      iframe.contentWindow,
+    );
+    expect(screen.getByText("插件页面渲染失败")).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SANDBOX_LOAD_TIMEOUT_MS + 1);
+    });
+    expect(screen.queryByText(i18n.t("skill.timeoutError"))).toBeNull();
+  });
+
+  it("外来文档的运行时错误帧不改变页面状态", async () => {
+    const { iframe } = renderBundleHost();
+    await flush();
+
+    sendFromSandbox(
+      { type: SANDBOX_FRAME_TYPES.contentError, error: "不属于这个 iframe" },
+      window,
+    );
+    expect(screen.queryByText("不属于这个 iframe")).toBeNull();
+    expect(iframe.style.opacity).toBe("0");
+  });
+
   it("外来来源的合法请求帧不发 IPC；同一帧换成宿主来源即照常执行（防「一律拒绝」假绿）", async () => {
     const { iframe } = renderBundleHost();
     await flush();

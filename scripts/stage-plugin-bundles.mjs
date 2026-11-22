@@ -33,6 +33,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertAllPluginRepos, PLUGIN_NAMES } from "./lib/plugin-repos.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -63,10 +64,8 @@ if (isMobile) {
   process.exit(0);
 }
 
-// 暂存的插件清单：**顺序即构建顺序**（串行转调，避免多个 cargo 同时抢锁）。
-// stock 必须排在第一位 —— 它今天的产物形状与单插件版逐字一致，先跑它能让「已存在」
-// 的那份产物在任何新增插件失败时保持有效。
-const PLUGINS = ["stock", "opc", "opc-accounting", "opc-security", "opc-game-dev", "opc-ai-research", "opc-consulting", "opc-design", "opc-ecommerce", "opc-education", "opc-finance-invest", "opc-geospatial", "opc-project-management", "opc-software-dev", "opc-sales-growth", "opc-content-media", "wiki"];
+// 暂存的插件清单：顺序即构建顺序。源码权威在各插件独立仓。
+const PLUGINS = PLUGIN_NAMES;
 
 // `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。手工直跑要 debug 档
 // 用 `--debug`（`npm run plugin:bundle:stage|:dev` 走的就是这条）。
@@ -76,14 +75,14 @@ const release =
   && !process.argv.includes("--debug");
 
 const bundledRoot = argRoot();
+const pluginRepos = assertAllPluginRepos(repoRoot, PLUGINS);
 
 console.error(
   `[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物到 ${bundledRoot}（${release ? "release" : "debug"}）`,
 );
-for (const plugin of PLUGINS) {
+for (const { plugin, script } of pluginRepos) {
   const outDir = path.join(bundledRoot, plugin);
-  // 打包脚本权威位置在 axagent-plugins/scripts/（随 SDK 仓走，#281 判据③缺口③）。
-  const args = ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
+  const args = [script, "--plugin", plugin, "--out", outDir];
   if (release) {
     args.push("--release");
   }

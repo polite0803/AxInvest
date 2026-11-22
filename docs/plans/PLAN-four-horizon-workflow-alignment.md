@@ -4987,11 +4987,11 @@ B-2b 的剩余前置见 §八十五(4)：死配置裁定、扇出键齐备性门
 | 引擎·启动点 | `:2682`/`:3477`（`sub_origin_parent_eid` 取父真实 id）、`:2690`/`:3488`（回调第 4 形参）、`:2767`/`:3589`（`sub_workflow_origin: Some(…)`）、`:2709`/`:3510`（每次调用再 clone 一份进 `spawn_blocking`，否则 `Fn` 退化 `FnOnce`） | 两处子执行启动点同批 |
 | 引擎·事件 | 主循环 4 条读局部（`:3326` running / `:3955` completed / `:4318` failed / `:4541` timeout）、容器 dispatch 3 条读 `ctx`（`:6580`/`:6663`/`:6727`）、`executors/agent_executor.rs:1403`（streaming 读 `context`） | **8 个构造点全覆盖** —— 漏一个就是「该节点的事件没有归属」 |
 | 执行器 | `executors/subworkflow_executor.rs:53`（签名 + 注释）、`:80`（`RetryParams.parent_node_id`）、`:136`（cb 传 4 参）、`:312`（`parent_node_id: sub_node.base.id.clone()`） | 唯一能给出父节点 id 的地方 |
-| 状态 | `execution_state.rs:297`（字段 + 那段「同名字段两种含义」警示）、`:324`（`new()`）、`:365`（`from_snapshot`）、`:494`（快照结构，`#[serde(default)]` 兼容旧快照 JSON）、`:514`（`to_snapshot`） | 快照往返必须带，否则「暂停恢复后子节点又消失」 |
+| 状态 | `execution_state.rs:297`（字段 + 那段「同名字段两种含义」警示）、`:324`（`new()`）、`:409`（`from_snapshot`）、`:494`（快照结构，`#[serde(default)]` 兼容旧快照 JSON）、`:514`（`to_snapshot`） | 快照往返必须带，否则「暂停恢复后子节点又消失」 |
 | 其它签名 | `src/commands/cognitive.rs:1208`（系统能力回调补第 4 形参 `_parent_node_id`） | 类型共用，编译器点的名；系统能力不产生子执行 ⇒ 如实忽略 |
 | commands | `src/commands/work_engine.rs:509`（取 origin）+ `:526`（node-status 载荷）+ `:566`（state-changed 载荷，取 `full_state.sub_workflow_origin`） | `workflow:execution-completed` **不改** —— 子执行不走那条，见 (5)1 |
 | 前端 store | `src/stores/feature/workEngineStore.ts:34`/`:55`/`:75`（三个纯函数：归属判定 / 增量合并 / 全量覆盖）、`:101`（`subFlow` 状态字段）、`:146` 与 `:377`（初始 + `resetDebug` 清空）、`:398`（node-status 监听）与 `:482`（state-changed 监听） | 判定抽成纯函数由两条监听器**共用**；父执行分支逐字不变 |
-| 类型 | `src/types/index.ts:1754`（`SubWorkflowOrigin`）、`:1764`（`SubWorkflowProgress`） | 禁区 13：Rust snake_case + 线上 camelCase + TS camelCase |
+| 类型 | `src/types/index.ts:1754`（`SubWorkflowOrigin`）、`:1826`（`SubWorkflowProgress`） | 禁区 13：Rust snake_case + 线上 camelCase + TS camelCase |
 | 面板 | `src/components/workflow/DebugPanel.tsx:565`（`openSubExecution` 提出来给两条路共用）、`:679`（`subFlow` 选择器）、`:1818`/`:1826`（SubWorkflow 节点详情里的实时段 + 缺席句） | 「查看子执行」原来只在节点**完成后**出现（靠 `output._child_execution_id`）⇒ live 期也能点了 |
 | i18n | 11 语言 × 2 键（`debugPanel.subFlowLive` 带 `{{count}}`、`debugPanel.subFlowPending`），插在 `subWorkflow` 之后保序、LF 落盘 | |
 | 测试 | Rust：`subworkflow_executor.rs:405` 起新 `mod tests`（2 条）+ `execution_state.rs:664`（快照往返 1 条）；TS：`src/stores/feature/__tests__/workEngineStore.subFlow.test.ts` 16 条（6 归属判定 / 5 桶 / 3 生产端反手抄 / 2 键 × 11 语言真译） | 变异自证见 (3) |

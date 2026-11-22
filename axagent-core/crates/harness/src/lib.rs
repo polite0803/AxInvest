@@ -100,8 +100,9 @@ pub mod workflow_node_dyn;
 // Wiki 业务功能面的宿主写接缝（P6.3 第一片）；只传 id，数据与文件系统主权留在宿主。
 pub mod wiki_store;
 pub use wiki_store::{
-    RepairWikiGraphResult, SyncNoteLinksRequest, SyncNoteToKnowledgeBaseOutcome,
-    SyncNoteToKnowledgeBaseRequest, UpdateWikiRequest, WikiStoreProvider, WikiUpdateResult,
+    AutoConnectWikiRequest, AutoConnectWikiResult, RepairWikiGraphResult, SyncNoteLinksRequest,
+    SyncNoteToKnowledgeBaseOutcome, SyncNoteToKnowledgeBaseRequest, UpdateWikiRequest,
+    WikiStoreProvider, WikiUpdateResult,
 };
 pub mod workflow_types;
 

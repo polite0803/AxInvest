@@ -28,7 +28,7 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 hex = "0.4"
 # gzip 特性有踩坑实证（见 src-tauri/Cargo.toml 注释），不得精简。
-reqwest = { version = "0.13", features = ["json", "gzip"] }
+reqwest = { version = "0.13", features = ["json", "gzip", "blocking"] }
 # rhai 下沉 harness 后需统一版本 + 特性：sync（Send + Sync）+ serde（Dynamic ↔ Value 转换）。
 rhai = { version = "1", features = ["sync", "serde"] }
 sea-orm = { version = "2.0.1", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros"] }

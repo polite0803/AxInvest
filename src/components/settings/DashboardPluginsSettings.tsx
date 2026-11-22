@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { usePluginGallery } from "@/hooks/usePluginGallery";
 import { invoke } from "@/lib/invoke";
 import { refreshPluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { message } from "@/lib/toast";
 import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Card, Empty, Spin, Switch, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Spin, Switch, Table, Tag, Typography } from "antd";
 import { FolderOpen, PanelRight, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,57 +22,47 @@ const POSITION_COLORS: Record<string, string> = {
 
 export function DashboardPluginsSettings() {
   const { t } = useTranslation();
+  const { installPlugin, error: installError } = usePluginGallery();
   const [plugins, setPlugins] = useState<DashboardPluginInfoDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [installing, setInstalling] = useState(false);
+  const [selectingSource, setSelectingSource] = useState(false);
   const [unloadingId, setUnloadingId] = useState<string | null>(null);
 
-  const loadPlugins = useCallback(async () => {
+  const loadPlugins = useCallback(async (): Promise<boolean> => {
     try {
       const result = await invoke<DashboardPluginInfoDto[]>(
         "dashboard_list_plugins",
       );
       setPlugins(Array.isArray(result) ? result : []);
+      return true;
     } catch (error) {
       message.error(t("settings.plugins.loadFailed", { error }));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [t]);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const result = await invoke<DashboardPluginInfoDto[]>(
-          "dashboard_list_plugins",
-        );
-        setPlugins(Array.isArray(result) ? result : []);
-      } catch (error) {
-        message.error(t("settings.plugins.loadFailed", { error }));
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [t]);
+    void loadPlugins();
+  }, [loadPlugins]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       // dashboard 合流（PLAN-plugin-gap-closure §3）：清单是 PluginManager 的实时投影，
       // 刷新即重新拉取，不再需要独立 reload 命令。
-      await loadPlugins();
-      message.success(t("settings.dashboardPlugins.refreshSuccess"));
-    } catch (error) {
-      message.error(t("settings.plugins.refreshFailed", { error }));
+      if (await loadPlugins()) {
+        message.success(t("settings.dashboardPlugins.refreshSuccess"));
+      }
     } finally {
       setRefreshing(false);
     }
   };
 
   const handleInstall = async () => {
-    setInstalling(true);
+    setSelectingSource(true);
     try {
       const selected = await open({
         multiple: false,
@@ -79,17 +70,19 @@ export function DashboardPluginsSettings() {
         title: t("settings.dashboardPlugins.install"),
       });
       if (!selected) {
-        setInstalling(false);
         return;
       }
-      await invoke("plugin_install", { source: selected });
+      // 设置页只选择本地目录，但仍统一走 pluginStore：安装来源判定和哈希门禁只能由
+      // `plugin_install` / `install_verified` 这条权威链执行，不能在这里造第二套安装入口。
+      const outcome = await installPlugin(selected);
+      if (!outcome) {
+        return;
+      }
       await loadPlugins();
       await refreshPluginPageRoutes().catch(() => undefined);
       message.success(t("settings.dashboardPlugins.enabled"));
-    } catch (error) {
-      message.error(t("settings.plugins.installFailed", { error }));
     } finally {
-      setInstalling(false);
+      setSelectingSource(false);
     }
   };
 
@@ -250,12 +243,24 @@ export function DashboardPluginsSettings() {
             type="primary"
             icon={<Plus size={16} />}
             onClick={handleInstall}
-            loading={installing}
+            loading={selectingSource}
           >
             {t("settings.dashboardPlugins.install")}
           </Button>
         </div>
       </div>
+
+      {installError && (
+        <Alert
+          type="error"
+          showIcon
+          closable
+          className="mb-4"
+          message={t("settings.plugins.installFailed", {
+            error: installError,
+          })}
+        />
+      )}
 
       {plugins.length > 0
         ? (
@@ -279,7 +284,7 @@ export function DashboardPluginsSettings() {
                     type="primary"
                     icon={<Plus size={16} />}
                     onClick={handleInstall}
-                    loading={installing}
+                    loading={selectingSource}
                   >
                     {t("settings.dashboardPlugins.installFirst")}
                   </Button>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const { pluginsRef } = vi.hoisted(() => ({ pluginsRef: { current: [] as unknown[] } }));
@@ -54,6 +54,11 @@ function plugin(overrides: Record<string, unknown>) {
     tools: [],
     mcpServers: [],
     skills: [],
+    source: "builtin",
+    permissions: [],
+    pages: [],
+    integrityStatus: "unknown",
+    pinnedHash: null,
     commands: [],
     eventStats: null,
     ...overrides,
@@ -102,5 +107,93 @@ describe("PluginGallery 的 eventStats 渲染", () => {
     // 若前端把 unavailable 再加一遍，这里会变成 4。
     expect(container.textContent).toContain("chat.plugins.marketplace.eventStats|0,2");
     expect(container.textContent).not.toContain("eventStats|0,4");
+  });
+
+  it("列表展示来源、权限、页面与完整性状态，并支持按这些字段筛选", () => {
+    pluginsRef.current = [
+      plugin({
+        id: "p1",
+        name: "alpha",
+        source: "./alpha-plugin",
+        permissions: ["read:files"],
+        pages: ["overview"],
+        integrityStatus: "verified",
+      }),
+      plugin({
+        id: "p2",
+        name: "beta",
+        source: "./beta-plugin",
+        permissions: ["write:files"],
+        pages: ["settings"],
+        integrityStatus: "mismatch",
+      }),
+    ];
+    const { container } = render(<PluginGallery />);
+    expect(container.textContent).toContain("chat.plugins.marketplace.integrityVerified");
+    expect(container.textContent).toContain("chat.plugins.marketplace.integrityMismatch");
+
+    fireEvent.change(
+      screen.getByPlaceholderText("chat.plugins.marketplace.listSearchPlaceholder"),
+      { target: { value: "read:files" } },
+    );
+    expect(container.textContent).toContain("alpha");
+    expect(container.textContent).not.toContain("./beta-plugin");
+
+    fireEvent.change(
+      screen.getByPlaceholderText("chat.plugins.marketplace.listSearchPlaceholder"),
+      { target: { value: "settings" } },
+    );
+    expect(container.textContent).toContain("./beta-plugin");
+    expect(container.textContent).not.toContain("./alpha-plugin");
+  });
+
+  it("筛选无结果时显示空态", () => {
+    pluginsRef.current = [plugin({})];
+    const { container } = render(<PluginGallery />);
+    fireEvent.change(
+      screen.getByPlaceholderText("chat.plugins.marketplace.listSearchPlaceholder"),
+      { target: { value: "不存在" } },
+    );
+    expect(container.textContent).toContain("chat.plugins.marketplace.listEmpty");
+  });
+
+  it("按来源类型、启用状态与完整性状态分面筛选", () => {
+    pluginsRef.current = [
+      plugin({
+        id: "remote-on",
+        name: "remote-on",
+        source: "https://example.com/remote.git",
+        enabled: true,
+        integrityStatus: "verified",
+      }),
+      plugin({
+        id: "local-off",
+        name: "local-off",
+        source: "./local-plugin",
+        enabled: false,
+        integrityStatus: "unpinned",
+      }),
+    ];
+    const { container } = render(<PluginGallery />);
+
+    fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.sourceTypeFilter"));
+    fireEvent.click(screen.getByText("chat.plugins.marketplace.sourceTypeRemote"));
+    expect(container.textContent).toContain("remote-on");
+    expect(container.textContent).not.toContain("local-off");
+
+    // 来源筛选保持“远程”时，禁用分面只留下已启用的远程插件。
+    fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.enabledFilter"));
+    fireEvent.click(screen.getByText("chat.plugins.marketplace.disabledOnly"));
+    expect(container.textContent).toContain("chat.plugins.marketplace.listEmpty");
+
+    // 切回“全部来源”后，禁用 + 未固定哈希只剩本地插件。
+    fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.sourceTypeFilter"));
+    fireEvent.click(screen.getByText("chat.plugins.marketplace.sourceTypeAll"));
+    expect(container.textContent).toContain("local-off");
+    expect(container.textContent).not.toContain("remote-on");
+
+    fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.integrityFilter"));
+    fireEvent.click(screen.getByText("chat.plugins.marketplace.integrityVerified"));
+    expect(container.textContent).toContain("chat.plugins.marketplace.listEmpty");
   });
 });

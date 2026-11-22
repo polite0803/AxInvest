@@ -3,10 +3,9 @@
 #
 # 角色：**插件侧可执行**，不入 harness 分层（consumer / implementor / hybrid / wiring 那套
 # 判的是 axagent-* 库 crate 之间的依赖方向；本 crate 是「被宿主 spawn 的对端进程」）。
-# 依赖规则：本 crate 可依赖**域自有实现**（`stock-core` / `analysis-engine`），
-# **不得**反向依赖 `axagent`（主壳）或 `axagent-plugins`（宿主侧运行时）。
-# `analysis-engine` 是暂住 `axagent-quant` 的股票域实现（迁移终局随 #32 进插件仓），
-# B9-1 起 worker 直接跑它的权威实现，避免在插件里复制一份算法（禁区 12）。
+# 依赖规则：本 crate 只依赖协议 SDK（`plugin-proto`）、共享契约 `harness` 与域自有
+# `stock-core`，不反向依赖主壳命令或宿主运行时。worker 的本地计算纯函数随 `stock-core`
+# 独立发布，避免把 `analysis-engine` 的 DAO / 实体 / 网络客户端拖进插件进程。
 
 [package]
 name = "axagent-plugin-stock"
@@ -21,8 +20,7 @@ name = "axagent-plugin-stock"
 path = "src/main.rs"
 
 [dependencies]
-axagent-analysis-engine = { version = "3.0.0", path = "../../../axagent-quant/crates/analysis-engine" }
-axagent-astock-data = { version = "3.0.0", path = "../../../axagent-quant/crates/astock-data" }
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
 axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
 axagent-stock-core = { version = "3.0.0", path = "../stock-core" }
 serde_json = "1"

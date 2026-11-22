@@ -9,6 +9,12 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:OpcCreateContentAsset",
     "tool:OpcCreateProject",
     "tool:FileWrite",
+    "tool:OpcGeospatialOpcSearchWiki",
+    "tool:OpcGeospatialWebSearch",
+    "tool:OpcGeospatialOpcCreateContentAsset",
+    "tool:OpcGeospatialOpcCreateProject",
+    "tool:OpcGeospatialFileWrite",
+    "tool:OpcGeospatialRunAutomationRules",
   ],
   "kpis": [
     {

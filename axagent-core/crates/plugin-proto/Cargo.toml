@@ -7,7 +7,6 @@ name = "axagent-plugin-proto"
 version = "3.0.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-publish = false
 repository = "https://github.com/polite0803/AxInvest"
 description = "AxAgent 插件帧协议：宿主与插件 worker 共用的长度前缀 JSON 帧与命令协议"
 

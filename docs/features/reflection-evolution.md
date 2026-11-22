@@ -66,7 +66,7 @@
 ### RL 与技能进化（`crates/trajectory/`）
 
 - 数值进化：`axagent-ai/crates/trajectory/src/numeric_evolution.rs:161` 的 `evolve_generation`。
-- 技能进化：`axagent-ai/crates/trajectory/src/skill_evolution.rs:498` 的 `SkillEvolutionEngine`、`:561` 的 `evolve_generation`、`:588` 的 `evolve_generation_v2`。
+- 技能进化：`axagent-ai/crates/trajectory/src/skill_evolution.rs:498` 的 `SkillEvolutionEngine`、同文件 `:588` 的 `evolve_generation_v2`。
 - 引擎开关与状态：`src-tauri/src/commands/evolution_engine.rs:317`（`get_all_engine_status`）、`:355`（`start_engine`）、`:427`（`stop_engine`）、`:851`（`load_evolution_execution_stats_impl`）。
 - 反思→进化的契约层早于业务层：v2.8.6 已落地「工作流反思/进化/优化三层 trait 契约」与「反思历史持久化到 trajectory_storage」（CHANGELOG v2.8.6 节）。
 

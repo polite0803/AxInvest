@@ -12,11 +12,10 @@ use axagent_harness::WikiStoreProvider;
 use axagent_harness::graph_dtos::{GraphEdge, LinkGraph};
 use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::NoteSearchResult;
-use axagent_harness::{RepairWikiGraphResult, WikiUpdateResult};
+use axagent_harness::{AutoConnectWikiResult, RepairWikiGraphResult, WikiUpdateResult};
 use axagent_search::hybrid_search::HybridSearcher;
 use axagent_search::rag::{RAGSource, WikiVaultRAG, collection_id};
 use sea_orm::{ConnectionTrait, DatabaseConnection};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -1856,6 +1855,12 @@ fn sanitize_filename(name: &str) -> String {
 
 /// P1-2: Wiki 一键建链 — 基于 embedding 相似度自动发现 note 间的关联并创建链接
 ///
+/// `auto_connect_wiki` 的宿主实现体（按相似度自动连接笔记）。
+///
+/// 原宿主命令已于 2026-11-19 P6.3 Wiki 自动连接片退役，
+/// 调用面改走插件命令 `wiki_auto_connect_wiki`
+/// ⇒ 经 `wiki.store::auto_connect_wiki` 接缝复用本实现体。
+///
 /// 流程：
 /// 1. 加载 vault 中所有 notes
 /// 2. 为每个 note 计算 embedding（复用 wiki 索引的向量）
@@ -1868,38 +1873,18 @@ fn sanitize_filename(name: &str) -> String {
 /// - `threshold`: 相似度阈值（0-1，默认 0.7）
 /// - `max_links_per_note`: 每个 note 最多创建的链接数（默认 5）
 /// - `dry_run`: 仅计算不写入 DB（用于预览效果）
-#[derive(Debug, Deserialize)]
-pub struct AutoConnectOptions {
-    pub threshold: Option<f64>,
-    pub max_links_per_note: Option<usize>,
-    pub dry_run: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AutoConnectResult {
-    pub links_created: usize,
-    pub pairs_analyzed: usize,
-    pub elapsed_ms: u64,
-}
-
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "自动连接 Wiki")]
-#[tauri::command]
-pub async fn auto_connect_wiki(
-    state: State<'_, AppState>,
+pub(crate) async fn auto_connect_wiki_core(
+    state: &AppState,
     vault_id: String,
-    options: Option<AutoConnectOptions>,
-) -> Result<AutoConnectResult, String> {
+    threshold: Option<f64>,
+    max_links_per_note: Option<usize>,
+    dry_run: Option<bool>,
+) -> Result<AutoConnectWikiResult, String> {
     let started = std::time::Instant::now();
     let db = state.harness.db();
-    let opts = options.unwrap_or(AutoConnectOptions {
-        threshold: None,
-        max_links_per_note: None,
-        dry_run: None,
-    });
-
-    let threshold = opts.threshold.unwrap_or(0.7).clamp(0.0, 1.0);
-    let max_links = opts.max_links_per_note.unwrap_or(5).clamp(1, 20);
-    let dry_run = opts.dry_run.unwrap_or(false);
+    let threshold = threshold.unwrap_or(0.7).clamp(0.0, 1.0);
+    let max_links = max_links_per_note.unwrap_or(5).clamp(1, 20);
+    let dry_run = dry_run.unwrap_or(false);
 
     // 1. 加载所有 notes
     let notes = axagent_dao::repo::note::list_notes(db, &vault_id).await.map_err(|e| {
@@ -1910,7 +1895,7 @@ pub async fn auto_connect_wiki(
     })?;
 
     if notes.len() < 2 {
-        return Ok(AutoConnectResult {
+        return Ok(AutoConnectWikiResult {
             links_created: 0,
             pairs_analyzed: 0,
             elapsed_ms: started.elapsed().as_millis() as u64,
@@ -1922,7 +1907,7 @@ pub async fn auto_connect_wiki(
     let embeddings_map = compute_note_embeddings(&state, &notes, &collection_id).await?;
 
     if embeddings_map.is_empty() {
-        return Ok(AutoConnectResult {
+        return Ok(AutoConnectWikiResult {
             links_created: 0,
             pairs_analyzed: 0,
             elapsed_ms: started.elapsed().as_millis() as u64,
@@ -2000,7 +1985,7 @@ pub async fn auto_connect_wiki(
         }
     }
 
-    Ok(AutoConnectResult {
+    Ok(AutoConnectWikiResult {
         links_created: links_to_create.len(),
         pairs_analyzed,
         elapsed_ms: started.elapsed().as_millis() as u64,
@@ -2023,7 +2008,7 @@ fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
 
 /// 为 notes 计算 embedding（使用轻量级哈希向量，避免重度依赖 LLM embedding）
 async fn compute_note_embeddings(
-    _state: &State<'_, AppState>,
+    _state: &AppState,
     notes: &[Note],
     _collection_id: &str,
 ) -> Result<std::collections::HashMap<String, Vec<f64>>, String> {

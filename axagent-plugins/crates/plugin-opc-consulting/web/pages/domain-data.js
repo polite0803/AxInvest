@@ -9,6 +9,12 @@ globalThis.AX_OPC_DOMAIN_DATA = {
     "tool:OpcGetDashboard",
     "tool:OpcCreateContentAsset",
     "tool:FileWrite",
+    "tool:OpcConsultingOpcSearchWiki",
+    "tool:OpcConsultingWebSearch",
+    "tool:OpcConsultingOpcGetDashboard",
+    "tool:OpcConsultingOpcCreateContentAsset",
+    "tool:OpcConsultingFileWrite",
+    "tool:OpcConsultingRunAutomationRules",
   ],
   "kpis": [
     {

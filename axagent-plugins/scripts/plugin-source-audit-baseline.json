@@ -11,6 +11,20 @@
       22
     ]
   },
+  "plugin-opc-ai-research": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-consulting": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
   "plugin-opc-content-media": {
     "path_dependency": [
       15,
@@ -23,6 +37,55 @@
       17
     ]
   },
+  "plugin-opc-design": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-ecommerce": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-education": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-finance-invest": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-game-dev": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-geospatial": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-project-management": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
   "plugin-opc-sales-growth": {
     "path_dependency": [
       17,
@@ -30,17 +93,36 @@
       25
     ]
   },
+  "plugin-opc-security": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
+  "plugin-opc-software-dev": {
+    "path_dependency": [
+      15,
+      16,
+      23
+    ]
+  },
   "plugin-stock": {
     "path_dependency": [
+      23,
       24,
-      25,
-      26,
-      27
+      25
     ]
   },
   "plugin-testkit": {
     "path_dependency": [
-      17
+      16
+    ]
+  },
+  "plugin-wiki": {
+    "path_dependency": [
+      17,
+      21
     ]
   },
   "plugins": {
@@ -52,6 +134,11 @@
   "schema-gen": {
     "path_dependency": [
       8
+    ]
+  },
+  "stock-core": {
+    "path_dependency": [
+      21
     ]
   }
 }

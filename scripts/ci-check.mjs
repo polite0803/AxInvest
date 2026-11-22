@@ -317,15 +317,22 @@ if (canRunFrontend) {
   // 显式化并锁死只减不增；命令与 ci.yml 的 workspace-config-parity job 逐字同源。
   step("插件 workspace 边界自检（正负对照）", "node scripts/check-workspace-boundary.mjs --selftest");
   step("插件 workspace 跨根 path 依赖（基线只减不增）", "node scripts/check-workspace-boundary.mjs");
-  step("插件源码审计自检（正负对照）", "node axagent-plugins/scripts/check-plugin-source-audit.mjs --selftest");
-  step("插件源码 path/git 依赖（基线只减不增）", "node axagent-plugins/scripts/check-plugin-source-audit.mjs");
+  step("插件统一契约自检（正负对照）", "node scripts/check-plugin-contract.mjs --selftest");
+  step("插件统一契约逐项对账", "node scripts/check-plugin-contract.mjs");
   step("声明式 OPC 页面数据与 YAML 一致性", "node scripts/generate-declarative-opc-pages.mjs --check");
   step("SDK 发布物清单自检", "node scripts/generate-plugin-sdk-release-manifest.mjs --selftest");
   step("SDK 发布物清单一致性", "node scripts/generate-plugin-sdk-release-manifest.mjs --check");
+  step("插件发布包生成器自检", "node scripts/generate-plugin-release-manifest.mjs --selftest");
   step("SDK 发布物包表面自检（正负对照）", "node scripts/check-sdk-package-surface.mjs --selftest");
   step("SDK 发布物包表面（Cargo.toml / src/lib.rs / 无 target）", "node scripts/check-sdk-package-surface.mjs");
-  step("OPC 插件 SDK 独立树验收", "node scripts/verify-opc-plugin-sdk.mjs");
-  step("全插件 SDK 独立树验收（含 stock 依赖链）", "node scripts/verify-opc-plugin-sdk.mjs --full");
+  step("外置插件仓结构与发布工作流自检（17/17）", "node scripts/generate-plugin-independent-repos.mjs --verify");
+  step(
+    "插件 SDK 发布形状 + 17/17 自包含独立仓演练",
+    "node scripts/verify-plugin-sdk-release-rehearsal.mjs",
+  );
+  step("插件逐项启停验收矩阵", "node scripts/verify-plugin-acceptance-matrix.mjs");
+  step("插件发布地址链契约回归", "node scripts/verify-plugin-release-flow.mjs");
+  step("外置仓插件打包入口（17/17）", "node scripts/run-plugin-bundle.mjs --all --check");
 
   // ── 能力域单一真相源门禁（权威枚举 ↔ 前端 / prompt / i18n 副本）──
   // 为什么需要：`CapabilityDomain`（`harness/src/capability.rs`）是唯一权威，

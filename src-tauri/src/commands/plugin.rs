@@ -3,6 +3,7 @@
 use axagent_agent_macro::agent_command;
 
 use axagent_harness::CapabilityIndexer;
+use axagent_plugins::PluginMarketplaceSummary;
 use tauri::{State, command};
 use tracing::warn;
 
@@ -17,11 +18,19 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
     tauri::async_runtime::spawn_blocking(move || {
         let manager = plugin_manager.blocking_read();
         manager
-            .list_plugins()
-            .map(|plugins| {
-                plugins
+            .list_plugin_marketplace_summaries()
+            .map(|marketplace_plugins| {
+                marketplace_plugins
                     .into_iter()
                     .map(|p| {
+                        let PluginMarketplaceSummary {
+                            summary: p,
+                            source,
+                            permissions,
+                            pages,
+                            integrity_status,
+                            pinned_hash,
+                        } = p;
                         let id = p.metadata.id.clone();
                         let event_stats =
                             manager.plugin_event_stats(&id).map(PluginEventStatsDto::from);
@@ -35,6 +44,11 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
                             tools: p.tool_names,
                             mcp_servers: p.mcp_server_names,
                             skills: p.skill_names,
+                            source,
+                            permissions,
+                            pages,
+                            integrity_status: integrity_status.as_str().to_string(),
+                            pinned_hash,
                             commands: p
                                 .commands
                                 .into_iter()
@@ -69,21 +83,25 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
 pub async fn plugin_validate_source(
     state: State<'_, AppState>,
     source: String,
-) -> Result<PluginManifestDto, String> {
+    expected_sha256: Option<String>,
+) -> Result<PluginSourceValidationDto, String> {
     let plugin_manager = state.plugin_manager.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let manager = plugin_manager.blocking_read();
-        let manifest = manager.validate_plugin_source(&source).map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-        Ok(PluginManifestDto {
+        let (manifest, expected_sha256) = manager
+            .validate_plugin_source_with_expected_hash(&source, expected_sha256.as_deref())
+            .map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Validation,
+                ))
+            })?;
+        Ok(PluginSourceValidationDto {
             name: manifest.name,
             version: manifest.version,
             description: manifest.description,
             permissions: manifest.permissions.iter().map(|p| p.as_str().to_string()).collect(),
+            pages: manifest.pages.iter().map(|page| page.id.clone()).collect(),
             default_enabled: manifest.default_enabled,
             hooks: {
                 let mut hooks = serde_json::Map::new();
@@ -136,6 +154,7 @@ pub async fn plugin_validate_source(
                     description: c.description.clone(),
                 })
                 .collect(),
+            expected_sha256: expected_sha256.map(|hash| hash.to_ascii_lowercase()),
         })
     })
     .await
@@ -248,36 +267,20 @@ fn source_build_category(
     }
 }
 
-/// SECURITY (S9): 远程插件源（Git URL、npm 包）安装时无 SHA-256 完整性校验或签名验证。
-/// 用户应从可信源（如官方 AxHub 市场）安装插件，避免安装来源不明的远程插件。
-/// 前端应在安装前通过 `plugin_validate_source` 验证插件元数据。
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "安装插件")]
 #[command]
 pub async fn plugin_install(
     state: State<'_, AppState>,
     source: String,
+    expected_sha256: Option<String>,
 ) -> Result<InstallOutcomeDto, String> {
-    // 安全日志：记录远程插件源安装（无完整性校验）
-    if source.starts_with("http://")
-        || source.starts_with("https://")
-        || source.starts_with("git@")
-        || source.starts_with('@')
-    {
-        warn!(
-            "SECURITY: Installing plugin from remote source without integrity verification: {}",
-            source
-        );
-    }
     let plugin_manager = state.plugin_manager.clone();
     let outcome =
         tauri::async_runtime::spawn_blocking(move || -> Result<InstallOutcomeDto, String> {
             let mut manager = plugin_manager.blocking_write();
-            let outcome = manager.install(&source).map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })?;
+            let outcome = manager
+                .install_verified(&source, expected_sha256.as_deref())
+                .map_err(plugin_lifecycle_error_response)?;
             Ok(InstallOutcomeDto {
                 plugin_id: outcome.plugin_id,
                 version: outcome.version,
@@ -720,7 +723,7 @@ pub async fn plugin_list_task_sources(
 /// **写权限闸不在这里**：`actions[].mutating = true` 要求清单 `permissions[]` 含 `write`，
 /// 这条在**装载期**由 `build_manifest_task_cards` 拦（装不上），投影期再判一遍只会长出
 /// 第二套口径。⇒ 能走到本命令的声明里不存在越权动作，前端不需要也无法再判一次
-/// （`PluginSummaryDto` 根本不带 `permissions`）。
+/// （`PluginSummaryDto.permissions` 只是 manifest 声明的展示投影）。
 #[agent_command(
     domain = plugin,
     safety = Safe,
@@ -760,17 +763,15 @@ pub async fn plugin_list_task_cards(
 pub async fn plugin_update(
     state: State<'_, AppState>,
     plugin_id: String,
+    expected_sha256: Option<String>,
 ) -> Result<UpdateOutcomeDto, String> {
     let plugin_manager = state.plugin_manager.clone();
     let outcome =
         tauri::async_runtime::spawn_blocking(move || -> Result<UpdateOutcomeDto, String> {
             let mut manager = plugin_manager.blocking_write();
-            let outcome = manager.update(&plugin_id).map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })?;
+            let outcome = manager
+                .update_verified(&plugin_id, expected_sha256.as_deref())
+                .map_err(plugin_lifecycle_error_response)?;
             Ok(UpdateOutcomeDto {
                 plugin_id: outcome.plugin_id,
                 old_version: outcome.old_version,
@@ -814,6 +815,17 @@ pub async fn plugin_update(
         ))
     })?;
     Ok(outcome)
+}
+
+fn plugin_lifecycle_error_response(error: axagent_plugins::PluginError) -> String {
+    use crate::commands::error::ErrorCategory;
+    let (code, category) = match &error {
+        axagent_plugins::PluginError::IntegrityVerifyFailed(_) => {
+            (plugin_err::SOURCE_INTEGRITY_FAILED, ErrorCategory::Validation)
+        },
+        _ => ("COMMON_INTERNAL", ErrorCategory::Unrecoverable),
+    };
+    String::from(ErrorResponse::from_error_with_code(code, error, category))
 }
 
 /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。
@@ -873,6 +885,16 @@ pub struct PluginSummaryDto {
     pub tools: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub skills: Vec<String>,
+    /// 安装来源的可读描述（来自安装登记，不是用户可信输入）。
+    pub source: String,
+    /// 插件在 manifest 中声明的权限名；只展示，权限判定始终在后端。
+    pub permissions: Vec<String>,
+    /// 插件在 manifest 中声明的页面 id；路径仍由 `plugin_resolve_page_asset` 后端解析。
+    pub pages: Vec<String>,
+    /// 安装目录完整性：`verified` / `mismatch` / `unpinned` / `unknown`。
+    pub integrity_status: String,
+    /// 安装时固定的期望 SHA-256；本地源或旧安装登记可能没有。
+    pub pinned_hash: Option<String>,
     /// 插件声明的命名命令（阶段3-① 执行分发的可见面，`PLAN-plugin-gap-closure.md` §2）。
     pub commands: Vec<PluginCommandDto>,
     /// 事件投递计数（任务 #135，B3「丢弃计数」的可见面）。
@@ -923,19 +945,23 @@ pub struct PluginCommandDto {
     pub description: String,
 }
 
+/// 预览结果带出安装时要冻结的哈希：发布地址由清单声明，其它来源沿用用户手填值。
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginManifestDto {
+pub struct PluginSourceValidationDto {
     pub name: String,
     pub version: String,
     pub description: String,
     pub permissions: Vec<String>,
+    /// 插件声明的页面 id（manifest.pages[] 的只读投影）。
+    pub pages: Vec<String>,
     pub default_enabled: bool,
     pub hooks: serde_json::Map<String, serde_json::Value>,
     pub tools: Vec<ToolDto>,
     pub mcp_servers: Vec<McpServerDto>,
     pub skills: Vec<SkillDto>,
     pub capabilities: Vec<PluginCapabilityDto>,
+    pub expected_sha256: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -987,6 +1013,7 @@ pub struct UpdateOutcomeDto {
 
 #[cfg(test)]
 mod tests {
+    use super::plugin_lifecycle_error_response;
     use crate::commands::error::plugin_command_error_response;
 
     /// 映射结果必须能按 `ErrorResponse` 解析回来（不是裸字符串），并返回 (code, category)。
@@ -1046,5 +1073,21 @@ mod tests {
             mapped(&axagent_plugins::PluginError::PermissionDenied("档位不足".to_string()));
         assert_eq!(code, "COMMON_INTERNAL");
         assert_eq!(category, "permission_denied");
+    }
+
+    #[test]
+    fn source_integrity_failure_maps_to_validation_error_code() {
+        let error = axagent_plugins::PluginError::IntegrityVerifyFailed(
+            "plugin source integrity mismatch".to_string(),
+        );
+        let text = plugin_lifecycle_error_response(error);
+        let value: serde_json::Value =
+            serde_json::from_str(&text).expect("错误串必须是可解析的 ErrorResponse JSON");
+        assert_eq!(value["code"], "PLUGIN_SOURCE_INTEGRITY_FAILED");
+        assert_eq!(value["category"], "validation");
+        assert!(
+            value["detail"].as_str().is_some_and(|detail| detail.contains("integrity mismatch")),
+            "必须保留可定位的哈希失败详情"
+        );
     }
 }

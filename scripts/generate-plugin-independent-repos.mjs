@@ -803,7 +803,9 @@ if (existsSync(releaseFile)) {
       const line = lines[i].trim();
       if (line.startsWith("[")) break;
       if (line.startsWith("version")) {
-        const value = line.slice(line.indexOf('"') + 1, line.lastIndexOf('"'));
+        const firstQuote = line.indexOf('"');
+        const lastQuote = line.lastIndexOf('"');
+        const value = firstQuote >= 0 && lastQuote > firstQuote ? line.slice(firstQuote + 1, lastQuote) : "";
         if (value) declared.push([relative(ROOT, manifest), value]);
         break;
       }

@@ -305,6 +305,11 @@
 | `MODEL.md` | 参考 | `bots` 表 20 列字段、`conversations.bot_id` 增量、DAO 与 `BotWorkspace` 接口、声明式建表与兼容性矩阵。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `IPC.md` | 参考 | 9 个 Tauri 命令与 Rust/TS DTO 契约、11 个错误码、命令注册与生成物检查清单。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PLAN.md` | 计划 | P1 纵向切片 T1–T6 任务卡：落点文件、依赖 crate、路由与 i18n 键、验收命令、估时与两条最高风险。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/GAP-P2.md` | 参考 | P2-a 三项（审批执行 · Bot 例程 · 通知未读）26 条 A/B/C 逐条判定，含 OpenMausBot 线程级审批语义实测修正与主线流程图。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/ADR-P2.md` | 参考 | P2-a 4 条决策：审批解析位置与合并规则、cron 构造 Bot 上下文、例程结果落未读、五档→运行档映射与引擎能力表。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/MODEL-P2.md` | 参考 | P2-a 零 schema 变更：CronJob 加 botId/timezone 两个 serde-default JSON 字段，逐表排除理由与 reconcile 安全核对。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/IPC-P2.md` | 参考 | P2-a 契约冻结稿：新增 2 命令、修改 3 命令（含 Option&lt;Option&lt;T&gt;&gt; 清除语义）、2 个新错误码入 11 语言、事件零新增。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/PLAN-P2.md` | 计划 | P2-a T1'–T7' 任务卡：依赖图、落点文件、i18n 键、验收命令与估时；P2-b 范围与 P2-c 清单各一段、3 个开放问题。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -481,6 +486,7 @@
 | 文件名 | 标题 | 一句话用途 | 状态 | 日期 | 对应版本 | 功能点 | 来源 | 关联 |
 |---|---|---|---|---|---|---|---|---|
 | `PLAN.md` | PLAN：Bot 集成的 P1 纵向切片 | Bot 数据模型与存储 → CRUD IPC → 侧栏与路由 → 每 Bot 线程 → SOUL/MEMORY 注入与查看，逐任务给出落点文件与验收命令。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `GAP.md` `ADR.md` `MODEL.md` `IPC.md` |
+| `P2/PLAN-P2.md` | PLAN：Bot 集成的 P2-a 纵向切片 | 审批执行 + Bot 例程 + 通知未读：T1'–T7' 任务卡、依赖图与逐卡验收命令；P2-b 范围、P2-c 清单与 3 个待裁决问题。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/GAP-P2.md` `P2/ADR-P2.md` `P2/MODEL-P2.md` `P2/IPC-P2.md` |
 | `PLAN-dev-team-work-protocol.md` | PLAN · 开发团队工作协议（2026-10-30 建团） | 写冲突规则： | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 通用 | 本地原创 | `PLAN-frontend-information-architecture.md` `AUDIT-gates-and-headless-scheduler-2026-10-26.md` `PLAN-r3h-long-sample-calibration.md` `PLAN-url-as-truth.md` |
 | `PLAN-four-horizon-workflow-alignment.md` | PLAN：四周期工作流对齐 —— 十项需求差距分析与实现方案 | 数据源四周期满足度（这是需求①后半的答案，也是需求⑦的输入） | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 股票决策链 | 本地原创 | `PLAN-multi-horizon-decision-science.md` `AUDIT-jev-adoption-stock-workflow-2026-09-20.md` `PLAN-analysis-data-repair.md` |
 | `PLAN-r2-daily-replay.md` | PLAN-r2-daily-replay —— 每日时间旅行回放（R-2） | R-1 接通回放验证后发现回放样本价格错位（详见 AUDIT-stock-business-profitability-2026-10-25.md §11）。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 时间旅行回放 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-25.md` |
@@ -709,6 +715,10 @@
 | `ADR.md` | Bot 集成架构决策记录（9 条） | 新表 `bots`、线程归属 `bot_id`、`~/.axagent/bots/<id>/` 布局、`<bot-soul>` 与全局 persona 互斥、复用 `ProjectMemory`、团队出 P1、审批只存不执行、无 migration、删除保留线程与记忆。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `MODEL.md` `IPC.md` |
 | `MODEL.md` | Bot 数据模型与迁移策略 | `bots` 表 20 列、`conversations.bot_id`、DAO 签名、`BotWorkspace` 文件系统模型、兼容性矩阵与删除语义。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `ADR.md` `IPC.md` |
 | `IPC.md` | Bot 的 Tauri 命令与事件契约 | 9 个命令、Rust/TS DTO、11 个错误码、命令注册与生成物检查清单；P1 不新增事件。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `MODEL.md` |
+| `P2/GAP-P2.md` | AxAgent × OpenMausBot P2-a 差距分析 | 例程/审批/通知 26 条 A/B/C 实测判定；修正 P1 对 OpenMausBot 线程级审批语义的转述失真。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/ADR-P2.md` `P2/PLAN-P2.md` |
+| `P2/ADR-P2.md` | Bot 集成 P2-a 架构决策记录（4 条） | 审批解析纯函数与合并规则（线程覆盖 / 例程只取 Bot 档 / custom 不传）、cron 复用执行上下文、通知零新管线、五档→运行档映射表。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/MODEL-P2.md` `P2/IPC-P2.md` |
+| `P2/MODEL-P2.md` | Bot P2-a 数据模型（零 schema 变更） | CronJob JSON 加 botId/timezone（serde default 免迁移）、calculate_next_run 时区参数、逐表排除与 reconcile 安全核对。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/ADR-P2.md` `P2/IPC-P2.md` |
+| `P2/IPC-P2.md` | Bot P2-a IPC 契约（冻结稿） | 新增 create/list_bot_scheduled_tasks，修改 create/list/update_scheduled_task（Option&lt;Option&lt;T&gt;&gt; 清除语义），2 个新错误码 11 语言，事件零新增。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/MODEL-P2.md` |
 | `dependency-graph.md` | AxAgent 仓库依赖图与拆分分析 | 仓库依赖图与按技术层拆分可行性分析（参考） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `dependency-matrix.md` | AxAgent Crate 精确依赖矩阵（实测） | 逐 crate 读取 Cargo.toml 得到的精确依赖矩阵（2026-10-31 实测） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `gate-coverage-ledger.md` | 门禁覆盖台账（gate-coverage-ledger） | CI / 本地门禁覆盖面台账与补齐进度 | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 | `PLAN-declarative-schema-sync.md` |

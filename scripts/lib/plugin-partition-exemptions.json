@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "note": "分区审计的显式豁免：只放宽格式差异，不放宽内容。每条必须给出 canonicalizer（强规范化器）与逐条理由；脚本会打印命中项，未命中的条目会作为过期项提示删除。",
+  "exemptions": [
+    {
+      "plugin": "opc-accounting",
+      "file": "web/pages/bundle.js",
+      "canonicalizer": "esbuild-minify",
+      "reason": "主仓副本与独立仓仅 `if (cond) { return; }` 的花括号布局不同（5 处单语句 return）。dprint 对既有花括号非幂等（useBraces=always / whenNotSingleLine 都不会增删已存在的花括号），格式归一会留下假差异。独立仓是格式基准、不回灌主仓格式；改用 esbuild --minify 做语义归一后两侧逐字节一致，证明是纯格式差异、无逻辑改动。",
+      "recordedAt": "2026-11-22"
+    }
+  ]
+}

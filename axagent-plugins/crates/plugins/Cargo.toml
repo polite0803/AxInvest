@@ -23,5 +23,11 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+# SDK 契约钉版（2026-11-22）：17 个业务插件迁出主仓后，SDK 权威快照留在本 workspace。
+# 宿主测试是「宿主与插件两侧用同一份 SDK」的本地证据（见 tests/sdk_contract_pin_test.rs）。
+[dev-dependencies]
+axagent-plugin-opc-core = { version = "3.0.0", path = "../plugin-opc-core" }
+axagent-plugin-testkit = { version = "3.0.0", path = "../plugin-testkit" }
+
 [lints]
 workspace = true

@@ -27,7 +27,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { ensurePluginBuildRoots, pluginBuildRootsDir } from "./lib/plugin-build-roots.mjs";
+import { ensurePluginBuildRoots, pluginSourceRootsDir } from "./lib/plugin-build-roots.mjs";
 import { discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -207,11 +207,14 @@ function selftest() {
   const stockWorker = stagedEnvironment().AXAGENT_STOCK_WORKER_BIN;
   t(`⑰ stock worker 路径指向 bundle/bin 下的平台可执行文件（${stockWorker ?? "未生成"}）`, Boolean(stockWorker && stockWorker.endsWith(path.join("bin", platformWorkerName()))));
   t(`⑱ 负控：平台 worker 文件名由平台决定（${platformWorkerName()}）`, ["axagent-plugin-stock", "axagent-plugin-stock.exe"].includes(platformWorkerName()));
-  const buildRootsDir = pluginBuildRootsDir(repoRoot);
+  // 构建根必须是主仓外的 17 个独立仓：主仓副本已是待删除对象，不能再当构建输入。
+  // 只验路径口径（干净 checkout 上 sibling 仓可能不在，存在性由 ensurePluginBuildRoots 负责）。
+  const sourceRootsDir = pluginSourceRootsDir(repoRoot);
   t(
-    `⑲ 临时构建根与主 workspace 分离、生成器在场（${path.relative(repoRoot, buildRootsDir)}）`,
-    Boolean(buildRootsDir) && buildRootsDir !== path.join(repoRoot, "axagent-plugins")
-      && fs.existsSync(path.join(repoRoot, "scripts", "generate-plugin-independent-repos.mjs")),
+    `⑲ 构建根锚定主仓外独立仓（${path.relative(repoRoot, sourceRootsDir)}）`,
+    Boolean(sourceRootsDir)
+      && path.resolve(sourceRootsDir) === path.resolve(repoRoot, "..", "AxInvest-plugin-repos")
+      && !`${path.resolve(sourceRootsDir)}${path.sep}`.startsWith(`${path.resolve(repoRoot)}${path.sep}`),
   );
 
   console.log(`[cargo-all-workspaces --selftest] ${pass} 项通过 / ${fails.length} 项失败`);
@@ -290,9 +293,9 @@ function assertStagedArtifacts() {
 if (mode === "nextest" && !listOnly) {
   // bundle E2E 在没有产物时只会打印 SKIP 并返回成功。这里逐插件串行 staging，
   // 任一失败立即中止，确保 CI 里每个门控 E2E 都有真实产物可用。
-  // 打包脚本与 worker 模板源权威都在主仓 `axagent-plugins/`。CI 只 checkout 本仓，
-  // 不能依赖 sibling 独立插件仓；先用生成器从模板源物化临时构建根（与主仓 workspace
-  // 隔离的 exclude crate 需要自己的根 Cargo.toml），再用主仓脚本构建 + `--check` 握手验收。
+  // worker 源码权威是主仓外的 17 个独立仓；每个仓自带根 Cargo.toml 与 SDK 快照，
+  // 直接作为构建根（`--build-root`），再用主仓打包脚本构建 + `--check` 握手验收。
+  // CI / Release 必须先获取这 17 个仓（取源方案尚未定，缺仓即 fail-closed）。
   const buildRoots = ensurePluginBuildRoots(repoRoot, BUNDLE_STAGING.map((item) => item.plugin));
   for (const { plugin } of BUNDLE_STAGING) {
     const staged = spawnSync(

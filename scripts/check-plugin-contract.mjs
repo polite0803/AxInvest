@@ -7,10 +7,12 @@
  * 域包底册 verticalSlices、runtime.yaml、Rust PluginManifest、dist/plugin.json 六处，
  * 只有「数量对账」而没有「逐项对账」。任何一处漂移都能让 17 仓 CI 全绿而语义已经分叉。
  *
- * 唯一权威：scripts/lib/plugin-contract.json。本脚本把契约与**主仓内可见的全部事实源**
- * 逐项比对；外置仓（Cargo.toml / dist / release.json）由
- * `node scripts/generate-plugin-independent-repos.mjs --verify` 在本地集成门里对账，
- * 远端主仓 CI 不检出同级插件仓，故本脚本刻意不读仓外目录。
+ * 唯一权威：scripts/lib/plugin-contract.json。本脚本把契约与全部事实源逐项比对。
+ * 2026-11-22 起 worker 源码、页面资产的权威位置是主仓外的 17 个独立仓
+ * （`../AxInvest-plugin-repos/<plugin>`，`AXAGENT_PLUGIN_REPOS_ROOT` 可覆盖）；
+ * C/F 两条判据直接读独立仓，缺任一仓即 fail-closed —— **绝不回退主仓副本**
+ * （主仓 `axagent-plugins/crates/plugin-*` 是待删除的迁移残留）。
+ * 发布物（dist / release.json）仍由 `generate-plugin-independent-repos.mjs --verify` 对账。
  *
  * 判据（任一不满足即退 1）：
  *   A 契约自身：schema/版本/条目数/名字形态/唯一性/形态⇔crate 与 packageName
@@ -29,6 +31,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pluginRepo, pluginReposRoot } from "./lib/plugin-repos.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -282,12 +285,18 @@ function checkRealTree(sources) {
   // 这里改查「派生语句仍在」，不再拿字面量逐项对账（否则每次契约改版都会假红）。
   const derivesWorkers = /CONTRACT\.plugins[\s\S]{0,160}p\.strategy === "worker"/.test(generatorSrc);
   if (!derivesWorkers) v.push("生成器未从契约派生 WORKER_SPECS");
+  // worker 源码权威 = 主仓外独立仓；缺仓 fail-closed，不回退主仓副本。
+  const reposRoot = pluginReposRoot(root);
+  if (!existsSync(reposRoot)) v.push(`独立插件仓根不存在：${reposRoot}（CI 必须先取源，禁止回退主仓副本）`);
   for (const p of plugins) {
-    const crateDir = join(root, "axagent-plugins", "crates", p.crate ?? "__none__", "Cargo.toml");
-    if (p.strategy === "worker" && !existsSync(crateDir)) v.push(`${p.name}: worker 但主仓 crate 不存在 ${crateDir}`);
-    if (p.strategy === "declarative" && p.crate && existsSync(crateDir)) {
-      v.push(`${p.name}: declarative 但主仓 crate 仍存在 ${crateDir}`);
+    if (p.strategy !== "worker") continue;
+    const repoRoot = pluginRepo(root, p.name);
+    if (!existsSync(join(repoRoot, ".git"))) {
+      v.push(`${p.name}: worker 但独立仓不存在 ${repoRoot}`);
+      continue;
     }
+    const crateManifest = join(repoRoot, p.crate ?? "__none__", "Cargo.toml");
+    if (!existsSync(crateManifest)) v.push(`${p.name}: worker 但独立仓 crate 不存在 ${crateManifest}`);
     const spec = bundleSpecs?.[p.name];
     if (spec) {
       const expectedPackage = p.packageName ?? null;
@@ -348,7 +357,7 @@ function checkRealTree(sources) {
     }
     const yaml = join(root, "config", "opc", "domain_packs", p.domainPackId, "manifest.yaml");
     if (!existsSync(yaml)) v.push(`${p.name}: 缺少域包 manifest.yaml ${yaml}`);
-    const pageDir = join(root, "axagent-plugins", "crates", `plugin-${p.name}`, "web", "pages");
+    const pageDir = join(pluginRepo(root, p.name), `plugin-${p.name}`, "web", "pages");
     for (const asset of p.pageAssets) {
       if (!existsSync(join(pageDir, asset))) v.push(`${p.name}: 缺少契约登记的页面资产 ${asset}`);
     }

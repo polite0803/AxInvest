@@ -20,6 +20,7 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  AXAGENT_PLUGIN_REPOS_ROOT: ${{ github.workspace }}/.plugin-repos
   NDK_VERSION: 'r26d'
 
 concurrency:
@@ -134,6 +135,10 @@ jobs:
           ref: master
           submodules: recursive
 
+      # 插件源码唯一权威位置：17 个独立仓按 scripts/lib/plugin-sources.json 钉版检出。
+      # 主仓不再携带插件源码副本；缺仓即失败，禁止回退主仓路径。
+      - name: Checkout plugin repos (pinned)
+        uses: ./.github/actions/checkout-plugin-repos
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -407,6 +412,10 @@ jobs:
           ref: master
           submodules: recursive
 
+      # 插件源码唯一权威位置：17 个独立仓按 scripts/lib/plugin-sources.json 钉版检出。
+      # 主仓不再携带插件源码副本；缺仓即失败，禁止回退主仓路径。
+      - name: Checkout plugin repos (pinned)
+        uses: ./.github/actions/checkout-plugin-repos
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -528,6 +537,10 @@ jobs:
           ref: master
           submodules: recursive
 
+      # 插件源码唯一权威位置：17 个独立仓按 scripts/lib/plugin-sources.json 钉版检出。
+      # 主仓不再携带插件源码副本；缺仓即失败，禁止回退主仓路径。
+      - name: Checkout plugin repos (pinned)
+        uses: ./.github/actions/checkout-plugin-repos
       - name: Free disk space
         run: |
           df -h /

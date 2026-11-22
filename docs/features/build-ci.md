@@ -140,7 +140,7 @@
 ## 配置与开关
 
 - **profile**：`[profile.dev]`、`[profile.dev.build-override]`、`[profile.release-android]`，逐根一份（`src-tauri/Cargo.toml:244-281`、`axagent-quant/Cargo.toml:46-82` 等）。
-- **Android 内存**：`CARGO_PROFILE_RELEASE_LTO=off`、`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`、`CARGO_BUILD_JOBS`（`.github/workflows/release.yml:744-763`）。
+- **Android 内存**：`CARGO_PROFILE_RELEASE_LTO=off`、`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`、`CARGO_BUILD_JOBS`（`.github/workflows/release.yml:765-776`）。
 - **本地门禁模式**：`node scripts/ci-check.mjs --quick`（pre-push 路径）；`--strict-skip`（缺工具链即失败）。
 - **Lint 继承**：`[lints] workspace = true`，当前仅 7 个 crate 真正继承。
 - **Rust 测试环境变量**：Windows 本地必须 `__TAURI_WORKSPACE__=true`。

@@ -212,3 +212,6 @@ temp_test.pdb
 docs/audits/AUDIT-*-blockers-*.md
 docs/audits/AUDIT-capability-inventory-*.md
 docs/architecture.html
+
+# CI 取插件源的检出目录（.github/actions/checkout-plugin-repos 写入）
+/.plugin-repos/

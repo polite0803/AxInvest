@@ -1,62 +1,54 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * 插件 worker 的**临时构建根**。
+ * 插件 worker 的**构建根解析**。
  *
- * 可交付插件源码的权威在 17 个独立 Git 仓，但它们只由各插件仓的 Release job checkout；
- * 主仓 CI / Release 只 checkout 本仓，不能强依赖 sibling repos（否则整条链当场红）。
- * 主仓 `axagent-plugins/crates/plugin-*` 是生成模板源，被 `exclude` 隔在主 workspace 外，
- * 直接 `cargo build -p <packageName>` 会报 "package ID specification did not match"。
+ * 可交付插件源码的权威是 17 个独立 Git 仓（`../AxInvest-plugin-repos/<plugin>`，
+ * `AXAGENT_PLUGIN_REPOS_ROOT` 可覆盖）。每个独立仓自带 SDK 快照与根 `Cargo.toml`，
+ * 本身就是可 `cargo build -p <packageName>` 的工作区根 ⇒ 不需要再物化任何临时副本。
  *
- * 本模块用**已有的生成器**从主仓模板源物化出与独立仓同构的临时工作区（含 SDK 快照与
- * 根 Cargo.toml），只用作 cargo 构建根；打包、页面资产、清单仍由主仓脚本负责。
- * 这样 CI 里的构建输入与已发布的独立仓一致，又不引入对仓外目录的强依赖。
+ * 2026-11-22 变更（物理删除前置条件）：此前这里调用生成器的「从主仓模板物化」引导模式，
+ * 从主仓 `axagent-plugins/crates/plugin-*` 模板源物化临时构建根 ⇒ 主仓副本既是「待删的」
+ * 又是「构建必需的」，删除永远无法落地。该引导调用已整体移除：现在直接返回独立仓根，
+ * 并对每个根 fail-closed 校验（Git 仓 + 根 Cargo.toml）。主仓副本不再参与构建。
+ *
+ * 代价（已知并接受）：CI / Release 必须在构建前获取 17 个独立仓。缺仓时这里直接报错，
+ * **不退回主仓副本** —— 回退会让「独立仓是唯一源」再次变成口号（取源方案见
+ * `check-plugin-source-ownership.mjs` 的第 5 项前置，尚未实施）。
  */
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { PLUGIN_NAMES } from "./plugin-repos.mjs";
+import { PLUGIN_NAMES, pluginRepo, pluginReposRoot } from "./plugin-repos.mjs";
 
-const GENERATOR = "scripts/generate-plugin-independent-repos.mjs";
-
-export function pluginBuildRootsDir(repoRoot) {
-  return path.resolve(
-    process.env.AXAGENT_PLUGIN_BUILD_ROOTS_DIR ?? path.join(repoRoot, "target", "plugin-build-roots"),
-  );
+/** 独立仓根（必须在主仓之外）—— 插件源码与 cargo 工作区的唯一权威。 */
+export function pluginSourceRootsDir(repoRoot) {
+  return pluginReposRoot(repoRoot);
 }
 
+/** 单个插件的 cargo 构建根 = 其独立仓根。 */
 export function pluginBuildRoot(repoRoot, plugin) {
-  return path.join(pluginBuildRootsDir(repoRoot), plugin);
+  return pluginRepo(repoRoot, plugin);
 }
 
 /**
- * 逐插件补齐临时构建根（已存在的跳过），任一生成失败即中止。
- * 返回所有请求的构建根，供调用方 fail-closed 校验。
+ * 逐插件校验构建根可用，任一不可用即中止（fail-closed）。
+ * 返回 `Map<plugin, root>`，供调用方直接传给 `--build-root`。
  */
 export function ensurePluginBuildRoots(repoRoot, plugins = PLUGIN_NAMES) {
-  const rootsDir = pluginBuildRootsDir(repoRoot);
-  fs.mkdirSync(rootsDir, { recursive: true });
   const roots = new Map();
+  const problems = [];
   for (const plugin of plugins) {
     const root = pluginBuildRoot(repoRoot, plugin);
-    if (!fs.existsSync(path.join(root, "Cargo.toml"))) {
-      const result = spawnSync(
-        process.execPath,
-        [GENERATOR, "--bootstrap-from-main", "--plugin", plugin, "--skip-git", "--out", rootsDir],
-        { cwd: repoRoot, stdio: "inherit", windowsHide: true },
-      );
-      if (result.error) {
-        throw new Error(`物化 ${plugin} 插件构建根失败：${result.error.message}`);
-      }
-      if (result.status !== 0) {
-        throw new Error(`物化 ${plugin} 插件构建根失败（exit ${result.status}）`);
-      }
+    if (!fs.existsSync(path.join(root, ".git"))) {
+      problems.push(`${plugin}: 不是 Git 仓（${root}）`);
+    } else if (!fs.existsSync(path.join(root, "Cargo.toml"))) {
+      problems.push(`${plugin}: 缺少根 Cargo.toml（${root}）`);
     }
     roots.set(plugin, root);
   }
-  const missing = [...roots].filter(([, root]) => !fs.existsSync(path.join(root, "Cargo.toml")))
-    .map(([plugin]) => plugin);
-  if (missing.length) {
-    throw new Error(`插件构建根缺少 Cargo.toml：${missing.join(", ")}（根：${rootsDir}）`);
+  if (problems.length) {
+    throw new Error(
+      `插件构建根不可用（独立仓是唯一权威，不回退主仓副本）：${problems.join("；")}`,
+    );
   }
   return roots;
 }

@@ -17,6 +17,7 @@ env:
   CARGO_BUILD_JOBS: 2
   CARGO_PROFILE_DEV_DEBUG: 0
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  AXAGENT_PLUGIN_REPOS_ROOT: ${{ github.workspace }}/.plugin-repos
 
 concurrency:
   group: '${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}'
@@ -714,6 +715,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # 插件源码唯一权威位置：17 个独立仓按 scripts/lib/plugin-sources.json 钉版检出。
+      # 主仓不再携带插件源码副本；缺仓即失败，禁止回退主仓路径。
+      - name: Checkout plugin repos (pinned)
+        uses: ./.github/actions/checkout-plugin-repos
       - name: Add swap space
         run: |
           if [ -f /swapfile ]; then
@@ -1082,6 +1087,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # 插件源码唯一权威位置：17 个独立仓按 scripts/lib/plugin-sources.json 钉版检出。
+      # 主仓不再携带插件源码副本；缺仓即失败，禁止回退主仓路径。
+      - name: Checkout plugin repos (pinned)
+        uses: ./.github/actions/checkout-plugin-repos
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -1189,6 +1198,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # 插件源码唯一权威位置：17 个独立仓按 scripts/lib/plugin-sources.json 钉版检出。
+      # 主仓不再携带插件源码副本；缺仓即失败，禁止回退主仓路径。
+      - name: Checkout plugin repos (pinned)
+        uses: ./.github/actions/checkout-plugin-repos
       - name: Check plugin source ownership selftest
         run: node scripts/check-plugin-source-ownership.mjs --selftest
 

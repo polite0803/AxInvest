@@ -66,7 +66,7 @@ Period::UltraShort => "超短", Short => "短线", Mid => "中线", Period::Long
 | B2 | `src/commands/portfolio-mgr.rhai:3434-3436` `cn_tier` | 超短线 | 短线 | 中线 | **长线** |
 | B3 | `agency_experts/stock-analysis/reflection.md:237-240` | 超短线 | — | — | **长线** |
 | B4 | `config/llm-output-schemas.json:507` | 超短（2 日） | — | — | **长线（90 个交易日）** |
-| B5 | `crates/analysis-engine/src/intent_parser.rs:36-44` 意图词表 | 超短/超短线 | — | — | **长线** |
+| B5 | `axinvest-plugin-stock-3.0.1/stock-core/src/intent_parser.rs:36-44` 意图词表 | 超短/超短线 | — | — | **长线** |
 
 ### 3.2 前端 i18n：8 套键族（`src/i18n/locales/zh-CN.json`）
 

@@ -2040,7 +2040,7 @@ function runSelftest() {
     check(scanAgentCommandFace([["src-tauri/b.rs", commentOnly]]).total === 0, "负控⑰b：`//!` / `//` / `/*` 注释形态的标注名一律不计");
     // 负控⑰c：非宿主根必须单列。真实树当前为 0（插件命名命令走 `build_plugin_command_index`，
     //   不经 inventory），而锚点 value2 钉的就是这个 0 ⇒ 插件侧真接入标注时必须显式判红，不许静默变化。
-    const plug = scanAgentCommandFace([["axagent-plugins/crates/plugin-stock/src/main.rs", L(`${AC}(domain = "finance")`)]]);
+    const plug = scanAgentCommandFace([["AxInvest-plugin-repos/stock/plugin-stock/src/main.rs", L(`${AC}(domain = "finance")`)]]);
     check(plug.total === 1 && plug.host === 0 && plug.nonHost === 1, "负控⑰c：插件根标注计入 nonHost，不得并进 host");
   }
 

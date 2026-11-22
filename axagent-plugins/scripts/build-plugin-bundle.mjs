@@ -44,11 +44,12 @@ const pluginVersionFlag = argv.indexOf("--plugin-version");
 const buildRootFlag = argv.indexOf("--build-root");
 const pluginName = pluginFlag >= 0 && argv[pluginFlag + 1] ? argv[pluginFlag + 1] : "stock";
 const targetTriple = targetFlag >= 0 && argv[targetFlag + 1] ? argv[targetFlag + 1] : null;
-// `--build-root` 只切换 cargo 的构建工作区，不切换前端/域包/清单的源码根：
-// 主仓 CI 从模板源物化出与独立仓同构的临时工作区后，仍由本脚本按主仓口径打包。
+// `--build-root` 只切换 cargo 的构建工作区，不切换前端/域包/清单的源码根。
+// 缺省构建根 = 该插件对应的独立 Git 仓（唯一权威源）；`--build-root` 保留给
+// 需要换 target 目录或跨机交叉编译的调用方，缺省路径不再回退主仓副本。
 const cargoCwd = buildRootFlag >= 0 && argv[buildRootFlag + 1]
   ? path.resolve(argv[buildRootFlag + 1])
-  : workspaceRoot;
+  : requirePluginSourceRoot(pluginName);
 const requestedPluginVersion = pluginVersionFlag >= 0 && argv[pluginVersionFlag + 1]
   ? argv[pluginVersionFlag + 1]
   : null;
@@ -57,22 +58,22 @@ const requestedPluginVersion = pluginVersionFlag >= 0 && argv[pluginVersionFlag 
  * 插件规格表（键 = `--plugin` 取值）。
  *
  * - `packageName`：cargo 包名，同时决定 `cargo build -p` 与产物文件名（`<packageName>[.exe]`）；
- * - `webDir`：前端贡献源目录（相对 `axagent-plugins/`）；`null` = 无前端贡献 ⇒ 不拷资产、
- *   且清单不得声明 `pages[]`（`--check` 会拦）；
- * - `uiSchema`：`ui.json` 源（相对 `axagent-plugins/`）；`null` = 无详情槽声明；
+ * - `webDir`：前端贡献源目录（相对**插件源码根** —— 独立仓根，或打包器自带副本时的本仓根）；
+ *   `null` = 无前端贡献 ⇒ 不拷资产、且清单不得声明 `pages[]`（`--check` 会拦）；
+ * - `uiSchema`：`ui.json` 源（同上，相对插件源码根）；`null` = 无详情槽声明；
  * - `manifest(ctx)`：清单构造器，`ctx = { version, binaryName, sha256 }`。**键序即产物键序**
  *   （`JSON.stringify` 保序），改键序等于改产物，下游比对会当漂移。
  */
 const PLUGIN_SPECS = {
   "opc-accounting": {
     packageName: "axagent-plugin-opc-accounting",
-    webDir: path.join("crates", "plugin-opc-accounting", "web"),
+    webDir: path.join("plugin-opc-accounting", "web"),
     uiSchema: null,
     manifest: opcAccountingManifest,
   },
   "opc-security": {
     packageName: "axagent-plugin-opc-security",
-    webDir: path.join("crates", "plugin-opc-security", "web"),
+    webDir: path.join("plugin-opc-security", "web"),
     uiSchema: null,
     commands: [
       "opc_security_opc_search_wiki",
@@ -86,7 +87,7 @@ const PLUGIN_SPECS = {
   // `PLUGIN_SPECS[name].commands` 派生 command 条目；契约 checker 逐项对账这份列表。
   "opc-game-dev": {
     packageName: "axagent-plugin-opc-game-dev",
-    webDir: path.join("crates", "plugin-opc-game-dev", "web"),
+    webDir: path.join("plugin-opc-game-dev", "web"),
     uiSchema: null,
     commands: [
       "opc_game_dev_web_search",
@@ -98,7 +99,7 @@ const PLUGIN_SPECS = {
   },
   "opc-ai-research": {
     packageName: "axagent-plugin-opc-ai-research",
-    webDir: path.join("crates", "plugin-opc-ai-research", "web"),
+    webDir: path.join("plugin-opc-ai-research", "web"),
     uiSchema: null,
     commands: [
       "opc_ai_research_opc_list_projects",
@@ -113,7 +114,7 @@ const PLUGIN_SPECS = {
   },
   "opc-consulting": {
     packageName: "axagent-plugin-opc-consulting",
-    webDir: path.join("crates", "plugin-opc-consulting", "web"),
+    webDir: path.join("plugin-opc-consulting", "web"),
     uiSchema: null,
     commands: [
       "opc_consulting_opc_search_wiki",
@@ -127,7 +128,7 @@ const PLUGIN_SPECS = {
   },
   "opc-design": {
     packageName: "axagent-plugin-opc-design",
-    webDir: path.join("crates", "plugin-opc-design", "web"),
+    webDir: path.join("plugin-opc-design", "web"),
     uiSchema: null,
     commands: [
       "opc_design_web_search",
@@ -140,7 +141,7 @@ const PLUGIN_SPECS = {
   },
   "opc-ecommerce": {
     packageName: "axagent-plugin-opc-ecommerce",
-    webDir: path.join("crates", "plugin-opc-ecommerce", "web"),
+    webDir: path.join("plugin-opc-ecommerce", "web"),
     uiSchema: null,
     commands: [
       "opc_ecommerce_web_search",
@@ -154,7 +155,7 @@ const PLUGIN_SPECS = {
   },
   "opc-education": {
     packageName: "axagent-plugin-opc-education",
-    webDir: path.join("crates", "plugin-opc-education", "web"),
+    webDir: path.join("plugin-opc-education", "web"),
     uiSchema: null,
     commands: [
       "opc_education_web_search",
@@ -167,7 +168,7 @@ const PLUGIN_SPECS = {
   },
   "opc-finance-invest": {
     packageName: "axagent-plugin-opc-finance-invest",
-    webDir: path.join("crates", "plugin-opc-finance-invest", "web"),
+    webDir: path.join("plugin-opc-finance-invest", "web"),
     uiSchema: null,
     commands: [
       "opc_finance_invest_opc_get_dashboard",
@@ -185,7 +186,7 @@ const PLUGIN_SPECS = {
   },
   "opc-geospatial": {
     packageName: "axagent-plugin-opc-geospatial",
-    webDir: path.join("crates", "plugin-opc-geospatial", "web"),
+    webDir: path.join("plugin-opc-geospatial", "web"),
     uiSchema: null,
     commands: [
       "opc_geospatial_opc_search_wiki",
@@ -199,7 +200,7 @@ const PLUGIN_SPECS = {
   },
   "opc-project-management": {
     packageName: "axagent-plugin-opc-project-management",
-    webDir: path.join("crates", "plugin-opc-project-management", "web"),
+    webDir: path.join("plugin-opc-project-management", "web"),
     uiSchema: null,
     commands: [
       "opc_project_management_opc_create_project",
@@ -211,7 +212,7 @@ const PLUGIN_SPECS = {
   },
   "opc-software-dev": {
     packageName: "axagent-plugin-opc-software-dev",
-    webDir: path.join("crates", "plugin-opc-software-dev", "web"),
+    webDir: path.join("plugin-opc-software-dev", "web"),
     uiSchema: null,
     commands: [
       "opc_software_dev_opc_list_projects",
@@ -226,13 +227,13 @@ const PLUGIN_SPECS = {
   },
   "opc-sales-growth": {
     packageName: "axagent-plugin-opc-sales-growth",
-    webDir: path.join("crates", "plugin-opc-sales-growth", "web"),
+    webDir: path.join("plugin-opc-sales-growth", "web"),
     uiSchema: null,
     manifest: opcSalesGrowthManifest,
   },
   "opc-content-media": {
     packageName: "axagent-plugin-opc-content-media",
-    webDir: path.join("crates", "plugin-opc-content-media", "web"),
+    webDir: path.join("plugin-opc-content-media", "web"),
     uiSchema: null,
     manifest: opcContentMediaManifest,
   },
@@ -248,12 +249,12 @@ const PLUGIN_SPECS = {
     packageName: "axagent-plugin-stock",
     // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
     // 目前只有一页通道探针（B8-0）；真实股票 UI 随 B8-1..B8-5 才落进这里。
-    webDir: path.join("crates", "plugin-stock", "web"),
+    webDir: path.join("plugin-stock", "web"),
     // UI 贡献声明（任务 #149 第 3 步）：`ui.json` 与 `plugin.json` **同级**落在安装根，
     // 任务源的 `detailSchema` 只能引用它里面已声明的 key —— 宿主 `build_manifest_task_sources`
     // 安装期硬校验，「声明了却不在 ui.json 里」等于装不上。故它是清单的一部分，必须由本脚本
     // 一起产出（前端资产目录 `web/` 只收 html/js/css，扩展名白名单会拒掉 .json）。
-    uiSchema: path.join("crates", "plugin-stock", "ui.json"),
+    uiSchema: path.join("plugin-stock", "ui.json"),
     manifest: stockManifest,
   },
   opc: {
@@ -261,7 +262,7 @@ const PLUGIN_SPECS = {
     // 前端贡献源目录（#301 判据④闭合）：`web/` 下的文件按**相对路径原样**进产物，
     // 目前只有一页通道探针（pages/index.html，照 stock B8-0 先例）。OPC 的 16 个真实页面
     // 仍住主壳 src/pages/opc/**（路由声明已交域模块 routes.tsx），迁入本产物属后续批。
-    webDir: path.join("crates", "plugin-opc", "web"),
+    webDir: path.join("plugin-opc", "web"),
     // OPC 无 ui.json 详情槽声明（没有任务源引用 OPC 的 detailSchema）⇒ 保持 null，
     // 不为「以后可能用」预留空文件。
     uiSchema: null,
@@ -272,7 +273,7 @@ const PLUGIN_SPECS = {
 // 清单命令的智能体面授权档位（`requiredPermission`，见 `PluginCommandManifest`）：
 // **未声明 = 只读档** ⇒ 写命令在智能体面按 `Safe` 暴露（`plugin_command_safety(None)`
 // 的测试锁定），用户确认弹窗形同虚设。写命令名单以宿主
-// `axagent-plugins/crates/plugins/src/worker.rs` 的
+// 宿主 `crates/plugins/src/worker.rs` 的
 // `required_permission_for(("opc.store", …)) => Write` 为准 —— **两处必须同批改**
 // （那边加一条写 op，这里就要加一条命令）。
 // ⚠ 删除类（delete_blog_post / delete_content_asset / delete_customer / delete_invoice）
@@ -356,21 +357,59 @@ const spec = PLUGIN_SPECS[pluginName];
 if (!spec) {
   fail(`未知插件 --plugin ${pluginName}（可选：${Object.keys(PLUGIN_SPECS).join(" | ")}）`);
 }
+
+/** 独立仓根（可用 `AXAGENT_PLUGIN_REPOS_ROOT` 覆盖）；主仓同级目录是默认落点。 */
+function pluginReposRoot() {
+  if (process.env.AXAGENT_PLUGIN_REPOS_ROOT) return path.resolve(process.env.AXAGENT_PLUGIN_REPOS_ROOT);
+  // `workspaceRoot` 是 `axagent-plugins/`，独立仓与**主仓**同级 ⇒ 上跳两层。
+  return path.resolve(workspaceRoot, "..", "..", "AxInvest-plugin-repos");
+}
+
+/**
+ * 插件源码根：**独立仓是唯一权威**，主仓 `crates/plugin-*` 副本不参与打包。
+ * 两种落点：
+ *   ① 主仓 `axagent-plugins/scripts/` ⇒ `<reposRoot>/<plugin>`；
+ *   ② 独立仓自带副本 `scripts/` ⇒ 本仓根（仓内已有 `plugin-<plugin>/`）。
+ * 都不成立时返回 null，由调用方 fail-closed —— 绝不回退主仓副本。
+ */
+function resolvePluginSourceRoot(name) {
+  const candidate = path.join(pluginReposRoot(), name);
+  if (fs.existsSync(path.join(candidate, ".git"))) return candidate;
+  if (fs.existsSync(path.join(workspaceRoot, `plugin-${name}`))) return workspaceRoot;
+  return null;
+}
+
+function requirePluginSourceRoot(name) {
+  const root = resolvePluginSourceRoot(name);
+  if (!root) {
+    fail(
+      `插件源码根不可用：找不到独立仓 ${path.join(pluginReposRoot(), name)}`
+      + "（独立仓是唯一权威，不退回主仓副本；可用 AXAGENT_PLUGIN_REPOS_ROOT 指定根）",
+    );
+  }
+  return root;
+}
+
 const outRoot = path.resolve(
   outFlag >= 0 && argv[outFlag + 1] ? argv[outFlag + 1] : path.join(workspaceRoot, "dist", "plugins", pluginName),
 );
-// 与宿主 `PANEL_ASSET_ALLOWED_EXTS`（axagent-plugins/crates/plugins/src/manager.rs）同口径：
+// 与宿主 `PANEL_ASSET_ALLOWED_EXTS`（宿主 crates/plugins/src/manager.rs）同口径：
 // 清单校验会拒掉白名单外的扩展名，产物自检必须在**打包期**就报出来，而不是等安装时才失败。
 const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
-const webRoot = spec.webDir ? path.join(workspaceRoot, spec.webDir) : null;
-const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) : null;
+const webRoot = spec.webDir ? path.join(requirePluginSourceRoot(pluginName), spec.webDir) : null;
+const uiSchemaSource = spec.uiSchema ? path.join(requirePluginSourceRoot(pluginName), spec.uiSchema) : null;
 const registryPath = path.join(workspaceRoot, "scripts", "opc-domain-pack-plugins.json");
 const ownershipRegistry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 const domainPackSourceByPlugin = Object.fromEntries(
   ownershipRegistry.packs
     .filter((p) => p.pluginId !== "plugin-opc")
-    .map((p) => [p.pluginId.replace(/^plugin-/, ""), path.join(workspaceRoot, "crates", p.pluginId, "domain_packs")]),
+    .map((p) => {
+      const owner = p.pluginId.replace(/^plugin-/, "");
+      // 全局命令归属自检要读**每个**域插件的 logical manifest；源码权威都在独立仓，
+      // 缺任一仓即 fail-closed（不退回主仓副本，也不静默跳过 —— 那会漏掉跨插件重名）。
+      return [owner, path.join(requirePluginSourceRoot(owner), p.pluginId, "domain_packs")];
+    }),
 );
 const domainPackSource = domainPackSourceByPlugin[pluginName] ?? null;
 const ownedDomainPackIds = new Set(
@@ -563,7 +602,7 @@ if (check) {
  * worker 命令页退回占位文案时，CI 会红而不是静默绿。
  */
 function checkPageVerifierIfPresent() {
-  const verifier = path.join(workspaceRoot, spec.webDir ?? "", "..", "src-web", "__verify__", "verify-bundle.mjs");
+  const verifier = path.join(requirePluginSourceRoot(pluginName), spec.webDir ?? "", "..", "src-web", "__verify__", "verify-bundle.mjs");
   if (!spec.webDir || !fs.existsSync(verifier)) {
     return;
   }
@@ -3862,7 +3901,8 @@ function opcManifest({ version, binaryName, sha256 }) {
   // opc 自身已不拥有任何域包（14 份全部分给各域插件），该目录在 Git 中为空 ⇒
   // 干净 checkout 里根本不存在。无条件 readdirSync 会让 Release 的 beforeBuildCommand
   // 以 ENOENT 失败（2026-11-22 实测 6 个桌面 target 全红）；目录不存在等价于零份域包。
-  const opcDomainPackDir = path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs");
+  const opcSourceRoot = resolvePluginSourceRoot("opc");
+  const opcDomainPackDir = opcSourceRoot ? path.join(opcSourceRoot, "plugin-opc", "domain_packs") : null;
   const domainPackManifests = (fs.existsSync(opcDomainPackDir) ? fs.readdirSync(opcDomainPackDir) : [])
     .filter((f) => f.endsWith(".json"))
     .sort()

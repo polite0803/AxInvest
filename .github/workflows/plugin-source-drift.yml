@@ -1,0 +1,37 @@
+name: Plugin Source Pins
+
+# 插件源钉版漂移报警（2026-11-22）
+#
+# 为什么单独一个工作流：钉版清单 scripts/lib/plugin-sources.json 只在发布前手工 bump，
+# 平时插件仓推新提交不该让主仓 PR 变红；但也不能永远不知道「清单已经落后」。
+# 每天一次 --strict：A（清单 ↔ 取源动作）、B（清单 ↔ 各 workflow 的取源根）不一致即红，
+# C（清单 SHA ↔ 远端默认分支 HEAD）漂移即红 —— 只报警，不自动改任何文件。
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-source-pins
+  cancel-in-progress: true
+
+jobs:
+  pins:
+    name: 钉版清单 ↔ 远端默认分支
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Check plugin source pins selftest
+        run: node scripts/check-plugin-source-pins.mjs --selftest
+
+      - name: Check plugin source pins against remote default branches
+        run: node scripts/check-plugin-source-pins.mjs --strict

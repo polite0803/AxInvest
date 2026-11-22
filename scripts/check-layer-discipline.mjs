@@ -382,16 +382,18 @@ export function ownCommandModule(file) {
 
 // ── 扫描 ──────────────────────────────────────────────────────────────
 /** 解析某个 workspace 根 Cargo.toml 的路径列表字段（members / exclude 同形）。 */
-function parseWorkspacePaths(rootCargo, key) {
+function parseWorkspacePathsFromText(text, key) {
   const paths = new Set();
-  if (!existsSync(rootCargo)) return paths;
-  const m = new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*\\[([\\s\\S]*?)\\]`, "m").exec(
-    readFileSync(rootCargo, "utf8"),
-  );
+  const m = new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*\\[([\\s\\S]*?)\\]`, "m").exec(text);
   if (m) {
     for (const s of m[1].matchAll(/"([^"]+)"/g)) paths.add(s[1].replace(/\\/g, "/"));
   }
   return paths;
+}
+
+function parseWorkspacePaths(rootCargo, key) {
+  if (!existsSync(rootCargo)) return new Set();
+  return parseWorkspacePathsFromText(readFileSync(rootCargo, "utf8"), key);
 }
 
 /** members 不采信目录存在；exclude 是显式的「非成员但有意保留」声明。 */
@@ -568,11 +570,14 @@ export function selftest() {
   T("R4- 注释里的名字不算引用", re4("axagent-crdt").test("# 曾用 axagent-crdt") === false);
   T("R4- `axagent-crdt-extra` 不得误判（词边界）", re4("axagent-crdt").test('axagent-crdt-extra = { path = "x" }') === false);
   T("R4- 缩进无关（tab / 空格均可）", re4("axagent-crdt").test("\taxagent-crdt.path = \"x\"") === true);
+  // 2026-11-22：插件源码已迁出主仓，不再拿主仓 exclude 的副本项当夹具；
+  // 直接验解析器本身（显式 exclude 项必须被识别，通配符/宿主 crate 仍由别的判据管）。
   T(
-    "R4b- 显式 exclude 的插件模板源不算孤儿目录",
-    parseWorkspacePaths(join(ROOT, "axagent-plugins", "Cargo.toml"), "exclude").has(
-      "crates/plugin-stock",
-    ),
+    "R4b- 显式 exclude 的插件目录被解析为「非孤儿」",
+    parseWorkspacePathsFromText(
+      '[workspace]\nexclude = [\n  "crates/plugin-stock",\n  "crates/stock-core",\n]\n',
+      "exclude",
+    ).has("crates/plugin-stock"),
   );
 
   // ── 规则 5 ──

@@ -615,8 +615,10 @@ function generateWorkerRepo(name, repo, version) {
   const members = [crateDir, ...extraCrates];
   copyTree(`axagent-plugins/crates/${spec.crate}`, join(repo, crateDir));
   // 打包器的 stock 规格引用 ui.json 校验任务源 detailSchema；独立仓必须带上同一份 schema。
-  if (name === "stock") {
-    copyTree("axagent-plugins/crates/plugin-stock/ui.json", join(repo, crateDir, "ui.json"));
+  // 2026-11-22：ui.json 已随 `plugin-stock/` 整树复制进入独立仓（上面 copyTree），
+  // 不再单独从主仓副本读取；这里只做存在性 fail-closed，权威是独立仓自己的副本。
+  if (name === "stock" && !existsSync(join(repo, crateDir, "ui.json"))) {
+    fail(`独立仓缺少 stock ui.json：${join(repo, crateDir, "ui.json")}`);
   }
   // 页面验收脚本用 jsdom 在 Node 里装载 bundle；独立仓必须自带最小 package.json，
   // 否则从仓外执行 --check 会向上找不到主仓 node_modules。

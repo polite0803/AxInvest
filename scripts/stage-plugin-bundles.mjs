@@ -65,9 +65,10 @@ if (isMobile) {
   process.exit(0);
 }
 
-// 暂存的插件清单：顺序即构建顺序。这里打的是**宿主安装包**，源码权威在主仓的
-// `axagent-plugins/`（排除在 workspace 外的模板源也在主仓），不得依赖仓外独立插件仓 ——
-// GitHub Actions 只 checkout 本仓，强依赖 sibling repos 会让所有 Release 构建当场红。
+// 暂存的插件清单：顺序即构建顺序。这里打的是**宿主安装包**，源码权威是主仓外的
+// 17 个独立插件仓（`../AxInvest-plugin-repos/<plugin>`，`AXAGENT_PLUGIN_REPOS_ROOT` 可覆盖）。
+// 主仓 `axagent-plugins/crates/plugin-*` 副本不再参与构建；CI / Release 必须先获取这 17 个仓
+// （取源方案尚未定，缺仓时 `ensurePluginBuildRoots` 直接报错而不是回退主仓副本）。
 const PLUGINS = PLUGIN_NAMES;
 
 // `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。手工直跑要 debug 档
@@ -82,12 +83,12 @@ const bundledRoot = argRoot();
 console.error(
   `[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物到 ${bundledRoot}（${release ? "release" : "debug"}）`,
 );
-// 可交付 crate 被主 workspace exclude；从主仓模板源物化与独立仓同构的临时构建根，
-// 让同一份打包脚本在 CI / Release 的干净 checkout 上也能 cargo build -p 成功。
+// 独立仓本身就是可 `cargo build -p` 的工作区根（自带 SDK 快照与根 Cargo.toml），
+// 直接作为 `--build-root` 传入；不再从主仓模板源物化临时副本。
 const buildRoots = ensurePluginBuildRoots(repoRoot, PLUGINS);
 for (const plugin of PLUGINS) {
   const outDir = path.join(bundledRoot, plugin);
-  // 打包脚本权威位置在 axagent-plugins/scripts/（与 SDK 仓同源），不是仓外独立仓副本。
+  // 打包脚本与各独立仓 scripts/ 下的 vendored 副本同源（生成器同步），这里用主仓这份。
   const args = [
     "axagent-plugins/scripts/build-plugin-bundle.mjs",
     "--plugin", plugin,

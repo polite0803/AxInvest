@@ -25,8 +25,8 @@
       "extraCrates": [
         "stock-core"
       ],
-      "webDir": "crates/plugin-stock/web",
-      "uiSchema": "crates/plugin-stock/ui.json",
+      "webDir": "plugin-stock/web",
+      "uiSchema": "plugin-stock/ui.json",
       "manifestFactory": "stockManifest",
       "domainPackId": null,
       "displayName": null,
@@ -252,7 +252,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc/web",
+      "webDir": "plugin-opc/web",
       "uiSchema": null,
       "manifestFactory": "opcManifest",
       "domainPackId": null,
@@ -393,7 +393,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-accounting/web",
+      "webDir": "plugin-opc-accounting/web",
       "uiSchema": null,
       "manifestFactory": "opcAccountingManifest",
       "domainPackId": "accounting",
@@ -424,7 +424,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-security/web",
+      "webDir": "plugin-opc-security/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "security",
@@ -457,7 +457,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-game-dev/web",
+      "webDir": "plugin-opc-game-dev/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "game_dev",
@@ -490,7 +490,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-ai-research/web",
+      "webDir": "plugin-opc-ai-research/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "ai_research",
@@ -526,7 +526,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-consulting/web",
+      "webDir": "plugin-opc-consulting/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "consulting",
@@ -561,7 +561,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-design/web",
+      "webDir": "plugin-opc-design/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "design",
@@ -595,7 +595,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-ecommerce/web",
+      "webDir": "plugin-opc-ecommerce/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "ecommerce",
@@ -630,7 +630,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-education/web",
+      "webDir": "plugin-opc-education/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "education",
@@ -664,7 +664,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-finance-invest/web",
+      "webDir": "plugin-opc-finance-invest/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "finance_invest",
@@ -703,7 +703,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-geospatial/web",
+      "webDir": "plugin-opc-geospatial/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "geospatial",
@@ -738,7 +738,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-project-management/web",
+      "webDir": "plugin-opc-project-management/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "project_management",
@@ -771,7 +771,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-software-dev/web",
+      "webDir": "plugin-opc-software-dev/web",
       "uiSchema": null,
       "manifestFactory": "opcWorkerDomainManifest",
       "domainPackId": "software_dev",
@@ -807,7 +807,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-sales-growth/web",
+      "webDir": "plugin-opc-sales-growth/web",
       "uiSchema": null,
       "manifestFactory": "opcSalesGrowthManifest",
       "domainPackId": "sales_growth",
@@ -838,7 +838,7 @@
         "plugin-testkit"
       ],
       "extraCrates": [],
-      "webDir": "crates/plugin-opc-content-media/web",
+      "webDir": "plugin-opc-content-media/web",
       "uiSchema": null,
       "manifestFactory": "opcContentMediaManifest",
       "domainPackId": "content_media",

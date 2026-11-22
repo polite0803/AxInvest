@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "note": "CI 钉版取源清单：17 个独立插件仓的公开 commit SHA。CI 用 actions/checkout 的 repository+ref 按本清单取源；清单与远端默认分支 HEAD 不一致时只报警（scripts/check-plugin-source-pins.mjs），发布前人工 bump。",
+  "defaultBranch": "main",
+  "pinnedAt": "2026-11-22",
+  "plugins": [
+    {
+      "plugin": "stock",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-stock",
+      "sha": "ce75ff2d0cdab9c1b6548e2b2f340b620058619d",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc",
+      "sha": "b6c63cbc77efb0a5ef3263b9303219aa38e42242",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-accounting",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-accounting",
+      "sha": "56233d393c9c8a3022156243524be9e21f20fb0a",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-security",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-security",
+      "sha": "aa044cf68416423d178a6277193dacca194d5207",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-game-dev",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-game-dev",
+      "sha": "5e47de1a01ccd27e615657244e4004b72a8c2d57",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-ai-research",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-ai-research",
+      "sha": "de73848e3e291ec9024f25c6aa4bb9c794e9cf65",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-consulting",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-consulting",
+      "sha": "80e246b733c606900a0bd37ee65f6ee1d6f1396c",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-design",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-design",
+      "sha": "eab6b7655d261eca3950f4bde1690de341b7464b",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-ecommerce",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-ecommerce",
+      "sha": "caa3aea7b9e2ad105150ecc03ae693a4e730fb14",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-education",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-education",
+      "sha": "de7e1297ff8ac2b1270b0813e877f7407e1e2414",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-finance-invest",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-finance-invest",
+      "sha": "38c4515d01d208e5893ac4c9bada9dfd4ccd77aa",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-geospatial",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-geospatial",
+      "sha": "50baf05c2e4f994a0768f580477f447b80911b0e",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-project-management",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-project-management",
+      "sha": "c2089e80683112539a63f5f3a33fb7e747a5fc87",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-software-dev",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-software-dev",
+      "sha": "d70751d7e0f02a7b2ec51e11c185cb2c9c1d3bb8",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-sales-growth",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-sales-growth",
+      "sha": "168cbf6fef943842988f6beca25a4e04aa991b2f",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "opc-content-media",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-opc-content-media",
+      "sha": "c1eff694b2fa84d16edd06810df3b4186a798510",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    },
+    {
+      "plugin": "wiki",
+      "owner": "polite0803",
+      "repo": "axinvest-plugin-wiki",
+      "sha": "aa708cb46174c41bba70393e23315c1c4c0fbbb3",
+      "pluginVersion": "3.0.1",
+      "rustVersion": "3.0.1"
+    }
+  ]
+}

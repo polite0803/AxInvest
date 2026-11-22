@@ -733,7 +733,9 @@ export function PluginGallery() {
       </Modal>
 
       <Modal
-        title={t("chat.plugins.marketplace.updateTitle")}
+        title={t("chat.plugins.marketplace.updateTitle", {
+          name: plugins.find((p) => p.id === updatingPluginId)?.name ?? "",
+        })}
         open={!!updatingPluginId}
         onCancel={closeUpdateDialog}
         onOk={updateValidated ? handleConfirmUpdate : handleValidateUpdate}

@@ -43,6 +43,28 @@ async function makeBot(name = "投研助手", soul = "# 只回答 A 股问题"):
   return handleCommand<BotDto>("create_bot", { input: { name, soul } });
 }
 
+interface RoutineDto {
+  id: string;
+  name: string;
+  description: string;
+  taskType: string;
+  cronExpression: string | null;
+  status: "active" | "paused" | "disabled";
+  botId: string;
+  timezone: string | null;
+  nextRunAt: string | null;
+  createdAt: string;
+}
+
+async function makeRoutine(botId: string, name = "例程"): Promise<RoutineDto> {
+  return handleCommand<RoutineDto>("create_bot_scheduled_task", {
+    botId,
+    name,
+    prompt: name + " 提示词",
+    cronExpression: "30 8 * * 1-5",
+  });
+}
+
 async function makeConversation(botId?: string | null, title = "线程"): Promise<ConvDto> {
   return handleCommand<ConvDto>("create_conversation", {
     title,
@@ -204,6 +226,106 @@ describe("browserMock: Bot 数据面", () => {
     expect(mem.byteCount).toBe(new TextEncoder().encode(mem.indexContent).length);
     expect(mem.budget).toEqual({ maxLines: 200, maxBytes: 24 * 1024 });
     expect(mem.topics.map((t) => t.relativePath)).toEqual(["memory/invest.md"]);
+  });
+
+  // ── P2-a 例程（IPC-P2 §2 / browserMockBots 例程命令）──────────────────
+
+  it("P2-a: create/list 例程走冻结契约，DTO 带 botId/timezone/taskType", async () => {
+    const bot = await makeBot("R");
+    const task = await handleCommand<RoutineDto>("create_bot_scheduled_task", {
+      botId: bot.id,
+      name: "每日复盘",
+      prompt: "总结今日行情",
+      cronExpression: "30 8 * * 1-5",
+      timezone: "Asia/Shanghai",
+    });
+    expect(task.taskType).toBe("bot_routine");
+    expect(task.botId).toBe(bot.id);
+    expect(task.timezone).toBe("Asia/Shanghai");
+    expect(task.status).toBe("active");
+    expect(task.cronExpression).toBe("30 8 * * 1-5");
+    expect(task.nextRunAt).toBeTruthy();
+
+    const list = await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: bot.id });
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(task.id);
+  });
+
+  it("P2-a: 校验链与后端同码（空 prompt / 坏 cron / 坏时区 / Bot 不存在）", async () => {
+    const bot = await makeBot("V");
+    await expect(
+      handleCommand("create_bot_scheduled_task", {
+        botId: bot.id, name: "x", prompt: "   ", cronExpression: "30 8 * * 1-5",
+      }),
+    ).rejects.toThrow(/COMMON_INVALID_INPUT/);
+    await expect(
+      handleCommand("create_bot_scheduled_task", {
+        botId: bot.id, name: "x", prompt: "p", cronExpression: "每天早上",
+      }),
+    ).rejects.toThrow(/BOT_SCHEDULE_CRON_INVALID/);
+    await expect(
+      handleCommand("create_bot_scheduled_task", {
+        botId: bot.id, name: "x", prompt: "p", cronExpression: "30 8 * * 1-5", timezone: "UTC+8",
+      }),
+    ).rejects.toThrow(/BOT_SCHEDULE_TIMEZONE_INVALID/);
+    await expect(
+      handleCommand("create_bot_scheduled_task", {
+        botId: "missing-bot", name: "x", prompt: "p", cronExpression: "30 8 * * 1-5",
+      }),
+    ).rejects.toThrow(/BOT_NOT_FOUND/);
+    await expect(handleCommand("list_bot_scheduled_tasks", { botId: "missing-bot" })).rejects.toThrow(
+      /BOT_NOT_FOUND/,
+    );
+  });
+
+  it("P2-a: pause/resume/update/delete 与删除级联（GAP G-10）", async () => {
+    const bot = await makeBot("C");
+    const other = await makeBot("O");
+    await makeRoutine(bot.id, "A 例程");
+    await makeRoutine(bot.id, "B 例程");
+    await makeRoutine(other.id, "O 例程");
+    // 顺手造一条非 Bot 普通任务，验证 bot 分支不拦截普通任务
+    localStorage.setItem(
+      "axagent_bot_routines",
+      JSON.stringify(
+        (JSON.parse(localStorage.getItem("axagent_bot_routines") ?? "[]") as RoutineDto[]).concat([
+          { ...(JSON.parse(localStorage.getItem("axagent_bot_routines") ?? "[]") as RoutineDto[])[0], id: "plain-task", taskType: "backup", botId: null as unknown as string },
+        ]),
+      ),
+    );
+
+    const list = await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: bot.id });
+    const a = list.find((t) => t.name === "A 例程")!;
+    expect(list).toHaveLength(2);
+
+    await handleCommand("pause_scheduled_task", { taskId: a.id });
+    let after = await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: bot.id });
+    expect(after.find((t) => t.id === a.id)!.status).toBe("paused");
+    await handleCommand("resume_scheduled_task", { taskId: a.id });
+    after = await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: bot.id });
+    expect(after.find((t) => t.id === a.id)!.status).toBe("active");
+
+    // §2.5 编辑：完整 DTO + 顶层 timezone（null=清除回落 Local）
+    const updated = { ...a, name: "A2 例程", description: "新提示词", cronExpression: "0 10 * * 1" };
+    await handleCommand("update_scheduled_task", { taskId: a.id, task: updated, timezone: null });
+    after = await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: bot.id });
+    const a2 = after.find((t) => t.id === a.id)!;
+    expect(a2.name).toBe("A2 例程");
+    expect(a2.description).toBe("新提示词");
+    expect(a2.cronExpression).toBe("0 10 * * 1");
+    expect(a2.timezone ?? null).toBeNull();
+
+    // 普通任务不被 bot 分支拦截：delete_scheduled_task 走 browserMock 原分支返回 undefined
+    await expect(handleCommand("delete_scheduled_task", { taskId: "plain-task" })).resolves.toBeUndefined();
+
+    // 删除 Bot 级联只删本 Bot 例程（GAP G-10）
+    const res = await handleCommand<{ detachedThreads: number; removedRoutines: number }>(
+      "delete_bot", { botId: bot.id },
+    );
+    expect(res.removedRoutines).toBe(2);
+    expect(await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: other.id })).toHaveLength(1);
+    // Bot 没了：list 报 BOT_NOT_FOUND（级联后无例程可删但仍校验存在性）
+    await expect(handleCommand("list_bot_scheduled_tasks", { botId: bot.id })).rejects.toThrow(/BOT_NOT_FOUND/);
   });
 
   it("校验失败返回结构化错误码（与后端 ErrorResponse 同形）", async () => {

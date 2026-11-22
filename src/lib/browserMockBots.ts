@@ -41,12 +41,71 @@ export const BOT_COMMANDS = [
   "read_bot_memory",
 ] as const;
 
+/**
+ * P2-a 例程命令（IPC-P2 §2）：2 条 bot 域命令 + 4 条复用的通用 scheduled_task
+ * 命令（仅拦截 `task_type === "bot_routine"` 的行，普通定时任务继续走 browserMock
+ * 原有分支）。T5' 冻结契约的字面名，不得改名。
+ */
+export const BOT_ROUTINE_COMMANDS = [
+  "create_bot_scheduled_task",
+  "list_bot_scheduled_tasks",
+  "update_scheduled_task",
+  "delete_scheduled_task",
+  "pause_scheduled_task",
+  "resume_scheduled_task",
+] as const;
+
+/** 与后端 `BOT_ROUTINE_TASK_TYPE` 同字面量（scheduled_task.rs）。 */
+export const BOT_ROUTINE_TASK_TYPE = "bot_routine" as const;
+
 export const APPROVAL_MODES = ["ask", "edits", "auto", "full", "custom"] as const;
 
 const BOTS_KEY = "bots";
 const SOUL_MIRRORS_KEY = "bot_soul_mirrors";
+const ROUTINES_KEY = "bot_routines";
 const MEMORY_BUDGET = { maxLines: 200, maxBytes: 24 * 1024 } as const;
 const SOUL_MAX_BYTES = 64 * 1024;
+
+/**
+ * 例程 DTO（浏览器 mock 形态）：键与后端 `ScheduledTaskDto`（camelCase 序列化）
+ * 及前端 `ScheduledTask` 类型对齐。真实后端的 next_run_at/last_run_at 来自
+ * `CronJobStore` 档期计算；浏览器无调度器，由 mock 用 cron 最小间隔估算，仅保
+ * 「非空且可被 `new Date()` 解析」的形态（面板只做展示）。
+ */
+interface MockRoutine {
+  id: string;
+  name: string;
+  description: string;
+  taskType: string;
+  cronExpression: string | null;
+  intervalSeconds: null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastResult: {
+    success: boolean;
+    output: string | null;
+    error: string | null;
+    durationMs: number;
+    skipped: boolean;
+  } | null;
+  status: "active" | "paused" | "disabled";
+  config: {
+    timeoutSeconds: number;
+    retryOnFailure: boolean;
+    maxRetries: number;
+    retryDelaySeconds: number;
+    notificationEnabled: boolean;
+    runOnStartup: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+  workflowId: null;
+  runningSince: null;
+  runningTrigger: null;
+  lastTrigger: null;
+  botId: string;
+  timezone: string | null;
+}
 
 interface MockBot {
   id: string;
@@ -191,6 +250,79 @@ function soulView(bot: MockBot) {
   return { content: bot.soul, hash: dbHash, drift };
 }
 
+// ── 例程（P2-a，IPC-P2 §2）──────────────────────────────────────────────
+
+function loadRoutines(): MockRoutine[] {
+  return readStore<MockRoutine[]>(ROUTINES_KEY, []);
+}
+
+function saveRoutines(rows: MockRoutine[]): void {
+  writeStore(ROUTINES_KEY, rows);
+}
+
+function findRoutine(taskId: string): { rows: MockRoutine[]; idx: number; row: MockRoutine } {
+  const rows = loadRoutines();
+  const idx = rows.findIndex((r) => r.id === taskId);
+  if (idx === -1) {
+    // 与后端 update/execute 对未知 id 一致：TASK_NOT_FOUND（pause/resume/delete 静默幂等）。
+    throw botError("TASK_NOT_FOUND");
+  }
+  return { rows, idx, row: rows[idx] };
+}
+
+/** cron 第 1 段（分钟）→ 下一个整分时刻（仅保展示形态；真实档期在 CronJobStore）。 */
+function nextRunEstimate(cron: string): string | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return null;
+  }
+  const minute = Number.parseInt(parts[0], 10);
+  const d = new Date();
+  d.setSeconds(0, 0);
+  if (Number.isFinite(minute) && minute >= 0 && minute <= 59) {
+    if (d.getMinutes() >= minute) {
+      d.setDate(d.getDate() + 1);
+    }
+    d.setMinutes(minute);
+  } else {
+    d.setMinutes(d.getMinutes() + 1);
+  }
+  return d.toISOString();
+}
+
+/**
+ * IANA 时区校验（GATES-P2 §2 A3 的 JS 侧口径）：`Intl.DateTimeFormat` 可解析即
+ * 放行；空 / 缺省 = 宿主 Local（null），与后端 `validate_timezone` 语义一致。
+ */
+function isValidTimeZoneJs(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateRoutineInput(input: { name?: unknown; prompt?: unknown; cron?: unknown; timezone?: unknown }): void {
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name || Array.from(name).length > 64) {
+    throw botError("BOT_NAME_INVALID");
+  }
+  // 与后端 validate_bot_routine_prompt 同规则：非空（trim 后）。
+  if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {
+    throw botError("COMMON_INVALID_INPUT");
+  }
+  const cron = typeof input.cron === "string" ? input.cron.trim() : "";
+  if (cron.split(/\s+/).length !== 5) {
+    // 与后端同码：包住 validate_cron_detail 的文案细节。
+    throw botError("BOT_SCHEDULE_CRON_INVALID");
+  }
+  const tz = typeof input.timezone === "string" ? input.timezone.trim() : "";
+  if (tz && !isValidTimeZoneJs(tz)) {
+    throw botError("BOT_SCHEDULE_TIMEZONE_INVALID");
+  }
+}
+
 // ── 校验 ────────────────────────────────────────────────────────────────
 
 function normalizeCreateInput(input: Record<string, unknown>): Partial<MockBot> {
@@ -268,7 +400,10 @@ export async function handleBotCommand(
   cmd: string,
   args?: Record<string, unknown>,
 ): Promise<unknown | typeof BOT_UNHANDLED> {
-  if (!(BOT_COMMANDS as readonly string[]).includes(cmd)) {
+  if (
+    !(BOT_COMMANDS as readonly string[]).includes(cmd)
+    && !(BOT_ROUTINE_COMMANDS as readonly string[]).includes(cmd)
+  ) {
     return BOT_UNHANDLED;
   }
   const a = args ?? {};
@@ -418,7 +553,11 @@ export async function handleBotCommand(
         }
       }
       writeStore("conversations", convs);
-      return { detachedThreads: detached, memoryPath: `~/.axagent/bots/${botId}` };
+      // P2-a（GAP G-10 / T2'）：级联删除该 Bot 的例程（非 Bot 例程不受影响）。
+      const routines = loadRoutines().filter((r) => r.botId !== botId);
+      const removedRoutines = loadRoutines().length - routines.length;
+      saveRoutines(routines);
+      return { detachedThreads: detached, removedRoutines, memoryPath: `~/.axagent/bots/${botId}` };
     }
     case "list_bot_threads": {
       const botId = field<string>(a, "botId") ?? "";
@@ -456,6 +595,124 @@ export async function handleBotCommand(
     case "read_bot_memory": {
       return memoryView(findBot(field<string>(a, "botId") ?? "").id);
     }
+
+    // ── P2-a 例程（IPC-P2 §2；通用 scheduled_task 命令只拦截 bot_routine 行）──
+
+    case "create_bot_scheduled_task": {
+      const botId = field<string>(a, "botId") ?? "";
+      const name = field<string>(a, "name");
+      const prompt = field<string>(a, "prompt");
+      const cron = field<string>(a, "cronExpression");
+      const timezone = field<string | null>(a, "timezone") ?? null;
+      validateRoutineInput({ name, prompt, cron, timezone });
+      findBot(botId); // BOT_NOT_FOUND 校验（与后端 ensure_bot_exists 同语义）
+      const now = new Date().toISOString();
+      const row: MockRoutine = {
+        id: `bot-routine-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        name: (name as string).trim(),
+        description: prompt as string,
+        taskType: BOT_ROUTINE_TASK_TYPE,
+        cronExpression: (cron as string).trim(),
+        intervalSeconds: null,
+        nextRunAt: nextRunEstimate(cron as string),
+        lastRunAt: null,
+        lastResult: null,
+        status: "active",
+        config: {
+          timeoutSeconds: 300,
+          retryOnFailure: false,
+          maxRetries: 0,
+          retryDelaySeconds: 30,
+          notificationEnabled: true,
+          runOnStartup: false,
+        },
+        createdAt: now,
+        updatedAt: now,
+        workflowId: null,
+        runningSince: null,
+        runningTrigger: null,
+        lastTrigger: null,
+        botId,
+        timezone: timezone && (timezone as string).trim() ? (timezone as string).trim() : null,
+      };
+      const rows = loadRoutines();
+      rows.push(row);
+      saveRoutines(rows);
+      return row;
+    }
+
+    case "list_bot_scheduled_tasks": {
+      const botId = field<string>(a, "botId") ?? "";
+      findBot(botId); // IPC-P2 §2.2：Bot 不存在 → BOT_NOT_FOUND
+      return loadRoutines()
+        .filter((r) => r.botId === botId)
+        .sort((x, y) => x.createdAt.localeCompare(y.createdAt));
+    }
+
+    case "update_scheduled_task": {
+      const taskId = field<string>(a, "taskId") ?? "";
+      const { rows, idx, row } = findRoutine(taskId);
+      if (row.taskType !== BOT_ROUTINE_TASK_TYPE) {
+        return BOT_UNHANDLED; // 普通定时任务：走 browserMock 原分支
+      }
+      const task = field<Record<string, unknown>>(a, "task") ?? {};
+      const name = field<string>(task, "name");
+      const prompt = field<string>(task, "description");
+      const cron = field<string>(task, "cronExpression");
+      validateRoutineInput({
+        name: name ?? row.name,
+        prompt: prompt ?? row.description,
+        cron: cron ?? row.cronExpression ?? "",
+        timezone: field<string | null>(a, "timezone") ?? row.timezone,
+      });
+      if (name !== undefined) {
+        row.name = name.trim();
+      }
+      if (prompt !== undefined) {
+        row.description = prompt;
+      }
+      if (cron !== undefined) {
+        row.cronExpression = cron.trim();
+        row.nextRunAt = nextRunEstimate(cron);
+      }
+      // IPC-P2 §2.5：顶层 timezone — undefined=不改；null=清除回落宿主 Local。
+      if (hasField(a, "timezone")) {
+        const tz = field<string | null>(a, "timezone");
+        row.timezone = tz && tz.trim() ? tz.trim() : null;
+      }
+      row.updatedAt = new Date().toISOString();
+      rows[idx] = row;
+      saveRoutines(rows);
+      return row;
+    }
+
+    case "delete_scheduled_task": {
+      const taskId = field<string>(a, "taskId") ?? "";
+      const { rows, idx, row } = findRoutine(taskId);
+      if (row.taskType !== BOT_ROUTINE_TASK_TYPE) {
+        return BOT_UNHANDLED;
+      }
+      rows.splice(idx, 1);
+      saveRoutines(rows);
+      return undefined;
+    }
+
+    case "pause_scheduled_task":
+    case "resume_scheduled_task": {
+      const taskId = field<string>(a, "taskId") ?? "";
+      const { rows, idx, row } = findRoutine(taskId);
+      if (row.taskType !== BOT_ROUTINE_TASK_TYPE) {
+        return BOT_UNHANDLED;
+      }
+      row.status = cmd === "pause_scheduled_task" ? "paused" : "active";
+      row.updatedAt = new Date().toISOString();
+      rows[idx] = row;
+      saveRoutines(rows);
+      return undefined;
+    }
+
+    // delete_bot 级联删例程（GAP G-10 / T2'）：见上方 delete_bot case 内联实现。
+
     default:
       return BOT_UNHANDLED;
   }

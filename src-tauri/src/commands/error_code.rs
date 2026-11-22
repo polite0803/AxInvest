@@ -61,6 +61,10 @@ pub mod bot {
     pub const ICON_INVALID: &str = "BOT_ICON_INVALID";
     /// 删除事务失败
     pub const DELETE_FAILED: &str = "BOT_DELETE_FAILED";
+    /// Bot 例程 cron 表达式非法（非 5 段 / 每分钟）
+    pub const SCHEDULE_CRON_INVALID: &str = "BOT_SCHEDULE_CRON_INVALID";
+    /// Bot 例程 IANA 时区名不可解析
+    pub const SCHEDULE_TIMEZONE_INVALID: &str = "BOT_SCHEDULE_TIMEZONE_INVALID";
     /// 读取 MEMORY.md 失败
     pub const MEMORY_READ_FAILED: &str = "BOT_MEMORY_READ_FAILED";
     /// SOUL 镜像写盘失败

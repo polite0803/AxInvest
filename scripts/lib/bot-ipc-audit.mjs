@@ -192,7 +192,7 @@ export const BOT_IPC = {
       ],
     },
   ],
-  /** IPC.md §5：11 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
+  /** IPC.md §5 + IPC-P2 §3：13 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
   errorCodes: [
     "BOT_NOT_FOUND",
     "BOT_NAME_INVALID",
@@ -205,6 +205,9 @@ export const BOT_IPC = {
     "BOT_DELETE_FAILED",
     "BOT_MEMORY_READ_FAILED",
     "BOT_SOUL_WRITE_FAILED",
+    // P2-a（IPC-P2 §3）：Bot 例程错误码 ×2
+    "BOT_SCHEDULE_CRON_INVALID",
+    "BOT_SCHEDULE_TIMEZONE_INVALID",
   ],
   /** IPC.md §6：P1 不新增事件。出现任何 `bot-*` 事件名即违约。 */
   forbiddenEventPrefix: "bot-",

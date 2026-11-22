@@ -163,6 +163,7 @@ axagent-tools = { version = "3.0.0", path = "../axagent-runtime/crates/tools" }
 axagent-trajectory = { version = "3.0.0", path = "../axagent-ai/crates/trajectory" }
 base64 = "0.22"
 chrono = { workspace = true }
+chrono-tz = "0.10"
 dashmap = { workspace = true }
 dirs = "6"
 feed-rs = "2"

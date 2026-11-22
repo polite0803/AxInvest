@@ -3,8 +3,12 @@
 //! 定时任务 Tauri 命令 — 基于 CronJobStore 统一调度系统。
 //! 命令名保持与旧 ScheduledTaskService 兼容，供前端 SchedulerSettings 调用。
 
+use axagent_dao::db::DatabaseConnection;
+use axagent_dao::repo::bot as bot_repo;
+
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::bot as bot_err;
 use crate::commands::error_code::task as task_err;
 use axagent_agent_macro::agent_command;
 use axagent_runtime_core::{CronJob, CronJobStatus, ExecutionRecord, TaskConfig};
@@ -40,33 +44,56 @@ fn state_has_operator(_state: &State<'_, AppState>) -> bool {
 /// `pub(crate)`：业务模块装配定时任务时复用同一套校验（如
 /// `opc_demand_subscription::opc_ensure_demand_scan_job`），避免校验规则分叉。
 pub(crate) fn validate_cron_expression(cron: &str) -> Result<(), String> {
+    match validate_cron_detail(cron) {
+        Ok(()) => Ok(()),
+        Err(detail) => Err(ErrorResponse::err_with_detail(
+            crate::commands::error_code::common::INVALID_INPUT,
+            detail,
+        )),
+    }
+}
+
+/// 纯校验核心：非法时返回失败 detail（与 IPC-P2 §2.1 的「包文案」口径对应），
+/// 合法返回 `()`。错误码由调用方决定：旧路径（`validate_cron_expression`）仍是
+/// `COMMON_INVALID_INPUT`（IPC 文中 ERR_VALIDATION 为占位写法）；Bot 例程路径
+/// 用 `BOT_SCHEDULE_CRON_INVALID`。
+pub(crate) fn validate_cron_detail(cron: &str) -> Result<(), String> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
     if parts.len() != 5 {
-        return Err(ErrorResponse::err_with_detail(
-            crate::commands::error_code::common::INVALID_INPUT,
-            format!("Cron must have exactly 5 fields, got {}: '{}'", parts.len(), cron),
-        ));
+        return Err(format!("Cron must have exactly 5 fields, got {}: '{}'", parts.len(), cron));
     }
     // 检查 minute 字段（第一字段），拒绝过于频繁的执行
     let minute = parts[0];
     if minute == "*" || minute == "*/1" {
-        return Err(ErrorResponse::err_with_detail(
-            crate::commands::error_code::common::INVALID_INPUT,
-            "Cron 表达式过于频繁：不允许每分钟执行，最小间隔为 2 分钟",
-        ));
+        return Err("Cron 表达式过于频繁：不允许每分钟执行，最小间隔为 2 分钟".to_string());
     }
     // 检查 */N 模式中 N < 1 的情况（实际上 N=1 已被上面覆盖）
     if let Some(rest) = minute.strip_prefix("*/") {
         if let Ok(n) = rest.parse::<u32>() {
             if n < 1 {
-                return Err(ErrorResponse::err_with_detail(
-                    crate::commands::error_code::common::INVALID_INPUT,
-                    "Cron interval less than 1 minute is not allowed",
-                ));
+                return Err("Cron interval less than 1 minute is not allowed".to_string());
             }
         }
     }
     Ok(())
+}
+
+/// P2-a（IPC-P2 §2.1）：IANA 时区名校验 —— `chrono_tz::Tz::from_str` 可解析才算合法。
+///
+/// `pub(crate)`：Bot 便捷命令（`commands/bot.rs`）复用同一校验，避免两边口径分叉。
+/// `None`（未给时区）= 宿主 Local，是合法值。
+pub(crate) fn validate_timezone(timezone: Option<&str>) -> Result<(), String> {
+    let Some(tz) = timezone.map(str::trim).filter(|t| !t.is_empty()) else {
+        // None 或 trim 后空白 = 宿主 Local，与 `normalized_timezone` 同一口径。
+        return Ok(());
+    };
+    if tz.parse::<chrono_tz::Tz>().is_ok() {
+        return Ok(());
+    }
+    Err(ErrorResponse::err_with_detail(
+        bot_err::SCHEDULE_TIMEZONE_INVALID,
+        format!("Unknown IANA time zone: '{tz}'"),
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +129,12 @@ pub struct ScheduledTaskDto {
     /// 最近一次执行的触发来源；null = 本列引入前的旧记录（未知）。
     #[serde(default)]
     pub last_trigger: Option<String>,
+    /// P2-a：例程归属的 Bot id；null = 普通（非 Bot）定时任务。
+    #[serde(default)]
+    pub bot_id: Option<String>,
+    /// P2-a：档期时区（IANA 名）；null = 宿主 Local（与现状一致）。
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,6 +278,8 @@ pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
         running_since: None,
         running_trigger: None,
         last_trigger: job.last_trigger.clone(),
+        bot_id: job.bot_id.clone(),
+        timezone: job.timezone.clone(),
     }
 }
 
@@ -262,6 +297,17 @@ pub struct CreateTaskInput {
     pub config: Option<TaskConfigDto>,
     /// 结构化业务参数
     pub params: Option<serde_json::Value>,
+    /// P2-a：例程归属的 Bot id；给出时校验 Bot 存在。不传 = 普通定时任务（行为不变）。
+    #[serde(rename = "botId", default)]
+    pub bot_id: Option<String>,
+    /// P2-a：档期时区（IANA 名）；null/缺省 = 宿主 Local。
+    #[serde(default)]
+    pub timezone: Option<String>,
+}
+
+/// 归一化时区入参：trim 后空白视为 None（宿主 Local）。
+fn normalized_timezone(value: Option<String>) -> Option<String> {
+    value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// 把进程内「在跑」登记叠加到 DTO（`cron_to_dto` 只看得见任务定义）。
@@ -280,11 +326,24 @@ fn overlay_running(
 #[tauri::command]
 pub async fn list_scheduled_tasks(
     state: State<'_, AppState>,
+    bot_id: Option<String>,
 ) -> Result<Vec<ScheduledTaskDto>, String> {
     require_operator(&state)?;
+    // P2-a（IPC-P2 §2.4）：bot_id 给出时按 data.botId 过滤（不存在 -> BOT_NOT_FOUND）；
+    // 不传返回全量（现状不变）。JSON 字段不可 SQL 索引（GAP G-10），命令层过滤。
+    if let Some(ref bid) = bot_id {
+        ensure_bot_exists(&state.harness.db(), bid).await?;
+    }
     let jobs = state.cron_job_store.list().await;
     let running = state.cron_job_store.list_running().await;
-    Ok(jobs.iter().map(|job| overlay_running(cron_to_dto(job), &running)).collect())
+    Ok(jobs
+        .iter()
+        .filter(|job| match &bot_id {
+            Some(bid) => job.bot_id.as_deref() == Some(bid.as_str()),
+            None => true,
+        })
+        .map(|job| overlay_running(cron_to_dto(job), &running))
+        .collect())
 }
 
 #[agent_command(domain = scheduled_task, safety = Safe, call_mode = StateInput, description = "获取定时任务详情")]
@@ -310,12 +369,19 @@ pub async fn create_scheduled_task(
     if let Some(ref cron) = input.cron_expression {
         validate_cron_expression(cron)?;
     }
+    validate_timezone(input.timezone.as_deref())?;
+    if let Some(ref bot_id) = input.bot_id {
+        // P2-a：botId 给出时校验 Bot 存在；旧调用不传，行为逐字节不变。
+        ensure_bot_exists(&state.harness.db(), bot_id).await?;
+    }
     let schedule = input.cron_expression.unwrap_or_else(|| "0 9 * * *".to_string());
     let desc = input.description.unwrap_or_else(|| input.name.clone());
     let mut job = CronJob::new(&input.name, &schedule, &desc, &desc);
     if let Some(ref task_type) = input.task_type {
         job.task_type = Some(task_type.clone());
     }
+    job.bot_id = input.bot_id.clone();
+    job.timezone = normalized_timezone(input.timezone.clone());
     if let Some(ref wf_id) = input.workflow_id {
         job.workflow_id = Some(wf_id.clone());
     }
@@ -345,8 +411,18 @@ pub async fn update_scheduled_task(
     state: State<'_, AppState>,
     task_id: String,
     task: ScheduledTaskDto,
+    timezone: Option<Option<String>>,
+    bot_id: Option<Option<String>>,
 ) -> Result<(), String> {
     require_operator(&state)?;
+    // P2-a（IPC-P2 §2.5）双层 Option 清除语义：外层 None = 不改；Some(None) = 清除；
+    // Some(Some(v)) = 设置并校验。旧调用不传新参 => 双 None => 行为不变。
+    if let Some(Some(ref tz)) = timezone {
+        validate_timezone(Some(tz))?;
+    }
+    if let Some(Some(ref bid)) = bot_id {
+        ensure_bot_exists(&state.harness.db(), bid).await?;
+    }
     if let Some(ref cron) = task.cron_expression {
         validate_cron_expression(cron)?;
     }
@@ -374,6 +450,16 @@ pub async fn update_scheduled_task(
                 "paused" => CronJobStatus::Paused,
                 _ => CronJobStatus::Disabled,
             };
+            match timezone {
+                None => {},
+                Some(None) => job.timezone = None,
+                Some(Some(ref tz)) => job.timezone = Some(tz.clone()),
+            }
+            match bot_id {
+                None => {},
+                Some(None) => job.bot_id = None,
+                Some(Some(ref bid)) => job.bot_id = Some(bid.clone()),
+            }
         })
         .await;
     Ok(())
@@ -671,4 +757,168 @@ pub async fn get_task_execution_history(
 ) -> Result<Vec<ExecutionRecord>, String> {
     require_operator(&state)?;
     Ok(state.cron_job_store.get_execution_history(&task_id).await)
+}
+
+// ───────────────────────────── Bot 例程便捷命令（P2-a，IPC-P2 §2.1/§2.2）─────────────────────────────
+//
+// Q3 裁定（PLAN-P2 开放问题）：Bot 语义入口与本命令族共用同一套校验/落库/DTO，
+// 避免两条口径；物理上也落在本模块（check:layers 规则 2：命令兄弟模块不得横向互调）。
+
+/// Bot 例程 DTO 中的 task_type 预设值。executor 分支（init/services.rs）据此识别 Bot 例程。
+pub(crate) const BOT_ROUTINE_TASK_TYPE: &str = "bot_routine";
+
+/// P2-a（IPC-P2 §2.1/§2.2）：Bot id 存在性校验；不存在 -> `BOT_NOT_FOUND`。
+pub(crate) async fn ensure_bot_exists(
+    db: &DatabaseConnection,
+    bot_id: &str,
+) -> Result<(), String> {
+    if bot_repo::get_bot(db, bot_id).await.is_ok() {
+        return Ok(());
+    }
+    Err(ErrorResponse::new(bot_err::NOT_FOUND)
+        .with_detail(format!("Bot not found: {bot_id}"))
+        .to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBotScheduledTaskInput {
+    pub bot_id: String,
+    pub name: String,
+    /// Bot 例程跑 agent_query 的 prompt（非空）
+    pub prompt: String,
+    #[serde(rename = "cronExpression")]
+    pub cron_expression: String,
+    /// IANA 时区名；null/缺省 = 宿主 Local
+    pub timezone: Option<String>,
+    /// 缺省 true
+    pub enabled: Option<bool>,
+}
+
+fn validate_bot_routine_prompt(prompt: &str) -> Result<(), String> {
+    if prompt.trim().is_empty() {
+        return Err(ErrorResponse::err_with_detail(
+            crate::commands::error_code::common::INVALID_INPUT,
+            "prompt must not be blank",
+        ));
+    }
+    Ok(())
+}
+
+/// IPC-P2 §2.1：Bot 例程创建 —— 预设 task_type = "bot_routine"，其余语义同 §2.3。
+/// cron 失败用专用码 `BOT_SCHEDULE_CRON_INVALID` 包同一文案，前端免解析自由字符串。
+#[tauri::command]
+pub async fn create_bot_scheduled_task(
+    state: State<'_, AppState>,
+    input: CreateBotScheduledTaskInput,
+) -> Result<ScheduledTaskDto, String> {
+    validate_bot_routine_prompt(&input.prompt)?;
+    validate_cron_detail(&input.cron_expression).map_err(|detail| {
+        ErrorResponse::err_with_detail(bot_err::SCHEDULE_CRON_INVALID, detail)
+    })?;
+    create_scheduled_task(
+        state,
+        CreateTaskInput {
+            name: input.name,
+            description: None,
+            cron_expression: Some(input.cron_expression),
+            task_type: Some(BOT_ROUTINE_TASK_TYPE.to_string()),
+            workflow_id: None,
+            enabled: input.enabled,
+            config: None,
+            params: None,
+            bot_id: Some(input.bot_id),
+            timezone: input.timezone,
+        },
+    )
+    .await
+}
+
+/// IPC-P2 §2.2：按 Bot id 过滤的例程清单（含 BOT_NOT_FOUND 校验）。
+#[tauri::command]
+pub async fn list_bot_scheduled_tasks(
+    state: State<'_, AppState>,
+    bot_id: String,
+) -> Result<Vec<ScheduledTaskDto>, String> {
+    list_scheduled_tasks(state, Some(bot_id)).await
+}
+
+#[cfg(test)]
+mod p2_bot_schedule_tests {
+    use super::*;
+
+    // P2-a（IPC-P2 §2.1）：坏时区 -> BOT_SCHEDULE_TIMEZONE_INVALID；
+    // None / 合法时区通过。
+    #[test]
+    fn validate_timezone_rejects_unknown_iana_name() {
+        let err = validate_timezone(Some("Not/AZone")).unwrap_err();
+        assert!(
+            err.contains("BOT_SCHEDULE_TIMEZONE_INVALID"),
+            "错误码必须是 BOT_SCHEDULE_TIMEZONE_INVALID: {err}"
+        );
+        assert!(validate_timezone(None).is_ok(), "None = 宿主 Local，合法");
+        assert!(validate_timezone(Some("Asia/Shanghai")).is_ok());
+        assert!(validate_timezone(Some("UTC")).is_ok());
+        assert!(validate_timezone(Some("  ")).is_ok(), "空白由 normalized_timezone 归一化，此处只验 parse");
+    }
+
+    // P2-a：DTO 新字段透传（botId/timezone 序列化为 camelCase）。
+    #[test]
+    fn dto_serializes_bot_id_and_timezone_camel_case() {
+        let mut job = CronJob::new("t", "0 9 * * *", "p", "d");
+        job.bot_id = Some("bot-1".to_string());
+        job.timezone = Some("Asia/Shanghai".to_string());
+        let dto = cron_to_dto(&job);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["botId"], "bot-1");
+        assert_eq!(json["timezone"], "Asia/Shanghai");
+    }
+
+    // P2-a：归一化——空白时区回落 None（宿主 Local）。
+    #[test]
+    fn normalized_timezone_blanks_fall_back_to_none() {
+        assert_eq!(normalized_timezone(None), None);
+        assert_eq!(normalized_timezone(Some("  ".to_string())), None);
+        assert_eq!(
+            normalized_timezone(Some(" Asia/Shanghai ".to_string())),
+            Some("Asia/Shanghai".to_string())
+        );
+    }
+
+    // P2-a（IPC-P2 §2.3）：旧 CreateTaskInput JSON（无 botId/timezone 键）
+    // 反序列化得 None —— 旧调用行为逐字节不变。
+    #[test]
+    fn legacy_create_input_json_deserializes_without_new_keys() {
+        let json = r#"{"name":"legacy","cronExpression":"0 9 * * *"}"#;
+        let input: CreateTaskInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.bot_id, None);
+        assert_eq!(input.timezone, None);
+    }
+
+    // P2-a（IPC-P2 §2.1）：旧路径 cron 失败仍是既有通用码（行为逐字节不变），
+    // detail 文案与纯核心一致。
+    #[test]
+    fn legacy_cron_path_still_returns_err_validation() {
+        let err = validate_cron_expression("* * * * *").unwrap_err();
+        assert!(
+            err.contains("COMMON_INVALID_INPUT"),
+            "旧路径错误码不变（通用 INVALID_INPUT）: {err}"
+        );
+        assert!(
+            err.contains("每分钟"),
+            "detail 文案保持原样: {err}"
+        );
+        assert!(validate_cron_expression("0 9 * * *").is_ok());
+    }
+
+    // P2-a（IPC-P2 §2.1）：Bot 例程路径 detail 与旧路径一致，仅错误码换成
+    // BOT_SCHEDULE_CRON_INVALID（由 commands/bot.rs 包裹，此处验核心）。
+    #[test]
+    fn cron_detail_core_matches_legacy_text() {
+        let detail = validate_cron_detail("0 9").unwrap_err();
+        assert!(detail.contains("5 fields"), "detail: {detail}");
+        let detail2 = validate_cron_detail("*/1 * * * *").unwrap_err();
+        assert!(detail2.contains("每分钟"), "detail: {detail2}");
+        assert!(validate_cron_detail("0 9 * * *").is_ok());
+    }
 }

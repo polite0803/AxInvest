@@ -310,6 +310,14 @@
 | `P2/MODEL-P2.md` | 参考 | P2-a 零 schema 变更：CronJob 加 botId/timezone 两个 serde-default JSON 字段，逐表排除理由与 reconcile 安全核对。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P2/IPC-P2.md` | 参考 | P2-a 契约冻结稿：新增 2 命令、修改 3 命令（含 Option&lt;Option&lt;T&gt;&gt; 清除语义）、2 个新错误码入 11 语言、事件零新增。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P2/PLAN-P2.md` | 计划 | P2-a T1'–T7' 任务卡：依赖图、落点文件、i18n 键、验收命令与估时；P2-b 范围与 P2-c 清单各一段、3 个开放问题。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/I18N-KEYS-P2.md` | 参考 | P2-a 权威 i18n 键名清单：前端 T4' 29 键（例程/通知/审批生效）+ 后端 T5' 错误码 ×2 的 11 语言译文与落盘顺序（防 errorcode-alignment 孤儿码红）。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/GAP-P2B.md` | 参考 | P2-b 差距分析（团队部门 + 多 Bot 委派）：15 条 A/B/C 逐条判定，关键发现「fleets 绑 session 不绑 Bot，部门须新表」与「delegate_task 仅 G5 三角色，委派运行时是真缺口」。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/ADR-P2B.md` | 参考 | P2-b 6 条决策：部门新双表不复用 fleets、执行器与 P2-a 例程分支同构、外部不升权、consult/dispatch 分路径、委派恒一层、删除级联保部门。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/MODEL-P2B.md` | 参考 | P2-b 新增 3 表（bot_departments / bot_department_members / bot_assignments）+ SCHEMA 清单登记；bots/conversations/cron_jobs 零变更与 reconcile 安全核对。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/IPC-P2B.md` | 参考 | P2-b 契约冻结稿：新增 8 命令、修改 delete_bot、事件新增 bot-assignment-updated、错误码 ×6 入 11 语言、并行门与 300s 超时口径。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/PLAN-P2B.md` | 计划 | P2-b T1''–T7'' 任务卡：依赖图、落点文件、测试与验收命令、估时 12.5 人日；Q 列表 6 条各附建议答案（待用户确认）。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/I18N-KEYS-P2B.md` | 参考 | P2-b 权威 i18n 键名清单：错误码 ×6 + 前端 27 键共 363 条 11 语言译文，落盘顺序（先 locale 后代码）防孤儿码红。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P2/GATES-P2.md` | 计划 | T7' 前置：P1 列出的 5 项 P2 门禁缺口成文方案（prompt-slots / 例程 botId 归属 / 审批矩阵六规则 / 通知计数四断言 / schema_compliance 登记）+ 证据日志 *.log→.md 迁移；只方案不实现，T1'–T4' 合入后收口。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -487,6 +495,7 @@
 |---|---|---|---|---|---|---|---|---|
 | `PLAN.md` | PLAN：Bot 集成的 P1 纵向切片 | Bot 数据模型与存储 → CRUD IPC → 侧栏与路由 → 每 Bot 线程 → SOUL/MEMORY 注入与查看，逐任务给出落点文件与验收命令。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `GAP.md` `ADR.md` `MODEL.md` `IPC.md` |
 | `P2/PLAN-P2.md` | PLAN：Bot 集成的 P2-a 纵向切片 | 审批执行 + Bot 例程 + 通知未读：T1'–T7' 任务卡、依赖图与逐卡验收命令；P2-b 范围、P2-c 清单与 3 个待裁决问题。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/GAP-P2.md` `P2/ADR-P2.md` `P2/MODEL-P2.md` `P2/IPC-P2.md` |
+| `P2/PLAN-P2B.md` | PLAN：Bot 集成的 P2-b 纵向切片 | 团队/部门 + 多 Bot 委派运行时：T1''–T7'' 任务卡（部门双表 → IPC → 委派执行器 → 前端 → e2e），与 T3' agent_query 的接线关系；Q 列表 6 条。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/GAP-P2B.md` `P2/ADR-P2B.md` `P2/MODEL-P2B.md` `P2/IPC-P2B.md` `P2/I18N-KEYS-P2B.md` |
 | `PLAN-dev-team-work-protocol.md` | PLAN · 开发团队工作协议（2026-10-30 建团） | 写冲突规则： | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 通用 | 本地原创 | `PLAN-frontend-information-architecture.md` `AUDIT-gates-and-headless-scheduler-2026-10-26.md` `PLAN-r3h-long-sample-calibration.md` `PLAN-url-as-truth.md` |
 | `PLAN-four-horizon-workflow-alignment.md` | PLAN：四周期工作流对齐 —— 十项需求差距分析与实现方案 | 数据源四周期满足度（这是需求①后半的答案，也是需求⑦的输入） | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 股票决策链 | 本地原创 | `PLAN-multi-horizon-decision-science.md` `AUDIT-jev-adoption-stock-workflow-2026-09-20.md` `PLAN-analysis-data-repair.md` |
 | `PLAN-r2-daily-replay.md` | PLAN-r2-daily-replay —— 每日时间旅行回放（R-2） | R-1 接通回放验证后发现回放样本价格错位（详见 AUDIT-stock-business-profitability-2026-10-25.md §11）。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 时间旅行回放 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-25.md` |

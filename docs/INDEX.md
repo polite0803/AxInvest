@@ -29,7 +29,7 @@
 | `paper-portfolio` | 模拟持仓与交易桥 | 含模拟持仓、组合管理器、风控门、交易桥与订单；不含回测仿真（归量化回测）。 | `src-tauri/src/commands/paper_portfolio.rs`<br>`src-tauri/src/commands/portfolio-mgr*.rhai`<br>`src-tauri/src/commands/portfolio-risk-gate.rhai` | v3.0.0 | 暂无（仅说明书） | 0 | 有 |
 | `plugin-system` | 插件体系 | 含插件清单/worker 帧协议、L1-L2 通信与环检测、动态 UI 装载、生命周期与能力面、17 仓统一 worker；不含 OPC 业务能力包（归 OPC 能力包）。 | `axagent-plugins/crates/plugins/`<br>`axagent-core/crates/plugin-proto/`<br>`src-tauri/src/commands/plugin.rs`<br>`src/components/plugin/` | v3.0.2 | 22 | 5 | 有 |
 | `data-quality-gates` | 数据质量与门禁 | 含 DQI 分级熔断、权重坍缩三档、字段级校验、数据修复与静态门禁口径；不含 CI 构建门（归构建与 CI）。 | `axagent-quant/crates/astock-data/src/scoring.rs`<br>`src-tauri/src/commands/stock_pipeline/`<br>`scripts/check-*.mjs`<br>`src-tauri/src/commands/stock_workflow/decision.rs` | v3.0.0 | 4 | 1 | 有 |
-| `agent-runtime` | 运行时与智能体 | 含智能体引擎、工具/审批/沙箱、上下文与知识库、工作流引擎/节点、技能与 MCP；不含模型供应商适配（归模型提供商与流式）。 | `axagent-ai/crates/agent/`<br>`axagent-runtime/crates/runtime-core/`<br>`axagent-runtime/crates/tools/`<br>`src-tauri/src/commands/` | v3.0.0 | 44 | 29 | 有 |
+| `agent-runtime` | 运行时与智能体 | 含智能体引擎、工具/审批/沙箱、上下文与知识库、工作流引擎/节点、技能与 MCP；不含模型供应商适配（归模型提供商与流式）。 | `axagent-ai/crates/agent/`<br>`axagent-runtime/crates/runtime-core/`<br>`axagent-runtime/crates/tools/`<br>`src-tauri/src/commands/` | v3.0.0 | 49 | 29 | 有 |
 | `provider-models` | 模型提供商与流式 | 含 LLM 提供商适配、流式输出、采样参数与 token 计量；不含智能体编排（归运行时与智能体）。 | `axagent-ai/crates/providers/`<br>`src/stores/feature/providerStore.ts`<br>`src/components/settings/` | v3.0.0 | 8 | 6 | 有 |
 | `storage-migration` | 存储与数据库迁移 | 含实体/DAO/迁移、SQLite/PG 方言、缓存、CRDT 与知识图谱存储；不含业务查询语义。 | `axagent-infra/crates/storage/`<br>`axagent-infra/crates/migration/`<br>`axagent-infra/crates/dao/`<br>`axagent-core/crates/entities/` | v3.0.0 | 9 | 1 | 有 |
 | `ui-shell` | 前端外壳 | 含前端外壳/路由/布局/信息架构、i18n、组件规范、滚动与主题；不含后端业务命令。 | `src/components/layout/`<br>`src/i18n/locales/`<br>`src/pages/`<br>`src/components/` | v3.0.0 | 13 | 6 | 有 |
@@ -295,11 +295,16 @@
 
 ### 运行时与智能体（`agent-runtime`）
 
-- 摘要：文档 44 篇（本地 15 / 导入 29）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-17
+- 摘要：文档 49 篇（本地 20 / 导入 29）｜ 最新版本 v3.0.0+（未定版，待确认） ｜ 最近变更 2026-11-22
 - 说明书：`docs/features/agent-runtime.md`
 
 | 文件名 | 类型 | 一句话用途 | 状态 | 日期 | 对应版本 | 来源 |
 |---|---|---|---|---|---|---|
+| `GAP.md` | 参考 | AxAgent × OpenMausBot 的 Bot 能力差距分析：21 项逐条判定「已有可复用 / 需改造 / 缺失」，并给出 P1 不重建清单。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `ADR.md` | 参考 | Bot 集成 9 条长期约束决策：新建 `bots` 表、线程归属键、目录布局、SOUL 注入优先级、记忆复用与团队出 P1。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `MODEL.md` | 参考 | `bots` 表 20 列字段、`conversations.bot_id` 增量、DAO 与 `BotWorkspace` 接口、声明式建表与兼容性矩阵。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `IPC.md` | 参考 | 9 个 Tauri 命令与 Rust/TS DTO 契约、11 个错误码、命令注册与生成物检查清单。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `PLAN.md` | 计划 | P1 纵向切片 T1–T6 任务卡：落点文件、依赖 crate、路由与 i18n 键、验收命令、估时与两条最高风险。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -475,6 +480,7 @@
 
 | 文件名 | 标题 | 一句话用途 | 状态 | 日期 | 对应版本 | 功能点 | 来源 | 关联 |
 |---|---|---|---|---|---|---|---|---|
+| `PLAN.md` | PLAN：Bot 集成的 P1 纵向切片 | Bot 数据模型与存储 → CRUD IPC → 侧栏与路由 → 每 Bot 线程 → SOUL/MEMORY 注入与查看，逐任务给出落点文件与验收命令。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `GAP.md` `ADR.md` `MODEL.md` `IPC.md` |
 | `PLAN-dev-team-work-protocol.md` | PLAN · 开发团队工作协议（2026-10-30 建团） | 写冲突规则： | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 通用 | 本地原创 | `PLAN-frontend-information-architecture.md` `AUDIT-gates-and-headless-scheduler-2026-10-26.md` `PLAN-r3h-long-sample-calibration.md` `PLAN-url-as-truth.md` |
 | `PLAN-four-horizon-workflow-alignment.md` | PLAN：四周期工作流对齐 —— 十项需求差距分析与实现方案 | 数据源四周期满足度（这是需求①后半的答案，也是需求⑦的输入） | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 股票决策链 | 本地原创 | `PLAN-multi-horizon-decision-science.md` `AUDIT-jev-adoption-stock-workflow-2026-09-20.md` `PLAN-analysis-data-repair.md` |
 | `PLAN-r2-daily-replay.md` | PLAN-r2-daily-replay —— 每日时间旅行回放（R-2） | R-1 接通回放验证后发现回放样本价格错位（详见 AUDIT-stock-business-profitability-2026-10-25.md §11）。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 时间旅行回放 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-25.md` |
@@ -699,6 +705,10 @@
 
 | 文件名 | 标题 | 一句话用途 | 状态 | 日期 | 对应版本 | 功能点 | 来源 | 关联 |
 |---|---|---|---|---|---|---|---|---|
+| `GAP.md` | AxAgent × OpenMausBot Bot 能力差距分析 | 21 项能力逐条判定「已有可复用 / 需改造 / 缺失」，并列出 P1 明确不重建的六件事。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `ADR.md` `PLAN.md` |
+| `ADR.md` | Bot 集成架构决策记录（9 条） | 新表 `bots`、线程归属 `bot_id`、`~/.axagent/bots/<id>/` 布局、`<bot-soul>` 与全局 persona 互斥、复用 `ProjectMemory`、团队出 P1、审批只存不执行、无 migration、删除保留线程与记忆。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `MODEL.md` `IPC.md` |
+| `MODEL.md` | Bot 数据模型与迁移策略 | `bots` 表 20 列、`conversations.bot_id`、DAO 签名、`BotWorkspace` 文件系统模型、兼容性矩阵与删除语义。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `ADR.md` `IPC.md` |
+| `IPC.md` | Bot 的 Tauri 命令与事件契约 | 9 个命令、Rust/TS DTO、11 个错误码、命令注册与生成物检查清单；P1 不新增事件。 | active | 2026-11-22 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `MODEL.md` |
 | `dependency-graph.md` | AxAgent 仓库依赖图与拆分分析 | 仓库依赖图与按技术层拆分可行性分析（参考） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `dependency-matrix.md` | AxAgent Crate 精确依赖矩阵（实测） | 逐 crate 读取 Cargo.toml 得到的精确依赖矩阵（2026-10-31 实测） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `gate-coverage-ledger.md` | 门禁覆盖台账（gate-coverage-ledger） | CI / 本地门禁覆盖面台账与补齐进度 | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 | `PLAN-declarative-schema-sync.md` |

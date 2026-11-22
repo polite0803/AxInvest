@@ -26,6 +26,7 @@ import {
   HistoryOutlined,
   MessageFilled,
   NodeIndexOutlined,
+  RobotOutlined,
   ScheduleOutlined,
   ShopOutlined,
   TeamOutlined,
@@ -54,6 +55,14 @@ export const builtinNavItems: NavItem[] = [
     icon: navIcon(MessageFilled),
     labelKey: "nav.workbench",
     path: BUILTIN_PAGE_PATH.chat,
+    isPlugin: false,
+  },
+  // ── 通用域（general）：Bot 归属层（机器人列表 / SOUL / 记忆 / 线程） ──
+  {
+    key: "bots",
+    icon: navIcon(RobotOutlined),
+    labelKey: "nav.bots",
+    path: BUILTIN_PAGE_PATH.bots,
     isPlugin: false,
   },
   // ── 通用域（general）：系统级任务中心（定时任务 / 手动作业统一入口） ──

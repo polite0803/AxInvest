@@ -187,6 +187,8 @@ export interface ConversationState {
       agentProfileId?: string;
       workflowTemplateId?: string;
       systemPrompt?: string;
+      /** Bot 归属：新建线程直接落到该 Bot 下（`conversations.bot_id`） */
+      botId?: string | null;
     },
   ) => Promise<Conversation>;
   updateConversation: (
@@ -865,6 +867,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
           modelId: templateModelId,
           providerId: templateProviderId,
           systemPrompt: options?.systemPrompt ?? category?.systemPrompt ?? undefined,
+          // Bot 归属：后端 `create_conversation` 新增可选 `botId`（PLAN T4 落点）。
+          // 同时下面的 `update_conversation` 也带 `botId`——若后端只实现了其中一处，
+          // 另一处仍会生效（两处幂等），避免契约切换期出现「线程静默不归属」。
+          ...(options?.botId ? { botId: options.botId } : {}),
         },
       );
       let conversation = createdConversation;
@@ -883,6 +889,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
               workflowTemplateId: options?.workflowTemplateId,
               mode: options?.mode,
               workStrategy: options?.workStrategy,
+              ...(options?.botId ? { botId: options.botId } : {}),
               ...getStagedPreferenceUpdate(),
             },
           },

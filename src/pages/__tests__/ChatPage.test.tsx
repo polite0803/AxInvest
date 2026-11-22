@@ -44,6 +44,12 @@ const uiState = {
   deviceLayout: "desktop" as string,
 };
 
+// ChatPage 的 Bot 上下文（`/chat?bot=<id>`）：默认无 Bot，走与升级前一致的路径
+const botState = {
+  bots: [] as Array<{ id: string; name: string }>,
+  loadBots: vi.fn(),
+};
+
 vi.mock("antd", () => ({
   Typography: {
     Title: ({ children }: any) => children,
@@ -92,6 +98,7 @@ vi.mock("@/stores", () => ({
   useTabStore: (selector: (state: typeof tabState) => unknown) => selector(tabState),
   useRightPanelStore: (selector: (state: typeof rightPanelState) => unknown) => selector(rightPanelState),
   useUIStore: (selector: (state: typeof uiState) => unknown) => selector(uiState),
+  useBotStore: (selector: (state: typeof botState) => unknown) => selector(botState),
 }));
 
 vi.mock("@/components/chat/ChatSidebar", () => ({

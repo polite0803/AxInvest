@@ -3,6 +3,9 @@
 // === Paired Types (全局同步字段对) ===
 export * from "./paired";
 
+// === Bot 归属层（IPC 冻结契约，见 docs/bot-integration/IPC.md §3） ===
+export * from "./bot";
+
 // === Time Travel（时间旅行批次复盘） ===
 export * from "./timeTravel";
 
@@ -188,6 +191,8 @@ export interface Conversation {
   agentProfileId?: string | null;
   /** Workflow template ID bound to this conversation */
   workflowTemplateId?: string | null;
+  /** Bot 归属（null / 缺省 = 未归属；与后端 `conversations.bot_id` 对齐） */
+  botId?: string | null;
   /** Session type: "conversation" = free dialog, "workflow" = bound to workflow template */
   sessionType: "conversation" | "workflow";
   /** Workflow execution status: running / completed / failed / cancelled */
@@ -441,6 +446,8 @@ export interface UpdateConversationInput {
   enabledSkillIds?: string[];
   agentProfileId?: string | null;
   workflowTemplateId?: string | null;
+  /** Bot 归属：`null` = 显式解绑，缺键 = 不改 */
+  botId?: string | null;
   sessionType?: "conversation" | "workflow";
   workflowStatus?: string | null;
 }

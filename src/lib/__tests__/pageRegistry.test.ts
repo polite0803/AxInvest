@@ -14,6 +14,7 @@ describe("pageRegistry", () => {
   describe("BUILTIN_PAGE_PATH", () => {
     it("应包含所有内置页面", () => {
       expect(BUILTIN_PAGE_PATH.chat).toBe("/chat");
+      expect(BUILTIN_PAGE_PATH.bots).toBe("/bots");
       expect(BUILTIN_PAGE_PATH.dashboard).toBe("/chat/dashboard");
       expect(BUILTIN_PAGE_PATH.settings).toBe("/settings");
       expect(BUILTIN_PAGE_PATH.chatWorkflow).toBe("/chat/workflow");

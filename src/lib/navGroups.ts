@@ -43,6 +43,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     path: "/chat",
     itemKeys: [
       "chat",
+      "bots",
       "chat-workflow",
       "chat-terminal",
       "chat-files",

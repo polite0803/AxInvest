@@ -4,6 +4,7 @@ import { SessionSearchPanel } from "@/components/search/SessionSearchPanel";
 import { useConversationWorkflowPreview } from "@/hooks/useConversationWorkflowPreview";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useKnowledgeBases } from "@/hooks/useKnowledgeBases";
+import { filterConversationsByBot } from "@/lib/conversationBotFilter";
 import { getConvIcon } from "@/lib/convIcon";
 import { showBackendError } from "@/lib/errorI18n";
 import {
@@ -36,6 +37,7 @@ import {
   Modal,
   Radio,
   Space,
+  Tag,
   theme,
   Tooltip,
 } from "antd";
@@ -102,11 +104,22 @@ function getDateGroup(timestamp: number): string {
   return "earlier";
 }
 
+export interface ChatSidebarProps {
+  onCollapseChange?: (collapsed: boolean) => void;
+  /** Bot 上下文（来自 `/chat?bot=<id>`）：非空时列表只显示该 Bot 的线程 */
+  activeBotId?: string | null;
+  /** 过滤条上展示的 Bot 名称（由 ChatPage 从 botStore 解析后注入） */
+  activeBotName?: string | null;
+  /** 清除 Bot 过滤（回到「全部机器人」视图） */
+  onClearBotFilter?: () => void;
+}
+
 export function ChatSidebar({
   onCollapseChange,
-}: {
-  onCollapseChange?: (collapsed: boolean) => void;
-}) {
+  activeBotId = null,
+  activeBotName = null,
+  onClearBotFilter,
+}: ChatSidebarProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { message: messageApi, modal } = App.useApp();
@@ -208,6 +221,11 @@ export function ChatSidebar({
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  /** Bot 上下文里是否一并显示「未归属」线程（切换 Bot 时重置，避免上下文串味） */
+  const [showUnassignedThreads, setShowUnassignedThreads] = useState(false);
+  useEffect(() => {
+    setShowUnassignedThreads(false);
+  }, [activeBotId]);
   const [archivedSelectedIds, setArchivedSelectedIds] = useState<Set<string>>(
     new Set(),
   );
@@ -381,6 +399,8 @@ export function ChatSidebar({
       t("chat.newConversation"),
       model.modelId,
       provider.id,
+      // Bot 上下文：新线程直接归属当前 Bot（无 Bot 时为 undefined，行为不变）
+      activeBotId ? { botId: activeBotId } : undefined,
     );
   }, [
     providers,
@@ -390,6 +410,7 @@ export function ChatSidebar({
     createConversation,
     messageApi,
     t,
+    activeBotId,
   ]);
 
   useEffect(() => {
@@ -423,6 +444,8 @@ export function ChatSidebar({
         filtered = filtered.filter((c: Conversation) => c.title.toLowerCase().includes(query));
       }
     }
+    // Bot 归属过滤（纯函数见 lib/conversationBotFilter.ts）：无 Bot 上下文时原样返回
+    filtered = filterConversationsByBot(filtered, activeBotId, showUnassignedThreads);
     // 复制后再排序，避免原地修改 store 持有的数组
     return [...filtered].sort((a, b) => {
       if (a.isPinned !== b.isPinned) {
@@ -430,7 +453,7 @@ export function ChatSidebar({
       }
       return b.updatedAt - a.updatedAt;
     });
-  }, [conversations, searchText, fts5ResultIds]);
+  }, [conversations, searchText, fts5ResultIds, activeBotId, showUnassignedThreads]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -2130,6 +2153,37 @@ export function ChatSidebar({
         </div>
       )}
 
+      {/* Bot 上下文过滤条：来源 `/chat?bot=<botId>`（由 ChatPage 注入，不在本组件读 botStore） */}
+      {activeBotId && !showArchived && !multiSelectMode && (
+        <div
+          data-testid="chat-sidebar-bot-filter"
+          style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px 8px", flexWrap: "wrap" }}
+        >
+          <Tooltip title={t("bots.allBots")}>
+            <Tag
+              color="blue"
+              closable
+              onClose={(event) => {
+                event.preventDefault();
+                onClearBotFilter?.();
+              }}
+              style={{ marginInlineEnd: 0, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <Bot size={12} />
+                {activeBotName || t("bots.title")}
+              </span>
+            </Tag>
+          </Tooltip>
+          <Checkbox
+            checked={showUnassignedThreads}
+            onChange={(event) => setShowUnassignedThreads(event.target.checked)}
+          >
+            <span style={{ fontSize: 12 }}>{t("bots.unassigned")}</span>
+          </Checkbox>
+        </div>
+      )}
+
       {showArchived
         ? (
           <div className="flex-1 overflow-y-auto">
@@ -2374,7 +2428,7 @@ export function ChatSidebar({
                   : (
                     <div className="flex items-center justify-center h-full">
                       <Empty
-                        description={t("chat.noConversations")}
+                        description={activeBotId ? t("bots.threadsEmpty") : t("chat.noConversations")}
                         image={Empty.PRESENTED_IMAGE_SIMPLE}
                       />
                     </div>

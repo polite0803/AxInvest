@@ -7,7 +7,14 @@ import { RightPanelContainer } from "@/components/chat/RightPanelContainer";
 import { ScrollToMessageProvider } from "@/components/chat/ScrollToMessageContext";
 import { useAgentContext } from "@/hooks/useAgentContext";
 import { CHAT_ONLY_QUERY_PARAMS, withoutParams } from "@/lib/workspaceTabs";
-import { useConversationStore, useProviderStore, useSettingsStore, useTabStore, useUIStore } from "@/stores";
+import {
+  useBotStore,
+  useConversationStore,
+  useProviderStore,
+  useSettingsStore,
+  useTabStore,
+  useUIStore,
+} from "@/stores";
 import { theme } from "antd";
 import { ChevronLeft, ChevronRight, PanelRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -26,6 +33,26 @@ export function ChatPage() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // ── Bot 上下文（`/chat?bot=<botId>`，由 `/bots` 详情页跳入） ──
+  // 只在这里读取 URL 与 botStore，再把结果以 props 注入 ChatSidebar ——
+  // `components/chat/**` 不直读 `stores/feature/botStore`（组件中立性门禁）。
+  const activeBotId = searchParams.get("bot");
+  const bots = useBotStore((s) => s.bots);
+  const loadBots = useBotStore((s) => s.loadBots);
+  useEffect(() => {
+    if (activeBotId && bots.length === 0) {
+      void loadBots();
+    }
+  }, [activeBotId, bots.length, loadBots]);
+  const activeBotName = activeBotId ? bots.find((bot) => bot.id === activeBotId)?.name ?? null : null;
+  const clearBotFilter = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("bot");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   // ── URL query 参数初始化（仅页面挂载时执行一次） ──
   const urlInitDoneRef = useRef(false);
@@ -345,7 +372,14 @@ export function ChatPage() {
           ...(isMobile ? { position: "absolute", zIndex: 102, height: "100%" } : {}),
         }}
       >
-        {(!sidebarCollapsed || !isMobile) && <ChatSidebar onCollapseChange={setSidebarCollapsed} />}
+        {(!sidebarCollapsed || !isMobile) && (
+          <ChatSidebar
+            onCollapseChange={setSidebarCollapsed}
+            activeBotId={activeBotId}
+            activeBotName={activeBotName}
+            onClearBotFilter={clearBotFilter}
+          />
+        )}
       </div>
       {/* 移动端：折叠时显示浮动切换按钮 */}
       {isMobile && sidebarCollapsed && (

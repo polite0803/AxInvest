@@ -150,6 +150,8 @@ export const CHAT_ONLY_QUERY_PARAMS: readonly string[] = [
   "prompt",
   "workflow",
   "code",
+  // Bot 上下文：`/chat?bot=<botId>` 由 Bot 详情页跳入，ChatPage 用它过滤线程并归属新建会话
+  "bot",
 ];
 
 /**

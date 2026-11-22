@@ -41,6 +41,8 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
 
   // ── 通用功能（general 域） ──
   chat: "/chat",
+  /** Bot 归属层管理页（列表 / 创建 / 编辑 / SOUL / 记忆 / 线程） */
+  bots: "/bots",
   chatWorkflow: "/chat/workflow",
   chatTerminal: "/chat/terminal",
   chatFiles: "/chat/files",

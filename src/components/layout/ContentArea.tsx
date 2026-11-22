@@ -50,6 +50,7 @@ const LazyReplayWorkbenchPage = lazy(() =>
 const LazyTasksCenterPage = lazy(() =>
   import("@/pages/TasksCenterPage/TasksCenterPage").then((m) => ({ default: m.TasksCenterPage }))
 );
+const LazyBotsPage = lazy(() => import("@/pages/BotsPage").then((m) => ({ default: m.BotsPage })));
 
 /**
  * 旧链兼容：`/opc/industry/:packId` → `/opc/domain/:packId`。
@@ -193,6 +194,15 @@ export const ContentArea = memo(function ContentArea() {
             element={
               <PageContextProvider page="chat">
                 <SafeLazyPage Page={LazyWorkspaceHub} />
+              </PageContextProvider>
+            }
+          />
+          {/* Bot 归属层：机器人列表 / 创建 / 编辑 / SOUL / 记忆 / 线程 */}
+          <Route
+            path={BUILTIN_PAGE_PATH.bots}
+            element={
+              <PageContextProvider page="bots">
+                <SafeLazyPage Page={LazyBotsPage} />
               </PageContextProvider>
             }
           />

@@ -43,6 +43,13 @@
         "@/stores/feature/workflowStore"
       ],
       "reason": "边界聚合器：提供页面级 Context，聚合三个 feature store 的只读快照供中立组件消费（team-lead-15 规格首个登记候选）"
+    },
+    {
+      "file": "src/components/layout/ContentArea.tsx",
+      "targets": [
+        "@/components/plugin/PluginPageRouteHost"
+      ],
+      "reason": "布局壳按路由投影挂载插件域页渲染宿主（2026-11-19 引入，属路由装配边界）；PluginPageRouteHost 是通用插件页路由宿主，下沉为中性基元属独立批次"
     }
   ],
   "targetPrefixExemptions": []

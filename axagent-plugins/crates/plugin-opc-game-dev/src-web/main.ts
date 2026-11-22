@@ -24,9 +24,9 @@ function render(value: unknown): string {
 }
 
 const SAMPLES: Record<string, { command: string; input: unknown }> = {
-  "WebSearch": { command: "opc_game_dev_web_search", input: {"query":"搜索关键词"} },
-  "FileWrite": { command: "opc_game_dev_file_write", input: {"path":"note.md","content":"正文"} },
-  "FileRead": { command: "opc_game_dev_file_read", input: {"path":"README.md"} },
+  "WebSearch": { command: "opc_game_dev_web_search", input: { "query": "搜索关键词" } },
+  "FileWrite": { command: "opc_game_dev_file_write", input: { "path": "note.md", "content": "正文" } },
+  "FileRead": { command: "opc_game_dev_file_read", input: { "path": "README.md" } },
   // `capabilityPackId` / `domain_pack_id` 由 worker 按自身身份固定注入；页面只提供实体字段。
   rules: {
     command: "opc_game_dev_run_automation_rules",
@@ -71,29 +71,30 @@ function mount(): void {
   select.addEventListener("change", fillSample);
   fillSample();
 
-  run.addEventListener("click", () => void (async () => {
-    const sample = SAMPLES[select.value];
-    if (!sample) { return; }
-    let args: unknown;
-    try {
-      args = JSON.parse(input.value) as unknown;
-    } catch (error) {
-      output.textContent = `输入不是合法 JSON：${errorText(error)}`;
-      return;
-    }
-    if (args === null || typeof args !== "object" || Array.isArray(args)) {
-      output.textContent = "输入必须是 JSON 对象";
-      return;
-    }
-    output.textContent = `执行 ${sample.command}…`;
-    try {
-      const result = await client.executeCommand({ name: sample.command, input: args });
-      output.textContent = `${sample.command}
+  run.addEventListener("click", () =>
+    void (async () => {
+      const sample = SAMPLES[select.value];
+      if (!sample) { return; }
+      let args: unknown;
+      try {
+        args = JSON.parse(input.value) as unknown;
+      } catch (error) {
+        output.textContent = `输入不是合法 JSON：${errorText(error)}`;
+        return;
+      }
+      if (args === null || typeof args !== "object" || Array.isArray(args)) {
+        output.textContent = "输入必须是 JSON 对象";
+        return;
+      }
+      output.textContent = `执行 ${sample.command}…`;
+      try {
+        const result = await client.executeCommand({ name: sample.command, input: args });
+        output.textContent = `${sample.command}
 ${render(result)}`;
-    } catch (error) {
-      output.textContent = `${sample.command} 失败：${errorText(error)}`;
-    }
-  })());
+      } catch (error) {
+        output.textContent = `${sample.command} 失败：${errorText(error)}`;
+      }
+    })());
 }
 
 mount();

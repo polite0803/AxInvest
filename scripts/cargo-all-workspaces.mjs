@@ -28,7 +28,6 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
-import { assertAllPluginRepos, pluginBundleDist, pluginRepo } from "./lib/plugin-repos.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const MODES = {
@@ -101,8 +100,9 @@ function bundleGateEnvVarsFromTests() {
   return found;
 }
 
+/** 产物落点：`build-plugin-bundle.mjs` 的缺省输出，源码与产物同在主仓。 */
 function bundledPluginDir(plugin) {
-  return pluginBundleDist(repoRoot, plugin);
+  return path.join(repoRoot, "axagent-plugins", "dist", "plugins", plugin);
 }
 
 /**
@@ -195,11 +195,16 @@ function selftest() {
     ? [...testVars].filter((name) => !E2E_GATED_BUNDLE_VARS.has(name) && !E2E_NON_BUNDLE_GATES.has(name))
     : [];
   t(`⑭ E2E 源码里的 bundle 门控变量全部已登记或显式豁免（漏：${unregisteredVars.join(", ") || "无"}）`, unregisteredVars.length === 0);
-  const missingDirs = BUNDLE_STAGING.filter((item) => !fs.existsSync(bundledPluginDir(item.plugin))).map((item) => item.plugin);
-  t(`⑮ staging 声明的插件产物都已存在（缺：${missingDirs.join(", ") || "无"}）`, missingDirs.length === 0);
+  // 自检跑在纯 Node 的 parity job（干净 checkout，没有 dist 产物），只验路径口径。
+  // 产物是否真实存在由 nextest 分支的 `assertStagedArtifacts()` 在 staging 之后 fail-closed。
+  const wrongDirs = BUNDLE_STAGING.filter(
+    (item) => bundledPluginDir(item.plugin)
+      !== path.join(repoRoot, "axagent-plugins", "dist", "plugins", item.plugin),
+  ).map((item) => item.plugin);
+  t(`⑮ staging 产物路径都锚定主仓 axagent-plugins/dist（偏：${wrongDirs.join(", ") || "无"}）`, wrongDirs.length === 0);
   t("⑯ 负控：删掉一个门控变量后确实能被检出", !stagedEnvironment({ skip: [BUNDLE_STAGING[0].env] })[BUNDLE_STAGING[0].env]);
   const stockWorker = stagedEnvironment().AXAGENT_STOCK_WORKER_BIN;
-  t(`⑰ stock worker 路径指向已暂存的可执行文件（${stockWorker ?? "未生成"}）`, Boolean(stockWorker && fs.existsSync(stockWorker)));
+  t(`⑰ stock worker 路径指向 bundle/bin 下的平台可执行文件（${stockWorker ?? "未生成"}）`, Boolean(stockWorker && stockWorker.endsWith(path.join("bin", platformWorkerName()))));
   t(`⑱ 负控：平台 worker 文件名由平台决定（${platformWorkerName()}）`, ["axagent-plugin-stock", "axagent-plugin-stock.exe"].includes(platformWorkerName()));
 
   console.log(`[cargo-all-workspaces --selftest] ${pass} 项通过 / ${fails.length} 项失败`);
@@ -260,23 +265,38 @@ function stagedEnvironment({ skip = [] } = {}) {
   return env;
 }
 
+/** staging 完成后 fail-closed：任一产物缺失就停，不让 E2E 静默 SKIP 冒充通过。 */
+function assertStagedArtifacts() {
+  const missing = BUNDLE_STAGING.filter((item) => !fs.existsSync(bundledPluginDir(item.plugin)))
+    .map((item) => item.plugin);
+  if (missing.length) {
+    console.error(`[cargo ${mode}] staging 后产物缺失：${missing.join(", ")}`);
+    process.exit(1);
+  }
+  const stockWorker = stagedEnvironment().AXAGENT_STOCK_WORKER_BIN;
+  if (!stockWorker || !fs.existsSync(stockWorker)) {
+    console.error(`[cargo ${mode}] stock worker 可执行文件缺失：${stockWorker ?? "未生成"}`);
+    process.exit(1);
+  }
+}
+
 if (mode === "nextest" && !listOnly) {
   // bundle E2E 在没有产物时只会打印 SKIP 并返回成功。这里逐插件串行 staging，
   // 任一失败立即中止，确保 CI 里每个门控 E2E 都有真实产物可用。
-  for (const { plugin, script } of assertAllPluginRepos(
-    repoRoot,
-    BUNDLE_STAGING.map((item) => item.plugin),
-  )) {
+  // 打包脚本与 worker 源码权威都在主仓 `axagent-plugins/`。CI 只 checkout 本仓，
+  // 不能依赖 sibling 独立插件仓；逐插件用同一份主仓脚本构建 + `--check` 握手验收。
+  for (const { plugin } of BUNDLE_STAGING) {
     const staged = spawnSync(
       process.execPath,
-      [script, "--plugin", plugin, "--check"],
-      { cwd: pluginRepo(repoRoot, plugin), stdio: "inherit", env: process.env },
+      ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--check"],
+      { cwd: repoRoot, stdio: "inherit", env: process.env },
     );
     if (staged.status !== 0) {
       console.error(`[cargo ${mode}] staging ${plugin} bundle 失败`);
       process.exit(staged.status ?? 1);
     }
   }
+  assertStagedArtifacts();
   Object.assign(process.env, stagedEnvironment());
 }
 

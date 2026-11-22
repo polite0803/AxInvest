@@ -59,8 +59,15 @@ export function scanPluginBoundary(repoRoot = ROOT) {
   const cratesDir = join(pluginRoot, "crates");
   const findings = {};
   if (!existsSync(cratesDir)) return findings;
+  // `exclude` 里的 crate 是模板源 / 独立仓发布源，不参与主 workspace 构建。
+  // 它们的 path 依赖会在生成器拷出独立仓时换成 SDK 版本号，不构成主仓的逻辑拆分债。
+  const workspaceManifest = readFileSync(join(pluginRoot, "Cargo.toml"), "utf8");
+  const excluded = new Set(
+    [...(/^[ \t]*exclude[ \t]*=[ \t]*\[([\s\S]*?)\]/m.exec(workspaceManifest)?.[1] ?? "").matchAll(/"([^"]+)"/g)]
+      .map((m) => m[1].split("/").pop()),
+  );
   for (const entry of readdirSync(cratesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() || excluded.has(entry.name)) continue;
     const manifest = join(cratesDir, entry.name, "Cargo.toml");
     if (!existsSync(manifest)) continue;
     const deps = parsePathDeps(readFileSync(manifest, "utf8"));
@@ -93,6 +100,10 @@ function selftest() {
   t("随仓依赖不计越界", good.get("axagent-plugin-opc-core").path.startsWith("../..") === false);
   t("空口径计数为 0", countFindings({}) === 0);
   t("新增 debt 会被计数", countFindings({ "plugin-x": ["axagent-harness"] }) === 1);
+  t(
+    "exclude 的模板源不计入主 workspace 边界债",
+    !Object.keys(scanPluginBoundary()).some((name) => name.startsWith("plugin-opc-ai-research")),
+  );
   const failed = checks.filter((c) => !c.ok);
   for (const c of checks) console.log(`  ${c.ok ? "✔" : "✖"} ${c.name}`);
   console.log(`selftest：${checks.length - failed.length} passed / ${failed.length} failed`);

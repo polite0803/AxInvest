@@ -33,7 +33,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertAllPluginRepos, PLUGIN_NAMES } from "./lib/plugin-repos.mjs";
+import { PLUGIN_NAMES } from "./lib/plugin-repos.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -64,7 +64,9 @@ if (isMobile) {
   process.exit(0);
 }
 
-// 暂存的插件清单：顺序即构建顺序。源码权威在各插件独立仓。
+// 暂存的插件清单：顺序即构建顺序。这里打的是**宿主安装包**，源码权威在主仓的
+// `axagent-plugins/`（排除在 workspace 外的模板源也在主仓），不得依赖仓外独立插件仓 ——
+// GitHub Actions 只 checkout 本仓，强依赖 sibling repos 会让所有 Release 构建当场红。
 const PLUGINS = PLUGIN_NAMES;
 
 // `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。手工直跑要 debug 档
@@ -75,14 +77,14 @@ const release =
   && !process.argv.includes("--debug");
 
 const bundledRoot = argRoot();
-const pluginRepos = assertAllPluginRepos(repoRoot, PLUGINS);
 
 console.error(
   `[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物到 ${bundledRoot}（${release ? "release" : "debug"}）`,
 );
-for (const { plugin, script } of pluginRepos) {
+for (const plugin of PLUGINS) {
   const outDir = path.join(bundledRoot, plugin);
-  const args = [script, "--plugin", plugin, "--out", outDir];
+  // 打包脚本权威位置在 axagent-plugins/scripts/（与 SDK 仓同源），不是仓外独立仓副本。
+  const args = ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
   if (release) {
     args.push("--release");
   }

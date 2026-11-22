@@ -326,7 +326,7 @@ const RULES = [
   },
   {
     id: "crate-dir-not-orphan",
-    title: "`crates/*` 目录必须在 workspace `members` 里（防孤儿 crate）",
+    title: "`crates/*` 目录必须在 workspace `members` 或显式 `exclude` 里（防孤儿 crate）",
     level: "ratchet",
     filesOf: () => [],
     hitsInLines() {
@@ -334,7 +334,7 @@ const RULES = [
     },
     hitsInContext(ctx) {
       return ctx.crateNames
-        .filter((c) => !c.isMember)
+        .filter((c) => !c.isMember && !c.isExcluded)
         .map((c) => ({
           file: rel(c.dir),
           line: 1,
@@ -381,21 +381,29 @@ export function ownCommandModule(file) {
 }
 
 // ── 扫描 ──────────────────────────────────────────────────────────────
-/** 解析某个 workspace 根 Cargo.toml 的 members（不采信目录存在 = 成员）。 */
-function parseMembers(rootCargo) {
-  const members = new Set();
-  if (!existsSync(rootCargo)) return members;
-  const m = /^[ \t]*members[ \t]*=[ \t]*\[([\s\S]*?)\]/m.exec(readFileSync(rootCargo, "utf8"));
+/** 解析某个 workspace 根 Cargo.toml 的路径列表字段（members / exclude 同形）。 */
+function parseWorkspacePaths(rootCargo, key) {
+  const paths = new Set();
+  if (!existsSync(rootCargo)) return paths;
+  const m = new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*\\[([\\s\\S]*?)\\]`, "m").exec(
+    readFileSync(rootCargo, "utf8"),
+  );
   if (m) {
-    for (const s of m[1].matchAll(/"([^"]+)"/g)) members.add(s[1].replace(/\\/g, "/"));
+    for (const s of m[1].matchAll(/"([^"]+)"/g)) paths.add(s[1].replace(/\\/g, "/"));
   }
-  return members;
+  return paths;
 }
+
+/** members 不采信目录存在；exclude 是显式的「非成员但有意保留」声明。 */
+const parseMembers = (rootCargo) => parseWorkspacePaths(rootCargo, "members");
 
 function buildContext() {
   // 每个 workspace 的成员表（自动探测，含应用壳层 src-tauri 与各拆分 workspace）。
   const membersByRoot = new Map(
     WORKSPACE_ROOTS.map((r) => [r, parseMembers(join(r, "Cargo.toml"))]),
+  );
+  const excludedByRoot = new Map(
+    WORKSPACE_ROOTS.map((r) => [r, parseWorkspacePaths(join(r, "Cargo.toml"), "exclude")]),
   );
   // crates/* 实际目录：用于发现「不在 members 的孤儿目录」；成员判定按各自 workspace 根。
   const cargos = CRATES_DIRS.flatMap((d) => walk(d, ["Cargo.toml"]));
@@ -419,10 +427,13 @@ function buildContext() {
     const binaryOnly =
       existsSync(join(dir, "src", "main.rs")) && !existsSync(join(dir, "src", "lib.rs"));
     const members = membersByRoot.get(wsRoot);
+    const excluded = excludedByRoot.get(wsRoot);
     crateNames.push({
       name: m[1],
       dir,
       isMember: members.has(relDir) || members.has(`${relDir}/`),
+      // `exclude` 中的目录是 generator 模板源 / 独立仓发布源：不是成员，也不是孤儿。
+      isExcluded: excluded.has(relDir) || excluded.has(`${relDir}/`),
       ffiOnly,
       binaryOnly,
     });
@@ -557,6 +568,12 @@ export function selftest() {
   T("R4- 注释里的名字不算引用", re4("axagent-crdt").test("# 曾用 axagent-crdt") === false);
   T("R4- `axagent-crdt-extra` 不得误判（词边界）", re4("axagent-crdt").test('axagent-crdt-extra = { path = "x" }') === false);
   T("R4- 缩进无关（tab / 空格均可）", re4("axagent-crdt").test("\taxagent-crdt.path = \"x\"") === true);
+  T(
+    "R4b- 显式 exclude 的插件模板源不算孤儿目录",
+    parseWorkspacePaths(join(ROOT, "axagent-plugins", "Cargo.toml"), "exclude").has(
+      "crates/plugin-stock",
+    ),
+  );
 
   // ── 规则 5 ──
   T("R5+ `from \"../feature/agentStore\"`", probe("stores-domain-no-feature", ['import { x } from "../feature/agentStore";']).length === 1);

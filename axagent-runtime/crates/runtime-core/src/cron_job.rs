@@ -20,6 +20,7 @@ use axagent_harness::jobs_store::{
     CronJobRunView, CronJobView, JobStoreProvider, NewCronJob, RemoveJobOutcome,
 };
 use chrono::{Datelike, Timelike};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -84,6 +85,15 @@ pub struct CronJob {
     /// 前端显示「未知」而不是猜成「定时」。写点只有 `record_run`（从在跑登记里取）。
     #[serde(default)]
     pub last_trigger: Option<String>,
+    /// 例程归属的 Bot id（P2-a）。`None` = 普通（非 Bot）定时任务，走既有分支，
+    /// 行为不变；旧持久化记录无此键，serde default 保证反序列化得 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_id: Option<String>,
+    /// IANA 时区名（`chrono_tz::Tz` 可解析，如 `Asia/Shanghai`）；`None` = 宿主
+    /// `Local`，与现状完全一致。档期计算（`calculate_next_run`）按它解释 cron
+    /// 五段；旧记录无此键 ⇒ `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
     /// 下次执行时间 (epoch millis)
     pub next_run_at: Option<i64>,
     /// 重试/超时配置
@@ -229,6 +239,8 @@ impl CronJob {
             last_run_at: None,
             last_result: None,
             last_trigger: None,
+            bot_id: None,
+            timezone: None,
             next_run_at: None,
             config: TaskConfig::default(),
             delivery: None,
@@ -305,7 +317,8 @@ impl CronJob {
 /// 这是调度器的**唯一**档期口径：调度循环（`runtime/src/cron/scheduler.rs`）
 /// 不再自行匹配 cron 字段，而是「`next_run_at` 到期即派发」；`next_run_at` 由
 /// `record_run`（触发后推进到下一档期）、`add`（新建即编排）、`resumed_next_run`
-/// （重启恢复）三处调用本函数算出。因此本函数的 Local 时区 / 五段 AND / 词法
+/// （重启恢复）三处调用本函数算出。因此本函数的档期时区（P2-a 起为 `tz` 参数：
+/// `None` = 宿主 Local，`Some` = 任务自带 IANA 时区）/ 五段 AND / 词法
 /// 怪癖就是调度器的全部语义，没有第二份需要同步的匹配实现。
 ///
 /// 1. 按**本地时区**匹配（表达式按北京时间书写，按 UTC 重算 ⇒ 显示/触发的下次
@@ -320,7 +333,7 @@ impl CronJob {
 /// 调用，含当前分钟会再次命中自己。
 /// 无法算出（非法表达式 / 一年内无匹配）返回 None —— 调用方据此保持
 /// `next_run_at = None`，调度器对 None 不派发。
-fn calculate_next_run(schedule: &str, now_ms: i64) -> Option<i64> {
+fn calculate_next_run(schedule: &str, now_ms: i64, tz: Option<Tz>) -> Option<i64> {
     let parts: Vec<&str> = schedule.split_whitespace().collect();
     if parts.len() != 5 {
         return None;
@@ -330,7 +343,17 @@ fn calculate_next_run(schedule: &str, now_ms: i64) -> Option<i64> {
         return None;
     }
 
-    let now_local = chrono::TimeZone::timestamp_millis_opt(&chrono::Local, now_ms).single()?;
+    // 档期时区：`None` = 宿主 Local（现状不变）；`Some(tz)` = 按 IANA 时区解释
+    // cron 五段，产出仍是 UTC 毫秒时间戳（调度器口径不变）。
+    let now_local: chrono::DateTime<chrono::FixedOffset> = match tz {
+        Some(tz) => {
+            use chrono::TimeZone as _;
+            tz.timestamp_millis_opt(now_ms).single()?.fixed_offset()
+        },
+        None => chrono::TimeZone::timestamp_millis_opt(&chrono::Local, now_ms)
+            .single()?
+            .fixed_offset(),
+    };
     // 秒/纳秒归零后推进到下一分钟，保证结果严格晚于本次触发
     let mut cursor = now_local
         .with_second(0)?
@@ -401,6 +424,7 @@ fn resumed_next_run(
     schedule: &str,
     active: bool,
     now_ms: i64,
+    tz: Option<Tz>,
 ) -> Option<i64> {
     if !active {
         return current;
@@ -408,7 +432,7 @@ fn resumed_next_run(
     match current {
         Some(next) if next > now_ms => Some(next),
         Some(_) => Some(0),
-        None => calculate_next_run(schedule, now_ms),
+        None => calculate_next_run(schedule, now_ms, tz),
     }
 }
 
@@ -526,7 +550,13 @@ impl CronJobStore {
             // 归零后走 None 分支：`resumed_next_run` 会按 cron 重新算，`materialize_next_runs`
             // 也会把它补算回 DB，等于自愈。
             let sanitized_next = job.next_run_at.filter(|t| *t > 0);
-            job.next_run_at = resumed_next_run(sanitized_next, &job.schedule, job.is_active(), now);
+            job.next_run_at = resumed_next_run(
+                sanitized_next,
+                &job.schedule,
+                job.is_active(),
+                now,
+                job.timezone.as_deref().and_then(|t| t.parse::<Tz>().ok()),
+            );
             job.updated_at = now;
             // 恢复策略改变了档期（过期→0 的补发标记、None→补算的下一档期）时回写 DB：
             // 否则 None→Some 只存在于内存，`materialize_next_runs` 又只扫内存中的
@@ -560,7 +590,11 @@ impl CronJobStore {
         // 「当前分钟匹配 cron」判定，None 任务永远不会被触发。非法表达式算出 None
         // 时保持 None（调度器不派发），与「非法表达式永不触发」的旧行为一致。
         if job.is_active() && job.next_run_at.is_none() {
-            job.next_run_at = calculate_next_run(&job.schedule, now_millis());
+            job.next_run_at = calculate_next_run(
+                &job.schedule,
+                now_millis(),
+                job.timezone.as_deref().and_then(|t| t.parse::<Tz>().ok()),
+            );
         }
         // 写入 DB（端口内部按 backend 生成占位符与冲突处理）；ephemeral 模式跳过
         if let Some(p) = self.port() {
@@ -637,17 +671,23 @@ impl CronJobStore {
     /// 老版本遗留的 None 行）。返回补算条数；非法表达式（一年内无档期）保持 None，
     /// 调度器不派发，也不会在每轮 tick 重复尝试写库。
     pub async fn materialize_next_runs(&self) -> usize {
-        let pending: Vec<(String, String)> = {
+        let pending: Vec<(String, String, Option<Tz>)> = {
             let jobs = self.jobs.read().await;
             jobs.iter()
                 .filter(|j| j.is_active() && j.next_run_at.is_none())
-                .map(|j| (j.id.clone(), j.schedule.clone()))
+                .map(|j| {
+                    (
+                        j.id.clone(),
+                        j.schedule.clone(),
+                        j.timezone.as_deref().and_then(|t| t.parse::<Tz>().ok()),
+                    )
+                })
                 .collect()
         };
 
         let mut count = 0;
-        for (id, schedule) in pending {
-            let Some(next) = calculate_next_run(&schedule, now_millis()) else {
+        for (id, schedule, tz) in pending {
+            let Some(next) = calculate_next_run(&schedule, now_millis(), tz) else {
                 continue;
             };
             if self.update(&id, |job| job.next_run_at = Some(next)).await {
@@ -731,7 +771,11 @@ impl CronJobStore {
                 job.run_count += 1;
                 job.last_result = Some(result.clone());
                 job.last_trigger = trigger.clone();
-                job.next_run_at = calculate_next_run(&job.schedule, now);
+                job.next_run_at = calculate_next_run(
+                    &job.schedule,
+                    now,
+                    job.timezone.as_deref().and_then(|t| t.parse::<Tz>().ok()),
+                );
             })
             .await;
 
@@ -1032,6 +1076,8 @@ impl JobStoreProvider for CronJobStore {
             last_run_at: None,
             last_result: None,
             last_trigger: None,
+            bot_id: None,
+            timezone: None,
             next_run_at: None,
             config: TaskConfig::default(),
             delivery: None,
@@ -1126,6 +1172,8 @@ impl From<axagent_harness::tool_service::CronJobData> for CronJob {
             last_run_at: None,
             last_result: None,
             last_trigger: None,
+            bot_id: None,
+            timezone: None,
             next_run_at: None,
             config: TaskConfig::default(),
             delivery: None,
@@ -1184,7 +1232,7 @@ impl axagent_harness::tool_service::CronJobStore for CronJobStore {
 
 #[cfg(test)]
 mod calculate_next_run_tests {
-    use super::{calculate_next_run, resumed_next_run};
+    use super::{calculate_next_run, resumed_next_run, CronJob};
     use chrono::{Datelike, Local, TimeZone, Timelike};
 
     /// 构造本地时区的毫秒时间戳
@@ -1213,7 +1261,7 @@ mod calculate_next_run_tests {
     fn test_daily_fixed_time_later_today() {
         // 当天 08:00 → 今天 09:00
         assert_local(
-            calculate_next_run("0 9 * * *", local_ms(2026, 10, 12, 8, 0, 0)),
+            calculate_next_run("0 9 * * *", local_ms(2026, 10, 12, 8, 0, 0), None),
             2026,
             10,
             12,
@@ -1226,7 +1274,7 @@ mod calculate_next_run_tests {
     fn test_daily_fixed_time_after_today_rolls_to_tomorrow() {
         // 当天 10:30 → 次日 09:00（旧 UTC 实现会算成当天/次日的错误钟点）
         assert_local(
-            calculate_next_run("0 9 * * *", local_ms(2026, 10, 12, 10, 30, 0)),
+            calculate_next_run("0 9 * * *", local_ms(2026, 10, 12, 10, 30, 0), None),
             2026,
             10,
             13,
@@ -1239,7 +1287,7 @@ mod calculate_next_run_tests {
     fn test_never_rematches_current_minute() {
         // record_run 在 09:00 触发后调用：含秒的当前分钟不得再次命中自己
         assert_local(
-            calculate_next_run("0 9 * * *", local_ms(2026, 10, 12, 9, 0, 42)),
+            calculate_next_run("0 9 * * *", local_ms(2026, 10, 12, 9, 0, 42), None),
             2026,
             10,
             13,
@@ -1248,7 +1296,7 @@ mod calculate_next_run_tests {
         );
         // 凌晨 01:00 档同理 → 次日 01:00（本地钟点，不偏 8 小时）
         assert_local(
-            calculate_next_run("0 1 * * *", local_ms(2026, 10, 12, 1, 0, 5)),
+            calculate_next_run("0 1 * * *", local_ms(2026, 10, 12, 1, 0, 5), None),
             2026,
             10,
             13,
@@ -1261,7 +1309,7 @@ mod calculate_next_run_tests {
     fn test_minute_step_aligns_to_grid() {
         // */15：10:07 之后的网格点是 10:15（旧实现给 now+15min=10:22，错误）
         assert_local(
-            calculate_next_run("*/15 * * * *", local_ms(2026, 10, 12, 10, 7, 0)),
+            calculate_next_run("*/15 * * * *", local_ms(2026, 10, 12, 10, 7, 0), None),
             2026,
             10,
             12,
@@ -1274,7 +1322,7 @@ mod calculate_next_run_tests {
     fn test_comma_list() {
         // 0,30 9 * * *：08 点档 → 09:00；09:10 → 09:30；09:40 → 次日 09:00
         assert_local(
-            calculate_next_run("0,30 9 * * *", local_ms(2026, 10, 12, 8, 0, 0)),
+            calculate_next_run("0,30 9 * * *", local_ms(2026, 10, 12, 8, 0, 0), None),
             2026,
             10,
             12,
@@ -1282,7 +1330,7 @@ mod calculate_next_run_tests {
             0,
         );
         assert_local(
-            calculate_next_run("0,30 9 * * *", local_ms(2026, 10, 12, 9, 10, 0)),
+            calculate_next_run("0,30 9 * * *", local_ms(2026, 10, 12, 9, 10, 0), None),
             2026,
             10,
             12,
@@ -1290,7 +1338,7 @@ mod calculate_next_run_tests {
             30,
         );
         assert_local(
-            calculate_next_run("0,30 9 * * *", local_ms(2026, 10, 12, 9, 40, 0)),
+            calculate_next_run("0,30 9 * * *", local_ms(2026, 10, 12, 9, 40, 0), None),
             2026,
             10,
             13,
@@ -1304,7 +1352,7 @@ mod calculate_next_run_tests {
         // 每周一 09:00；2026-10-11 是周日 → 2026-10-12（周一）09:00
         // 旧实现忽略星期字段，会错算成次日以外的任意日期
         assert_local(
-            calculate_next_run("0 9 * * 1", local_ms(2026, 10, 11, 12, 0, 0)),
+            calculate_next_run("0 9 * * 1", local_ms(2026, 10, 11, 12, 0, 0), None),
             2026,
             10,
             12,
@@ -1313,7 +1361,7 @@ mod calculate_next_run_tests {
         );
         // 周一 10:00 再算 → 下周一（10-19）
         assert_local(
-            calculate_next_run("0 9 * * 1", local_ms(2026, 10, 12, 10, 0, 0)),
+            calculate_next_run("0 9 * * 1", local_ms(2026, 10, 12, 10, 0, 0), None),
             2026,
             10,
             19,
@@ -1326,7 +1374,7 @@ mod calculate_next_run_tests {
     fn test_monthly_day_field_is_honored() {
         // 每月 1 日 18:00；10-11 → 11-01 18:00
         assert_local(
-            calculate_next_run("0 18 1 * *", local_ms(2026, 10, 11, 9, 0, 0)),
+            calculate_next_run("0 18 1 * *", local_ms(2026, 10, 11, 9, 0, 0), None),
             2026,
             11,
             1,
@@ -1338,11 +1386,88 @@ mod calculate_next_run_tests {
     #[test]
     fn test_invalid_and_lexical_gate_return_none() {
         // 非法 / 段数不对
-        assert!(calculate_next_run("not a cron", 0).is_none());
-        assert!(calculate_next_run("0 9 * *", local_ms(2026, 10, 12, 8, 0, 0)).is_none());
+        assert!(calculate_next_run("not a cron", 0, None).is_none());
+        assert!(calculate_next_run("0 9 * *", local_ms(2026, 10, 12, 8, 0, 0), None).is_none());
         // 词法门槛：不含 * , - / 的表达式无档期语义，calculate_next_run 返回 None
         // ⇒ next_run_at 保持 None，调度器不派发
-        assert!(calculate_next_run("0 9 1 1 1", local_ms(2026, 10, 12, 8, 0, 0)).is_none());
+        assert!(calculate_next_run("0 9 1 1 1", local_ms(2026, 10, 12, 8, 0, 0), None).is_none());
+    }
+
+    // ── P2-a：时区化档期计算 ──
+
+    use chrono_tz::Tz;
+
+    /// P2-a 升级等价性：旧 JSON（无 botId/timezone 键）反序列化得 None，
+    /// 且档期计算与显式传 None 完全一致。
+    #[test]
+    fn p2a_legacy_json_deserializes_without_new_keys() {
+        let json = r#"{
+            "id": "legacy",
+            "name": "legacy",
+            "description": "",
+            "schedule": "0 9 * * *",
+            "prompt": "p",
+            "workflow_id": null,
+            "task_type": null,
+            "platform": null,
+            "enabled_toolsets": null,
+            "status": "active",
+            "recurring": true,
+            "run_count": 0,
+            "last_run_at": null,
+            "last_result": null,
+            "next_run_at": null,
+            "config": {
+                "timeout_seconds": 300,
+                "retry_on_failure": true,
+                "max_retries": 3,
+                "retry_delay_seconds": 60,
+                "notification_enabled": false,
+                "run_on_startup": false
+            },
+            "priority": "medium",
+            "created_at": 0,
+            "updated_at": 0
+        }"#;
+        let job: CronJob = serde_json::from_str(json).expect("旧 JSON 必须可反序列化");
+        assert_eq!(job.bot_id, None, "旧记录 botId 应得 None");
+        assert_eq!(job.timezone, None, "旧记录 timezone 应得 None");
+        // 档期与改前一致（None = Local 旧行为）
+        let got = calculate_next_run(&job.schedule, local_ms(2026, 10, 12, 8, 0, 0), None);
+        assert_local(got, 2026, 10, 12, 9, 0);
+    }
+
+    /// P2-a：Some("Asia/Shanghai") 下 `0 9 * * *` 产出 UTC+8 的 09:00 对应时间戳。
+    #[test]
+    fn p2a_timezone_aware_next_run() {
+        let tz: Tz = "Asia/Shanghai".parse().expect("固定时区必须可解析");
+        // 以「上海时区 2026-10-12 08:00」对应的 UTC 毫秒为「现在」
+        let shanghai_0800 = tz
+            .with_ymd_and_hms(2026, 10, 12, 8, 0, 0)
+            .single()
+            .expect("测试时刻必须唯一")
+            .timestamp_millis();
+        let got = calculate_next_run("0 9 * * *", shanghai_0800, Some(tz))
+            .expect("应算出下次档期");
+        // 期望：上海时区当天 09:00 = UTC 01:00
+        let expected = tz
+            .with_ymd_and_hms(2026, 10, 12, 9, 0, 0)
+            .single()
+            .expect("期望时刻必须唯一")
+            .timestamp_millis();
+        assert_eq!(got, expected, "上海时区 0 9 * * * 应产出上海 09:00 的时间戳");
+        // 反向验证：该时间戳在 UTC 下是 01:00
+        let utc = chrono::TimeZone::timestamp_millis_opt(&chrono::Utc, got)
+            .single()
+            .unwrap();
+        assert_eq!((utc.hour(), utc.minute()), (1, 0), "UTC 侧应为 01:00");
+    }
+
+    /// P2-a：Some("Not/AZone") 构造报错（parse::<Tz> 失败）。
+    #[test]
+    fn p2a_invalid_timezone_string_fails_to_parse() {
+        let parsed = "Not/AZone".parse::<Tz>();
+        assert!(parsed.is_err(), "非法 IANA 时区名必须解析失败");
     }
 
     // ── resumed_next_run 三态恢复策略 ──
@@ -1353,7 +1478,7 @@ mod calculate_next_run_tests {
         // 是 next 已推进；这里直接锁住「未来不动」这一半语义）。
         let now = local_ms(2026, 10, 14, 6, 0, 0);
         let future = local_ms(2026, 10, 14, 9, 0, 0);
-        assert_eq!(resumed_next_run(Some(future), "0 9 * * *", true, now), Some(future));
+        assert_eq!(resumed_next_run(Some(future), "0 9 * * *", true, now, None), Some(future));
     }
 
     #[test]
@@ -1361,15 +1486,15 @@ mod calculate_next_run_tests {
         // 昨天的档期 / 0（旧版本恢复值）⇒ 置 0，首轮 tick 即补发一次。
         let now = local_ms(2026, 10, 14, 3, 22, 0);
         let yesterday = local_ms(2026, 10, 13, 0, 0, 0);
-        assert_eq!(resumed_next_run(Some(yesterday), "0 0 * * *", true, now), Some(0));
-        assert_eq!(resumed_next_run(Some(0), "0 0 * * *", true, now), Some(0));
+        assert_eq!(resumed_next_run(Some(yesterday), "0 0 * * *", true, now, None), Some(0));
+        assert_eq!(resumed_next_run(Some(0), "0 0 * * *", true, now, None), Some(0));
     }
 
     #[test]
     fn test_none_next_run_active_is_scheduled_from_expression() {
         // 周六 09:00 周任务，周三重启 ⇒ 算出本周六，不立即补发（周中没错过它的档期）。
         let now = local_ms(2026, 10, 14, 3, 22, 0); // 2026-10-14 周三
-        let got = resumed_next_run(None, "0 9 * * 6", true, now).expect("应算出周六档期");
+        let got = resumed_next_run(None, "0 9 * * 6", true, now, None).expect("应算出周六档期");
         assert_local(Some(got), 2026, 10, 17, 9, 0);
     }
 
@@ -1377,8 +1502,8 @@ mod calculate_next_run_tests {
     fn test_none_next_run_invalid_expression_stays_none() {
         // 非法表达式保持 None：调度器对 None 不派发，避免每轮 tick 重复触发。
         let now = local_ms(2026, 10, 14, 3, 22, 0);
-        assert!(resumed_next_run(None, "not a cron", true, now).is_none());
-        assert!(resumed_next_run(None, "0 9 1 1 1", true, now).is_none());
+        assert!(resumed_next_run(None, "not a cron", true, now, None).is_none());
+        assert!(resumed_next_run(None, "0 9 1 1 1", true, now, None).is_none());
     }
 
     #[test]
@@ -1386,8 +1511,8 @@ mod calculate_next_run_tests {
         // 暂停 / 禁用任务：任何现值（含过期 / None）原样保留。
         let now = local_ms(2026, 10, 14, 3, 22, 0);
         let expired = local_ms(2026, 10, 10, 2, 0, 0);
-        assert_eq!(resumed_next_run(Some(expired), "0 2 * * *", false, now), Some(expired));
-        assert_eq!(resumed_next_run(None, "0 9 * * *", false, now), None);
+        assert_eq!(resumed_next_run(Some(expired), "0 2 * * *", false, now, None), Some(expired));
+        assert_eq!(resumed_next_run(None, "0 9 * * *", false, now, None), None);
     }
 }
 

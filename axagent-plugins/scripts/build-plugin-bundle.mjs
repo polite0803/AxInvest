@@ -360,7 +360,7 @@ if (!spec) {
 
 /** 独立仓根（可用 `AXAGENT_PLUGIN_REPOS_ROOT` 覆盖）；主仓同级目录是默认落点。 */
 function pluginReposRoot() {
-  if (process.env.AXAGENT_PLUGIN_REPOS_ROOT) return path.resolve(process.env.AXAGENT_PLUGIN_REPOS_ROOT);
+  if (process.env.AXAGENT_PLUGIN_REPOS_ROOT) { return path.resolve(process.env.AXAGENT_PLUGIN_REPOS_ROOT); }
   // `workspaceRoot` 是 `axagent-plugins/`，独立仓与**主仓**同级 ⇒ 上跳两层。
   return path.resolve(workspaceRoot, "..", "..", "AxInvest-plugin-repos");
 }
@@ -374,8 +374,8 @@ function pluginReposRoot() {
  */
 function resolvePluginSourceRoot(name) {
   const candidate = path.join(pluginReposRoot(), name);
-  if (fs.existsSync(path.join(candidate, ".git"))) return candidate;
-  if (fs.existsSync(path.join(workspaceRoot, `plugin-${name}`))) return workspaceRoot;
+  if (fs.existsSync(path.join(candidate, ".git"))) { return candidate; }
+  if (fs.existsSync(path.join(workspaceRoot, `plugin-${name}`))) { return workspaceRoot; }
   return null;
 }
 
@@ -384,7 +384,7 @@ function requirePluginSourceRoot(name) {
   if (!root) {
     fail(
       `插件源码根不可用：找不到独立仓 ${path.join(pluginReposRoot(), name)}`
-      + "（独立仓是唯一权威，不退回主仓副本；可用 AXAGENT_PLUGIN_REPOS_ROOT 指定根）",
+        + "（独立仓是唯一权威，不退回主仓副本；可用 AXAGENT_PLUGIN_REPOS_ROOT 指定根）",
     );
   }
   return root;
@@ -602,7 +602,14 @@ if (check) {
  * worker 命令页退回占位文案时，CI 会红而不是静默绿。
  */
 function checkPageVerifierIfPresent() {
-  const verifier = path.join(requirePluginSourceRoot(pluginName), spec.webDir ?? "", "..", "src-web", "__verify__", "verify-bundle.mjs");
+  const verifier = path.join(
+    requirePluginSourceRoot(pluginName),
+    spec.webDir ?? "",
+    "..",
+    "src-web",
+    "__verify__",
+    "verify-bundle.mjs",
+  );
   if (!spec.webDir || !fs.existsSync(verifier)) {
     return;
   }

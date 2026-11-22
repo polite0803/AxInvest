@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 //
-// Bot P1 i18n **必需 key 集合**门禁（2026-11-22）。
+// Bot P1/P2-a i18n **必需 key 集合**门禁（2026-11-22 建，2026-11-23 登记 P2-a 29 键）。
 //
 // ## 补的是哪一格
 //
@@ -98,6 +98,39 @@ export const BOT_I18N_KEYS = [
   "bots.memoryLoadFailed",
   "bots.memoryBudget",
   "bots.memoryBudgetHint",
+  // ── P2-a T4' 新增（2026-11-23，权威清单 docs/bot-integration/P2/I18N-KEYS-P2.md §1）──
+  // 例程区（18）
+  "bots.tabRoutines",
+  "bots.routineAdd",
+  "bots.routineName",
+  "bots.routineNameRequired",
+  "bots.routinePrompt",
+  "bots.routinePromptRequired",
+  "bots.routineCron",
+  "bots.routineCronHint",
+  "bots.routineCronInvalid",
+  "bots.routineTimezone",
+  "bots.routineTimezoneLocal",
+  "bots.routineTimezoneInvalid",
+  "bots.routineEmpty",
+  "bots.routineEmptyDescription",
+  "bots.routineNextRun",
+  "bots.routineLastRun",
+  "bots.routinePause",
+  "bots.routineResume",
+  "bots.routineDelete",
+  "bots.routineDeleteConfirm",
+  "bots.routineSaveFailed",
+  "bots.routineBadge",
+  // 通知（4）
+  "notification.filterByBot",
+  "notification.allBots",
+  "notification.viewThread",
+  "notification.unreadCount",
+  // 审批生效级别（2）+ 角标（1）
+  "bots.approvalEffective",
+  "bots.approvalEffectiveHint",
+  "bots.unreadBadge",
 ];
 
 /** ADR-009：删除确认必须说明线程与记忆会保留。 */

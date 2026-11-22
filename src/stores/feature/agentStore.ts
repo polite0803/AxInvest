@@ -131,6 +131,17 @@ interface AgentStore {
   deleteCustomProfile(id: string): Promise<void>;
 }
 
+/**
+ * P2-a：事件 payload 的 conversationId → Bot 归属解析（IPC-P2 §4）。
+ * 会话总表里查不到（未加载 / 非归属会话）返回 null —— 通知仍落，只是不带 botId。
+ */
+function resolveBotIdForConversation(conversationId: string | undefined): string | null {
+  if (!conversationId) {
+    return null;
+  }
+  return useConversationStore.getState().conversations.find((c) => c.id === conversationId)?.botId ?? null;
+}
+
 export const useAgentStore = create<AgentStore>((set, get) => ({
   sessions: {},
   pendingPermissions: {},
@@ -472,7 +483,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       : "";
     const doneText = i18n.t("agentStore.executionComplete", { turns, cost });
     message.success(doneText);
-    pushNotification("success", doneText);
+    pushNotification("success", doneText, {
+      conversationId: event.conversationId,
+      botId: resolveBotIdForConversation(event.conversationId),
+    });
   },
 
   handleError: (event) => {
@@ -552,7 +566,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const errMsg = event.message?.slice(0, 100) || i18n.t("agentStore.unknownError");
     const errorText = i18n.t("agentStore.executionFailed", { errMsg });
     message.error(errorText);
-    pushNotification("error", errorText);
+    pushNotification("error", errorText, {
+      conversationId: event.conversationId,
+      botId: resolveBotIdForConversation(event.conversationId),
+    });
   },
 
   handleCancelled: (event) => {

@@ -11,7 +11,7 @@
 
 import { backendErrorText } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import type { Bot, BotMemory, BotSoul, Conversation, CreateBotInput, DeleteBotResult, UpdateBotInput } from "@/types";
+import type { Bot, BotMemory, BotSoul, Conversation, CreateBotInput, DeleteBotResult, ScheduledTask, UpdateBotInput } from "@/types";
 import { create } from "zustand";
 
 export interface BotStoreState {
@@ -42,7 +42,29 @@ export interface BotStoreState {
   readMemory: (botId: string) => Promise<BotMemory>;
   /** 只读：该 Bot 的线程列表（直接返回既有 Conversation DTO） */
   listThreads: (botId: string, includeArchived?: boolean) => Promise<Conversation[]>;
+  /** P2-a：该 Bot 的例程（IPC-P2 §2.2：含 paused/disabled 全量，不设分页） */
+  listBotRoutines: (botId: string) => Promise<ScheduledTask[]>;
+  createBotRoutine: (input: BotRoutineInput) => Promise<ScheduledTask>;
+  /**
+   * P2-a：编辑例程。P1/IPC-P2 §2.5 的 update 语义是**完整 DTO 回传**（以原任务为底覆盖
+   * 名称/prompt/cron），timezone 走独立顶层参数：undefined=不改，null=清除（回落宿主 Local）。
+   */
+  updateBotRoutine: (taskId: string, updatedTask: ScheduledTask, timezone?: string | null) => Promise<void>;
+  deleteBotRoutine: (taskId: string) => Promise<void>;
+  pauseBotRoutine: (taskId: string) => Promise<void>;
+  resumeBotRoutine: (taskId: string) => Promise<void>;
 }
+
+/** IPC-P2 §2.1 create_bot_scheduled_task 入参 */
+export interface BotRoutineInput {
+  botId: string;
+  name: string;
+  prompt: string;
+  cronExpression: string;
+  timezone?: string | null;
+}
+
+
 
 /** 防止并发 loadBots 的旧响应覆盖新响应（切换 includeDisabled 时的高发点）。 */
 let loadSeq = 0;
@@ -154,4 +176,58 @@ export const useBotStore = create<BotStoreState>((set) => ({
 
   listThreads: (botId, includeArchived = false) =>
     invoke<Conversation[]>("list_bot_threads", { botId, includeArchived }),
+
+  listBotRoutines: (botId) =>
+    invoke<ScheduledTask[]>("list_bot_scheduled_tasks", { botId }),
+
+  createBotRoutine: async (input) => {
+    set({ saving: true, error: null });
+    try {
+      const task = await invoke<ScheduledTask>("create_bot_scheduled_task", {
+        botId: input.botId,
+        name: input.name,
+        prompt: input.prompt,
+        cronExpression: input.cronExpression,
+        timezone: input.timezone ?? null,
+      });
+      set({ saving: false });
+      return task;
+    } catch (e) {
+      set({ saving: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  updateBotRoutine: async (taskId, updatedTask, timezone) => {
+    set({ saving: true, error: null });
+    try {
+      await invoke("update_scheduled_task", {
+        taskId,
+        task: updatedTask,
+        // T5' 冻结契约 §2.5：外层 undefined=不改；null=清除回落 Local
+        ...(timezone === undefined ? {} : { timezone }),
+      });
+      set({ saving: false });
+    } catch (e) {
+      set({ saving: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  deleteBotRoutine: async (taskId) => {
+    try {
+      await invoke("delete_scheduled_task", { taskId });
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  pauseBotRoutine: async (taskId) => {
+    await invoke("pause_scheduled_task", { taskId });
+  },
+
+  resumeBotRoutine: async (taskId) => {
+    await invoke("resume_scheduled_task", { taskId });
+  },
 }));

@@ -91,6 +91,13 @@ export interface ScheduledTask {
   runningTrigger?: string | null;
   /** 最近一次执行的触发来源；null/undefined = 旧记录（未知） */
   lastTrigger?: string | null;
+  /**
+   * P2-a：例程归属的 Bot（IPC-P2 §2.4 DTO 追加字段）。
+   * null/缺省 = 普通定时任务（非 Bot），行为与 P1 逐字节一致。
+   */
+  botId?: string | null;
+  /** P2-a：IANA 时区名；null/缺省 = 宿主 Local（与后端 None 语义一致） */
+  timezone?: string | null;
 }
 
 /**

@@ -123,6 +123,11 @@ export interface UnifiedRun {
   durationMs?: number;
   error?: RunError;
   badges?: RunBadge[];
+  /**
+   * P2-a：Bot 例程徽章文案（botId 短串）；非 Bot 例程不写。
+   * 独立于 RunBadge（封闭联合），避免向任务中心枚举注入 bot 域语义。
+   */
+  botBadge?: string;
   /** DAG/父子执行关联 */
   parentRunId?: string;
   /** 跳源页面的站内路由 */

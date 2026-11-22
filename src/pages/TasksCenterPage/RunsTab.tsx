@@ -103,13 +103,17 @@ export function RunsTab() {
         title: t("tasksCenter.column.name"),
         key: "name",
         render: (_, r) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text strong>{r.name}</Typography.Text>
-            {r.error?.message && (
-              <Typography.Text type="danger" style={{ fontSize: 12 }} ellipsis>
-                {translateBackendError(r.error.message)}
-              </Typography.Text>
-            )}
+          <Space size={4}>
+            {/* P2-a：Bot 例程行在名称旁渲染归属徽章（短 botId），title 走 bots.routineBadge */}
+            {r.botBadge && <Tag color="geekblue">{r.botBadge}</Tag>}
+            <Space direction="vertical" size={0}>
+              <Typography.Text strong>{r.name}</Typography.Text>
+              {r.error?.message && (
+                <Typography.Text type="danger" style={{ fontSize: 12 }} ellipsis>
+                  {translateBackendError(r.error.message)}
+                </Typography.Text>
+              )}
+            </Space>
           </Space>
         ),
       },

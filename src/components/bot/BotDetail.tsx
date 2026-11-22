@@ -9,7 +9,7 @@
 
 import { useBotStore } from "@/stores/feature/botStore";
 import type { Bot, Conversation } from "@/types";
-import { Alert, Button, Card, List, Popconfirm, Spin, theme, Typography } from "antd";
+import { Alert, Button, Card, List, Popconfirm, Spin, Tabs, theme, Typography } from "antd";
 import { Bot as BotIcon, MessageSquarePlus, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,19 @@ import { BotSoulPanel } from "./BotSoulPanel";
 
 const { Text, Title } = Typography;
 
+/**
+ * Bot 五档 → 会话三档展示映射（ADR-P2-4 的展示面：custom → Prompt ⇒ 会话侧
+ * 最接近的是「默认」（逐轮确认），故映射到 permissionMode.readOnly 同级的保守档；
+ * auto → workspaceWrite（Q1 建议值）。仅做 UI 展示，执行语义在后端解析。
+ */
+const APPROVAL_TO_SESSION_MODE: Record<Bot["approvalMode"], "readOnly" | "allow" | "workspaceWrite" | "fullAccess"> = {
+  ask: "readOnly",
+  edits: "workspaceWrite",
+  auto: "workspaceWrite",
+  full: "fullAccess",
+  custom: "readOnly",
+};
+
 export interface BotDetailProps {
   bot: Bot;
   deleting?: boolean;
@@ -25,6 +38,11 @@ export interface BotDetailProps {
   onDelete: () => void;
   onCreateThread: () => void;
   onOpenThread: (conversationId: string) => void;
+  /**
+   * P2-a：「例程」Tab 内容（页面层注入 —— 组件中立性门禁：components/bot 不得
+   * import pages/**；未传则不渲染该 Tab，组件在无例程依赖场景保持可用）。
+   */
+  routinesPanel?: React.ReactNode;
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
@@ -40,7 +58,7 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThread, onOpenThread }: BotDetailProps) {
+export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThread, onOpenThread, routinesPanel }: BotDetailProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const listThreads = useBotStore((s) => s.listThreads);
@@ -131,8 +149,12 @@ export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThr
           <MetaRow label={t("bots.model")} value={modelLabel} />
           <MetaRow label={t("bots.workdir")} value={bot.workdir ?? "—"} />
           <MetaRow label={t("bots.approvalMode")} value={t(`bots.approval.${bot.approvalMode}`)} />
+          <MetaRow
+            label={t("bots.approvalEffective")}
+            value={t(`permissionMode.${APPROVAL_TO_SESSION_MODE[bot.approvalMode]}`)}
+          />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {t("bots.approvalModeP2Hint")}
+            {t("bots.approvalEffectiveHint")}
           </Text>
         </div>
       </Card>
@@ -140,9 +162,17 @@ export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThr
       <BotSoulPanel botId={bot.id} />
       <BotMemoryPanel botId={bot.id} />
 
+      <Tabs
+        defaultActiveKey="threads"
+        destroyInactiveTabPane={false}
+        items={[
+          {
+            key: "threads",
+            label: `${t("bots.threads")}${threads.length > 0 ? ` (${threads.length})` : ""}`,
+            children: (
       <Card
         size="small"
-        title={`${t("bots.threads")}${threads.length > 0 ? ` (${threads.length})` : ""}`}
+        title={t("bots.threads")}
         data-testid="bot-threads-panel"
       >
         {threadsLoading
@@ -182,6 +212,13 @@ export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThr
             />
           )}
       </Card>
+            ),
+          },
+          ...(routinesPanel
+            ? [{ key: "routines", label: t("bots.tabRoutines"), children: routinesPanel }]
+            : []),
+        ]}
+      />
     </div>
   );
 }

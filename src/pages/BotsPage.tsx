@@ -17,9 +17,11 @@ import { BotEditor, type BotEditorModelOption, type BotEditorValues } from "@/co
 import { BotEmptyState } from "@/components/bot/BotEmptyState";
 import { BotList } from "@/components/bot/BotList";
 import { backendErrorText } from "@/lib/errorI18n";
+import { countUnread, getNotifications } from "@/lib/notification";
 import { message } from "@/lib/toast";
 import { useBotStore, useConversationStore, useProviderStore } from "@/stores";
 import type { Bot, CreateBotInput, UpdateBotInput } from "@/types";
+import { BotRoutinesPanel } from "./BotsPage/BotRoutinesPanel";
 import { Alert, Spin, theme } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -67,6 +69,31 @@ export function BotsPage() {
 
   const providers = useProviderStore((s) => s.providers);
   const fetchProviders = useProviderStore((s) => s.fetchProviders);
+
+  // P2-a：Bot 未读角标数据源 —— localStorage 通知按 botId 计数；
+  // CustomEvent（axagent:notification）触发重读保持角标新鲜。
+  const [notificationVersion, setNotificationVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setNotificationVersion((v) => v + 1);
+    window.addEventListener("axagent:notification", bump);
+    return () => {
+      window.removeEventListener("axagent:notification", bump);
+    };
+  }, []);
+
+  const unreadByBot = useMemo(() => {
+    // notificationVersion 仅作依赖驱动重算（eslint 兜新鲜度）
+    void notificationVersion;
+    const notifications = getNotifications();
+    const map = new Map<string, number>();
+    for (const bot of bots) {
+      const n = countUnread(notifications, bot.id);
+      if (n > 0) {
+        map.set(bot.id, n);
+      }
+    }
+    return map;
+  }, [bots, notificationVersion]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
@@ -252,6 +279,7 @@ export function BotsPage() {
         <BotList
           bots={bots}
           activeBotId={activeBot?.id ?? null}
+          unreadByBot={unreadByBot}
           onSelect={setActiveBot}
           onCreate={openCreate}
         />
@@ -273,6 +301,7 @@ export function BotsPage() {
             <BotDetail
               bot={activeBot}
               deleting={deleting}
+              routinesPanel={<BotRoutinesPanel botId={activeBot.id} />}
               onEdit={() => {
                 void openEdit();
               }}

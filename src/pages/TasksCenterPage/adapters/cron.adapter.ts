@@ -82,6 +82,7 @@ export function mapRunningTask(task: ScheduledTask): UnifiedRun {
       retry: canExecuteNow(task),
       viewHistory: true,
     },
+    botBadge: task.botId ? task.botId.slice(0, 8) : undefined,
     raw: task,
   };
 }
@@ -106,6 +107,7 @@ export function mapLastRun(task: ScheduledTask): UnifiedRun {
   if (result?.partial) {
     badges.push("partial");
   }
+
   return {
     id: runIdOf("scheduled-cron", task.id),
     source: "scheduled-cron",
@@ -125,6 +127,7 @@ export function mapLastRun(task: ScheduledTask): UnifiedRun {
       retry: canExecuteNow(task),
       viewHistory: true,
     },
+    botBadge: task.botId ? task.botId.slice(0, 8) : undefined,
     raw: task,
   };
 }

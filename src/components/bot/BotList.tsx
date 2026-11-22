@@ -6,7 +6,7 @@
  */
 
 import type { Bot } from "@/types";
-import { Button, theme, Typography } from "antd";
+import { Badge, Button, theme, Typography } from "antd";
 import { Bot as BotIcon, Plus } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,11 +16,13 @@ const { Text } = Typography;
 export interface BotListProps {
   bots: Bot[];
   activeBotId: string | null;
+  /** P2-a：botId → 未读通知数（>0 时在列表项上渲染角标；页面层经 props 注入） */
+  unreadByBot?: Map<string, number>;
   onSelect: (botId: string) => void;
   onCreate: () => void;
 }
 
-export function BotList({ bots, activeBotId, onSelect, onCreate }: BotListProps) {
+export function BotList({ bots, activeBotId, unreadByBot, onSelect, onCreate }: BotListProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
@@ -63,9 +65,16 @@ export function BotList({ bots, activeBotId, onSelect, onCreate }: BotListProps)
                 border: `1px solid ${active ? token.colorBorderSecondary : "transparent"}`,
               }}
             >
-              <span style={{ display: "inline-flex", width: 20, justifyContent: "center", fontSize: 16 }}>
-                {bot.icon ? bot.icon : <BotIcon size={16} />}
-              </span>
+              <Badge
+                count={unreadByBot?.get(bot.id) ?? 0}
+                size="small"
+                offset={[-4, 4]}
+                title={t("bots.unreadBadge", { count: unreadByBot?.get(bot.id) ?? 0 })}
+              >
+                <span style={{ display: "inline-flex", width: 20, justifyContent: "center", fontSize: 16 }}>
+                  {bot.icon ? bot.icon : <BotIcon size={16} />}
+                </span>
+              </Badge>
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
                 <Text ellipsis style={{ fontWeight: active ? 600 : 400 }}>
                   {bot.name}

@@ -9,8 +9,12 @@ import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import {
   addNotification,
   clearAllNotifications,
+  dismissNotification,
+  filterNotificationsByBot,
   getNotifications,
+  listNotificationBotIds,
   markAllAsRead,
+  readNotification,
   type Notification,
 } from "@/lib/notification";
 import { BellOutlined } from "@ant-design/icons";
@@ -18,15 +22,24 @@ import { Badge, Empty, theme, Typography } from "antd";
 import { Check, CheckCheck, Copy, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 const { Text } = Typography;
 
-/** 推送一条通知（兼容旧 API，供 agentStore 等调用） */
+/** 推送一条通知（兼容旧 API：归属字段可选，缺省行为与 P1 完全一致） */
 export function pushNotification(
   type: Notification["type"],
   message: string,
+  attribution?: { botId?: string | null; conversationId?: string | null },
 ) {
-  addNotification({ type, title: message });
+  addNotification({
+    type,
+    title: message,
+    // 事件 payload 带了 conversationId 才写归属；botId 解析不到（映射查不到）时
+    // 不写该字段，通知仍落 —— IPC-P2 §4。
+    ...(attribution?.conversationId ? { conversationId: attribution.conversationId } : {}),
+    ...(attribution?.botId ? { botId: attribution.botId } : {}),
+  });
 }
 
 export function NotificationBell() {
@@ -35,7 +48,10 @@ export function NotificationBell() {
   const { t, i18n } = useTranslation();
   const { token } = theme.useToken();
   const { copy } = useCopyToClipboard();
+  const navigate = useNavigate();
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  /** 归属过滤：null = 全部（P1 行为；旧通知无 botId 也在这里可见） */
+  const [botFilter, setBotFilter] = useState<string | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // 监听 CustomEvent 实时更新
@@ -50,7 +66,10 @@ export function NotificationBell() {
     };
   }, [handleNotificationEvent]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // 过滤与徽章都按归属口径：botFilter=null 计全部（IPC-P2 §4「旧通知不丢」）
+  const visibleNotifications = filterNotificationsByBot(notifications, botFilter);
+  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
+  const botFilterOptions = listNotificationBotIds(notifications);
 
   const handleMarkAllRead = useCallback(() => {
     setNotifications(markAllAsRead());
@@ -58,6 +77,24 @@ export function NotificationBell() {
 
   const handleClearAll = useCallback(() => {
     setNotifications(clearAllNotifications());
+  }, []);
+
+  /** 逐条点击已读 + 跳转到产生通知的线程（/chat?conversationId= 为 ChatPage 挂载时消费的契约参数）。 */
+  const handleOpenThread = useCallback(
+    (n: Notification) => {
+      readNotification(n.id);
+      setNotifications(getNotifications());
+      if (n.conversationId) {
+        setOpen(false);
+        navigate(`/chat?conversationId=${encodeURIComponent(n.conversationId)}`);
+      }
+    },
+    [navigate],
+  );
+
+  /** 删除单条（铃铛逐条清理入口；localStorage 同步更新） */
+  const handleDismiss = useCallback((id: string) => {
+    setNotifications(dismissNotification(id));
   }, []);
 
   const handleCopy = useCallback(
@@ -87,6 +124,17 @@ export function NotificationBell() {
   }, []);
 
   const actionItems = notifications.length === 0 ? [] : [
+    ...(botFilterOptions.length > 0
+      ? [
+        { key: "filter-all", label: <span>{t("notification.allBots")}</span>, onClick: () => setBotFilter(null) },
+        ...botFilterOptions.map((id) => ({
+          key: `filter-bot-${id}`,
+          label: <span>{t("notification.filterByBot")} · {id.slice(0, 8)}</span>,
+          onClick: () => setBotFilter(id),
+        })),
+        { key: "divider-filter", divider: true },
+      ]
+      : []),
     {
       key: "markAllRead",
       label: <span>{t("notification.markAllRead")}</span>,
@@ -104,7 +152,7 @@ export function NotificationBell() {
     { key: "divider-actions", divider: true },
   ];
 
-  const notificationItems = notifications.length === 0
+  const notificationItems = visibleNotifications.length === 0
     ? [
       {
         key: "empty",
@@ -117,16 +165,28 @@ export function NotificationBell() {
         disabled: true,
       },
     ]
-    : notifications.slice(0, 20).map((n) => ({
+    : visibleNotifications.slice(0, 20).map((n) => ({
       key: n.id,
       label: (
         <div
+          role={n.conversationId ? "button" : undefined}
+          tabIndex={n.conversationId ? 0 : undefined}
+          onClick={n.conversationId ? () => handleOpenThread(n) : undefined}
+          onKeyDown={n.conversationId
+            ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleOpenThread(n);
+              }
+            }
+            : undefined}
           style={{
             display: "flex",
             alignItems: "flex-start",
             gap: 8,
             maxWidth: 320,
             padding: "4px 0",
+            cursor: n.conversationId ? "pointer" : undefined,
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -142,10 +202,42 @@ export function NotificationBell() {
             >
               {n.type === "error" ? "❌" : n.type === "warning" ? "⚠️" : "✅"} {n.title}
             </Text>
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {new Date(n.timestamp).toLocaleTimeString(i18n.language)}
               </Text>
+              {n.conversationId && (
+                <Text
+                  type="secondary"
+                  style={{ fontSize: 12, textDecoration: "underline" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenThread(n);
+                  }}
+                >
+                  {t("notification.viewThread")}
+                </Text>
+              )}
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={t("notification.clear")}
+                title={t("notification.clear")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDismiss(n.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleDismiss(n.id);
+                  }
+                }}
+                style={{ color: token.colorTextQuaternary, fontSize: 11, cursor: "pointer" }}
+              >
+                ✕
+              </span>
             </div>
           </div>
           <span

@@ -758,9 +758,9 @@ jobs:
 
       # L2 拆分后 8 个 workspace 各有自己的测试面；只跑 src-tauri 会漏掉其余 34 个 crate
       # （与 fmt / clippy / check 同一种假绿形态）。
-      # nextest 模式前串行 staging accounting bundle，保证其禁用/恢复 e2e 真跑，不靠 SKIP。
+      # nextest 前 staging bundle 要 jsdom，本 job 只 setup-node 会 MODULE_NOT_FOUND；同一步先 npm ci，不增行数。
       - name: Run Rust tests (all workspaces)
-        run: node scripts/cargo-all-workspaces.mjs nextest
+        run: npm ci --legacy-peer-deps && node scripts/cargo-all-workspaces.mjs nextest
 
       # 真机 PostgreSQL 集成测试 —— **串行**执行，并与上面的 nextest 步骤隔离。
       #
@@ -1121,9 +1121,9 @@ jobs:
 
       - name: Check SDK package surface (Cargo.toml / src/lib.rs / no target)
         run: node scripts/check-sdk-package-surface.mjs
-
+      # --ci-safe 只跑主仓内的发布形状/地址链对账；验 17 个 sibling 仓由本地集成入口与各自 CI 覆盖。
       - name: Verify plugin release address flow contract
-        run: node scripts/verify-plugin-release-flow.mjs
+        run: node scripts/verify-plugin-release-flow.mjs --ci-safe
 
       # 多 workspace cargo 命令组装自检（纯 Node，不起 cargo）。
       # 为什么要单列：`--manifest-path` 若落到 `--` 之后，rustc/clippy-driver 会报

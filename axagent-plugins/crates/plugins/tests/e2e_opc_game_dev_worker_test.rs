@@ -39,7 +39,7 @@ impl Tool for StubTool {
     }
 
     fn category(&self) -> ToolCategory {
-        self.category.clone()
+        self.category
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {

@@ -331,7 +331,11 @@ if (canRunFrontend) {
     "node scripts/verify-plugin-sdk-release-rehearsal.mjs",
   );
   step("插件逐项启停验收矩阵", "node scripts/verify-plugin-acceptance-matrix.mjs");
-  step("插件发布地址链契约回归", "node scripts/verify-plugin-release-flow.mjs");
+  // CI 只跑主仓内可判定的发布形状/地址链对账；17 个 sibling 仓的端到端演练保留在本地集成路径。
+  step(
+    "插件发布地址链契约回归（CI 安全面）",
+    "node scripts/verify-plugin-release-flow.mjs --ci-safe",
+  );
   step("外置仓插件打包入口（17/17）", "node scripts/run-plugin-bundle.mjs --all --check");
 
   // ── 能力域单一真相源门禁（权威枚举 ↔ 前端 / prompt / i18n 副本）──

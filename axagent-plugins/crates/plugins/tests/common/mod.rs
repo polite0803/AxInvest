@@ -8,7 +8,8 @@
 #![allow(dead_code)]
 
 use axagent_harness::{
-    AdjType, KLine, MarketDataProvider, Result as HarnessResult, StockQuote, StockSearchResult,
+    AdjType, AnalysisKind, KLine, MarketDataProvider, Result as HarnessResult, StockQuote,
+    StockSearchResult,
 };
 use axagent_plugins::PluginManifest;
 use serde_json::json;
@@ -144,7 +145,7 @@ impl axagent_harness::AnalysisRecordProvider for FixedAnalysisRecordProvider {
             decision_action: None,
             decision_position_state: None,
             decision_position_pct: None,
-            analysis_kind: "live".to_string(),
+            analysis_kind: AnalysisKind::Live.as_storage().to_string(),
             as_of_date: None,
             parent_analysis_id: None,
             template_id: None,

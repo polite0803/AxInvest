@@ -7,6 +7,7 @@
 use axagent_dao::db::create_test_pool;
 use axagent_dao::reconcile::apply::bootstrap_schema;
 use axagent_entities::{portfolio_holdings, reco_picks, stock_analyses};
+use axagent_harness::AnalysisKind;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 
 async fn seed_stock_rows(db: &DatabaseConnection) {
@@ -21,7 +22,7 @@ async fn seed_stock_rows(db: &DatabaseConnection) {
         decision_action: Set(Some("hold".into())),
         decision_json: Set(Some(r#"{"action":"hold","confidence":0.8}"#.into())),
         blackboard_snapshot: Set(Some(r#"{"report":{"market":"ok"}}"#.into())),
-        analysis_kind: Set("live".into()),
+        analysis_kind: Set(AnalysisKind::Live.as_storage().into()),
         source: Set("live".into()),
         synthetic: Set(0),
         created_at: Set(1_700_000_000_000),

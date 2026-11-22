@@ -3859,8 +3859,11 @@ function withRequiredPermission(commands) {
 }
 
 function opcManifest({ version, binaryName, sha256 }) {
-  const domainPackManifests = fs
-    .readdirSync(path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs"))
+  // opc 自身已不拥有任何域包（14 份全部分给各域插件），该目录在 Git 中为空 ⇒
+  // 干净 checkout 里根本不存在。无条件 readdirSync 会让 Release 的 beforeBuildCommand
+  // 以 ENOENT 失败（2026-11-22 实测 6 个桌面 target 全红）；目录不存在等价于零份域包。
+  const opcDomainPackDir = path.join(workspaceRoot, "crates", "plugin-opc", "domain_packs");
+  const domainPackManifests = (fs.existsSync(opcDomainPackDir) ? fs.readdirSync(opcDomainPackDir) : [])
     .filter((f) => f.endsWith(".json"))
     .sort()
     .map((f) => path.posix.join(DOMAIN_PACK_DIR, f));

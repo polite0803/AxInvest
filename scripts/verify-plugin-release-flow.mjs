@@ -8,7 +8,7 @@
  *   2. 前端把直接粘贴的 HTTPS release.json 归一化成 `axagent-release+https://...`；
  *   3. Rust `parse_install_source` 在下载前把它识别为 ReleaseManifestUrl；
  *   4. 安装命令使用 `install_verified` 并把后端错误映射为结构化错误码；
- *   5. 17/17 外置插件仓 bundle 自检通过，发布包由各仓自己的产物生成。
+ *   5. 17/17 外置插件仓 bundle 自检通过，发布包由各仓自己的产物生成（`--ci-safe` 只跑 1–4，第 5 项留给本地集成与各仓 CI）。
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -297,6 +297,27 @@ function stageIndependentBundles() {
 }
 
 async function main() {
+  // CI 干净 checkout 没有 sibling 的 17 个独立仓，也没有它们的 dist/plugin.json ⇒
+  // 验仓与发布物重建只能在本地集成入口跑（各独立仓自己的 CI/Release 也覆盖）。
+  // 这里的 CI 安全面仍对主仓内的发布形状、发布源归一化、前后端冻结与 Rust 安装门禁
+  // 逐项断言；它是子集，但**不是** `|| true` 静默放行，输出也明确标注范围。
+  if (process.argv.includes("--ci-safe")) {
+    run(process.execPath, [RELEASE_GEN, "--selftest"]);
+    verifyBundleReleaseShape();
+    await verifyFrontendNormalization();
+    verifyFrontendFreezeContract();
+    verifyRustContract();
+    console.log(JSON.stringify({
+      scope: "main-repo-only contract surface; sibling repos and bundle artifacts excluded",
+      releaseGeneratorSelftest: "PASS",
+      bundleReleaseShape: "PASS",
+      sourceNormalization: "PASS",
+      frontendFreezeContract: "PASS",
+      rustInstallContract: "PASS",
+    }, null, 2));
+    console.log("PLUGIN_RELEASE_FLOW_CI_SAFE_OK");
+    return;
+  }
   const output = run(process.execPath, [REPO_VERIFY, "--verify"]);
   assert(output.includes("PLUGIN_REPOS_CHECK_OK"), "独立仓快照自检未通过");
   run(process.execPath, [RELEASE_GEN, "--selftest"]);

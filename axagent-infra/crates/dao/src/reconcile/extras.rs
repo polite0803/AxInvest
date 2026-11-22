@@ -842,6 +842,18 @@ const GIN_INDEXES: &[IndexDecl] = &[
 
 // ═══════════════ 多列索引（实体 indexed 只作用单字段，无复合键形式） ═══════════════
 const MULTI_COL_INDEXES: &[IndexDecl] = &[
+    // P2-b 部门归属（docs/bot-integration/P2/MODEL-P2B §2.2，Q2）：一个 Bot 只属
+    // 一个部门 —— 复合 UNIQUE 是**功能必需**，实体语法表达不了复合键，走本清单。
+    // 声明式新增（无迁移出处；本仓表结构正门即声明式对账）。
+    IndexDecl {
+        table: "bot_department_members",
+        name: "idx_bot_department_members_dept_bot_uniq",
+        cols: &["department_id", "bot_id"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-23，P2-b T1''）
+    },
     IndexDecl {
         table: "agent_sessions",
         name: "idx_sessions_user",
@@ -1353,7 +1365,7 @@ mod counts {
     const EXPECT_FUNCTIONS: usize = 1;
     const EXPECT_CHECKS: usize = 5;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 37;
+    const EXPECT_MULTI: usize = 38;
     /// partial 索引条目数。
     ///
     /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条
@@ -1399,7 +1411,7 @@ mod counts {
     }
 
     #[test]
-    fn l2_total_is_seventy_four() {
+    fn l2_total_is_seventy_five() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1409,7 +1421,7 @@ mod counts {
             + EXPECT_GIN
             + EXPECT_MULTI
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 74, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 75, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 

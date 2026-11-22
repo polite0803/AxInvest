@@ -103,3 +103,90 @@ pub struct UpdateBotPatch {
     #[serde(default)]
     pub sort_order: Option<i32>,
 }
+
+// ───────────────────────── P2-b：部门与委派（IPC-P2B §2） ─────────────────────────
+
+/// 部门记录（输出 DTO）。`bot_ids` 由命令层 join 成员表得出。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotDepartment {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub chief_bot_id: Option<String>,
+    pub bot_ids: Vec<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 新建部门输入。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBotDepartment {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub chief_bot_id: Option<String>,
+}
+
+/// 更新部门补丁：`None` = 不改，`Some(None)` = 显式置空（Chief 可摘除）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBotDepartmentPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub chief_bot_id: Option<Option<String>>,
+}
+
+/// 委派合同（输出 DTO，与 `bot_assignments` 实体一一对应；状态五态）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotAssignment {
+    pub id: String,
+    pub root_id: String,
+    pub parent_id: Option<String>,
+    pub depth: i32,
+    /// `person` / `bot` / `routine`。
+    pub origin: String,
+    pub requester_bot_id: Option<String>,
+    pub requester_conversation_id: Option<String>,
+    pub assignee_bot_id: String,
+    /// 冗余展示名（命令层 join bots 表回填，部门删除后仍可读）。
+    pub assignee_name: String,
+    /// `consult` / `dispatch`。
+    pub mode: String,
+    pub task_text: String,
+    /// `queued/running/completed/failed/cancelled`。
+    pub status: String,
+    pub result_text: Option<String>,
+    pub error_code: Option<String>,
+    pub error_detail: Option<String>,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 发起委派输入（`create_bot_assignment` 命令 + consult 工具 runner 共用 DTO）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBotAssignment {
+    pub assignee_bot_id: String,
+    /// 1..20000 字符。
+    pub task_text: String,
+    /// `consult` / `dispatch`；命令层只接受 `dispatch`（IPC-P2B §2.3）。
+    #[serde(default = "default_assignment_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub requester_conversation_id: Option<String>,
+    #[serde(default)]
+    pub requester_bot_id: Option<String>,
+}
+
+fn default_assignment_mode() -> String {
+    "dispatch".to_string()
+}

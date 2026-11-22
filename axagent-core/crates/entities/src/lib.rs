@@ -36,6 +36,10 @@ pub mod backup_manifests;
 pub mod backup_targets;
 // Bot 归属层（docs/bot-integration/MODEL.md §2）：身份 + SOUL + 工作区 + 记忆 + 线程归属。
 pub mod bots;
+// Bot 组织与委派层（docs/bot-integration/P2/MODEL-P2B §2）：部门 + 归属 + 委派合同。
+pub mod bot_assignments;
+pub mod bot_department_members;
+pub mod bot_departments;
 pub mod context_sources;
 pub mod conversation_branches;
 pub mod credentials;

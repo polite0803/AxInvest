@@ -2289,6 +2289,12 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
     let work_engine = state.work_engine.clone();
     let cron_store = state.cron_job_store.clone();
     let sync_db = state.harness.db().clone();
+    // P2 Bot 例程：runner 只依赖 harness + 会话管理器（bot_approval / provider
+    // 解析都在 runner 内部经 harness.db() 现查，避免闭包捕获整份 AppState）。
+    let bot_routine_ctx = std::sync::Arc::new(crate::bot_routine_runner::BotRoutineContext {
+        harness: state.harness.clone(),
+        session_manager: state.agent_session_manager.clone(),
+    });
     let astock_client = state.stock().astock_client.clone();
     // 漏检补分析与时间旅行批次共用这一把全局 as-of 锁（try_lock，不排队）
     let asof_lock = state.time_travel_batch_lock.clone();
@@ -2433,6 +2439,43 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                     return;
                 }
             }
+        }
+        // ── Bot 例程分支（P2 / ADR-P2-2）──
+        //
+        // job.bot_id 非空 ⇒ 走 Bot 非交互轮（SOUL/MEMORY 注入 + Bot 档权限 +
+        // provider 解析 + 占位会话），不复用上方任何业务分支：Bot 例程的产物
+        // 不依赖当日行情，不进交易日闸门；也无 workflow_id（如两者同时存在，
+        // 以 bot_id 为准并记 warn，MODEL-P2 规定例程创建时 workflow_id 必空）。
+        if job.bot_id.is_some() {
+            let ctx = bot_routine_ctx.clone();
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            let bot_id = job.bot_id.clone().unwrap_or_default();
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                // 触发时现查 Bot 快照：approval_mode / provider / model 以触发
+                // 时刻为准（Bot 编辑后无需重创建例程，GAP G-11 的取值口径）。
+                let outcome = match axagent_dao::repo::bot::get_bot(&db, &bot_id).await {
+                    Ok(bot) => {
+                        crate::bot_routine_runner::run_bot_routine_turn(
+                            &ctx,
+                            &bot.id,
+                            &bot.approval_mode,
+                            bot.provider_id.as_deref(),
+                            bot.model_id.as_deref(),
+                            &prompt,
+                        )
+                        .await
+                        .map_err(|e| e.to_string())
+                    },
+                    Err(e) => Err(format!("Bot 例程触发时 Bot 已不存在（{bot_id}）: {e}")),
+                };
+                crate::bot_routine_runner::finish_bot_routine(&store, &job_id, recurring, started, outcome).await;
+            }));
+            return;
         }
         // 需求订阅扫描：task_type = opc_demand_scan（v133）
         //

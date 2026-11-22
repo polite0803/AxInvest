@@ -440,6 +440,26 @@ pub async fn delete_bot(
             .with_detail(other.to_string())
             .to_string(),
     })?;
+    // 级联删除该 Bot 的例程（GAP G-10）：Bot 不在了，到点触发的例程只会
+    // 反复落「Bot 已不存在」的失败历史。失败仅记 warn —— 主操作（删 Bot）
+    // 已成功，例程残留可由用户手动清理，不因此回滚。
+    let orphaned_routines = {
+        let store = state.cron_job_store.clone();
+        let bot_id = bot_id.clone();
+        async move {
+            let mut n = 0usize;
+            for job in store.list().await {
+                if job.bot_id.as_deref() == Some(bot_id.as_str()) && store.remove(&job.id).await {
+                    n += 1;
+                }
+            }
+            n
+        }
+    }
+    .await;
+    if orphaned_routines > 0 {
+        tracing::info!(bot_id = %bot_id, count = orphaned_routines, "已级联删除该 Bot 的定时例程");
+    }
     Ok(DeleteBotResult { detached_threads: detached as i64, memory_path })
 }
 

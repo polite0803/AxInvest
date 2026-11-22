@@ -14,6 +14,8 @@ mod capability_embedding;
 // P6.0-⑥ 批 D：知识库文本检索接缝的宿主实现（vectorRetrieve 节点的真检索出口）。
 mod capability_vector_search;
 // P6.0-⑥ 批 E：工作流节点外部 IO 接缝的宿主实现（HTTP / 文件 / SMTP）。
+mod bot_approval;
+mod bot_routine_runner;
 mod bot_context;
 mod capability_workflow_io;
 mod commands;
@@ -149,6 +151,14 @@ pub use init::stock_domain_state::{
     stock_cross_stock_aggregator, stock_daily_snapshot, stock_evolution_drift, stock_factors,
     stock_health_check, stock_hit_outcome, stock_market_close_store, stock_monitor,
     stock_realtime_quote, stock_recommender, stock_serenity_hit_rate_backtest,
+};
+
+// P2-a T2'：Bot 例程执行分支（`tests/bot_routine.rs` 集成测试入口）。
+// `bot_routine_runner` 与 `bot_approval` 都是私有模块，同上方处置方式：
+// 只在 lib 层再导出，不改模块解析面。
+pub use bot_routine_runner::run_bot_routine_turn;
+pub use bot_approval::{
+    level_supported, resolve_bot_approval_level, resolve_bot_routine_level,
 };
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。

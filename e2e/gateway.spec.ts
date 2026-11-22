@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("Gateway Management E2E", () => {
+test.describe("Gateway Management E2E", { tag: "@heavy" }, () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/gateway");
     await page.waitForSelector('[data-testid="gateway-overview"]', { timeout: 60000 });

@@ -487,7 +487,7 @@ jobs:
         # （用户看到中文揣在日文界面里，不报错、不告警）。本步补上这一格：
         # 以 zh-CN 为基准做**双向叶子路径差集**，非空即失败；含正控防「比较面被写窄」。
         # 首次接入时实测 11 语言 15130 条路径完全一致 ⇒ 无既存违规，不存在红基线。
-        run: node scripts/check-i18n-key-parity.mjs
+        run: node scripts/check-i18n-key-parity.mjs && node scripts/check-bot-i18n-keys.mjs
 
       - name: Check i18n placeholder usage (value must not echo its key; {{x}} must be interpolated)
         # 2026-10-01 补的**盲区修复**。上面四道 i18n 门禁的判据都停在「键在不在、值空不空、
@@ -590,7 +590,7 @@ jobs:
         # b 段不在此处：错误码 i18n 对齐由上面的 check-errorcode-alignment.mjs 独立执行。
         # f = 登记字段必有消费点（防死参数回归）；g = 事件发射/监听对称（防前端监听永远收不到）。
         # h = 静默丢弃 Result 棘轮（Rust 侧 bare-except 等价物，只减不增）。
-        run: npm run contracts -- --only=a,c,d,f,g,h
+        run: npm run contracts -- --only=a,c,d,f,g,h,bot
 
   rust-check:
     name: Rust Check (fmt + clippy + build)
@@ -949,7 +949,7 @@ jobs:
         run: npx playwright install chromium
 
       - name: Run E2E tests
-        run: npx playwright test --project=chromium --grep-invert "(Agent|Cache|Conversation|Gateway)" --timeout=120000
+        run: npx playwright test --project=chromium --grep-invert "@heavy" --timeout=120000
 
   cargo-audit:
     name: Security Audit

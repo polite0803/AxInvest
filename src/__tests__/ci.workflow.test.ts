@@ -19,16 +19,28 @@
 //   ② 判定用的是 **strict / 默认（拦截）模式**，不是 report-only；
 //   ③ 三个步骤都位于 `frontend-check` job 内，且排在 dprint **之前**（纯 Node、秒级、早失败）；
 //   ④ 反向断言：门禁步骤块内**不得**出现 `|| true` / `continue-on-error`（静默放行）；
-//   ⑤ `test-e2e` job 存在、跑 `--project=chromium`、且浏览器由 Playwright 自装
+//   ⑤ `test-e2e` job 存在、跑 `--project=chromium`、按显式 `@heavy` tag 排除重用例（不是标题正则）、且浏览器由 Playwright 自装
 //      （2026-09-14 裁定：**不恢复**「用 runner 系统 Chrome 省 165MB」那条优化 ——
 //       版本随 runner 镜像漂移、不受 pin，flake 风险 > 固定成本）。
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ymlPath = resolve(process.cwd(), ".github/workflows/ci.yml");
 const hasCi = existsSync(ymlPath);
+
+const e2eDir = resolve(process.cwd(), "e2e");
+// 「重用例集」白名单：这些套件在 macOS runner 上耗时长 / 需要真实后端时序，
+// 用显式 `{ tag: "@heavy" }` 排除。名单必须与 CI 的 `--grep-invert "@heavy"` 对齐：
+// 少标一个 ⇒ 它又变成「跑着但可能 flake」；多标一个 ⇒ 用例被静默吞掉。
+const HEAVY_E2E_FILES = [
+  "agent-execution.spec.ts",
+  "cache-config.spec.ts",
+  "conversation-lifecycle.spec.ts",
+  "gateway.spec.ts",
+  "platform-gateway.spec.ts",
+];
 
 function loadCi(): string {
   return hasCi ? readFileSync(ymlPath, "utf8") : "";
@@ -239,17 +251,51 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
       expect(job).toMatch(/runs-on:\s*macos-latest/);
     });
 
-    it("真正执行 Playwright（chromium 项目），且过滤条件不会退化为「零用例」", () => {
+    it("真正执行 Playwright（chromium 项目），过滤用显式 @heavy tag 而非标题正则", () => {
       const job = jobBlock(loadCi(), E2E_JOB) ?? "";
       expect(job, `找不到 job「${E2E_JOB}」`).not.toBe("");
       expect(job).toMatch(/npx playwright test\b/);
       expect(job).toMatch(/--project=chromium/);
-      // `--grep-invert ""` / `--grep-invert ".*"` ⇒ 排除全部用例 ⇒ 跑 0 个测试却退出码 0
+      // 2026-11-22 改：原口径 `--grep-invert "(Agent|Cache|Conversation|Gateway)"` 按**标题词**
+      // 排除，Playwright 的 grep 大小写不敏感 ⇒ 把 chat-navigation / cross-page-navigation 里
+      // 无关的 5 条用例一起吞掉；Bot 用例标题含 conversation/agent 时也会静默跳过却报绿。
+      // 现在只认 tag：`--grep-invert "@heavy"`。
       const m = /--grep-invert\s+"([^"]*)"/.exec(job);
       expect(m, `E2E 缺 \`--grep-invert "…"\`（空或通配 = 排除全部 ⇒ 空转）`).not.toBeNull();
       const pat = (m ?? ["", ""])[1].trim();
       expect(pat.length, "`--grep-invert` 为空串 ⇒ 排除全部用例，E2E 空转").toBeGreaterThan(0);
       expect(pat, "`--grep-invert` 为 `.*` ⇒ 排除全部用例，E2E 空转").not.toBe(".*");
+      expect(pat, "必须按显式 tag 排除（如 `@heavy`），不得回到标题词正则").toBe("@heavy");
+      expect(job, "标题词正则会把无关用例一起吞掉（2026-11-22 实测 5 条误伤）").not.toMatch(
+        /\(Agent\|Cache\|Conversation\|Gateway\)/,
+      );
+    });
+
+    it("重跑套件必须逐个标 `@heavy`，且名单外不得偷偷打 tag（防「全体打 tag」= 空转）", () => {
+      for (const f of HEAVY_E2E_FILES) {
+        const src = readFileSync(join(e2eDir, f), "utf8");
+        expect(src, `${f} 未标 { tag: "@heavy" } ⇒ CI 会把它当成普通套件跑`).toMatch(
+          /\{\s*tag:\s*"@heavy"\s*\}/,
+        );
+      }
+      const specs = readdirSync(e2eDir).filter((f) => f.endsWith(".spec.ts"));
+      const extraTagged = specs.filter(
+        (f) =>
+          !HEAVY_E2E_FILES.includes(f)
+          && /tag:\s*"@heavy"/.test(readFileSync(join(e2eDir, f), "utf8")),
+      );
+      expect(
+        extraTagged,
+        `这些套件不在重用例白名单却打了 @heavy ⇒ 会在 CI 静默不跑：${extraTagged.join(", ")}`,
+      ).toEqual([]);
+    });
+
+    it("Bot e2e 存在且不带 @heavy（CI 过滤后必须执行，标题含 Agent/Conversation 也不会被跳过）", () => {
+      const botSpec = join(e2eDir, "bots.spec.ts");
+      expect(existsSync(botSpec), "缺 e2e/bots.spec.ts ⇒ P1 的 Bot 验收没有可执行用例").toBe(true);
+      const src = readFileSync(botSpec, "utf8");
+      expect(src, "bots.spec.ts 不得打 @heavy（否则 CI 里永远不会执行）").not.toMatch(/@heavy/);
+      expect(src, "bots.spec.ts 至少要有一条用例（防空文件假绿）").toMatch(/\btest\s*\(/);
     });
 
     it("浏览器由 Playwright 自装（**不依赖 runner 自带 Chrome** —— 2026-09-14 裁决）", () => {

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("Conversation Lifecycle", () => {
+test.describe("Conversation Lifecycle", { tag: "@heavy" }, () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/chat");
     await page.waitForSelector('[data-testid="chat-view"]', { timeout: 60000 });

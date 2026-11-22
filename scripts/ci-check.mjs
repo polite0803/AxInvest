@@ -604,6 +604,9 @@ if (canRunFrontend) {
   }
   // ④⑤ 命令行与 `.github/workflows/ci.yml:405/418` **逐字同源**（两处都写 `node`，不用 npx）。
   step("i18n key 集合（zh-CN ↔ 其余 10 语言）", "node scripts/check-i18n-key-parity.mjs");
+  // Bot P1 必需 key（PLAN T3，46 个 × 11 语言）：parity 只比「彼此相等」，
+  // 11 个语言一起漏掉某个 key 时仍会全绿 ⇒ 必须有独立必需集合门禁。
+  step("i18n Bot 必需 key（11 语言）", "node scripts/check-bot-i18n-keys.mjs");
   step("i18n 占位符使用（值不得==键名；{{x}} 必须被插值）", "node scripts/check-i18n-placeholder-usage.mjs");
 
   // ── i18n 豁免预算 / JSX 文本节点 / 增量孤儿键（2026-10-31 补三道）──

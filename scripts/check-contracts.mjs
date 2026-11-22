@@ -13,6 +13,8 @@
  *   G. 事件名契约:          TS 侧 listen("evt") 必须命中后端枚举 IpcEventName 的成员,
  *                            且每个成员须有发射引用; 生成物 events.ts 须与枚举一致
  *                            (防「前端监听永远收不到」的静默失效; R2-2 起由枚举驱动)
+ *   BOT. Bot P1 IPC 契约:    9 个命令（名字/参数/返回/注册）、11 个错误码 ×11 语言、
+ *                            DTO camelCase、前端调用点与参数键形、P1 不新增事件
  *   H. 静默丢弃 Result 棘轮:  `let _ = <fallible>.await;` 的数量不得超过基线
  *                            (Rust 侧 bare-except 等价物; 铁律 #12「归因字段不得说谎」.
  *                             棘轮只减不增 —— 修复后必须同步下调 SILENT_RESULT_BASELINE)
@@ -29,6 +31,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanitize, testModuleRanges } from "./lib/rust-source-scan.mjs";
 import { crateFile, discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
+import { auditBotIpc, botSelftest } from "./lib/bot-ipc-audit.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_TAURI = join(ROOT, "src-tauri");
@@ -741,8 +744,74 @@ function selftestSilentDiscard() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
+// ---------- BOT. Bot P1 IPC 契约（9 命令 / 11 错误码 / 不新增事件）----------
+//
+// 为什么单独一段：A 段只保证「定义 ⊆ 注册」，抓不到改名 / 参数改名 / 错误码漏语言 /
+// DTO 少 rename_all / 前端 snake_case 参数 —— 这些都不会让 typecheck 变红。
+// 判据来源与完整清单见 `scripts/lib/bot-ipc-audit.mjs`（含 `--selftest=bot`）。
+function checkBotContracts() {
+  const localeFiles = existsSync(LOCALES_DIR)
+    ? readdirSync(LOCALES_DIR).filter((f) => f.endsWith(".json")).sort()
+    : [];
+  const locales = localeFiles.map((name) => {
+    try {
+      return { name, json: JSON.parse(read(join(LOCALES_DIR, name))) };
+    } catch {
+      return { name, json: {} };
+    }
+  });
+  const frontendFiles = [...walk(FRONTEND, ".ts"), ...walk(FRONTEND, ".tsx")].map((f) => ({
+    path: relative(ROOT, f).replace(/\\/g, "/"),
+    src: read(f),
+  }));
+  const botPath = join(SRC_TAURI, "src", "commands", "bot.rs");
+  // DTO 的权威定义在 harness（禁区 12：各层不复制），命令层只做别名。
+  const harnessBotTypesPath = join(
+    ROOT,
+    "axagent-core",
+    "crates",
+    "harness",
+    "src",
+    "types",
+    "bot.rs",
+  );
+  const errorCodePath = join(SRC_TAURI, "src", "commands", "error_code.rs");
+  const typesPath = join(FRONTEND, "types", "bot.ts");
+  const result = auditBotIpc({
+    botRs: existsSync(botPath) ? read(botPath) : null,
+    typesRs: existsSync(harnessBotTypesPath) ? read(harnessBotTypesPath) : "",
+    modRs: existsSync(join(SRC_TAURI, "src", "commands", "mod.rs"))
+      ? read(join(SRC_TAURI, "src", "commands", "mod.rs"))
+      : "",
+    registerRs: existsSync(join(SRC_TAURI, "src", "register_commands.rs"))
+      ? read(join(SRC_TAURI, "src", "register_commands.rs"))
+      : "",
+    errorCodeRs: existsSync(errorCodePath) ? read(errorCodePath) : "",
+    locales,
+    typesTs: existsSync(typesPath) ? read(typesPath) : null,
+    frontendFiles,
+    eventsEnum: existsSync(EVENT_NAME_ENUM) ? read(EVENT_NAME_ENUM) : "",
+    eventsTs: existsSync(EVENT_NAMES_TS) ? read(EVENT_NAMES_TS) : "",
+  });
+  console.log(`
+[BOT] Bot P1 IPC 契约：errors=${result.errors.length} warnings=${result.warnings.length}`);
+  result.errors.forEach((e) => fail(`[BOT] ${e}`));
+  result.warnings.forEach((w) => warn(`[BOT] ${w}`));
+}
+
 // ---------- 主流程 ----------
 const argv = process.argv.slice(2);
+if (argv.includes("--selftest=bot")) {
+  const { cases, failed } = botSelftest();
+  console.log("=== [BOT] 段自检（合成源码：单点破坏必须逐条变红）===");
+  for (const c of cases) {
+    console.log(`  ${c.pass ? "✓" : "✗"} ${c.name}${c.pass ? "" : `
+      ${c.detail}`}`);
+  }
+  console.log(`
+自检：${cases.length - failed.length} 通过 / ${failed.length} 失败`);
+  process.exit(failed.length > 0 ? 1 : 0);
+}
 if (argv.includes("--selftest")) { selftestSilentDiscard(); }
 let only = null;
 for (let i = 0; i < argv.length; i++) {
@@ -760,6 +829,7 @@ if (has("d")) { checkHarnessDirection(); }
 if (has("f")) { checkFieldConsumption(); }
 if (has("g")) { checkEventSymmetry(); }
 if (has("h")) { checkSilentResultDiscard(); }
+if (has("bot")) { checkBotContracts(); }
 if (enableDto) { checkDto(); }
 
 if (warnings.length) {

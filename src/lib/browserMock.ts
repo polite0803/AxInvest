@@ -2,6 +2,7 @@
 
 // i18n-exempt: Mock data for browser preview mode. Not user-facing UI.
 import i18n from "@/i18n";
+import { BOT_UNHANDLED, handleBotCommand } from "./browserMockBots";
 /**
  * Browser-mode mock backend using localStorage.
  * Activated when the app runs outside Tauri (e.g. `pnpm dev` in browser).
@@ -1926,6 +1927,34 @@ function mockLoadSchemaForCommand(
  * 所有命令的读键，破坏面远超本批收益。只在读取处兼容，代价一个函数。
  * camelCase 优先命中 —— 直调 `executeCommand`（不经 `handleCommand`）的路径保持原形状。
  */
+/** `readMockReqField` 的 null 保留版：`{ botId: null }` = 显式解绑，不能被 `??` 吞掉。 */
+function readMockReqFieldOrNull<T>(req: unknown, camelKey: string): T | undefined {
+  if (req === null || typeof req !== "object") {
+    return undefined;
+  }
+  const obj = req as Record<string, unknown>;
+  const snakeKey = camelToSnake(camelKey);
+  if (Object.prototype.hasOwnProperty.call(obj, camelKey)) {
+    return obj[camelKey] as T;
+  }
+  if (Object.prototype.hasOwnProperty.call(obj, snakeKey)) {
+    return obj[snakeKey] as T;
+  }
+  return undefined;
+}
+
+/** 键存在性（含 snake_case 形态），用于区分「不改」与「显式置空」。 */
+function hasMockReqField(req: unknown, camelKey: string): boolean {
+  if (req === null || typeof req !== "object") {
+    return false;
+  }
+  const obj = req as Record<string, unknown>;
+  return (
+    Object.prototype.hasOwnProperty.call(obj, camelKey)
+    || Object.prototype.hasOwnProperty.call(obj, camelToSnake(camelKey))
+  );
+}
+
 function readMockReqField<T>(req: unknown, camelKey: string): T | undefined {
   if (req === null || typeof req !== "object") {
     return undefined;
@@ -2216,6 +2245,11 @@ export async function handleCommand<T>(
   cmd: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
+  // P1 的 9 条 Bot 命令集中在 browserMockBots.ts；未命中返回哨兵，继续走原 switch。
+  const botResult = await handleBotCommand(cmd, args);
+  if (botResult !== BOT_UNHANDLED) {
+    return botResult as T;
+  }
   await new Promise((r) => setTimeout(r, 5));
 
   // 将前端 camelCase 参数转换为后端 snake_case 格式
@@ -2635,6 +2669,7 @@ async function executeCommand<T>(
       const modelId = readMockReqField<string>(args, "modelId");
       const providerId = readMockReqField<string>(args, "providerId");
       const systemPrompt = readMockReqField<string>(args, "systemPrompt");
+      const botId = readMockReqFieldOrNull<string | null>(args, "botId");
       const conv = {
         id: genId(),
         title,
@@ -2653,6 +2688,7 @@ async function executeCommand<T>(
         message_count: 0,
         is_pinned: false,
         is_archived: false,
+        bot_id: botId ?? null,
         created_at: nowTs(),
         updated_at: nowTs(),
       };
@@ -2671,6 +2707,10 @@ async function executeCommand<T>(
       if (idx !== -1 && input) {
         if (input.title !== undefined) {
           convs[idx].title = input.title;
+        }
+        if (hasMockReqField(input, "botId")) {
+          (convs[idx] as unknown as Record<string, unknown>).bot_id =
+            readMockReqFieldOrNull<string | null>(input, "botId") ?? null;
         }
         const categoryId = readMockReqField<string | null>(input, "categoryId");
         if (categoryId !== undefined) {

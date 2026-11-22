@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("Platform Gateway Configuration", () => {
+test.describe("Platform Gateway Configuration", { tag: "@heavy" }, () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/settings");
     await page.waitForSelector('[data-testid="settings-panel"]', { timeout: 30000 });

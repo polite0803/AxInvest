@@ -169,7 +169,9 @@ cd axagent-plugins && cargo run -q -p schema-gen -- check
 | 线程 | `bots.allBots`、`bots.unassigned`、`bots.threads`、`bots.newThread`、`bots.threadsEmpty`、`bots.threadsEmptyDescription` |
 | 记忆/SOUL | `bots.soulTitle`、`bots.soulEmpty`、`bots.soulLoadFailed`、`bots.memory`、`bots.memoryTitle`、`bots.memoryEmpty`、`bots.memoryLoadFailed`、`bots.memoryBudget`、`bots.memoryBudgetHint` |
 
-共 42 个 key（含 `nav.bots`）。`bots.deleteConfirm` 文案必须含「线程与记忆会保留」。
+共 46 个 key（含 `nav.bots`；本节原稿写「42 个」，但逐行相加为 1+7+14+9+6+9=46，
+门禁 `node scripts/check-bot-i18n-keys.mjs` 以逐行列出的 46 个为准）。
+`bots.deleteConfirm` 文案必须含「线程与记忆会保留」。
 
 **测试**
 
@@ -229,14 +231,14 @@ npm run check:i18n:key-parity
 - 组件：给定 `activeBotId`，列表只显示该 Bot 会话 + 「未归属」开关。
 - e2e：`e2e/bots.spec.ts` 覆盖「新建 Bot → 在其下建线程 → 刷新后线程仍在 Bot 下」。
 
-> **CI 陷阱**：CI 的 Playwright 用 `--grep-invert "Agent|Cache|Conversation|Gateway"` 排除用例标题（`.github/workflows/ci.yml:952`）。新用例标题**不要**含这四个词（含 `Conversation` 也会被跳过），用「bot / 机器人 / 线程」表述。
+> **CI 过滤口径（2026-11-22 已修）**：CI 改为 `--grep-invert "@heavy"`，只跳过显式打了 `@heavy` 的整文件重用例（`.github/workflows/ci.yml:952`）。**标题不再参与过滤**，Bot 用例标题可以正常使用 `Conversation` / `Agent` / `Gateway` 等词。新增快用例不要打 `@heavy`；确需打 tag 的必须同步加进 `src/__tests__/ci.workflow.test.ts` 的 `HEAVY_E2E_FILES` 名单。修前/修后证据见 `docs/bot-integration/evidence/e2e-filter-before-after.md`。
 
 **验收命令**
 
 ```bash
 npm run test:run -- -t "bot"
 npx playwright test e2e/bots.spec.ts --project=chromium
-npx playwright test e2e/bots.spec.ts --project=chromium --grep-invert "(Agent|Cache|Conversation|Gateway)"
+npx playwright test e2e/bots.spec.ts --project=chromium --grep-invert "@heavy"
 npm run contracts -- --only=g
 ```
 
@@ -351,7 +353,7 @@ npm run check:layers
 node scripts/cargo-all-workspaces.mjs fmt-check
 node scripts/cargo-all-workspaces.mjs clippy
 __TAURI_WORKSPACE__=true cargo test --manifest-path src-tauri/Cargo.toml -p axagent --workspace
-npx playwright test e2e/bots.spec.ts --project=chromium --grep-invert "(Agent|Cache|Conversation|Gateway)"
+npx playwright test e2e/bots.spec.ts --project=chromium --grep-invert "@heavy"
 ```
 
 **DoD**：以上全绿；`git status` 只含预期文件；本地 commit（不 push）。
@@ -375,9 +377,9 @@ npx playwright test e2e/bots.spec.ts --project=chromium --grep-invert "(Agent|Ca
 
 ### 风险 2：SOUL 双注入与「假绿」e2e
 
-两处调用点（`agent/mod.rs:1971`、`skill_execution.rs:874`）只要漏改一处，Bot 会话就会在不同路径下收到不同人格；而提示词没有门禁，单测不覆盖就无人发现。另一面，浏览器 mock 不写 `botId` 会让「按 Bot 过滤」在 Web 模式恒空，CI 的 `--grep-invert` 又会跳过标题含 `Agent|Conversation` 的用例——测试写着、实际没跑。
+两处调用点（`agent/mod.rs:1971`、`skill_execution.rs:874`）只要漏改一处，Bot 会话就会在不同路径下收到不同人格；而提示词没有门禁，单测不覆盖就无人发现。另一面，浏览器 mock 不写 `botId` 会让「按 Bot 过滤」在 Web 模式恒空；旧的标题正则 `--grep-invert "Agent|Cache|Conversation|Gateway"` 还会把标题含这些词的正常用例一起跳过（实测误伤 5 条既有用例）——测试写着、实际没跑。
 
-**缓解**：T5 用纯函数快照锁两处调用点的输出；T4 强制补 `browserMock.ts` 并在 CI 同款 `--grep-invert` 下跑一遍；e2e 标题禁用四个被排除的词。
+**缓解**：T5 用纯函数快照锁两处调用点的输出；T4 强制补 `browserMock.ts`（`botId` 写入单测 `src/lib/__tests__/browserMock.bots.test.ts` 双重回归锁）并在 CI 同款 `--grep-invert "@heavy"` 下跑一遍；e2e 过滤改为**显式 tag**，标题不再受限（证据：`docs/bot-integration/evidence/e2e-filter-before-after.md`）。
 
 ## 5. 估时与人力
 

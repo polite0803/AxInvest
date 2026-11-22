@@ -104,6 +104,8 @@ replace_logs.py
 tmp-*.txt
 v15_*.rs
 eslint-out.log
+# 临时中间产物（例如 scripts/*.tmp.json）：无构建产物价值，只防误提交
+*.tmp.json
 
 # Backup files (临时备份/历史版本)
 *.bak

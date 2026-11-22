@@ -1,6 +1,6 @@
 # OPC 能力包体系
 
-> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.1 ｜ 功能点：opc-capability-packs
+> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.2 ｜ 功能点：opc-capability-packs
 
 ## 定位
 
@@ -157,4 +157,4 @@ worker 只做入参形状校验、固定 `domain_pack_id` 注入与接缝转发�
 | v3.0.0 | 2026-09-26 | 域包办公室数据驱动化（manifest 名册覆盖 + `office_scene.yaml` + 门禁 e 判据） | `351f254d9`；`CHANGELOG.md:145` |
 | v3.0.0 | 2026-10-31 | 版本基线确立（本文件所述实现即此版本状态） | `CHANGELOG.md:133` |
 | unreleased | 2026-11-01 | `src-tauri/crates` 拆为 7 个 workspace 根，能力包路径随迁（无行为变更） | `8dfaeb4db` |
-| v3.0.1 | 2026-11-22 | 14 域统一为独立 worker（0 声明式域）：命令面单一契约源 + 生成器强校验，接缝复用宿主实现 | `scripts/lib/plugin-contract.json`、`PLAN-plugin-completion-handoff.md` |
+| v3.0.2 | 2026-11-22 | 14 域统一为独立 worker（0 声明式域）：命令面单一契约源 + 生成器强校验，接缝复用宿主实现 | `scripts/lib/plugin-contract.json`、`PLAN-plugin-completion-handoff.md` |

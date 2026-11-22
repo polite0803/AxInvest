@@ -1,6 +1,6 @@
 # PLAN — 全仓插件化收尾接手单
 
-> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.1
+> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.2
 > 关联：`PLAN-shell-plus-plugins.md`、`PLAN-p62-domain-pack-plugins.md`、`AUDIT-plugin-integration-acceptance-2026-11-19.md`、`AUDIT-plugin-independent-repos-2026-11-20.md`、`AUDIT-plugin-release-address-2026-11-20.md`、`AUDIT-plugin-sdk-release-manifest-2026-11-18.md`
 > 性质：跨会话接手文档。记录当前盘面、已完成能力、真实剩余缺口与可复跑验收入口；不替代审计、真机验收或生产库对比。
 

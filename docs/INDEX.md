@@ -22,12 +22,12 @@
 | `serenity-screening` | 趋势智选 | 含候选池构造/去重、快速链、来源优先级、定时筛选与智能荐股；不含单票决策（归股票决策链）与回放批次（归时间旅行）。 | `src-tauri/src/commands/pool_scan.rs`<br>`src-tauri/src/commands/stock_workflow/serenity.rs`<br>`src-tauri/src/commands/stock_analysis_setup/seed_serenity*.rs`<br>`src/components/stock-analysis/` | v3.0.0 | 14 | 0 | 有 |
 | `time-travel-replay` | 时间旅行回放 | 含 as-of 封闭世界、批次编排、live 窗口互斥、准入快照校验、四档反思触发；不含策略验证指标口径（归量化回测）与反思算法本体（归反思进化）。 | `src-tauri/src/commands/time_travel_batch.rs`<br>`axagent-core/crates/harness/src/as_of.rs`<br>`src/components/time-travel/`<br>`axagent-core/crates/entities/src/time_travel_batch_runs.rs` | v3.0.0 | 5 | 0 | 有 |
 | `market-data` | 行情与数据源 | 含行情/个股数据面、多数据源适配、跨市场与抓取降级、K 线缓存与板块/行业数据；不含数据质量评分与门禁（归数据质量门禁）。 | `axagent-quant/crates/astock-data/`<br>`src-tauri/src/commands/market_mainline.rs`<br>`src-tauri/src/commands/market_close_sweep.rs`<br>`src-tauri/src/commands/stock_pipeline/` | v3.0.0 | 9 | 0 | 有 |
-| `opc-capability-packs` | OPC 能力包 | 含 OPC 域包/行业适配、能力集封闭、办公室场景与需求发现、14 域独立 worker 交付形态；不含插件装载（归插件体系）与股票决策（归股票决策链）。 | `axagent-quant/crates/analysis-engine/`<br>`axagent-quant/crates/company-runtime/`<br>`src-tauri/src/commands/opc_capability_pack_actions.rs`<br>`src-tauri/src/commands/opc_setup/` | v3.0.1 | 31 | 6 | 有 |
+| `opc-capability-packs` | OPC 能力包 | 含 OPC 域包/行业适配、能力集封闭、办公室场景与需求发现、14 域独立 worker 交付形态；不含插件装载（归插件体系）与股票决策（归股票决策链）。 | `axagent-quant/crates/analysis-engine/`<br>`axagent-quant/crates/company-runtime/`<br>`src-tauri/src/commands/opc_capability_pack_actions.rs`<br>`src-tauri/src/commands/opc_setup/` | v3.0.2 | 31 | 6 | 有 |
 | `quant-backtest` | 量化回测 | 含量化策略/回测、因子信号契约、策略基线与市场仿真；不含生产决策落库（归股票决策链）。 | `axagent-quant/crates/quant/`<br>`axagent-quant/crates/market-sim/`<br>`src-tauri/src/commands/quant_backtest.rs`<br>`src-tauri/src/commands/backtest_validation.rs` | v3.0.0 | 11 | 4 | 有 |
 | `reflection-evolution` | 反思与进化 | 含批次反思、T+N 归因、进化/自学习与优化闭环；不含四档持有期定义（归股票决策链/harness）。 | `src-tauri/src/commands/stock_workflow/reflection.rs`<br>`axagent-ai/crates/trajectory/`<br>`src-tauri/src/commands/evolution_engine.rs`<br>`src-tauri/src/commands/workflow_reflection.rs` | v3.0.0 | 14 | 2 | 有 |
 | `task-center` | 任务中心与调度 | 含任务中心、cron/定时调度、后台任务、无头调度与监控告警；不含具体业务链实现。 | `src-tauri/src/commands/background_tasks.rs`<br>`src-tauri/src/commands/scheduled_task.rs`<br>`src-tauri/src/commands/recommendation_cron.rs`<br>`src/components/tasks/` | v3.0.0 | 11 | 1 | 有 |
 | `paper-portfolio` | 模拟持仓与交易桥 | 含模拟持仓、组合管理器、风控门、交易桥与订单；不含回测仿真（归量化回测）。 | `src-tauri/src/commands/paper_portfolio.rs`<br>`src-tauri/src/commands/portfolio-mgr*.rhai`<br>`src-tauri/src/commands/portfolio-risk-gate.rhai` | v3.0.0 | 暂无（仅说明书） | 0 | 有 |
-| `plugin-system` | 插件体系 | 含插件清单/worker 帧协议、L1-L2 通信与环检测、动态 UI 装载、生命周期与能力面、17 仓统一 worker；不含 OPC 业务能力包（归 OPC 能力包）。 | `axagent-plugins/crates/plugins/`<br>`axagent-core/crates/plugin-proto/`<br>`src-tauri/src/commands/plugin.rs`<br>`src/components/plugin/` | v3.0.1 | 22 | 5 | 有 |
+| `plugin-system` | 插件体系 | 含插件清单/worker 帧协议、L1-L2 通信与环检测、动态 UI 装载、生命周期与能力面、17 仓统一 worker；不含 OPC 业务能力包（归 OPC 能力包）。 | `axagent-plugins/crates/plugins/`<br>`axagent-core/crates/plugin-proto/`<br>`src-tauri/src/commands/plugin.rs`<br>`src/components/plugin/` | v3.0.2 | 22 | 5 | 有 |
 | `data-quality-gates` | 数据质量与门禁 | 含 DQI 分级熔断、权重坍缩三档、字段级校验、数据修复与静态门禁口径；不含 CI 构建门（归构建与 CI）。 | `axagent-quant/crates/astock-data/src/scoring.rs`<br>`src-tauri/src/commands/stock_pipeline/`<br>`scripts/check-*.mjs`<br>`src-tauri/src/commands/stock_workflow/decision.rs` | v3.0.0 | 4 | 1 | 有 |
 | `agent-runtime` | 运行时与智能体 | 含智能体引擎、工具/审批/沙箱、上下文与知识库、工作流引擎/节点、技能与 MCP；不含模型供应商适配（归模型提供商与流式）。 | `axagent-ai/crates/agent/`<br>`axagent-runtime/crates/runtime-core/`<br>`axagent-runtime/crates/tools/`<br>`src-tauri/src/commands/` | v3.0.0 | 44 | 29 | 有 |
 | `provider-models` | 模型提供商与流式 | 含 LLM 提供商适配、流式输出、采样参数与 token 计量；不含智能体编排（归运行时与智能体）。 | `axagent-ai/crates/providers/`<br>`src/stores/feature/providerStore.ts`<br>`src/components/settings/` | v3.0.0 | 8 | 6 | 有 |
@@ -149,12 +149,12 @@
 
 ### OPC 能力包（`opc-capability-packs`）
 
-- 摘要：文档 31 篇（本地 25 / 导入 6）｜ 最新版本 v3.0.1 ｜ 最近变更 2026-11-22
+- 摘要：文档 31 篇（本地 25 / 导入 6）｜ 最新版本 v3.0.2 ｜ 最近变更 2026-11-22
 - 说明书：`docs/features/opc-capability-packs.md`
 
 | 文件名 | 类型 | 一句话用途 | 状态 | 日期 | 对应版本 | 来源 |
 |---|---|---|---|---|---|---|
-| `opc-capability-packs.md` | 说明书 | OPC（业务标签 axopc）的「域包」是纯数据资产包而非代码：每个包一个目录，内含 manifest.yaml（承诺能力契约 + 归属域）、roles.yaml（专家/工具白名单… | active | 2026-11-22 | v3.0.1 | 本地原创 |
+| `opc-capability-packs.md` | 说明书 | OPC（业务标签 axopc）的「域包」是纯数据资产包而非代码：每个包一个目录，内含 manifest.yaml（承诺能力契约 + 归属域）、roles.yaml（专家/工具白名单… | active | 2026-11-22 | v3.0.2 | 本地原创 |
 | `PLAN-domain-pack-consolidation.md` | 计划 | 两者无字段级对应：能力护照的 domain 是 CapabilityDomain 枚举；域包 manifest 无 domain 字段（不声明归属本体域）；roles.yaml 不… | active | 2026-10-11 | v2.9.9 | 本地原创 |
 | `PLAN-domain-single-source.md` | 计划 | 已收敛的两个先例（正确形态，勿重新分裂）： | active | 2026-10-11 | v2.9.9 | 本地原创 |
 | `PLAN-industry-to-domain-migration.md` | 计划 | 结论：上次「域改造」是加了一套新轨（domain）却没删旧轨（industry），且新增的 config/opc/domains/ 配置包无人读取。前端只把「域」做成了侧栏分组标题… | active | 2026-10-11 | v2.9.9 | 本地原创 |
@@ -257,13 +257,13 @@
 
 ### 插件体系（`plugin-system`）
 
-- 摘要：文档 17 篇（本地 12 / 导入 5）｜ 最新版本 v3.0.1 ｜ 最近变更 2026-11-22
+- 摘要：文档 17 篇（本地 12 / 导入 5）｜ 最新版本 v3.0.2 ｜ 最近变更 2026-11-22
 - 说明书：`docs/features/plugin-system.md`
 
 | 文件名 | 类型 | 一句话用途 | 状态 | 日期 | 对应版本 | 来源 |
 |---|---|---|---|---|---|---|
-| `plugin-system.md` | 说明书 | 插件体系把「内置功能」与「外部扩展」统一成同一套装载形态：一份 plugin.json 清单 + 可选的长驻 worker 子进程 + 可选的动态 UI 资产。目标是让扩展能力与内… | active | 2026-11-22 | v3.0.1 | 本地原创 |
-| `PLAN-plugin-completion-handoff.md` | 计划 | 全仓插件化未完成项接手文档：14 个 OPC 域统一为独立 Rust worker、当前数量口径、已闭合能力、正式发布/真机 GUI/签名与数据兼容剩余项，以及可复跑验收命令。 | active | 2026-11-22 | v3.0.1 | 本地原创 |
+| `plugin-system.md` | 说明书 | 插件体系把「内置功能」与「外部扩展」统一成同一套装载形态：一份 plugin.json 清单 + 可选的长驻 worker 子进程 + 可选的动态 UI 资产。目标是让扩展能力与内… | active | 2026-11-22 | v3.0.2 | 本地原创 |
+| `PLAN-plugin-completion-handoff.md` | 计划 | 全仓插件化未完成项接手文档：14 个 OPC 域统一为独立 Rust worker、当前数量口径、已闭合能力、正式发布/真机 GUI/签名与数据兼容剩余项，以及可复跑验收命令。 | active | 2026-11-22 | v3.0.2 | 本地原创 |
 | `AUDIT-plugin-release-address-2026-11-20.md` | 审计 | 发布地址安装链时点快照：六平台 artifacts[] 清单、OS/ARCH 选包、聚合与旧格式兼容；GitHub Release HTTPS 真实安装 1 passed。正式六平台 Release 与 GUI 点击验收仍阻塞。 | active | 2026-11-20 | v3.0.1 | 本地原创 |
 | `AUDIT-plugin-independent-repos-2026-11-20.md` | 审计 | 17 个独立 Git 仓与六平台发布工作流快照：17/17 bundle、依赖边界和 latest 地址检查通过；17 仓无 remote，GitHub runner、SDK registry、主仓拆仓和真机 GUI 仍阻塞。 | active | 2026-11-20 | v3.0.1 | 本地原创 |
 | `AUDIT-plugin-integration-acceptance-2026-11-19.md` | 审计 | 插件化收尾验收矩阵：按 22 个物理 crate 目录 / 11 个 workspace crate / 17 个 bundle / 14 个 OPC 域分口径记录构建、启停、命令、页面与禁用隔离证据，并明确真机 GUI、物理拆仓与市场 DTO 缺口。 | active | 2026-11-19 | v3.0.1 | 本地原创 |
@@ -480,7 +480,7 @@
 | `PLAN-r2-daily-replay.md` | PLAN-r2-daily-replay —— 每日时间旅行回放（R-2） | R-1 接通回放验证后发现回放样本价格错位（详见 AUDIT-stock-business-profitability-2026-10-25.md §11）。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 时间旅行回放 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-25.md` |
 | `PLAN-r3h-long-sample-calibration.md` | PLAN-r3h-long-sample-calibration —— 打破「0 买入」死循环（门槛不变，增加 long/mid 样本） | 用户裁决：门槛（30）不变 ⇒ 必须从「样本供给」侧解。 | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 股票决策链 | 本地原创 | `AUDIT-stock-business-profitability-2026-10-26.md` |
 | `PLAN-shell-plus-plugins.md` | PLAN · 主壳 + 按能力插件（= `PLAN-everything-is-plugin.md` 的 P5 阶段） | 对齐性自检：口径 1 与既有 §1.1 的主路径（独立二进制 + 长驻 worker + 长度前缀 JSON 帧）同形， | active | 2026-11-03 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-everything-is-plugin.md` `PLAN-plugin-gap-closure.md` `AUDIT-capability-inventory-2026-11-01.md` `PLAN-repo-split.md` `PLAN-asof-gaps.md` |
-| `PLAN-plugin-completion-handoff.md` | PLAN · 全仓插件化收尾接手单（2026-11-22） | 以当前工作树为准交接插件化真实剩余面：22 个物理 crate 目录 / 4 个 workspace 成员 / 17 个 bundle / 14 个 OPC 域全部 worker，明确仓外源码不等于正式发布、SHA-256 不等于签名、E2E 不等于真机 GUI，并列出定点复跑命令。 | active | 2026-11-22 | v3.0.1 | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` `PLAN-p62-domain-pack-plugins.md` `AUDIT-plugin-integration-acceptance-2026-11-19.md` `AUDIT-plugin-independent-repos-2026-11-20.md` `AUDIT-plugin-release-address-2026-11-20.md` `AUDIT-plugin-sdk-release-manifest-2026-11-18.md` |
+| `PLAN-plugin-completion-handoff.md` | PLAN · 全仓插件化收尾接手单（2026-11-22） | 以当前工作树为准交接插件化真实剩余面：22 个物理 crate 目录 / 4 个 workspace 成员 / 17 个 bundle / 14 个 OPC 域全部 worker，明确仓外源码不等于正式发布、SHA-256 不等于签名、E2E 不等于真机 GUI，并列出定点复跑命令。 | active | 2026-11-22 | v3.0.2 | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` `PLAN-p62-domain-pack-plugins.md` `AUDIT-plugin-integration-acceptance-2026-11-19.md` `AUDIT-plugin-independent-repos-2026-11-20.md` `AUDIT-plugin-release-address-2026-11-20.md` `AUDIT-plugin-sdk-release-manifest-2026-11-18.md` |
 | `PLAN-shared-primitives-neutrality.md` | PLAN · 共享基元的逐符号中性判定（B8-4 前置） | 51 处前端反向阻塞逐符号判定：真中性只有 2 处、判据误报 7 处、域内错位 20 处、宿主内联域逻辑 22 处；「20 处共享基元」原判据不成立。 | proposed | 2026-11-05 | v3.0.0+（未定版） | 插件体系 | 本地原创 | `PLAN-shell-plus-plugins.md` |
 | `PLAN-everything-is-plugin.md` | PLAN · 一切皆插件 + 动态插件 | 关键判据：A 与 B 不是二选一。B 层插件在注册表里必须与 A 层内置实现是同一个类型， | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 |  |
 | `PLAN-plugin-gap-closure.md` | PLAN-plugin-gap-closure — 「一切皆为插件」缺口收编计划 | 1. B 层零真实用户：仓内无任何插件声明 worker 或 capabilities（bundled 仅 2 个 shell hook 脚手架）；真实子进程集成测试默认门控跳过（… | active | 2026-11-01 | v3.0.0+（未定版，待确认） | 插件体系 | 本地原创 | `PLAN-everything-is-plugin.md` |

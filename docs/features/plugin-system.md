@@ -1,6 +1,6 @@
 # 插件体系
 
-> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.1 ｜ 功能点：plugin-system
+> 状态：active ｜ 日期：2026-11-22 ｜ 对应版本：v3.0.2 ｜ 功能点：plugin-system
 
 ## 定位
 
@@ -182,4 +182,4 @@ ENV 白名单常量 `DEFAULT_ENV_WHITELIST` 仅含 `PATH` / `HOME` / `USERPROFIL
 | unreleased | 2026-11-02 | stdin 写不再持锁阻塞，超时判连接不可用 | `3b4c5c58c`；`CHANGELOG.md:56` |
 | unreleased | 2026-11-03 | 接缝写操作加 op 级 write 权限闸 | `ac89e1606` |
 | unreleased | 2026-11-04 | 事件总线每订阅者兜底超时 + 两级丢弃计数 | `088d5a189` |
-| v3.0.1 | 2026-11-22 | 17 仓统一 worker：14 个 OPC 域补齐完整命令集、0 声明式域；单一契约源 + 生成器逐字节校验 | `scripts/lib/plugin-contract.json`、`PLAN-plugin-completion-handoff.md` |
+| v3.0.2 | 2026-11-22 | 17 仓统一 worker：14 个 OPC 域补齐完整命令集、0 声明式域；单一契约源 + 生成器逐字节校验 | `scripts/lib/plugin-contract.json`、`PLAN-plugin-completion-handoff.md` |

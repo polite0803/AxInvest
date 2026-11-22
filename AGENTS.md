@@ -162,6 +162,14 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 
    ⇒ 判据：**门禁命令的覆盖面本身就是门禁的一部分**。抄命令时连同参数一起抄，别只抄动词。
 
+   ⚠ **插件 bundle E2E 的前置不靠手工 export（2026-11-22 实测）**：`axagent-plugins` 的
+   `e2e_stock_uninstall_isolation_test` 在未注入 `AXAGENT_STOCK_BUNDLE_DIR` /
+   `AXAGENT_SECURITY_BUNDLE_DIR` 时，会直接在 `axagent-plugins/dist/plugins/<plugin>`
+   定位打包产物；产物缺失即**失败**，不会 SKIP。⇒ **裸 `cargo test --workspace` 不足以
+   证明插件门禁通过**：先跑 `node scripts/cargo-all-workspaces.mjs nextest`（CI 口径，
+   逐插件真实 staging 并注入变量），或确保 `axagent-plugins/dist/plugins/{stock,opc-security}`
+   已有产物（`node axagent-plugins/scripts/build-plugin-bundle.mjs --plugin stock --check`）。
+
 **两个 lint 连锁陷阱（2026-09-21 实测）**：
 
 - **躲一个 lint 会撞上另一个**。合并同体分支前，必须先确认「合并后的形式」本身 lint-clean。

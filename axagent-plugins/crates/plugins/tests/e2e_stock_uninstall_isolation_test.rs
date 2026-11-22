@@ -5,8 +5,9 @@
 //! 2. stock 安装目录被删除；
 //! 3. security 页面与域包投影不受影响。
 //!
-//! 门控：`AXAGENT_STOCK_BUNDLE_DIR` 与 `AXAGENT_SECURITY_BUNDLE_DIR`；CI 前置会真实 staging
-//! 两个产物，缺失即失败，不把未执行的隔离测试当成通过。
+//! 门控：`AXAGENT_STOCK_BUNDLE_DIR` 与 `AXAGENT_SECURITY_BUNDLE_DIR`；未显式注入时
+//! 直接在仓内 `axagent-plugins/dist/plugins/<plugin>` 定位打包产物。两条路径都要求
+//! `plugin.json` 真实存在，缺失即失败 —— 不把未执行的隔离测试当成通过，也不依赖手工 export。
 
 mod common;
 
@@ -17,18 +18,38 @@ use axagent_plugins::{PluginManager, PluginManagerConfig};
 use common::{FixedQuoteProvider, TempDir};
 use serde_json::json;
 
-fn bundled_dir(env: &str) -> std::path::PathBuf {
-    let value =
-        std::env::var(env).unwrap_or_else(|_| panic!("未设置 {env}；隔离测试必须使用真 bundle"));
-    let dir = std::path::PathBuf::from(value);
+fn bundled_dir(env: &str, plugin: &str) -> std::path::PathBuf {
+    let dir = match std::env::var(env) {
+        Ok(value) => std::path::PathBuf::from(value),
+        Err(_) => staged_bundle_dir(env, plugin),
+    };
     assert!(dir.join("plugin.json").is_file(), "{env} 缺少 plugin.json：{}", dir.display());
+    dir
+}
+
+/// 未显式注入时的固定落点：`axagent-plugins/dist/plugins/<plugin>`
+/// （`pnpm plugin:bundle -- --plugin <plugin> --check` 的产物）。
+///
+/// 裸 `cargo test` 不跑 staging，这里直接定位仓内已有产物；找不到就报出补齐命令。
+/// 绝不把「环境变量缺失」降级成 SKIP —— 隔离断言必须跑在真 bundle 上。
+fn staged_bundle_dir(env: &str, plugin: &str) -> std::path::PathBuf {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("测试 crate 应位于 axagent-plugins/crates/plugins");
+    let dir = workspace_root.join("dist").join("plugins").join(plugin);
+    assert!(
+        dir.join("plugin.json").is_file(),
+        "找不到 {plugin} 的打包产物：{}；先运行 `pnpm plugin:bundle -- --plugin {plugin} --check`，或把 {env} 指向已 staging 的目录。",
+        dir.display()
+    );
     dir
 }
 
 #[test]
 fn uninstalling_stock_leaves_security_plugin_available() {
-    let stock_dir = bundled_dir("AXAGENT_STOCK_BUNDLE_DIR");
-    let security_dir = bundled_dir("AXAGENT_SECURITY_BUNDLE_DIR");
+    let stock_dir = bundled_dir("AXAGENT_STOCK_BUNDLE_DIR", "stock");
+    let security_dir = bundled_dir("AXAGENT_SECURITY_BUNDLE_DIR", "opc-security");
 
     let runtime = tokio::runtime::Runtime::new().expect("卸载隔离测试需要 tokio 运行时");
     let _entered = runtime.enter();

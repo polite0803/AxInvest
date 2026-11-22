@@ -17,6 +17,10 @@ cargo check --workspace --all-features
 # 4. 运行所有测试
 cargo test --workspace --all-features
 
+> 插件 bundle E2E 需要真实产物：`axagent-plugins/dist/plugins/{stock,opc-security}` 不存在时
+> `e2e_stock_uninstall_isolation_test` 会**失败而非跳过**。跑这一步之前先执行
+> `node scripts/cargo-all-workspaces.mjs nextest`（自动 staging），或补齐上述两个目录。
+
 # 5. 覆盖率检查（若有变更）
 cargo llvm-cov --workspace --all-features
 ```

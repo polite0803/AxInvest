@@ -1342,7 +1342,11 @@ pub async fn send_message(
     //
     // 失败仅日志,不影响主流程(原 scan_relevant_files 实现存在但零调用,见
     // project_memory.rs:328)
-    if let Some(workspace_dir) = global_settings.default_workspace_dir.as_ref() {
+    // ADR-005：Bot 会话只注入 Bot 记忆（`<bot-memory>`），不再叠加项目根
+    // `.axagent/MEMORY.md`；未归属会话行为完全不变。
+    if conversation.bot_id.is_none()
+        && let Some(workspace_dir) = global_settings.default_workspace_dir.as_ref()
+    {
         match axagent_agent::ProjectMemory::new(std::path::PathBuf::from(workspace_dir))
             .scan_relevant_files(&content, 5)
             .await

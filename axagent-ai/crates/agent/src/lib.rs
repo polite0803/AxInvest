@@ -13,6 +13,7 @@
 pub mod academic_search;
 pub mod action_executor;
 pub mod agent_round_adapter;
+pub mod bot_workspace;
 pub mod checkpoint;
 pub mod citation_tracker;
 pub mod content_synthesizer;

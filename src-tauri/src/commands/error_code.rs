@@ -41,6 +41,32 @@ pub mod conversation {
     pub const INTERNAL: &str = "CONVERSATION_INTERNAL";
 }
 
+/// Bot 归属层错误码（docs/bot-integration/IPC.md §5）
+pub mod bot {
+    /// Bot id 不存在
+    pub const NOT_FOUND: &str = "BOT_NOT_FOUND";
+    /// 名称空 / 超长（去首尾空白后 1–64 字符）
+    pub const NAME_INVALID: &str = "BOT_NAME_INVALID";
+    /// title / description 超长
+    pub const FIELD_TOO_LONG: &str = "BOT_FIELD_TOO_LONG";
+    /// SOUL 正文超过 64 KB
+    pub const SOUL_TOO_LARGE: &str = "BOT_SOUL_TOO_LARGE";
+    /// approval_mode 不在枚举内
+    pub const APPROVAL_MODE_INVALID: &str = "BOT_APPROVAL_MODE_INVALID";
+    /// model_id / provider_id 只给了一个
+    pub const MODEL_PAIR_INVALID: &str = "BOT_MODEL_PAIR_INVALID";
+    /// workdir 不是已存在的绝对目录
+    pub const WORKDIR_INVALID: &str = "BOT_WORKDIR_INVALID";
+    /// icon 不是单个 emoji（1 grapheme / ≤ 8 字节）
+    pub const ICON_INVALID: &str = "BOT_ICON_INVALID";
+    /// 删除事务失败
+    pub const DELETE_FAILED: &str = "BOT_DELETE_FAILED";
+    /// 读取 MEMORY.md 失败
+    pub const MEMORY_READ_FAILED: &str = "BOT_MEMORY_READ_FAILED";
+    /// SOUL 镜像写盘失败
+    pub const SOUL_WRITE_FAILED: &str = "BOT_SOUL_WRITE_FAILED";
+}
+
 /// 微调训练相关错误码
 pub mod fine_tune {
     /// 删除训练任务失败

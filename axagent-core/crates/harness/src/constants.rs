@@ -161,6 +161,9 @@ pub mod memory {
     pub const MEMORY_INDEX: &str = ".axagent/MEMORY.md";
     /// 索引文件最大行数(硬限制)
     pub const MEMORY_INDEX_MAX_LINES: usize = 200;
+    /// 索引文件最大字节数(硬限制)。与 200 行预算并列，
+    /// Bot 记忆注入与前端预算条共用这一口径。
+    pub const MEMORY_INDEX_MAX_BYTES: usize = 24 * 1024;
     /// 文件级检索时选取的最相关文件数上限
     pub const MEMORY_RELEVANT_FILES_LIMIT: usize = 5;
     /// 单个记忆主题文件大小上限(字节,256KB)

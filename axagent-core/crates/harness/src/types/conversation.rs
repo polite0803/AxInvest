@@ -35,6 +35,8 @@ pub struct Conversation {
     pub workspace_dir: Option<String>,
     pub enabled_skill_ids: Vec<String>,
     pub agent_profile_id: Option<String>,
+    /// Bot 归属；None = 未归属（存量会话与「普通对话」）。
+    pub bot_id: Option<String>,
     pub workflow_template_id: Option<String>,
     pub session_type: String,
     pub workflow_status: Option<String>,
@@ -292,6 +294,8 @@ pub struct UpdateConversationInput {
     pub enabled_skill_ids: Option<Vec<String>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub agent_profile_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub bot_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub workflow_template_id: Option<Option<String>>,
     pub session_type: Option<String>,

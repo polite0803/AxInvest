@@ -872,6 +872,18 @@ const MULTI_COL_INDEXES: &[IndexDecl] = &[
     //    没有实体，按 PLAN §五·一 B 组的裁决它整张表交孤儿判定处置（引擎上线后
     //    DROP），L2 再认领它的索引就是自相矛盾（`DROP TABLE` 与 `CREATE INDEX`
     //    同轮出现）。**无实体表上的索引一律不进 L2**，处置随表本身。
+    // `bots` 侧栏排序：`WHERE is_enabled = 1 ORDER BY sort_order, created_at`
+    // 需要 (is_enabled, sort_order) 复合索引才能免排序；实体侧 `#[sea_orm(indexed)]`
+    // 只能建单列，故在此登记（docs/bot-integration/MODEL.md §2.2）。
+    IndexDecl {
+        table: "bots",
+        name: "idx_bots_sort_order",
+        cols: &["is_enabled", "sort_order"],
+        unique: false,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（无迁移出处）
+    },
     IndexDecl {
         table: "dynamic_ui_pins",
         name: "idx_dynamic_ui_pins_group",
@@ -1280,7 +1292,7 @@ const PARTIAL_INDEXES: &[IndexDecl] = &[
     },
 ];
 
-// 静态条目数自证：GIN 6 / MULTI 36 / PARTIAL 7
+// 静态条目数自证：GIN 6 / MULTI 37 / PARTIAL 7
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 汇总视图 —— 引擎（P3+）消费入口
@@ -1341,7 +1353,7 @@ mod counts {
     const EXPECT_FUNCTIONS: usize = 1;
     const EXPECT_CHECKS: usize = 5;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 36;
+    const EXPECT_MULTI: usize = 37;
     /// partial 索引条目数。
     ///
     /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条
@@ -1387,7 +1399,7 @@ mod counts {
     }
 
     #[test]
-    fn l2_total_is_seventy_three() {
+    fn l2_total_is_seventy_four() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1397,7 +1409,7 @@ mod counts {
             + EXPECT_GIN
             + EXPECT_MULTI
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 73, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 74, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 

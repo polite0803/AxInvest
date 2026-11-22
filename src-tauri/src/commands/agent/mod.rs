@@ -644,10 +644,19 @@ pub async fn agent_query(
     //   1. persona 被错误包装为 user-custom（缺陷 2）
     //   2. 主聊天与工作流两套合并语义割裂（缺陷 1）
     //   3. role 裸字符串占据 primacy 位置（缺陷 3，由 build_agent_system_prompt 配合修复）
-    let persona_prompt = axagent_agent::personality::PersonalityManager::get_active()
-        .ok()
-        .flatten()
-        .map(|p| p.system_prompt_injection());
+    // Bot 归属：SOUL/MEMORY 的解析与流式路径共用 `bot_context`，避免两条路径漂移。
+    let bot_context =
+        crate::bot_context::resolve_bot_context(app_state.harness.db(), &conversation).await;
+
+    // 互斥（ADR-004）：Bot 有 SOUL 时全局 persona 让位，避免双身份互相冲突。
+    let persona_prompt = if bot_context.as_ref().is_some_and(|c| c.soul.is_some()) {
+        None
+    } else {
+        axagent_agent::personality::PersonalityManager::get_active()
+            .ok()
+            .flatten()
+            .map(|p| p.system_prompt_injection())
+    };
 
     // Profile 提示词合并：role + expert（运行时拼接，不在 DB 中预缓存）
     let profile_prompt: Option<String> = {
@@ -1970,6 +1979,8 @@ pub async fn agent_query(
 
     let system_prompt = build_agent_system_prompt(
         persona_prompt.as_deref(),
+        bot_context.as_ref().and_then(|c| c.soul.as_deref()),
+        bot_context.as_ref().and_then(|c| c.memory.as_deref()),
         profile_prompt.as_deref(),
         user_custom_prompt.as_deref(),
         rag_context_parts.as_deref(),

@@ -213,6 +213,8 @@ tempfile = "3"
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "1"
+# icon 校验按 grapheme cluster 计数（单个 emoji 判定），已在依赖树中（1.13.3）。
+unicode-segmentation = "1"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "chrono"] }
 urlencoding = "2"

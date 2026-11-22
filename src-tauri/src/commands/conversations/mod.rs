@@ -346,8 +346,44 @@ pub(crate) fn get_thinking_block_end() -> String {
     "\n</think>\n\n".to_string()
 }
 
-/// Resolve effective system prompt with priority: Conversation → Category → Global Default
+/// Resolve effective system prompt with priority: Conversation → Category → Global Default,
+/// 并在 Bot 会话上补 `<bot-soul>` / `<bot-memory>` 两段（ADR-004 / ADR-005）。
+///
+/// 流式发送、重新生成、换模型重跑三条路径都走这里 —— 注入点只有一处，
+/// 才不会有哪条路径漏掉 SOUL 而出现「人格分叉」。
 pub(crate) async fn resolve_system_prompt(
+    db: &DatabaseConnection,
+    conversation: &Conversation,
+) -> Option<String> {
+    let base = resolve_base_system_prompt(db, conversation).await;
+    let Some(bot) = crate::bot_context::resolve_bot_context(db, conversation).await else {
+        return base;
+    };
+
+    let mut parts: Vec<String> = Vec::new();
+    // `<bot-soul>` 必须排在最前（primacy），与 build_agent_system_prompt 的 slot 顺序一致。
+    if let Some(soul) = bot.soul_segment() {
+        parts.push(soul);
+    }
+    if let Some(base) = base {
+        parts.push(base);
+    }
+    if let Some(memory) = bot.memory_segment() {
+        parts.push(memory);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(
+            "
+
+",
+        ))
+    }
+}
+
+/// 原有三级优先级解析（会话 → 分类 → 全局默认），不含 Bot 段。
+async fn resolve_base_system_prompt(
     db: &DatabaseConnection,
     conversation: &Conversation,
 ) -> Option<String> {
@@ -762,6 +798,7 @@ pub async fn create_conversation(
         &provider_id,
         system_prompt.as_deref(),
         defaults,
+        None, // bot_id：普通新建会话不归属任何 Bot
     )
     .await
     .map_err(|e| {

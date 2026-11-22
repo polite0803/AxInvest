@@ -44,6 +44,7 @@ pub fn conversation_from_entity(m: conversations::Model) -> Conversation {
         workspace_dir: None,
         enabled_skill_ids: parse_string_list(&m.enabled_skill_ids),
         agent_profile_id: m.agent_profile_id,
+        bot_id: m.bot_id,
         workflow_template_id: m.workflow_template_id,
         session_type: m.session_type,
         workflow_status: m.workflow_status,
@@ -66,7 +67,7 @@ fn stringify_string_list(values: &[String]) -> String {
     })
 }
 
-async fn attach_workspace_dirs(
+pub(crate) async fn attach_workspace_dirs(
     db: &DatabaseConnection,
     mut convs: Vec<Conversation>,
 ) -> Result<Vec<Conversation>> {
@@ -186,6 +187,7 @@ pub async fn create_conversation(
         provider_id,
         system_prompt,
         ConversationParamDefaults::default(),
+        None,
     )
     .await
 }
@@ -197,6 +199,7 @@ pub async fn create_conversation_with_defaults(
     provider_id: &str,
     system_prompt: Option<&str>,
     defaults: ConversationParamDefaults,
+    bot_id: Option<&str>,
 ) -> Result<Conversation> {
     let id = gen_id();
     let now = now_ts();
@@ -218,6 +221,7 @@ pub async fn create_conversation_with_defaults(
         enabled_skill_ids: Set("[]".to_string()),
         enabled_wiki_ids: Set("[]".to_string()),
         mode: Set("agent".to_string()),
+        bot_id: Set(bot_id.map(str::to_string)),
         session_type: Set("conversation".to_string()),
         memory_status: Set("idle".to_string()),
         created_at: Set(now),
@@ -315,6 +319,9 @@ pub async fn update_conversation(
     }
     if let Some(agent_profile_id) = input.agent_profile_id {
         am.agent_profile_id = Set(agent_profile_id);
+    }
+    if let Some(bot_id) = input.bot_id {
+        am.bot_id = Set(bot_id);
     }
     if let Some(workflow_template_id) = input.workflow_template_id {
         am.workflow_template_id = Set(workflow_template_id);
@@ -965,6 +972,7 @@ pub async fn branch_conversation(
         research_mode: Set(source.research_mode),
         enabled_skill_ids: Set(source.enabled_skill_ids.clone()),
         agent_profile_id: Set(source.agent_profile_id.clone()),
+        bot_id: Set(source.bot_id.clone()),
         workflow_template_id: Set(source.workflow_template_id.clone()),
         session_type: Set(source.session_type.clone()),
         workflow_status: Set(source.workflow_status.clone()),
@@ -1381,6 +1389,7 @@ mod conversation_defaults_tests {
                 max_tokens: Some(2048),
                 top_p: Some(0.9),
             },
+            None,
         )
         .await
         .expect("创建会话应成功");

@@ -22,6 +22,7 @@ pub mod artifacts;
 pub mod background_tasks;
 pub mod backtest_validation;
 pub mod backup;
+pub mod bot;
 pub mod branches;
 #[cfg(not(mobile))]
 pub mod browser;

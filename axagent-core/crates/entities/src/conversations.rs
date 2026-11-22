@@ -53,6 +53,9 @@ pub struct Model {
     #[sea_orm(default_value = "[]")]
     pub enabled_skill_ids: String,
     pub agent_profile_id: Option<String>,
+    /// Bot 归属；NULL = 未归属（存量会话与「普通对话」均为此）。
+    #[sea_orm(indexed)]
+    pub bot_id: Option<String>,
     pub workflow_template_id: Option<String>,
     #[sea_orm(default_value = "conversation")]
     pub session_type: String,

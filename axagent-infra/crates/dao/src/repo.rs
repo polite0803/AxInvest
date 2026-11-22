@@ -7,6 +7,7 @@ pub mod agent_session_repo;
 pub mod artifact;
 pub mod astock_daily_snapshot;
 pub mod backup;
+pub mod bot;
 pub mod capability_domain_override;
 pub mod capability_policy;
 pub mod capability_relationship;

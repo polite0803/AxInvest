@@ -58,7 +58,7 @@
 
 ### 1.5 旧路由重定向是 JSX 内联代码
 
-- `redirectToChat`（`src/components/layout/ContentArea.tsx:114-117`，2026-10-28 已删除、仅留墓碑）删除前用 **`window.location.search`** ——非响应式读取，且与同类 `redirectToDevTools`（`:125-131`）形态不一致，同一件事两套写法。
+- `redirectToChat`（`src/components/layout/ContentArea.tsx:140-143`，2026-10-28 已删除、仅留墓碑）删除前用 **`window.location.search`** ——非响应式读取，且与同类 `redirectToDevTools`（`:148-154`）形态不一致，同一件事两套写法。
 - 约 20 条兼容路由散落在 `:272-279`、`:420-449`，无法单测、无法统一加「来路」标记。
 - 该问题已被 `PLAN-agent-workbench-enhancement.md` §10.8 登记为未做项。
 

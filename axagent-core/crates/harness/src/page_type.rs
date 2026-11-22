@@ -40,9 +40,9 @@
 //! |---|---|
 //! | `Doc` | `src/init/opc_knowledge.rs:254`；DB 实测 `notes.page_type='doc'` **15 行** |
 //! | `Daily` | `src/commands/wiki.rs:1830` |
-//! | `Knowledge` | `src/commands/wiki.rs:2076`、`src/commands/knowledge_source.rs:237` |
+//! | `Knowledge` | `src/commands/wiki.rs:1459`、`src/commands/knowledge_source.rs:237` |
 //! | `KnowledgeDocument` | `src/init/services.rs:438` |
-//! | `Synced` | `src/commands/wiki.rs:1576` |
+//! | `Synced` | `src/commands/wiki.rs:1111` |
 //! | `Log` | `crates/agent/src/wiki_compiler.rs:671`（白名单允许）、`:782`（`page_type_dir` 的 `"log" => ""` 分支） |
 //!
 //! 同时 `is_valid_page_type` 改为委派本模块 ⇒ 三套词表收敛成一套（`note` 不再被拒）。
@@ -68,11 +68,11 @@ pub enum PageType {
     Doc,
     /// 日报（`src/commands/wiki.rs:1830`）
     Daily,
-    /// 知识条目（`src/commands/wiki.rs:2076`、`src/commands/knowledge_source.rs:237`）
+    /// 知识条目（`src/commands/wiki.rs:1459`、`src/commands/knowledge_source.rs:237`）
     Knowledge,
     /// 知识库文档（`src/init/services.rs:438`）
     KnowledgeDocument,
-    /// 已同步文档（`src/commands/wiki.rs:1576`）
+    /// 已同步文档（`src/commands/wiki.rs:1111`）
     Synced,
     /// 编译日志页（`crates/agent/src/wiki_compiler.rs:671/782`）
     Log,
@@ -417,8 +417,8 @@ mod tests {
     /// 本测试会红 —— 而那正是「图谱节点解析失败 ⇒ 亲和度静默落兜底」的入口。
     #[test]
     fn test_observed_write_values_are_in_vocabulary() {
-        // 写入点：src/commands/wiki.rs:1830 / src/commands/wiki.rs:2076 / knowledge_source.rs:237 /
-        //        opc_knowledge.rs:254 / src/init/services.rs:438 / src/commands/wiki.rs:1576 / wiki_compiler.rs:671
+        // 写入点：src/commands/wiki.rs:1830 / src/commands/wiki.rs:1459 / knowledge_source.rs:237 /
+        //        opc_knowledge.rs:254 / src/init/services.rs:438 / src/commands/wiki.rs:1111 / wiki_compiler.rs:671
         for raw in ["doc", "daily", "knowledge", "knowledge_document", "synced", "log", "note"] {
             assert!(
                 PageType::parse_strict(raw).is_some(),

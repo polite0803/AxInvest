@@ -15,6 +15,7 @@
  *   node scripts/build-plugin-bundle.mjs --plugin-version <版本> # 显式发布版本（声明式插件必需）
  *   node scripts/build-plugin-bundle.mjs --check         # 打包后真起一次 worker 做握手 + 停机回执
  *   node scripts/build-plugin-bundle.mjs --out <dir>     # 自定义输出目录
+ *   node scripts/build-plugin-bundle.mjs --build-root <dir> # 只切换 cargo 工作区（CI 临时构建根）
  *
  * 参数化口径（任务 #36 第 1 批）：**一个插件 = `PLUGIN_SPECS` 里一条**，条目的字段就是
  * 本脚本对插件的全部假设（cargo 包名、前端源目录、`ui.json` 源、清单构造器）。新增插件只加
@@ -40,8 +41,14 @@ const outFlag = argv.indexOf("--out");
 const pluginFlag = argv.indexOf("--plugin");
 const targetFlag = argv.indexOf("--target");
 const pluginVersionFlag = argv.indexOf("--plugin-version");
+const buildRootFlag = argv.indexOf("--build-root");
 const pluginName = pluginFlag >= 0 && argv[pluginFlag + 1] ? argv[pluginFlag + 1] : "stock";
 const targetTriple = targetFlag >= 0 && argv[targetFlag + 1] ? argv[targetFlag + 1] : null;
+// `--build-root` 只切换 cargo 的构建工作区，不切换前端/域包/清单的源码根：
+// 主仓 CI 从模板源物化出与独立仓同构的临时工作区后，仍由本脚本按主仓口径打包。
+const cargoCwd = buildRootFlag >= 0 && argv[buildRootFlag + 1]
+  ? path.resolve(argv[buildRootFlag + 1])
+  : workspaceRoot;
 const requestedPluginVersion = pluginVersionFlag >= 0 && argv[pluginVersionFlag + 1]
   ? argv[pluginVersionFlag + 1]
   : null;
@@ -408,6 +415,9 @@ let sha256 = null;
 let binaryName = null;
 let workerVersion = "1.0.0";
 if (spec.packageName) {
+  if (!fs.existsSync(path.join(cargoCwd, "Cargo.toml"))) {
+    fail(`cargo 构建根缺少 Cargo.toml（--build-root）：${cargoCwd}`);
+  }
   run(
     "cargo",
     [
@@ -417,13 +427,13 @@ if (spec.packageName) {
       ...(release ? ["--release"] : []),
       ...(targetTriple ? ["--target", targetTriple] : []),
     ],
-    { cwd: workspaceRoot },
+    { cwd: cargoCwd },
   );
 
   // 2) 从 cargo 自己的视角取 target 目录与版本号 —— 不猜 `target/` 的位置
   //    （本机把 CARGO_TARGET_DIR 指到了 `~/.cargo/target-axagent`）。
   const metadataRaw = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
-    cwd: workspaceRoot,
+    cwd: cargoCwd,
     encoding: "utf8",
     windowsHide: true,
   });
@@ -716,17 +726,23 @@ function checkDeclaredPages(declared, root) {
   console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
 }
 
-/** OPC 域包页面的安装产物自检：静态数据区所有域都查，worker 域额外查 bundle.js。 */
+/**
+ * OPC 域包页面的安装产物自检：worker 域必查 bundle.js；
+ * 静态数据区只查 `index.html` 确实声明加载 domain-data.js 的域 ——
+ * accounting / sales-growth / content-media 三个老 worker 域从未有静态区，
+ * 与 `generate-declarative-opc-pages.mjs` 的 pageAssets 口径保持一致。
+ */
 function checkOpcDomainPage(root, expectedId, withWorkerBundle) {
   const pageDir = path.join(root, "pages");
   const pagePath = path.join(pageDir, "index.html");
   const dataPath = path.join(pageDir, "domain-data.js");
-  if (!fs.existsSync(pagePath) || !fs.existsSync(dataPath)) {
+  if (!fs.existsSync(pagePath)) {
     fail(`--check：域包页面产物缺失：${pageDir}`);
   }
   const html = fs.readFileSync(pagePath, "utf8");
-  if (!html.includes('src="./domain-data.js"')) {
-    fail("--check：域包页面没有加载 domain-data.js");
+  const withStaticData = html.includes('src="./domain-data.js"');
+  if (withStaticData && !fs.existsSync(dataPath)) {
+    fail(`--check：域包页面声明了 domain-data.js 但产物缺失：${dataPath}`);
   }
   if (withWorkerBundle) {
     const bundlePath = path.join(pageDir, "bundle.js");
@@ -734,6 +750,10 @@ function checkOpcDomainPage(root, expectedId, withWorkerBundle) {
     if (!html.includes('src="./bundle.js"')) {
       fail("--check：worker 域页面没有加载 bundle.js");
     }
+  }
+  if (!withStaticData) {
+    console.log(`[plugin-bundle] --check ✅ 域包页面无静态数据区（${expectedId}：仅 bundle 交互）`);
+    return;
   }
   for (const selector of ["#capabilities", "#kpis", "#workflow-steps", "#data-sources", "#acceptance"]) {
     if (!html.includes(selector)) { fail(`--check：域包页面缺少渲染区 ${selector}`); }

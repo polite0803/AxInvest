@@ -1062,7 +1062,7 @@ analysis-engine 后 `super` 变成 `opc`，链接即断 ⇒ 必须**连 `copy_di
 | `list_industries` | 8（**5 个定义**） | `analysis-engine/opc/capability_pack_config.rs:1078`、`opc/learning.rs:287`、`harness/domain_pack_orchestration/mod.rs:102`、`orchestrator/task_context.rs:263`、`commands/opc_capability_pack_runtime.rs:354` | 同名**四种返回类型**（`Vec<(String,String)>` / `Vec<&String>` / `Vec<&str>` / `Vec<String>`）⇒ 典型「一名多义」 |
 | `opc_list_industries` | 4 | `register_commands.rs:815`、`opc_capability_pack_bridge.rs:33/393`、`opc_capability_pack_actions.rs:2052` | **跨前后端契约**（Tauri 命令名 + LLM 工具名）⇒ 改名须同步前端 |
 | `opc_list_runtime_industries` | 已退役 | #264 批 7 刀 A（2026-11-11）三条只读包装器之一，退役注释见 `commands/opc_capability_pack_runtime.rs:369` | 调用方走 plugin-opc 同名命名命令 |
-| `LegacyIndustryPathRedirect` | 2 | `src/components/layout/ContentArea.tsx:114/304` | 前端「旧路径重定向」组件（批次②清了 `opc-industries` 路由 key，组件名未改） |
+| `LegacyIndustryPathRedirect` | 2 | `src/components/layout/ContentArea.tsx:61/251` | 前端「旧路径重定向」组件（批次②清了 `opc-industries` 路由 key，组件名未改） |
 | `opc_industries` / `opc_industries_pkey` / `idx_opc_industries_enabled` / `create_industries` | 4+2+2+2 | `dao/migrations/v211_opc_domain_packs.rs`、`v232_opc_domain_pack_rename.rs` | **历史迁移里的旧表名/约束名**（叙述改名本身）⇒ **保护名单**，不动 |
 | `domain_pack_pack_seed_registers_industries` | 1 | `opc_workflows/mod.rs:790` | 测试函数名 |
 

@@ -1103,9 +1103,9 @@ jobs:
 
       - name: Check plugin contract (single source of truth parity)
         run: node scripts/check-plugin-contract.mjs
-
+      # 本 job 只 setup-node 不装依赖 ⇒ npm ci 补上 yaml；保持行数不变（文档按行号引用 ci.yml）
       - name: Check declarative OPC page data (generated from YAML)
-        run: node scripts/generate-declarative-opc-pages.mjs --check
+        run: npm ci --ignore-scripts && node scripts/generate-declarative-opc-pages.mjs --check
 
       - name: Check plugin SDK release manifest selftest
         run: node scripts/generate-plugin-sdk-release-manifest.mjs --selftest

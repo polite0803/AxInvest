@@ -202,7 +202,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 | `AUDIT-gates-and-headless-scheduler-2026-10-26.md` | `TEMPLATE_VERSION` = 188 | 实际 **193**（v189–v193 五个版本全部未回写） |
 | 同上 §7 限制 5 | 「Windows 服务化未做」 | `scripts/install-scheduler-task.ps1` 已完整实现 |
 | `PLAN-r3h-long-sample-calibration.md:84` | 「放宽到至少一源」 | `time_travel_batch.rs:487-499` 已实证推翻该前提 |
-| `PLAN-url-as-truth.md` | §1 事实基线逐条核对 | `redirectToChat` 已被删除（`ContentArea.tsx:117` 留墓碑），`:305` 行号已漂移到 `:327` |
+| `PLAN-url-as-truth.md` | §1 事实基线逐条核对 | `redirectToChat` 已被删除（`ContentArea.tsx:140` 留墓碑），`:305` 行号已漂移到 `:327` |
 | `CHECKS.md` | 「12 步全部通过 = 可发版」 | 4 条口径不符、1 条（eslint）必崩、漏 ~45 条真实门禁 |
 | `AGENTS.md:342` | implementor 含 `scanner` | `crates/scanner` **不存在** |
 | `AGENTS.md:47/157` | 36 个 crate（+schema-gen = 37） | 实际 **41**（+schema-gen = 42） |
@@ -238,7 +238,7 @@ isReachable('/opc/:tab',         new Set(['/opc']))     → true   ← 设计意
 .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));   // 块注释
 ```
 
-`ContentArea.tsx:307` 的 `` path={`${BUILTIN_PAGE_PATH.settings}/*`} `` —— **splat 通配 `/*` 落在模板串内**，
+`ContentArea.tsx:311` 的 `` path={`${BUILTIN_PAGE_PATH.settings}/*`} `` —— **splat 通配 `/*` 落在模板串内**，
 被块注释正则当作起点，配到文件后面最近的「块注释结束符」，**吞掉其间全部内容**：
 
 | 后果（实测） | 证据 |

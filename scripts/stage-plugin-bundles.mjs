@@ -33,6 +33,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensurePluginBuildRoots } from "./lib/plugin-build-roots.mjs";
 import { PLUGIN_NAMES } from "./lib/plugin-repos.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,10 +82,18 @@ const bundledRoot = argRoot();
 console.error(
   `[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物到 ${bundledRoot}（${release ? "release" : "debug"}）`,
 );
+// 可交付 crate 被主 workspace exclude；从主仓模板源物化与独立仓同构的临时构建根，
+// 让同一份打包脚本在 CI / Release 的干净 checkout 上也能 cargo build -p 成功。
+const buildRoots = ensurePluginBuildRoots(repoRoot, PLUGINS);
 for (const plugin of PLUGINS) {
   const outDir = path.join(bundledRoot, plugin);
   // 打包脚本权威位置在 axagent-plugins/scripts/（与 SDK 仓同源），不是仓外独立仓副本。
-  const args = ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
+  const args = [
+    "axagent-plugins/scripts/build-plugin-bundle.mjs",
+    "--plugin", plugin,
+    "--build-root", buildRoots.get(plugin),
+    "--out", outDir,
+  ];
   if (release) {
     args.push("--release");
   }

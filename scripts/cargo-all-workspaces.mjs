@@ -27,6 +27,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { ensurePluginBuildRoots, pluginBuildRootsDir } from "./lib/plugin-build-roots.mjs";
 import { discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -206,6 +207,12 @@ function selftest() {
   const stockWorker = stagedEnvironment().AXAGENT_STOCK_WORKER_BIN;
   t(`⑰ stock worker 路径指向 bundle/bin 下的平台可执行文件（${stockWorker ?? "未生成"}）`, Boolean(stockWorker && stockWorker.endsWith(path.join("bin", platformWorkerName()))));
   t(`⑱ 负控：平台 worker 文件名由平台决定（${platformWorkerName()}）`, ["axagent-plugin-stock", "axagent-plugin-stock.exe"].includes(platformWorkerName()));
+  const buildRootsDir = pluginBuildRootsDir(repoRoot);
+  t(
+    `⑲ 临时构建根与主 workspace 分离、生成器在场（${path.relative(repoRoot, buildRootsDir)}）`,
+    Boolean(buildRootsDir) && buildRootsDir !== path.join(repoRoot, "axagent-plugins")
+      && fs.existsSync(path.join(repoRoot, "scripts", "generate-plugin-independent-repos.mjs")),
+  );
 
   console.log(`[cargo-all-workspaces --selftest] ${pass} 项通过 / ${fails.length} 项失败`);
   for (const f of fails) console.log(`  ✖ ${f}`);
@@ -283,12 +290,19 @@ function assertStagedArtifacts() {
 if (mode === "nextest" && !listOnly) {
   // bundle E2E 在没有产物时只会打印 SKIP 并返回成功。这里逐插件串行 staging，
   // 任一失败立即中止，确保 CI 里每个门控 E2E 都有真实产物可用。
-  // 打包脚本与 worker 源码权威都在主仓 `axagent-plugins/`。CI 只 checkout 本仓，
-  // 不能依赖 sibling 独立插件仓；逐插件用同一份主仓脚本构建 + `--check` 握手验收。
+  // 打包脚本与 worker 模板源权威都在主仓 `axagent-plugins/`。CI 只 checkout 本仓，
+  // 不能依赖 sibling 独立插件仓；先用生成器从模板源物化临时构建根（与主仓 workspace
+  // 隔离的 exclude crate 需要自己的根 Cargo.toml），再用主仓脚本构建 + `--check` 握手验收。
+  const buildRoots = ensurePluginBuildRoots(repoRoot, BUNDLE_STAGING.map((item) => item.plugin));
   for (const { plugin } of BUNDLE_STAGING) {
     const staged = spawnSync(
       process.execPath,
-      ["axagent-plugins/scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--check"],
+      [
+        "axagent-plugins/scripts/build-plugin-bundle.mjs",
+        "--plugin", plugin,
+        "--build-root", buildRoots.get(plugin),
+        "--check",
+      ],
       { cwd: repoRoot, stdio: "inherit", env: process.env },
     );
     if (staged.status !== 0) {

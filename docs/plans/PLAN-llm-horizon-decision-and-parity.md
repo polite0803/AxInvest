@@ -200,7 +200,7 @@
 3. **代 bump**：重播种门是 `existing.version >= TEMPLATE_VERSION` 早退（`:2370`，严格大于）；
    **现网已同步在 160**（`workflow_templates` 主模板 + 四个档分支模板全部 160，2026-10-16 实测）⇒ 本轮图改动 bump 到 **161**，
    并照 `debate_rounds_graph_drift`（`:2373-2379`）的形态为「逐档辩论是否真重展开」补一条同型漂移门。
-4. **会被打红的既有断言**：`analyst_brief_keys_match_tiered_instances` 锁 21 键（`seed_consistency_tests.rs:4672,4287`）、
+4. **会被打红的既有断言**：`analyst_brief_keys_match_tiered_instances` 锁 21 键（`seed_consistency_tests.rs:4680,4287`）、
    `check-tier-purity.mjs` R2（块内不得点名另一档）、`check-analyst-id-shape.mjs` R1/R2（逐档 id 只能由 `analyst_node_id` 生成，禁止字面量 `base--tier`）、
    `main_chain_risk_grade_is_tier_scoped_in_code_domain` 锁恰好 1 处 `pm_risk_veto`（`:3287,3300`）。
    ⇒ 门扫的是**字面量**，`format!` 拼出来的 id 会让门静默失明（`horizon_tier_template.rs:141-142,175-177` 已写成规矩）。

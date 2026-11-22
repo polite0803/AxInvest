@@ -1,0 +1,33 @@
+# 插件业务源码的权威在 AxInvest-plugin-repos/<plugin>/，主仓只保留宿主运行时、SDK 与构建工具。
+# 这里只降低 ripgrep/编辑器的搜索噪声；.gitignore、dprint、CI 门禁的扫描面保持不变。
+axagent-plugins/crates/plugin-opc/
+axagent-plugins/crates/plugin-opc-accounting/
+axagent-plugins/crates/plugin-opc-ai-research/
+axagent-plugins/crates/plugin-opc-consulting/
+axagent-plugins/crates/plugin-opc-content-media/
+axagent-plugins/crates/plugin-opc-design/
+axagent-plugins/crates/plugin-opc-ecommerce/
+axagent-plugins/crates/plugin-opc-education/
+axagent-plugins/crates/plugin-opc-finance-invest/
+axagent-plugins/crates/plugin-opc-game-dev/
+axagent-plugins/crates/plugin-opc-geospatial/
+axagent-plugins/crates/plugin-opc-project-management/
+axagent-plugins/crates/plugin-opc-sales-growth/
+axagent-plugins/crates/plugin-opc-security/
+axagent-plugins/crates/plugin-opc-software-dev/
+axagent-plugins/crates/plugin-stock/
+axagent-plugins/crates/plugin-wiki/
+axagent-plugins/crates/stock-core/
+
+# 生成物 / 发布暂存 / 依赖
+src-tauri/gen/
+axagent-plugins/dist/plugins/
+axagent-plugins/crates/plugins/bundled/
+src-tauri/plugins/
+.tmp/plugin-bundles/
+.tmp/plugin-release-flow/
+target/
+**/target/
+**/target-*/
+node_modules/
+axagent-core/target/package/

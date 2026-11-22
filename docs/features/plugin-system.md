@@ -21,6 +21,21 @@
 `finance_invest` / `software_dev` 两个特殊域另有 `*_batch_validate_entities` 命令，
 `entities` 非数组在命令层拒绝，`domain_pack_id` 由 worker 固定注入，调用方不能越域。
 
+### 源码归属与搜索隔离（2026-11-22）
+
+业务源码的**权威位置**是 `AxInvest-plugin-repos/<plugin>/`；主仓只保留宿主运行时、SDK、构建工具与门禁。
+但主仓 `axagent-plugins/crates/` 下 18 个被 workspace `exclude` 的目录当前仍是 CI/Release
+物化临时 cargo 构建根、打包页面与域包资产的过渡输入，**不能直接删除**：独立仓副本与主仓模板
+仍有 Cargo 版本、rustfmt 格式与 bundle 生成格式差异，且 CI 未配置独立仓路径。
+
+- 根 `.ignore` 只隐藏上述 18 个模板目录，降低 ripgrep/编辑器搜索噪声；不修改 `.gitignore`、
+  dprint 与门禁扫描面，已跟踪文件仍在 `git ls-files` 与格式化检查中可见。
+- `scripts/check-plugin-source-ownership.mjs` 对账契约数量、宿主 workspace 4 成员、
+  `.ignore` 与 `exclude` 逐项同源；并报告物理删除的 5 项前置（独立仓、逐文件一致、
+  构建根切换、打包器源码根切换、CI 获取独立仓），前置未满足只报告不判红。
+- 删除模板源的前置全部满足后，必须同批更新 workspace、生成器、打包器、CI 与基线，
+  再让该门转入硬判定；在此之前不要通过删目录「清理」主仓。
+
 ## 当前行为
 
 ### 1. 长驻 worker + 长度前缀 JSON 帧

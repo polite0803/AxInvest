@@ -205,7 +205,12 @@ pub async fn wiki_notes_delete(
 ) -> Result<(), String> {
     // 向量清理、DB 行删除、缓存失效与反馈数据湖已下沉 wiki.store provider。
     let service = crate::init::wiki_store_service::HostWikiStore::new(app);
-    service.delete_note(id).await.map_err(|e| e.to_string())
+    service.delete_note(id).await.map_err(|e| {
+        crate::commands::error::ErrorResponse::err_with_detail(
+            crate::commands::error_code::wiki::DELETE_NOTE_FAILED,
+            format!("删除 Wiki 笔记失败: {e}"),
+        )
+    })
 }
 
 /// `rebuild_wiki_index` 的宿主实现体（清库 + 后台逐篇重索引，fire-and-forget）。

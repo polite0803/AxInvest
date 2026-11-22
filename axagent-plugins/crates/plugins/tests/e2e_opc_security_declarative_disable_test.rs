@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! security 声明式域包的**真 bundle 启停**端到端。
+//! security 域 worker 的**真 bundle 启停**端到端。
 //!
-//! 这类插件没有 worker / 命令，可插单元形态是「页面资产 + 域包逻辑清单」。
-//! 本测试锁：启用后页面可解析、页面读取随包域数据、域包投影可见；
-//! 禁用后两者消失；恢复后仍可解析。
+//! 本域已统一为 Rust worker，但这里只锁与传输形态无关的共性面：
+//! 启用后页面可解析、页面读取随包域数据、域包投影可见；
+//! 禁用后两者消失；恢复后仍可解析。命令转发由 worker 域通用 E2E 覆盖。
 //! 门控：`AXAGENT_SECURITY_BUNDLE_DIR`；CI 由 nextest staging 前置。
 
 mod common;
@@ -16,7 +16,7 @@ use axagent_plugins::{PluginManager, PluginManagerConfig};
 fn security_declarative_bundle_disable_and_restore_is_scoped_to_its_plugin() {
     let Ok(dir) = std::env::var("AXAGENT_SECURITY_BUNDLE_DIR") else {
         eprintln!(
-            "SKIP: 未设置 AXAGENT_SECURITY_BUNDLE_DIR，跳过 security 声明式启停端到端。\
+            "SKIP: 未设置 AXAGENT_SECURITY_BUNDLE_DIR，跳过 security bundle 启停端到端。\
              \n      跑法：node axagent-plugins/scripts/build-plugin-bundle.mjs --plugin opc-security \
              后指向 axagent-plugins/dist/plugins/opc-security。"
         );
@@ -30,7 +30,7 @@ fn security_declarative_bundle_disable_and_restore_is_scoped_to_its_plugin() {
     let runtime = tokio::runtime::Runtime::new().expect("端到端测试需要 tokio 运行时");
     let _entered = runtime.enter();
     let registry = get_capability_registry();
-    assert!(registry.get_opc_store().is_none(), "声明式插件不应依赖 opc.store");
+    assert!(registry.get_opc_store().is_none(), "security E2E 不应依赖宿主 opc.store");
     let _guard = registry.clone();
 
     let home = common::TempDir::new("security-bundle-home");
@@ -63,8 +63,8 @@ fn security_declarative_bundle_disable_and_restore_is_scoped_to_its_plugin() {
     assert!(pack.enabled);
     assert_eq!(pack.domain_packs.len(), 1);
     assert_eq!(pack.domain_packs[0].id, "security");
-    assert_eq!(pack.domain_packs[0].transport_owner, "plugin-opc-common");
-    assert!(pack.domain_packs[0].commands.is_empty(), "声明式插件不得复制 worker 命令");
+    assert_eq!(pack.domain_packs[0].transport_owner, "opc-security");
+    assert!(!pack.domain_packs[0].commands.is_empty(), "worker 域包必须声明自己的命令面");
 
     // ② 禁用态：页面与域包投影都消失；不得引入命令不可用的说法（本来零命令）。
     manager.disable(&outcome.plugin_id).expect("disable 应成功");

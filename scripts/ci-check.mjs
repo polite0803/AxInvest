@@ -1016,6 +1016,12 @@ if (canRunRust && !quick) {
   );
 }
 
+// 插件源码归属对账（2026-11-22）：契约数量、宿主 workspace 成员、`.ignore` 与
+// `exclude` 逐项同源；物理删除前置只报告不判红（当前主仓模板仍是 CI 构建输入）。
+// 纯 Node 静态门，走 pre-push 快速档；命令行与 ci.yml 末尾对应步骤逐字同源。
+step("插件源码归属与删除前置对账自检", "node scripts/check-plugin-source-ownership.mjs --selftest");
+step("插件源码归属与删除前置对账", "node scripts/check-plugin-source-ownership.mjs");
+
 // 快速模式中的 Rust 格式化
 if (canRunRust && quick) {
   console.log(`\n${c.bold}[Rust 快速检查]${c.reset}`);

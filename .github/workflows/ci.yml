@@ -1179,3 +1179,18 @@ jobs:
 
       - name: Check TypeScript types via per-file enumeration (UNC-safe)
         run: node scripts/typecheck-unc.mjs
+
+  # 插件源码归属对账（2026-11-22，追加在末尾避免 ci.yml:<行号> 引用漂移）：
+  # 硬门查契约/宿主 workspace/.ignore 与 exclude 同源；物理删除前置只报告不判红。
+  # 命令行与 scripts/ci-check.mjs 对应 step 逐字同源（对称差集护栏自动校验）。
+  plugin-source-ownership:
+    name: Plugin source ownership and deletion readiness (read-only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check plugin source ownership selftest
+        run: node scripts/check-plugin-source-ownership.mjs --selftest
+
+      - name: Check plugin source ownership and deletion prerequisites
+        run: node scripts/check-plugin-source-ownership.mjs

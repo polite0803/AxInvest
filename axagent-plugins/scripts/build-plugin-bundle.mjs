@@ -80,7 +80,7 @@ const PLUGIN_SPECS = {
       "opc_security_file_write",
       "opc_security_run_automation_rules",
     ],
-    manifest: opcWorkerDomainManifest("opc-security", null, "security"),
+    manifest: opcWorkerDomainManifest("opc-security", "安全合规", "security"),
   },
   // 统一插件规范试点：本域从声明式翻为 worker。命令名在此登记一次，清单工厂按
   // `PLUGIN_SPECS[name].commands` 派生 command 条目；契约 checker 逐项对账这份列表。

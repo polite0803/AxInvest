@@ -313,6 +313,17 @@ pub trait StockAnalysisProvider: Send + Sync {
         ))
     }
 
+    /// 设置主行情源（`set_primary_market_vendor` op）—— 写 op（写 settings + 即时重排
+    /// `quote`/`klines` 链首；只重排不增删注册源）。入参二选一：
+    /// `{vendor: string|null}` 写入并应用；`{applyFromSettings: true}` 只读 settings 应用
+    /// （装配/重放已保存的主源，不写库）。空串/全空白归一为 `None`（清除覆盖）。出参恒 `null`。
+    async fn set_primary_market_vendor(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::set_primary_market_vendor 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
     /// 取消进行中的分析任务（`cancel_stock_analysis` op）—— 写 op（翻转取消令牌，
     /// op 级要求包有 write，#337）。
     ///
@@ -1496,6 +1507,10 @@ mod tests {
             // #337 两条（写语义）：默认实现同样必须显式报错（空对象入参不能被读成
             // 「vendor 状态已改 / 取消已下发」）。
             ("set_vendor_status", futures::executor::block_on(stub.set_vendor_status(Value::Null))),
+            (
+                "set_primary_market_vendor",
+                futures::executor::block_on(stub.set_primary_market_vendor(Value::Null)),
+            ),
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),

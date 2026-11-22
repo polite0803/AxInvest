@@ -10345,7 +10345,7 @@ A 组前提核实后**无需独立阶段**：种子 DB 化已就绪（勘误 4�
 
 - **运行时优先级覆盖**：`axagent-quant/crates/astock-data/src/lib.rs` 加 `vendor_priority: parking_lot::RwLock<HashMap<String, Vec<String>>>` + `set_primary_market_vendor(Option<&str>)` / `vendor_priority_snapshot()` / 纯函数 `reorder_vendors`；在唯一遍历入口 `try_vendors_retry` 按 `route_key` 重排（**as_of 回放不生效**，只重排不增删源）。
 - **配置权威**：`AppSettings.market_data_primary_vendor: Option<String>`（harness + 前端类型 + store 默认 null）。
-- **命令 + 启动应用**：`commands/market_vendor.rs` 的 `stock_set_market_data_primary_vendor(vendor)` 写 settings 并即时 `set_primary_market_vendor`；`init/services.rs` 启动装配时一并应用。
+- **命令 + 启动应用**：`stock_set_market_data_primary_vendor` 原为宿主命令（写 settings 并即时 `set_primary_market_vendor`）；2026-11-22 起已按「股票业务归股票插件」改判，宿主命令删除，改由 plugin-stock 同名命名命令经 `stock.analysis::set_primary_market_vendor` 写 op 承接；`init/services.rs` 仅保留宿主自己持有的 `AStockClient` 链首恢复（不是业务命令）。
 - **UI + 11 语言**：`DataVendorsTab.tsx` 顶部加「主行情源」Select（默认顺序 / 各 quote-capable 源），改选即保存+apply；11 语言各 +4 key；browserMock 桩返回成功。
 - **判据测试**：`vendor_priority_tests` 两条（重排+未知名忽略、设置/清除快照），`cargo test -p axagent-astock-data --lib vendor_priority` 2/2。
 - 验收口径：改配置换主源 → 重跑分析，`[astock-data] 应用行情源优先级覆盖` 日志给出实际链序；主壳零重编（只改 settings/运行时顺序）。
@@ -10731,3 +10731,146 @@ PLAN:268 / :269 两行文字与镜像表 `planAnchorText` 同批人工改指（�
 `auto_connect_wiki`（Safe，DTO `AutoConnectOptions` / `AutoConnectResult` 同上收）、
 `delete_wiki`（**Dangerous ⇒ 按 §142.3 保留宿主闸门**；若与插件命令并存须
 `danger-full-access` + 包级 `execute`），以及 `llm_wiki_*`（26 条）与 `knowledge_*` 知识库面。
+
+## §215 导航修复与包体瘦身对账（2026-11-22，未完）
+
+**触发**：用户报告插件化重构后主应用导航大量 404、启停对 UI 无变化、股票页在插件未加载时
+就存在、标题/面包屑/命令面板错位、`读取闭环状态失败 … os error 123`，以及 Windows 安装包
+80 多 M 涨到 156M。用户裁定：股票页按完整外迁（P3/P4）方向修；Bot 侧 20 个未提交改动全程
+不碰，只做定点验证；Windows 真机验证由用户执行。
+
+**已落地（本机 WSL 定点验证）**：
+
+- **启停闭环**：`plugin-state-changed` 事件契约与生成物同批落地；前端统一由
+  `initPluginStateListener()` 失效命令缓存、卡片贡献并重拉插件列表，设置页不再直连 invoke。
+- **路由一致性**：插件页投影 ready 前有首帧 gate 与 3 秒失败态；`/opc/domain/*` 旧链与插件页
+  同源；标题、面包屑、命令面板统一消费插件路由表；路由可达性门禁接入本地与 CI（自检先行）。
+- **股票页门槛**：`/invest` 与 `/invest/replay` 两条路由及其侧栏入口都由
+  `src/pages/invest/routes.tsx` 声明并带 `requiresPlugin: "stock"`，宿主骨架不再点名这两个 key；
+  浏览器 mock 模式门槛失效，避免本地开发/e2e 股票页消失。
+- **worker 错误**：`worker://` 不再被当成可执行程序 spawn，未加载时返回明确中文错误；
+  worker 启动失败回滚 enabled；清单程序名跨平台统一为无后缀，`resolve_worker_program` 按平台补
+  `.exe`；闭环面板改用 `translateBackendError()`。
+- **包体**：17 个插件独立仓与插件 workspace 均补 `[profile.release]`（profile 只在发起构建的
+  workspace 根生效），staging 注入 strip 兜底并加 `debug_info` 校验。`src-tauri/plugins/bundled`
+  从 120M 降到 11M，17 个 worker 均 stripped；stock worker 31MB → 1.0MiB。
+  `axagent-plugins/dist/plugins` 仍是旧的未 strip 构建产物，**不是安装包资源**（安装包只取
+  `src-tauri/plugins/bundled`）。
+
+**验证读数**：`npm run typecheck` 退出 0；`npm run test:run -- src/components/layout src/lib
+src/hooks` 100 文件 / 1417 测试全绿；路由门禁自检 OK、strict 40 路由 / 34 入口通过；
+`node scripts/check-contracts.mjs` 退出 0；i18n 11 语言 16351 键对齐；行尾检查 4856 文件 PASS；
+`cargo clippy -p axagent-plugins --all-targets -- -D warnings` 与 `cargo check -p axagent` 退出 0。
+**未跑全量 cargo/npm 门禁**（Bot WIP 未处理，按用户裁定）。
+
+**明确未完成**：T3 完整 bundle 外迁尚未做完 —— `InvestHub` 6 Tab 与 `StockWorkspaceShell`
+6 视图（约 67,626 行）仍在宿主编译，stock 插件 web bundle 目前只有 `stock-home` 一页；
+本轮交付的是**可见性与声明权**收口，不是页面代码搬迁。阶段 5 的直连命令 `stock_set_market_data_primary_vendor` 原按 §208 判据③保留宿主，
+2026-11-22 按用户改判已迁到 plugin-stock：宿主命令文件删除，前端切
+`invokePluginCommand`；`init/services.rs` 只保留宿主 `AStockClient` 的启动链首恢复，不属业务命令。文档与 Playwright spec 的
+收口亦待完整外迁后统一做。
+
+**2026-11-22 追加：vendor 命令外迁 + 前端构建链修复**
+
+- `stock_set_market_data_primary_vendor` 已从宿主移出：删 `commands/stock_market_vendor.rs` 与
+  `init/services.rs` 中的宿主业务装配调用（build.rs 重生成 `register_commands.rs`，未手改）；harness 的
+  `StockAnalysisProvider` 双副本增 `set_primary_market_vendor` 写 op，宿主 provider 承接原命令体，
+  worker 登记 `Write` 权限与分派臂；plugin-stock 增同名命名命令。`init/services.rs` 保留宿主
+  `AStockClient` 的启动链首恢复（不是业务命令，避免 worker 首次命令额外 `call_seam` 破坏帧序）。
+  前端 `DataVendorsTab.tsx` 切 `invokePluginCommand`，browserMock 保留同名桩；两份 packager 与
+  `scripts/lib/plugin-contract.json` 同批声明。
+- 预置资源 `src-tauri/plugins/bundled/stock` 与 staging 目录已同步新清单/worker/web bundle，
+  web bundle 与新增命令声明均可检索；最终 worker、manifest sha256 与两处盘上二进制一致
+  （`b28075907c5ac49ebc3adc0bb4191390f725ca49c5ba6ba77676d0402c95b26d`），宿主侧 `--check` 复验通过。
+- stock 仓 `build:web` 从指向不存在的 `../../../node_modules/esbuild` 改指本仓
+  `../node_modules/esbuild`；esbuild 升为根 `devDependency` 并写进 `package-lock.json`；
+  `plugin-ci.yml` / `release-plugin.yml` 在 bundle 打包前新增 `npm run build:web --prefix plugin-stock`，
+  避免 checked-in bundle 陈旧。实测从本仓依赖重建 14.0kb bundle，随后 stock 仓 `--check` 全 PASS。
+- 本批定点验证：`cargo check -p axagent` / `cargo clippy -p axagent --all-targets -- -D warnings` /
+  `cargo clippy -p axagent-plugins --lib -- -D warnings` / `cargo clippy -p axagent-harness
+  --all-targets -- -D warnings` / 股票仓 `cargo fmt --all --check`、`cargo test --workspace --all-targets`
+  （1135 通过 / 1 ignored / 0 失败）与 `cargo clippy -p axagent-plugin-stock --all-targets -- -D warnings`
+  全为 EXIT=0；`npm run typecheck`、`npm run lint:eslint`（改动文件）、dprint（改动文件）、
+  `check-contracts`、`check-plugin-contract`、`check-line-endings` 均 EXIT=0。
+  补充：`cargo clippy -p axagent-plugins --all-targets -- -D warnings` 当前被既存测试目标
+  `sdk_contract_pin_test.rs` 的两个未声明 dev-dependency（opc-core / testkit）挡住，非本批引入；
+  定点 lib 目标已绿。
+  未跑全量 cargo/npm 门禁（Bot WIP 未处理，按用户裁定）。`check-capability-register.mjs` 当前红灯
+  11 条，其中本批只引起 `commandTotal` 1144→1152 / 模块 145→145（历史遗留 +8）、
+  `registryFileLines` 1209→1213（历史遗留 +4）、`stockBoundaryCommands` 71→70 与
+  `stockAuditDomainCommands` 70→69 各 −1（本批删除宿主命令）、`agentCommandFace` 1150→1149
+  （本批删除 `#[agent_command]`）；其余 `unassignedModules: bot`、前端体量、K1 文件数、两条
+  workflow evidence 均为本会话前既存漂移，按 Bot WIP 不碰原则未改基线（详见工作区读数）。
+
+**Windows 真机验收步骤（用户执行）**：
+1. 不重启应用，启用/禁用/卸载一个 OPC 插件：侧栏 packs 组、设置页开关、命令面板条目即时变化。
+2. 冷启动直开 `/plugins/<slug>/<pageId>` 不闪 404；14 条 `/opc/domain/*` 旧链落到正确插件页且
+   标题正确；插件未启用时显示明确降级态而非跳 `/opc`。
+3. 打开 RecoLoopPanel 的 IC 统计，宿主日志不应再出现 `回退到 spawn-on-call 通道执行` 与
+   `worker://` 组合，也不应有裸 `os error 123`。
+4. 重新打 Windows 包：体积应从 156M 明显回落；安装后插件 worker 无 debug 符号文件。
+5. 未装/停用 stock 时侧栏无股票入口、`/invest` 与 `/invest/replay` 均为 404；安装启用后
+   6 Tab / 6 视图可切换，停用后入口即时消失；其它插件不受影响。第 5 条的页面内容仍由宿主
+   提供，完整外迁完成前不能以它证明 T3 终局。
+
+**2026-11-23 追加：T3 首个可运行 bundle 垂直切片（跨市场行情）**
+
+- 调研结论：`InvestHub` 6 Tab 里 `cross-market` 最适合先迁 —— 296 行单组件，只有 4 条只读
+  `market.quote` 命令（国际个股 quote / K 线、基准指数 K 线、外汇 K 线），无写操作、无事件
+  监听、无路由跳转；其余 Tab 依赖 antd/echarts/store/上传等，整页直搬进原生 IIFE bundle
+  成本过高。切片边界：**先把跨市场作为 `stock-home` bundle 内第二个 Tab**，宿主路由、域页
+  注册表、`InvestHub` / `StockWorkspaceShell` 一行未改（Bot WIP 在共享文件上，不能混批）。
+- 插件仓新增 `plugin-stock/src-web/crossMarket.ts`：五个入参输入（三标的 + 周期 + K 线根数），
+  四区并发调用、各自独立 loading/error/empty/数据四态；K 线用原生 SVG polyline 渲染，无
+  antd/echarts 依赖。中文文案在 bundle 内自带，不依赖宿主 i18n；主题用 `color-scheme:
+  light dark` + 本地 CSS 变量（iframe 不继承宿主 token）。`src-web/main.ts` 改为 Tab 壳：
+  数据切片默认激活（原十条命令帧序不变），跨市场首次点开才装载四条命令，切走只隐藏 DOM
+  不卸载；顶层 `announceReady()` 与 `beforeunload -> dispose()` 仍各一处。
+- `plugin-stock/web/pages/index.html` 补 Tab/表单/四区样式；`src-web/__verify__/verify-bundle.mjs`
+  增加跨市场帧级断言：四条命令只经 `plugin_execute_command`、入参齐备且无空串、四区均渲染。
+  `npm run build:web --prefix plugin-stock` 重建 25.3kb bundle；stock 仓
+  `node scripts/build-plugin-bundle.mjs --plugin stock --plugin-version 3.0.1 --check --out
+  dist/plugins/stock` 全 PASS（含 T3 新增断言）；宿主 `check-contracts` /
+  `check-plugin-contract`（434 命令）与行尾 / `git diff --check` 全绿。
+- **仍未完成**：这只是插件内部视图切片，尚未做「股票页在宿主完全消失」—— `InvestHub` /
+  `StockWorkspaceShell` 与 `/invest` 编译期路由仍在宿主。当时的判断是「stock 没有
+  `domainPacks` 所以进不了 `/plugins/<slug>/<pageId>` 投影」，下一批已改为**放宽投影门槛**
+  而不是给 stock 伪造域包，详见本节末尾 2026-11-23 第二笔追加。
+
+**2026-11-23 追加：插件页一等路由门槛（T3 导航前置）**
+
+- `src/lib/pluginDomainPageRoutes.ts`：去掉「插件必须贡献 `domainPacks`」这一条投影前置，
+  条件收敛为 `enabled` + `loading=bundle` + page id 可作 URL 段。域包退化为只算
+  `legacyPath`，与门禁 `scripts/check-route-reachability.mjs` 的 `parsePluginPageRoutes()`
+  「全部 bundle 页」口径对齐。这样股票等非 OPC 插件页也有一等 URL / 侧栏入口，插件启停
+  对导航立即可见；不必为了让股票页有路由而伪造一份 OPC 域包清单。
+- 同一函数里 `packsById` 只收 `enabled` 的投影：插件停用后 `/opc/domain/*` 旧链不再被映射到
+  已禁用插件页（原实现在放宽门槛后会漏出这条旧链）。`src/lib/pluginRouteRegistry.ts` 对
+  `plugin_list_domain_packs` 失败做降级（按空表处理），仅 `plugin_list_pages` 失败才进错误态
+  —— 域包查询异常不再让全部插件页入口消失。
+- 修正股票插件 `plugin-stock/src-web/crossMarket.ts` 的 `mountCrossMarket()` 参数类型：
+  残留的 `PluginClientBridge` 未定义，改为文件已导入的 `AxAgentPluginClient`（esbuild 擦除
+  类型不会报，但宿主 `tsc` 会红）。类型修改不改运行时代码，bundle 无需重建。
+- 定点验证：`npm run typecheck` EXIT=0；`npm run test:run -- src/lib/__tests__/pluginDomainPageRoutes.test.ts
+  src/lib/__tests__/pluginRouteRegistry.test.ts` 14 测试全绿；`node scripts/check-route-reachability.mjs
+  --strict` EXIT=0（路由 40 / 入口 34）；改动文件 dprint check EXIT=0。仍未跑全量
+  cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
+**2026-11-23 追加：T3 第二个业务视图（模拟观察）迁入 bundle**
+
+- 股票插件新增 `plugin-stock/src-web/portfolio.ts`，把宿主 `PaperPortfolioPage` 的数据面
+  收敛为原生 DOM：单条 `stock_get_portfolio_dashboard` 读命令（worker 已声明，经 `stock.analysis`
+  接缝取 R2 组合监控），渲染 8 张汇总卡 + 持仓表 + 行业暴露条 + 三档压力测试；
+  缺字段显示破折号而非 0，四态分列，连续刷新只让最后一轮回包上屏。
+- `src-web/main.ts` 内部 Tab 壳增加第三页「模拟观察」，与其它视图共用唯一桥客户端：
+  首次点开才装载并发命令，切走只隐藏 DOM；cleanup 同时解绑两个懒装载视图。
+  `web/pages/index.html` 补本地 CSS 变量驱动的卡片 / 表格 / 条图样式（iframe 不继承宿主 token）。
+- verifier 新增帧级断言：只发一条组合看板命令、走 `plugin_execute_command`、激活视图、
+  8 卡 / 1 行持仓 / 2 行行业 / 3 档压力测试均渲染。bundle 重建后 35.0kb，SHA-256
+  `b863f1243dfb8f971e737880e45935f356d8bc6c4b4ffba5c946c51852b93d12`；
+  已同步 `axagent-plugins/dist/plugins/stock` 与 `src-tauri/plugins/bundled/stock` 两处
+  gitignored 预置目录（用户授权覆盖），三处哈希一致，两份 packager `--check` 全 PASS。
+- 定点验证：插件前端 `tsc -p plugin-stock/tsconfig.json` EXIT=0；bundle verifier 全通过；
+  两份 packager `--check` EXIT=0。未跑全量 cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
+- **T3 终局仍差**：`InvestHub` 剩余 4 个 Tab（screener / workspace / screenshot-diagnosis /
+  quant）与 `StockWorkspaceShell` 6 视图尚未迁入 bundle；宿主 `/invest` 编译期路由未删。
+  已迁入的数据切片 / 跨市场 / 模拟观察三页仍通过插件页独立 URL 展示，宿主旧页保留为回退。

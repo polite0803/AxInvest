@@ -98,7 +98,18 @@ for (const plugin of PLUGINS) {
   if (release) {
     args.push("--release");
   }
-  const result = spawnSync(process.execPath, args, { stdio: "inherit", cwd: repoRoot });
+  // release 的 strip/debug 由**发起构建的根**决定：各独立仓与 axagent-plugins 的
+  // Cargo.toml 已写 [profile.release]，这里再注入环境变量兜住尚未同步 profile 的仓，
+  // 避免某个 worker 漏去符号就把安装包体积抬回 156M。
+  const result = spawnSync(process.execPath, args, {
+    stdio: "inherit",
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      CARGO_PROFILE_RELEASE_STRIP: "symbols",
+      CARGO_PROFILE_RELEASE_DEBUG: "0",
+    },
+  });
   if (result.error) {
     console.error(`[stage-plugins] 启动 ${plugin} 打包失败：${result.error.message}`);
     process.exit(1);

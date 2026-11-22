@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { usePluginGallery } from "@/hooks/usePluginGallery";
-import { invoke } from "@/lib/invoke";
-import { refreshPluginPageRoutes } from "@/lib/pluginRouteRegistry";
+import { invoke, listen } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -22,7 +21,13 @@ const POSITION_COLORS: Record<string, string> = {
 
 export function DashboardPluginsSettings() {
   const { t } = useTranslation();
-  const { installPlugin, error: installError } = usePluginGallery();
+  const {
+    installPlugin,
+    enablePlugin,
+    disablePlugin,
+    uninstallPlugin,
+    error: installError,
+  } = usePluginGallery();
   const [plugins, setPlugins] = useState<DashboardPluginInfoDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,6 +51,20 @@ export function DashboardPluginsSettings() {
 
   useEffect(() => {
     void loadPlugins();
+    // 后端在任何入口启停/装卸后广播 plugin-state-changed：本页 dashboard 投影与
+    // 侧栏/命令面板（经 pluginStore → bindPluginRouteStore）一起重拉，不再各改各的。
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listen("plugin-state-changed", () => {
+      if (!disposed) { void loadPlugins(); }
+    }).then((fn) => {
+      if (disposed) { fn(); }
+      else { unlisten = fn; }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [loadPlugins]);
 
   const handleRefresh = async () => {
@@ -79,7 +98,6 @@ export function DashboardPluginsSettings() {
         return;
       }
       await loadPlugins();
-      await refreshPluginPageRoutes().catch(() => undefined);
       message.success(t("settings.dashboardPlugins.enabled"));
     } finally {
       setSelectingSource(false);
@@ -96,14 +114,13 @@ export function DashboardPluginsSettings() {
 
   const handleToggle = async (pluginId: string, enabled: boolean) => {
     try {
-      // 启停复用 plugin_* 命令（自带护照索引同步与 UI 贡献撤销）。
-      if (enabled) {
-        await invoke("plugin_enable", { pluginId });
-      } else {
-        await invoke("plugin_disable", { pluginId });
+      // 启停统一走 pluginStore（其 action 内部仍调 plugin_* 命令，自带护照索引同步
+      // 与 UI 贡献撤销）。store 是单一入口，事件广播负责让其它挂载面同步。
+      const ok = enabled ? await enablePlugin(pluginId) : await disablePlugin(pluginId);
+      if (!ok) {
+        message.error(t("settings.plugins.toggleFailed", { error: installError ?? "" }));
+        return;
       }
-      setPlugins((prev) => prev.map((p) => (p.id === pluginId ? { ...p, enabled } : p)));
-      await refreshPluginPageRoutes().catch(() => undefined);
       message.success(
         enabled
           ? t("settings.dashboardPlugins.enabled")
@@ -117,9 +134,11 @@ export function DashboardPluginsSettings() {
   const handleUnload = async (pluginId: string) => {
     setUnloadingId(pluginId);
     try {
-      await invoke("plugin_uninstall", { pluginId });
-      setPlugins((prev) => prev.filter((p) => p.id !== pluginId));
-      await refreshPluginPageRoutes().catch(() => undefined);
+      const ok = await uninstallPlugin(pluginId);
+      if (!ok) {
+        message.error(t("settings.plugins.unloadFailed", { error: installError ?? "" }));
+        return;
+      }
       message.success(t("settings.dashboardPlugins.unloaded"));
     } catch (error) {
       message.error(t("settings.plugins.unloadFailed", { error }));

@@ -8,10 +8,15 @@
  * - `packs` 来自后端 `plugin_list_domain_packs`（启用域的 logical manifest 投影）。
  *
  * 只有**同时**满足以下条件的页面才成为主路由：
- * 1. 插件已启用；
- * 2. 插件贡献了至少一个域包；
- * 3. 页面加载形态是 bundle（schema 页仍走动态 UI 通道）；
- * 4. page id 是可用作 URL 段的稳定标识。
+ * 1. 插件已启用（后端 `plugin_list_pages` 本身也只投影启用的插件）；
+ * 2. 页面加载形态是 bundle（schema 页仍走动态 UI 通道）；
+ * 3. page id 是可用作 URL 段的稳定标识。
+ *
+ * 域包**不是**投影的前置条件，只用于计算 `legacyPath`（旧 `/opc/domain/*` 链）：
+ * T3 起股票等非 OPC 插件也要有一等 URL 与侧栏入口；若仍要求 domainPacks 非空，
+ * 股票页即使打包完成也只能从工作台「插件页」入口打开，启停对导航无可见变化。
+ * 门禁 `scripts/check-route-reachability.mjs` 的 `parsePluginPageRoutes()` 同样按
+ * 「全部 bundle 页」展开，两侧口径必须一致。
  *
  * 路径使用独立命名空间，避免与主壳静态路由争抢所有权：
  *   `/plugins/<pluginName>/<pageId>`
@@ -63,13 +68,12 @@ export function resolvePluginDomainPageRoutes(
   pages: readonly PluginPagesInfoDto[],
   packs: readonly PluginDomainPacksInfoDto[],
 ): PluginDomainPageRoute[] {
-  const packsById = new Map(packs.map((item) => [item.id, item] as const));
-  const enabledDomainPlugins = new Set(
-    packs.filter((item) => item.enabled && item.domainPacks.length > 0).map((item) => item.id),
-  );
+  // 禁用插件的域包不贡献旧链映射：与 pages 的 enabled 过滤同口径，
+  // 否则插件停用后 /opc/domain/* 旧链仍会把用户送进已禁用插件页。
+  const packsById = new Map(packs.filter((item) => item.enabled).map((item) => [item.id, item] as const));
   const out: PluginDomainPageRoute[] = [];
   for (const info of pages) {
-    if (!info.enabled || !enabledDomainPlugins.has(info.id)) {
+    if (!info.enabled) {
       continue;
     }
     const slug = pluginRouteSlug(info.id);

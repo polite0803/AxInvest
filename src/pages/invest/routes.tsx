@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ContributedPageRoute } from "@/lib/domainPageRegistry";
+import { DollarCircleFilled, HistoryOutlined } from "@ant-design/icons";
 import { type ComponentType, lazy, type LazyExoticComponent } from "react";
 
 /**
@@ -18,20 +19,55 @@ import { type ComponentType, lazy, type LazyExoticComponent } from "react";
  *
  * ⚠ path / pageKey 由本文件**字面量**声明（#260 之后 OPC 的同一口径）：不再从宿主
  * `BUILTIN_PAGE_PATH` 取路径 —— 那等于把命名权留在主壳。（宿主表里 `"finance-investment": "/invest"`
- * 本批仍保留：侧栏导航项 `navRegistry` 与 `/invest/replay` 旧模板串还在消费它，
- * 导航声明权的移交属后续批次，本批边界只交回**装载权**。）
+ * 仍保留给 `/invest/replay` 旧模板串消费；侧栏入口本批已随插件门槛迁进本文件的 `nav`。）
  */
 
 const LazyInvestPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage }))
 );
+const LazyReplayWorkbenchPage: LazyExoticComponent<ComponentType> = lazy(() =>
+  import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
+);
 
 /**
- * 无侧栏入口的页面路由：字段结构与 OPC 的 `EXTRA_ROUTES` 同构（`ContributedPageRoute`
- * 的 `nav` 为可选字段，缺省即不出现在侧栏投影里）。投资域主页的侧栏入口此前就由宿主
- * `navRegistry.builtinNavItems`（key `finance-investment`）持有，本批不重复贡献一份
- * 同 key 导航项（`getNavItems()` 是「宿主内置 + 域贡献」直接拼接，重复 key 会在侧栏长出双入口）。
+ * 投资域主页路由：字段结构与 OPC 的路由声明同构。`requiresPlugin` 把页面的**可见性**
+ * 绑到 stock 插件状态；侧栏入口由本文件同一条声明的 `nav` 派生，避免出现「路由消失但
+ * 入口还在」的 404 按钮（`getNavItems()` 是「宿主内置 + 域贡献」直接拼接，宿主侧
+ * `finance-investment` 静态项已同步删除，不能在这里重复贡献同 key）。
  */
 export const DOMAIN_PAGES: readonly ContributedPageRoute[] = [
-  { id: "invest:index", path: "/invest", pageKey: "finance-investment", Page: LazyInvestPage },
+  {
+    id: "invest:index",
+    path: "/invest",
+    pageKey: "finance-investment",
+    Page: LazyInvestPage,
+    // 股票页的**可见性**归 stock 插件：未装/未启用时路由与侧栏入口都不存在。
+    // 页面组件本身仍在宿主编译（完整 bundle 外迁尚待 P6.1 前端移植），但对外契约
+    // 已经与插件生命周期一致 —— 不能让用户看到插件未加载就存在的股票页。
+    requiresPlugin: "stock",
+    // 侧栏入口也走本表投影：宿主 navRegistry 的同 key 静态项已删，禁用后入口一并消失。
+    nav: {
+      key: "finance-investment",
+      labelKey: "nav.financeInvestment",
+      icon: <DollarCircleFilled style={{ fontSize: 17 }} />,
+      domain: "finance",
+      group: "invest",
+    },
+  },
+  {
+    // 回放工作台：与投资主页同一 stock 门槛，禁用插件后旧链也不能进入股票业务页。
+    // pageKey 沿用 finance-investment，保持页面上下文与改动前一致。
+    id: "invest:replay",
+    path: "/invest/replay",
+    pageKey: "finance-investment",
+    Page: LazyReplayWorkbenchPage,
+    requiresPlugin: "stock",
+    nav: {
+      key: "invest-replay",
+      labelKey: "nav.replayWorkbench",
+      icon: <HistoryOutlined style={{ fontSize: 17 }} />,
+      domain: "finance",
+      group: "invest",
+    },
+  },
 ];

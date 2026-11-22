@@ -32,8 +32,13 @@ vi.mock("@/lib/pluginRouteRegistry", () => ({
     legacyPath: "/opc/domain/ai-research",
     pluginSlug: "opc-ai-research",
     pageId: "opc-ai-research",
+    navKey: "plugin-page:opc-ai-research:opc-ai-research",
   }],
   usePluginPageRoutes: () => [],
+  // 本用例只验证旧链路由接线，投影视为已就绪；首帧 gate 由专用用例覆盖。
+  usePluginPageRoutesReady: () => true,
+  getPluginPageRoutesError: () => null,
+  refreshPluginPageRoutes: vi.fn(async () => []),
 }));
 vi.mock("@/components/plugin/PluginPageRouteHost", () => ({
   PluginPageRouteHost: () => <div data-testid="plugin-domain-page" />,

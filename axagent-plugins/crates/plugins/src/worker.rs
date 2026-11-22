@@ -564,7 +564,7 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
         // `health_tracker`、`cancel_stock_analysis` 翻转取消令牌 ⇒ `Write`。
         (
             "stock.analysis",
-            "set_vendor_status" | "cancel_stock_analysis",
+            "set_vendor_status" | "set_primary_market_vendor" | "cancel_stock_analysis",
         ) => Some(PluginPermission::Write),
         // #346 批 B20：七条写 op ⇒ `Write`。
         (
@@ -4091,6 +4091,22 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.set_vendor_status(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // 主行情源：原宿主命令 `stock_set_market_data_primary_vendor` 的业务体下沉到
+            // 这条接缝，宿主只提供 provider，不再持有 Tauri/智能体命令（用户裁定 2026-11-22）。
+            "stock.analysis" if op == "set_primary_market_vendor" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.set_primary_market_vendor(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -15848,11 +15864,13 @@ mod tests {
             with_watchdog(Duration::from_secs(2), "stock.analysis #337 权限表", || {
                 (
                     required_permission_for("stock.analysis", "set_vendor_status"),
+                    required_permission_for("stock.analysis", "set_primary_market_vendor"),
                     required_permission_for("stock.analysis", "cancel_stock_analysis"),
                 )
             });
         assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.1, Some(PluginPermission::Write), "写 op 必须要求 write");
+        assert_eq!(verdict.2, Some(PluginPermission::Write), "写 op 必须要求 write");
     }
 
     /// #338 mover_recall_analysis 三条：`run_mover_recall_analysis` 落批次起点并后台

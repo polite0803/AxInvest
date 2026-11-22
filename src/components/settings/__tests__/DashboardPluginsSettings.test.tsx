@@ -10,6 +10,7 @@ const { mocks } = vi.hoisted(() => ({
     installError: vi.fn(),
     open: vi.fn(),
     refreshPluginPageRoutes: vi.fn(),
+    listen: vi.fn(() => Promise.resolve(() => {})),
     error: vi.fn(),
     success: vi.fn(),
     translate: (key: string) => key,
@@ -29,6 +30,7 @@ vi.mock("@/hooks/usePluginGallery", () => ({
 
 vi.mock("@/lib/invoke", () => ({
   invoke: mocks.invoke,
+  listen: mocks.listen,
 }));
 
 vi.mock("@/lib/pluginRouteRegistry", () => ({
@@ -62,6 +64,7 @@ describe("DashboardPluginsSettings 安装与刷新", () => {
     mocks.installError.mockReset();
     mocks.open.mockReset();
     mocks.refreshPluginPageRoutes.mockReset();
+    mocks.listen.mockClear();
     mocks.error.mockReset();
     mocks.success.mockReset();
     mocks.invoke.mockResolvedValue([]);
@@ -74,11 +77,19 @@ describe("DashboardPluginsSettings 安装与刷新", () => {
   it("本地目录安装统一走 pluginStore，不绕过宿主安装命令与状态链", async () => {
     render(<DashboardPluginsSettings />);
 
+    // 状态链（§215）：本页不再直连 refreshPluginPageRoutes，只订阅后端广播，
+    // 由 pluginStore / bindPluginRouteStore 统一失效路由、侧栏与命令面板。
+    await waitFor(() => expect(mocks.listen).toHaveBeenCalledWith("plugin-state-changed", expect.any(Function)));
+    const listLoads = () => mocks.invoke.mock.calls.filter(([command]) => command === "dashboard_list_plugins").length;
+    await waitFor(() => expect(listLoads()).toBeGreaterThan(0));
+    const loadsBeforeInstall = listLoads();
+
     fireEvent.click(await screen.findByRole("button", { name: "settings.dashboardPlugins.install" }));
 
     await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(LOCAL_SOURCE));
     expect(mocks.invoke).not.toHaveBeenCalledWith("plugin_install", expect.anything());
-    expect(mocks.refreshPluginPageRoutes).toHaveBeenCalledTimes(1);
+    // 投影仍是现场真值：安装成功后本页自行重拉一次（事件广播是给其它挂载面的）。
+    await waitFor(() => expect(listLoads()).toBeGreaterThan(loadsBeforeInstall));
     expect(mocks.success).toHaveBeenCalledWith("settings.dashboardPlugins.enabled");
   });
 

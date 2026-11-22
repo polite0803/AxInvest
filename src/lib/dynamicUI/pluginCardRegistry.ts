@@ -223,6 +223,22 @@ export function ensureCardContributionsLoaded(): Promise<number> {
 }
 
 /**
+ * 启停/装卸后重建整张表。
+ *
+ * 注册表是「投影 → 宿主键」的只读索引，不缓存第二份真相；事件到达时清空并重新拉两路
+ * 投影（注册顺序恒宿主先，先到先得语义不变）。否则禁用插件的卡会永久留在表里，
+ * 再次启用时新声明也会被旧键挡住。
+ */
+export function refreshCardContributions(): Promise<number> {
+  BY_KEY.clear();
+  BY_SCHEMA_ID.clear();
+  BY_SURFACE.clear();
+  loadPromise = null;
+  bumpRegistryVersion();
+  return ensureCardContributionsLoaded();
+}
+
+/**
  * 测试专用：清空注册表与加载缓存。
  *
  * 注册表是模块级单例（与 `adapters/registry.ts` 同形态），用例之间必须显式复位，

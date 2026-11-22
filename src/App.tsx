@@ -49,6 +49,7 @@ import { bindPluginRouteStore, refreshPluginPageRoutes } from "@/lib/pluginRoute
 import { message, setMessageInstance } from "@/lib/toast";
 import {
   initAnimationPreference,
+  initPluginStateListener,
   useAgentPanelStore,
   useSettingsStore,
   useSkillStore,
@@ -174,7 +175,12 @@ function AppInner() {
   }, [navigate]);
   useEffect(() => {
     void refreshPluginPageRoutes();
-    return bindPluginRouteStore();
+    const unbindRoutes = bindPluginRouteStore();
+    const unlistenState = initPluginStateListener();
+    return () => {
+      unbindRoutes();
+      unlistenState();
+    };
   }, []);
   const handleCloseCmdPalette = useCallback(() => setCmdOpen(false), [setCmdOpen]);
   const isInSettings = location.pathname === "/settings"

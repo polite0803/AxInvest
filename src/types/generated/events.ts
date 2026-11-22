@@ -63,6 +63,7 @@ export const IPC_EVENT_NAMES = [
   "skill-proposal",
   "skill-state-changed",
   "skill:file-changed",
+  "plugin-state-changed",
   "gateway-status-changed",
   "app-close-requested",
   "auto-backup-completed",

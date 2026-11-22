@@ -93,10 +93,11 @@ pub enum IpcEventName {
     MemoryRebuildComplete,
     WikiNoteIndexed,
     WikiRebuildComplete,
-    // ── 技能 / 网关 ──
+    // ── 技能 / 插件 / 网关 ──
     SkillProposal,
     SkillStateChanged,
     SkillFileChanged,
+    PluginStateChanged,
     GatewayStatusChanged,
     // ── 任务 / 终端 / 行情 / 系统 ──
     AppCloseRequested,
@@ -194,10 +195,11 @@ impl IpcEventName {
             IpcEventName::MemoryRebuildComplete => "memory-rebuild-complete",
             IpcEventName::WikiNoteIndexed => "wiki-note-indexed",
             IpcEventName::WikiRebuildComplete => "wiki-rebuild-complete",
-            // ── 技能 / 网关 ──
+            // ── 技能 / 插件 / 网关 ──
             IpcEventName::SkillProposal => "skill-proposal",
             IpcEventName::SkillStateChanged => "skill-state-changed",
             IpcEventName::SkillFileChanged => "skill:file-changed",
+            IpcEventName::PluginStateChanged => "plugin-state-changed",
             IpcEventName::GatewayStatusChanged => "gateway-status-changed",
             // ── 任务 / 终端 / 行情 / 系统 ──
             IpcEventName::AppCloseRequested => "app-close-requested",
@@ -289,6 +291,7 @@ impl IpcEventName {
         IpcEventName::SkillProposal,
         IpcEventName::SkillStateChanged,
         IpcEventName::SkillFileChanged,
+        IpcEventName::PluginStateChanged,
         IpcEventName::GatewayStatusChanged,
         IpcEventName::AppCloseRequested,
         IpcEventName::AutoBackupCompleted,

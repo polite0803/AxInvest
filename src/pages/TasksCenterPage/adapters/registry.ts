@@ -32,6 +32,9 @@ const BY_ID = new Map<SourceId, TaskSourceAdapter>(
   REGISTRY.map((adapter) => [adapter.id, adapter]),
 );
 
+/** 由插件投影注册的源 id。启停/卸载后按此集合剔除，宿主源不动。 */
+const PLUGIN_SOURCE_IDS = new Set<SourceId>();
+
 /**
  * 注册表版本号（外置 store 的快照值）：每次成功追加源就 +1。
  *
@@ -102,6 +105,7 @@ export function registerPluginTaskSources(infos: readonly PluginTaskSourcesInfoD
       const adapter = createPluginTaskSourceAdapter(info.id, source);
       REGISTRY.push(adapter);
       BY_ID.set(source.id, adapter);
+      PLUGIN_SOURCE_IDS.add(source.id);
       added += 1;
     }
   }
@@ -109,6 +113,24 @@ export function registerPluginTaskSources(infos: readonly PluginTaskSourcesInfoD
     bumpRegistryVersion();
   }
   return added;
+}
+
+/**
+ * 撤掉全部插件源，保留宿主源。
+ *
+ * `plugin-state-changed` 到达后先撤再重拉投影：否则禁用/卸载的插件源会作为空标签残留，
+ * 重新安装时也会被「重名宿主优先」的幂等判定挡住（旧 adapter 永远不更新）。
+ */
+export function clearPluginTaskSources(): number {
+  if (PLUGIN_SOURCE_IDS.size === 0) { return 0; }
+  for (let i = REGISTRY.length - 1; i >= 0; i -= 1) {
+    if (PLUGIN_SOURCE_IDS.has(REGISTRY[i]!.id)) { REGISTRY.splice(i, 1); }
+  }
+  for (const id of PLUGIN_SOURCE_IDS) { BY_ID.delete(id); }
+  const removed = PLUGIN_SOURCE_IDS.size;
+  PLUGIN_SOURCE_IDS.clear();
+  bumpRegistryVersion();
+  return removed;
 }
 
 function toErrorMessage(e: unknown): string {

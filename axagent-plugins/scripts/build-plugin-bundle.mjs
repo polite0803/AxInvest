@@ -501,6 +501,20 @@ if (spec.packageName) {
   fs.mkdirSync(binDir, { recursive: true });
   const stagedBinary = path.join(binDir, binaryName);
   fs.copyFileSync(builtBinary, stagedBinary);
+  if (release) {
+    // 包体闸门：带 debug_info 的 worker 一个就有 6-7M，17 个把安装包从 80M 抬到 156M。
+    // `file` 在部分 Windows 环境不存在，此时只提示不拦包（strip 已由 Cargo profile 保证）。
+    const probe = spawnSync("file", [stagedBinary], { encoding: "utf8", windowsHide: true });
+    if (probe.error || probe.status !== 0) {
+      console.warn(
+        `[bundle] 无法用 file 校验 ${binaryName} 的调试符号（跳过）：${probe.error ?? probe.stderr?.trim()}`,
+      );
+    } else if (/debug_info/.test(probe.stdout)) {
+      fail(`${binaryName} 仍带 debug_info；请检查发起构建的 workspace 根的 [profile.release] strip 设置`);
+    }
+    const sizeMiB = (fs.statSync(stagedBinary).size / 1024 / 1024).toFixed(1);
+    console.log(`[bundle] worker ${binaryName}: ${sizeMiB} MiB（release / stripped）`);
+  }
   sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest("hex");
 } else if (requestedPluginVersion) {
   workerVersion = requestedPluginVersion;
@@ -1322,6 +1336,29 @@ function stockManifest({ version, binaryName, sha256 }) {
             },
           },
           required: ["vendor", "status"],
+        },
+      },
+      {
+        // 主行情源设置 —— 原宿主命令 `stock_set_market_data_primary_vendor` 的业务体
+        // 收进股票插件；写 settings + 即时重排 quote/klines 链首（等阶 workspace-write）。
+        name: "stock_set_market_data_primary_vendor",
+        description: "设置主行情源并即时重排 quote/klines 链首（经宿主 stock.analysis 接缝；传 vendor=null 清除覆盖）",
+        command: "worker://stock_set_market_data_primary_vendor",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            vendor: {
+              type: ["string", "null"],
+              description: "主行情源标识；null / 空串清除覆盖，恢复默认优先级",
+            },
+            applyFromSettings: {
+              type: "boolean",
+              description: "只读 settings 并应用（装配/重放已保存的主源），不写库",
+            },
+          },
+          required: [],
         },
       },
       {

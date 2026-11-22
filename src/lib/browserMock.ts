@@ -2327,7 +2327,8 @@ async function executeCommand<T>(
     case "notification_apply_channel_config":
       return [] as T;
     case "stock_set_market_data_primary_vendor":
-      // 浏览器模式无真实行情客户端：设置已由 save_settings 落到 localStorage，这里直接成功。
+      // 股票插件命名命令桩：浏览器模式无真实行情客户端，设置已由 save_settings 落到
+      // localStorage，这里直接成功（真机由 worker 走 stock.analysis 写 op）。
       return undefined as T;
 
     // ── 数据库结构状态（`Settings → 数据库` 卡片） ────────────────────────
@@ -5596,6 +5597,9 @@ async function executeCommand<T>(
         pinnedHash: null,
       });
       setStore("plugins", plugins);
+      // 与真机 `commands/plugin.rs` 同批广播：启停入口只需改 mock store 并发事件，
+      // 订阅方（pluginStore / 设置页 / 路由注册表）在两种运行模式下走同一条链。
+      emitBrowserEvent("plugin-state-changed", { pluginId: id, state: "installed" });
       return {
         pluginId: id,
         version: "0.0.0",
@@ -5622,6 +5626,10 @@ async function executeCommand<T>(
           enabled: cmd === "plugin_enable",
         };
         setStore("plugins", allPlugins);
+        emitBrowserEvent("plugin-state-changed", {
+          pluginId,
+          state: cmd === "plugin_enable" ? "enabled" : "disabled",
+        });
       }
       return undefined as T;
     }
@@ -5632,6 +5640,7 @@ async function executeCommand<T>(
       const pluginId = readMockReqField<string>(args, "pluginId") || "";
       allPlugins = allPlugins.filter((p) => p.id !== pluginId);
       setStore("plugins", allPlugins);
+      emitBrowserEvent("plugin-state-changed", { pluginId, state: "uninstalled" });
       // #192-⑦：后端卸载会调 `revoke_schemas_owned_by(owner_id)` 撤销该插件贡献的 UI Schema
       // （`dynamic_ui.rs` 的 revoke 实现：按 `origin="plugin"` **且** `owner_id` 匹配，逐个走公开
       // 删除路径 ⇒ form_data / versions 一并级联）。dev mock 没有任何插件安装通道，插件行只能
@@ -5683,6 +5692,7 @@ async function executeCommand<T>(
       const newVersion = bumpPatchVersion(oldVersion);
       target.version = newVersion;
       setStore("plugins", plugins);
+      emitBrowserEvent("plugin-state-changed", { pluginId, state: "updated" });
       return {
         pluginId,
         oldVersion,
@@ -5727,12 +5737,27 @@ async function executeCommand<T>(
       );
     }
 
-    case "plugin_list_pages":
-      // 浏览器演示清单：1 个插件 + 1 张 schema 占位页，让 `npm run dev` 下「插件页」Tab
-      // 能列出内容（而不是空态）。⚠ 这是**演示数据**，不是真机清单 —— 浏览器既没有插件
-      // 安装根，也没有 asset 协议与预置的动态 UI schema，故容器层（PluginPageExplorer）
-      // 在 `!isTauri()` 时不把这张页交给 PluginPageHost，而是显示说明态，避免白屏/报错。
-      // 真机（tauri）下本命令由后端 PluginManager 实时投影，返回真实清单。
+    case "plugin_list_pages": {
+      // 与真机同一投影口径：只列已启用插件声明的页面，禁用/卸载后入口立即消失。
+      // 这样 browser 模式也能复现「启停 → 导航增删」，而不是永远返回一张写死的演示页。
+      const plugins = getStore<Array<Record<string, unknown>>>("plugins", []);
+      if (plugins.length > 0) {
+        return plugins.flatMap((plugin) => {
+          if (plugin.enabled === false) { return []; }
+          const pages = Array.isArray(plugin.pages) ? plugin.pages : [];
+          return pages.map((page) => ({
+            id: String(plugin.id ?? ""),
+            name: String(plugin.name ?? plugin.id ?? ""),
+            version: String(plugin.version ?? "0.0.0"),
+            description: String(plugin.description ?? ""),
+            author: null,
+            enabled: true,
+            pages: [page],
+          }));
+        }) as T;
+      }
+      // store 为空时的浏览器演示占位：真机无此数据。容器层在 `!isTauri()` 时不把这张页
+      // 交给 PluginPageHost，而是显示说明态，避免白屏/报错。
       return [
         {
           id: "browser-demo",
@@ -5751,6 +5776,7 @@ async function executeCommand<T>(
           ],
         },
       ] as T;
+    }
 
     case "plugin_list_task_sources":
       // 同 plugin_list_pages：浏览器模式无安装根 ⇒ 空清单 =「没有插件任务源」，
@@ -5813,8 +5839,19 @@ async function executeCommand<T>(
       return [] as T;
 
     // ── Dashboard Plugins (mock) ────────────────────────────────────
-    case "dashboard_list_plugins":
-      return [] as T;
+    case "dashboard_list_plugins": {
+      // 同一份 mock store 的只读投影：设置页开关与 plugin_list 不再各读一套状态。
+      const plugins = getStore<Array<Record<string, unknown>>>("plugins", []);
+      return plugins.map((plugin) => ({
+        id: String(plugin.id ?? ""),
+        name: String(plugin.name ?? plugin.id ?? ""),
+        version: String(plugin.version ?? "0.0.0"),
+        description: String(plugin.description ?? ""),
+        author: typeof plugin.author === "string" ? plugin.author : null,
+        enabled: plugin.enabled !== false,
+        panels: Array.isArray(plugin.panels) ? plugin.panels : [],
+      })) as T;
+    }
 
     // ── Prompt Templates (mock) ─────────────────────────────────────
     case "list_prompt_templates":

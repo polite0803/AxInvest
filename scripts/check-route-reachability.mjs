@@ -19,7 +19,7 @@
 //   node scripts/check-route-reachability.mjs            # 报告模式，总是 exit 0
 //   node scripts/check-route-reachability.mjs --strict   # 门禁模式，有未达路由 / 已删键引用 / 已删路由跳转则 exit 1
 
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = process.cwd();
@@ -32,6 +32,9 @@ const INTERNAL_ROUTES = new Set([
   // 快速操作：独立浮层窗口，由全局快捷键 `show_quickbar` 加载（`__route=quickbar`），
   // 不走侧栏导航，2026-10-28 误接入导航后移除。
   "/chat/quickbar",
+  // Wiki 摄入是知识库详情页的操作型深链（外部书签 / 重新索引入口），
+  // 没有侧栏或命令面板入口；页面内也没有常驻按钮。2026-11-22 登记，避免门禁假红。
+  "/llm-wiki/:wikiId/ingest",
 ]);
 
 /** 兼容 / 重定向 / 兜底路由：不是功能页，不要求入口。 */
@@ -562,6 +565,57 @@ export function isReachable(route, entries) {
   return false;
 }
 
+/**
+ * 插件页运行期投影的静态镜像：读宿主 bundled 清单 + 域包声明，按
+ * `src/lib/pluginDomainPageRoutes.ts` 的 slug / pageId / legacyPath 规则展开。
+ *
+ * 门禁**不**把这些路径混进静态 `routes`（它们由 `pluginPages.map` 运行期注册）：
+ * 它做的是反向断言 —— 清单声明了页面，宿主就必须保留投影点与旧链兜底路由。
+ * 缺任一处，14 条 `/opc/domain/*` 旧链和全部插件页都会静默落 404。
+ */
+export function parsePluginPageRoutes(manifestRoot) {
+  const routes = new Set();
+  const legacyPaths = new Set();
+  if (!existsSync(manifestRoot)) { return { routes, legacyPaths }; }
+  const URL_SEGMENT = /^[a-z0-9][a-z0-9-]{0,63}$/i;
+  for (const name of readdirSync(manifestRoot)) {
+    const dir = join(manifestRoot, name);
+    try {
+      if (!statSync(dir).isDirectory()) { continue; }
+    } catch {
+      continue;
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(join(dir, "plugin.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    const pluginId = manifest.id || `${manifest.name || name}@bundled`;
+    const slug = pluginId.toLowerCase().replace(/@/g, "-").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!slug) { continue; }
+    const packs = [];
+    for (const rel of manifest.domainPacks ?? []) {
+      try {
+        const decl = JSON.parse(readFileSync(join(dir, rel), "utf8"));
+        if (typeof decl.id === "string" && typeof decl.page?.path === "string") {
+          packs.push({ pageId: `opc-${decl.id.replace(/_/g, "-")}`, path: decl.page.path });
+        }
+      } catch {
+        // 单份域包清单读失败跳过，与后端 list_plugin_domain_packs 同口径。
+      }
+    }
+    for (const page of manifest.pages ?? []) {
+      if (page.loading !== "bundle" || !URL_SEGMENT.test(page.id)) { continue; }
+      routes.add(`/plugins/${slug}/${page.id}`);
+      for (const pack of packs) {
+        if (pack.pageId === page.id) { legacyPaths.add(pack.path); }
+      }
+    }
+  }
+  return { routes, legacyPaths };
+}
+
 function main() {
   const registry = parsePageRegistry(stripComments(read("src/lib/pageRegistry.ts")));
   const domainPaths = parseDomainPaths(stripComments(read("src/lib/domainMeta.ts")));
@@ -631,6 +685,22 @@ function main() {
     unreachable.push({
       route: "(域路由投影)",
       source: "ContentArea 缺 contributedPages.map：域路由文件存在但一页都不会渲染",
+    });
+  }
+
+  // 插件页运行期投影（同上形态）：清单声明了 bundle 页，宿主就必须保留展开点；
+  // 域包声明了 legacyPath，就必须保留 /opc/domain/:pageId 兜底，否则旧书签全落 404。
+  const bundledPluginPages = parsePluginPageRoutes(join(ROOT, "src-tauri", "plugins", "bundled"));
+  if (bundledPluginPages.routes.size > 0 && !contentArea.includes("pluginPages.map")) {
+    unreachable.push({
+      route: "(插件页路由投影)",
+      source: "ContentArea 缺 pluginPages.map：清单声明的插件页不会注册",
+    });
+  }
+  if (bundledPluginPages.legacyPaths.size > 0 && !routes.has("/opc/domain/:pageId")) {
+    unreachable.push({
+      route: "(插件旧链投影)",
+      source: `ContentArea 缺 /opc/domain/:pageId：清单声明的 ${bundledPluginPages.legacyPaths.size} 条旧链会落 404`,
     });
   }
 
@@ -789,6 +859,37 @@ function selftest() {
     console.log(`${ok ? "PASS" : "FAIL"}  ${name}`);
     if (!ok) { failed += 1; }
   };
+
+  // ── 插件页投影自证（2026-11-22）───────────────────────────────────────────
+  // 门禁靠 bundled 清单判断「宿主有没有把插件页投影接上」；解析函数若漏读 pages[]
+  // 或把 schema 页误算成路由，分母为零时检查会静默通过，因此必须自证。
+  const pluginDir = join(tmp, "plugins", "demo");
+  mkdirSync(join(pluginDir, "domain_packs"), { recursive: true });
+  writeFileSync(join(pluginDir, "plugin.json"), JSON.stringify({
+    name: "demo",
+    pages: [
+      { id: "opc-demo", title: "Demo", entry: "pages/index.html", loading: "bundle" },
+      { id: "demo-schema", title: "Schema", entry: "schema-id", loading: "schema" },
+    ],
+    domainPacks: ["domain_packs/demo.json"],
+  }));
+  writeFileSync(join(pluginDir, "domain_packs", "demo.json"), JSON.stringify({
+    id: "demo",
+    page: { id: "domain:demo", path: "/opc/domain/demo" },
+  }));
+  const parsedPlugin = parsePluginPageRoutes(join(tmp, "plugins"));
+  check(
+    "插件页投影：bundle 页生成 /plugins/<slug>/<pageId>",
+    parsedPlugin.routes.has("/plugins/demo-bundled/opc-demo"),
+  );
+  check(
+    "插件页投影：schema 页不生成路由",
+    !parsedPlugin.routes.has("/plugins/demo-bundled/demo-schema"),
+  );
+  check(
+    "插件页投影：域包旧链与 pageId 对应时才登记",
+    parsedPlugin.legacyPaths.has("/opc/domain/demo"),
+  );
 
   check(
     "取已删键被抓出（1 处）",

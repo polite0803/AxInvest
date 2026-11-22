@@ -1485,6 +1485,16 @@ impl PluginManager {
             }
         }
         // ── 通道二：spawn-on-call（未长驻 worker 的既存路径，逐字保留） ──
+        // `worker://name` 是长驻 worker 的**路由键**，不是可执行程序。worker 不在
+        // `loaded_workers` 里时若把它原样交给 `Command::new`，Windows 的 CreateProcess
+        // 会报「文件名、目录名或卷标语法不正确 (os error 123)」—— 用户只看到裸 IO 串，
+        // 既不知道 worker 没加载，也不知道该重装还是重启。这里直接 fail-fast。
+        if entry.command.starts_with("worker://") {
+            return Err(PluginError::NotFound(format!(
+                "插件 `{plugin_id}` 的 worker 未加载，命令 `{}` 无法执行；请重装或重启插件",
+                entry.name
+            )));
+        }
         let metadata = plugin.metadata();
         // 相对路径声明必须在这里解析成绝对路径，不能原样交给 `Command::new`：
         // 可执行文件查找发生在**宿主进程的 cwd**，子进程的 `current_dir` 不参与
@@ -1891,12 +1901,22 @@ impl PluginManager {
             tracing::info!("Plugin `{plugin_id}` registered {count} capability passport(s)");
         }
         // B 层 worker：声明了 `worker` 才 spawn（长驻子进程，PLAN §5.3）。
-        // 失败不阻断启用 —— 声明式资产（hooks / tools / 技能）仍然可用；但必须留可见日志，
-        // 否则插件「启用了却一个远程能力都没有」会无从排查。
+        // 启动失败必须回滚到未启用：否则清单里的页面/命令照样出现在导航里，
+        // 点进去却全部失败（典型症状是 worker:// 被当程序 spawn 的 os error 123）。
         if let Some(decl) = &manifest.worker {
             match self.start_plugin_worker(plugin_id, &record.install_path, decl, manifest) {
                 Ok(()) => tracing::info!("Started worker for plugin `{plugin_id}`"),
-                Err(e) => tracing::warn!("Failed to start worker for plugin `{plugin_id}`: {e}"),
+                Err(e) => {
+                    tracing::error!("Failed to start worker for plugin `{plugin_id}`: {e}");
+                    // 回滚失败只留痕，不能遮蔽真正的原因（worker 启动错误）。
+                    if let Err(rollback) = self.write_enabled_state(plugin_id, Some(false)) {
+                        tracing::warn!(
+                            "Failed to roll back enabled state for `{plugin_id}`: {rollback}"
+                        );
+                    }
+                    self.config.enabled_plugins.insert(plugin_id.to_string(), false);
+                    return Err(e);
+                },
             }
         }
         Ok(())
@@ -4267,7 +4287,16 @@ fn resolve_worker_program(install_path: &Path, entry: &str) -> Result<PathBuf, P
             "worker program `{entry}` must not escape the plugin install directory"
         )));
     }
-    let path = install_path.join(relative);
+    let mut path = install_path.join(relative);
+    // 清单统一声明跨平台程序名（不带后缀）；Windows 实际文件是 `.exe`。解析按**发起
+    // 构建的宿主平台**补后缀，POSIX 的 EXE_SUFFIX 是空串 ⇒ 天然幂等，不再需要
+    // 四处清单各自带平台后缀（曾因主仓 bundled 写 `.exe`、独立仓写无后缀而不一致）。
+    let suffix = std::env::consts::EXE_SUFFIX;
+    if !suffix.is_empty() && !path.as_os_str().to_string_lossy().ends_with(suffix) {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        path = PathBuf::from(name);
+    }
     if !path.is_file() {
         return Err(PluginError::InvalidManifest(format!(
             "worker program `{}` does not exist or is not a file",
@@ -7866,5 +7895,90 @@ mod release_source_tests {
             std::path::Path::new(&outcome.install_path.to_string_lossy().into_owned()).is_dir()
         );
         let _ = std::fs::remove_dir_all(&config_home);
+    }
+}
+
+#[cfg(test)]
+mod worker_route_tests {
+    use super::*;
+    use crate::manager::test_support::isolated_config;
+    use std::path::PathBuf;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("测试：系统时间应晚于 UNIX EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("plugin-worker-route-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("创建临时目录");
+        dir
+    }
+
+    fn install_worker_route_plugin(
+        command: &str,
+        label: &str,
+    ) -> (PluginManager, PathBuf, String, PathBuf) {
+        let source = temp_dir(&format!("{label}-source"));
+        let config_home = temp_dir(&format!("{label}-home"));
+        let manifest_dir = source.join(".claude-plugin");
+        std::fs::create_dir_all(&manifest_dir).expect("创建清单目录");
+        std::fs::write(
+            manifest_dir.join("plugin.json"),
+            format!(
+                "{{\"name\":\"{label}\",\"version\":\"1.0.0\",\"description\":\"worker route probe\",\
+                 \"defaultEnabled\":true,\"permissions\":[\"subprocess_execution\"],\
+                 \"commands\":[{{\"name\":\"probe\",\"description\":\"probe\",\"command\":\"{command}\"}}]}}"
+            ),
+        )
+        .expect("写入清单");
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let outcome = manager
+            .install(source.to_str().expect("utf8 path"))
+            .unwrap_or_else(|e| panic!("安装应成功: {e}"));
+        (manager, config_home, outcome.plugin_id, source)
+    }
+
+    /// worker 未加载时 `worker://` 是路由键而非程序名：必须 fail-fast 成可读错误，
+    /// 不能落到 `Command::new("worker://…")` 让 Windows 报 os error 123。
+    #[test]
+    fn worker_route_key_is_never_spawned_as_a_program() {
+        let (manager, config_home, plugin_id, source) =
+            install_worker_route_plugin("worker://stock_reco_ic_stats", "worker-route");
+
+        let err = manager
+            .execute_plugin_command(&plugin_id, "probe", &serde_json::json!({}))
+            .expect_err("未加载 worker 的路由键必须被拒绝");
+        assert!(matches!(err, PluginError::NotFound(_)), "期望 NotFound，实际 {err:?}");
+        let text = err.to_string();
+        assert!(text.contains("worker 未加载"), "错误应可操作：{text}");
+        assert!(!text.contains("os error"), "不能把裸 IO 错透给用户：{text}");
+
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+    }
+
+    /// 清单统一写不带后缀的程序名，解析按宿主平台补后缀（POSIX 是空串 ⇒ 幂等）。
+    #[test]
+    fn worker_program_resolution_appends_platform_suffix() {
+        let root = temp_dir("worker-program");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).expect("创建 bin");
+        let expected = if cfg!(windows) {
+            bin.join("probe.exe")
+        } else {
+            bin.join("probe")
+        };
+        std::fs::write(&expected, b"stub").expect("写入假 worker");
+
+        let resolved =
+            resolve_worker_program(&root, "bin/probe").expect("应解析到平台 worker 文件");
+        assert_eq!(resolved, expected);
+        assert!(matches!(
+            resolve_worker_program(&root, "bin/missing"),
+            Err(PluginError::InvalidManifest(_))
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

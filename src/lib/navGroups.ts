@@ -56,7 +56,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     labelKey: "nav.financeInvestment",
     color: "#d4380d",
     path: "/invest",
-    itemKeys: ["finance-investment", "invest-replay"],
+    // 两项均已随 stock 插件门槛迁入 `src/pages/invest/routes.tsx` 的 `nav` 声明；
+    // 宿主骨架不再点名 key，插件禁用时该组随投影一起消失。
+    itemKeys: [],
   },
   {
     key: "knowledge",

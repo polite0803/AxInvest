@@ -92,3 +92,12 @@ codegen-units = 16
 debug = false
 # 同 [profile.dev]：build script 的增量会话目录同样 GC 不掉，一并关闭
 incremental = false
+
+# worker 二进制随安装包分发：release 必须去符号。实测 17 个 worker 各带 6-7M
+# debug_info（合计 120M），安装包从 80M 涨到 156M。`[profile.*]` 只在发起构建的
+# workspace 根生效，独立插件仓各自也要写一份；这里与 src-tauri 的 release 口径对齐。
+[profile.release]
+strip = true
+lto = "thin"
+opt-level = "s"
+codegen-units = 16

@@ -46,6 +46,13 @@ export interface ContributedPageRoute {
    * 同一页面的多段路由（如 `/opc` 与 `/opc/:tab`）只在**主路由**上挂一次。
    */
   readonly nav?: ContributedNavItem;
+  /**
+   * 页面所依赖的插件 `name` 或 `id`。未安装/未启用时路由与侧栏入口一起消失。
+   *
+   * 这是「域整棵迁进插件」的过渡接缝：页面组件仍在宿主编译，但**可见性**已经
+   * 由插件状态决定，避免插件未加载时股票页仍然出现（#36 / P6.1 的对外契约）。
+   */
+  readonly requiresPlugin?: string;
 }
 
 /** 一条域贡献的导航项（侧栏 + 域聚合页共用）。 */
@@ -65,6 +72,8 @@ export interface ContributedNavItem {
 /** 已登记导航项（`path` 由所在路由派生，域侧只写一次路径）。 */
 export interface ContributedNavEntry extends ContributedNavItem {
   readonly path: string;
+  /** 与来源路由同源的插件门槛，消费方只读路由/nav 投影，不直接判它。 */
+  readonly requiresPlugin?: string;
 }
 
 const byId = new Map<string, ContributedPageRoute>();
@@ -73,10 +82,28 @@ let snapshot: readonly ContributedPageRoute[] = [];
 let navSnapshot: readonly ContributedNavEntry[] = [];
 const listeners = new Set<() => void>();
 
+// null = 插件列表还没投影完（或投影失败）：**不启用门槛**，避免首帧把域页整片抹掉。
+// 非 null = 启用中的插件 name/id 集合，只有声明了 requiresPlugin 的域页受它约束。
+let enabledPlugins: ReadonlySet<string> | null = null;
+
+function pluginAvailable(required: string | undefined): boolean {
+  return !required || enabledPlugins === null || enabledPlugins.has(required);
+}
+
+/** 由插件 store 在列表投影后调用；传 null 表示「未知」，不是「没有任何插件」。 */
+export function setEnabledPlugins(names: readonly string[] | null): void {
+  const next = names === null ? null : new Set(names);
+  if (next?.size === enabledPlugins?.size && (!next || [...next].every((v) => enabledPlugins?.has(v)))) {
+    return;
+  }
+  enabledPlugins = next;
+  publish();
+}
+
 function publish(): void {
   // 必须是新数组引用：useSyncExternalStore 按引用比较快照，原地改会让订阅者看不到更新
-  snapshot = [...byId.values()];
-  navSnapshot = [...navByKey.values()];
+  snapshot = [...byId.values()].filter((route) => pluginAvailable(route.requiresPlugin));
+  navSnapshot = [...navByKey.values()].filter((entry) => pluginAvailable(entry.requiresPlugin));
   for (const listener of listeners) {
     listener();
   }
@@ -87,7 +114,11 @@ export function contributeDomainPages(routes: readonly ContributedPageRoute[]): 
   for (const route of routes) {
     byId.set(route.id, route);
     if (route.nav) {
-      navByKey.set(route.nav.key, { ...route.nav, path: route.path });
+      navByKey.set(route.nav.key, {
+        ...route.nav,
+        path: route.path,
+        requiresPlugin: route.requiresPlugin,
+      });
     }
   }
   publish();

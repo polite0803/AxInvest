@@ -20,10 +20,8 @@ import {
   BookOutlined,
   CodeOutlined,
   DatabaseOutlined,
-  DollarCircleFilled,
   FileTextOutlined,
   FolderOpenOutlined,
-  HistoryOutlined,
   MessageFilled,
   NodeIndexOutlined,
   RobotOutlined,
@@ -73,14 +71,9 @@ export const builtinNavItems: NavItem[] = [
     path: BUILTIN_PAGE_PATH["tasks-center"],
     isPlugin: false,
   },
-  // ── 金融域（finance）：AxInvest 投资总览 ──
-  {
-    key: "finance-investment",
-    icon: navIcon(DollarCircleFilled),
-    labelKey: "nav.financeInvestment",
-    path: BUILTIN_PAGE_PATH["finance-investment"],
-    isPlugin: false,
-  },
+  // ── 金融域（finance）：投资总览 / 回放工作台 ──
+  // 两项已随股票页插件门槛迁入域自身 `src/pages/invest/routes.tsx` 的 `nav` 声明：
+  // 宿主项无法感知插件启停，会在 stock 未装/禁用时留下点开即 404 的侧栏入口。
   // ── 金融域（finance）：OPC 投顾经营域包 / 财务会计行业包，自动化、运维、数据分析、
   // 内容创作、AI 媒体域的全部行业包，以及 OPC 经营面板与需求发现页 ——
   // 一律由 `src/pages/opc/routes.tsx` 的 `NAV_PAGE_DECLARATIONS` 贡献（#36 导航声明权半），
@@ -150,13 +143,6 @@ export const builtinNavItems: NavItem[] = [
     icon: navIcon(NodeIndexOutlined),
     labelKey: "nav.learningGraph",
     path: BUILTIN_PAGE_PATH.knowledgeLearning,
-    isPlugin: false,
-  },
-  {
-    key: "invest-replay",
-    icon: navIcon(HistoryOutlined),
-    labelKey: "nav.replayWorkbench",
-    path: BUILTIN_PAGE_PATH.investReplay,
     isPlugin: false,
   },
   // 网关配置页：此前 `/gateway` 与 `/link` 无任何侧栏入口。

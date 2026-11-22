@@ -198,6 +198,14 @@ jobs:
           node scripts/check-single-source-facts.mjs --selftest
           node scripts/check-single-source-facts.mjs --ci
 
+      # 插件页路径由运行期投影生成，静态入口扫描看不到它；反向断言宿主必须保留投影点和
+      # /opc/domain/:pageId 旧链兜底，否则清单声明的页面与旧书签会静默落 404。自检先行。
+      # 本步两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
+      - name: Check route reachability (plugin page projection / legacy links)
+        run: |
+          node scripts/check-route-reachability.mjs --selftest
+          node scripts/check-route-reachability.mjs --strict
+
       # 估值缺省参数横跨 3 个技术栈共 4 处载体（真相源常量 / 主 crate `ValuationParams::default()`
       # / seed 变量默认值 / 前端兜底），历史上各自停在不同校准批次上，导致前端直调链与工作流链
       # 取到两套参数。主 crate 与 seed 已是代码级派生，前端引用不到 Rust ⇒ 需机器守等式。

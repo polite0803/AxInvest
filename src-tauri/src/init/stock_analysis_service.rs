@@ -756,6 +756,54 @@ impl StockAnalysisProvider for HostStockAnalysis {
         Ok(Value::Null)
     }
 
+    /// 写 op：设置主行情源（原宿主 `stock_set_market_data_primary_vendor` 命令的业务体）。
+    ///
+    /// 两种入参：`{vendor}` 写 settings 并即时重排；`{applyFromSettings: true}` 只读 settings
+    /// 重排（装配/重放已保存的主源，不重复落库）。空串/全空白归一为 `None`（清除覆盖），
+    /// 与宿主原命令逐字一致；只重排不注册新源，未知 vendor 不报错（由 `AStockClient` 裁定）。
+    async fn set_primary_market_vendor(&self, input: Value) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PrimaryVendorRequest {
+            #[serde(default)]
+            vendor: Option<String>,
+            #[serde(default)]
+            apply_from_settings: bool,
+        }
+        let request = serde_json::from_value::<PrimaryVendorRequest>(input).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "stock.analysis::set_primary_market_vendor 参数解析失败: {e}。期望 \
+                 {{vendor}} 或 {{applyFromSettings: true}}"
+            ))
+        })?;
+        let mut settings =
+            axagent_dao::repo::settings::get_settings(&self.db).await.map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::set_primary_market_vendor 读取设置失败: {e}"
+                ))
+            })?;
+        let effective = if request.apply_from_settings {
+            settings.market_data_primary_vendor.clone()
+        } else {
+            let normalized = request.vendor.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+            settings.market_data_primary_vendor = normalized.clone();
+            axagent_dao::repo::settings::save_settings(&self.db, &settings).await.map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "stock.analysis::set_primary_market_vendor 保存设置失败: {e}"
+                ))
+            })?;
+            normalized
+        };
+        self.astock_client.set_primary_market_vendor(effective.as_deref());
+        tracing::info!(
+            target: "astock-data::priority",
+            primary = ?effective,
+            from_settings = request.apply_from_settings,
+            "主行情源已更新（quote/klines 链首重排）"
+        );
+        Ok(Value::Null)
+    }
+
     /// 写 op：取消进行中的分析任务（宿主 `cancel_stock_analysis` 的接缝面；#337）。
     ///
     /// 与宿主原命令同判据：令牌不存在（任务不存在或已完成）报错，不伪造成功。

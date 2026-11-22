@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { formatFixed } from "@/lib/format";
 import { invokePluginCommand } from "@/lib/pluginCommand";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
@@ -35,7 +36,9 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
       setLoop(stats.loop ?? null);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // 后端错误是带 code/detail 的 ErrorResponse；直接 String(e) 会把 JSON 串或
+      // Windows 的裸 IO 文案（os error 123）糊到面板上，用户看不到可操作原因。
+      setError(translateBackendError(e));
       setLoop(null);
     } finally {
       setLoading(false);
@@ -59,7 +62,7 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
     } catch (e) {
       message.error(
         t("stockAnalysis.recoLoop.recalcFailed", {
-          error: e instanceof Error ? e.message : String(e),
+          error: translateBackendError(e),
         }),
       );
     } finally {

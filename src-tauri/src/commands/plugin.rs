@@ -2,9 +2,9 @@
 
 use axagent_agent_macro::agent_command;
 
-use axagent_harness::CapabilityIndexer;
+use axagent_harness::{CapabilityIndexer, IpcEventName};
 use axagent_plugins::PluginMarketplaceSummary;
-use tauri::{State, command};
+use tauri::{AppHandle, Emitter, State, command};
 use tracing::warn;
 
 use crate::app_state::AppState;
@@ -271,6 +271,7 @@ fn source_build_category(
 #[command]
 pub async fn plugin_install(
     state: State<'_, AppState>,
+    app: AppHandle,
     source: String,
     expected_sha256: Option<String>,
 ) -> Result<InstallOutcomeDto, String> {
@@ -324,12 +325,17 @@ pub async fn plugin_install(
             crate::commands::error::ErrorCategory::Retryable,
         ))
     })?;
+    emit_plugin_state(&app, &outcome.plugin_id, "installed");
     Ok(outcome)
 }
 
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "启用指定插件")]
 #[command]
-pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Result<(), String> {
+pub async fn plugin_enable(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    plugin_id: String,
+) -> Result<(), String> {
     let plugin_manager = state.plugin_manager.clone();
     let capability_indexer = state.capability_indexer.clone();
     let plugin_id_for_task = plugin_id.clone();
@@ -386,12 +392,17 @@ pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Res
             crate::commands::error::ErrorCategory::Retryable,
         ))
     })?;
+    emit_plugin_state(&app, &plugin_id, "enabled");
     Ok(())
 }
 
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "禁用指定插件")]
 #[command]
-pub async fn plugin_disable(state: State<'_, AppState>, plugin_id: String) -> Result<(), String> {
+pub async fn plugin_disable(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    plugin_id: String,
+) -> Result<(), String> {
     let plugin_manager = state.plugin_manager.clone();
     let capability_indexer = state.capability_indexer.clone();
     let plugin_id_for_task = plugin_id.clone();
@@ -427,12 +438,17 @@ pub async fn plugin_disable(state: State<'_, AppState>, plugin_id: String) -> Re
             warn!("SECURITY: 插件 `{plugin_id}` 护照 `{id}` 回滚失败: {e}");
         }
     }
+    emit_plugin_state(&app, &plugin_id, "disabled");
     Ok(())
 }
 
 #[agent_command(domain = plugin, safety = Dangerous, call_mode = StateInput, description = "卸载指定插件")]
 #[command]
-pub async fn plugin_uninstall(state: State<'_, AppState>, plugin_id: String) -> Result<(), String> {
+pub async fn plugin_uninstall(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    plugin_id: String,
+) -> Result<(), String> {
     let plugin_manager = state.plugin_manager.clone();
     let capability_indexer = state.capability_indexer.clone();
     let plugin_id_for_task = plugin_id.clone();
@@ -479,7 +495,20 @@ pub async fn plugin_uninstall(state: State<'_, AppState>, plugin_id: String) -> 
         },
         Err(e) => warn!("插件 `{plugin_id}` 的 UI 贡献撤销失败（孤儿 Schema 需手动清理）: {e}"),
     }
+    emit_plugin_state(&app, &plugin_id, "uninstalled");
     Ok(())
+}
+
+/// 广播插件状态变更：事件只是失效信号，前端仍以 `plugin_list` / 实时投影为准。
+/// emit 放在命令全部成功后，避免半启用状态被当成真相发布。
+fn emit_plugin_state(app: &AppHandle, plugin_id: &str, state: &'static str) {
+    // 广播失败不影响已完成的启停事务，但必须留痕：否则事件链断裂时只有 UI 症状、无后端证据。
+    if let Err(e) = app.emit(
+        IpcEventName::PluginStateChanged.as_str(),
+        serde_json::json!({ "pluginId": plugin_id, "state": state }),
+    ) {
+        warn!("插件 `{plugin_id}` 状态广播失败（state={state}）: {e}");
+    }
 }
 
 /// 插件 UI action 回流：把动态 UI 里声明的动作送回**插件自己的 worker 进程**。
@@ -762,6 +791,7 @@ pub async fn plugin_list_task_cards(
 #[command]
 pub async fn plugin_update(
     state: State<'_, AppState>,
+    app: AppHandle,
     plugin_id: String,
     expected_sha256: Option<String>,
 ) -> Result<UpdateOutcomeDto, String> {
@@ -814,6 +844,7 @@ pub async fn plugin_update(
             crate::commands::error::ErrorCategory::Retryable,
         ))
     })?;
+    emit_plugin_state(&app, &outcome.plugin_id, "updated");
     Ok(outcome)
 }
 

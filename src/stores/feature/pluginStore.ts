@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { setEnabledPlugins } from "@/lib/domainPageRegistry";
+import { refreshCardContributions } from "@/lib/dynamicUI/pluginCardRegistry";
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invoke, isTauri, listen } from "@/lib/invoke";
+import { invalidatePluginCommandCache } from "@/lib/pluginCommandResolve";
 import type {
   DynamicAction,
   InstallOutcomeDto,
@@ -37,6 +40,39 @@ interface PluginState {
   runUiAction: (pluginId: string, action: DynamicAction) => Promise<unknown | null>;
 }
 
+/** 后端 `plugin-state-changed` 事件负载；事件只是失效信号，真相仍是 `plugin_list` 投影。 */
+export interface PluginStateChangedPayload {
+  pluginId: string;
+  state: "enabled" | "disabled" | "uninstalled" | "installed" | "updated";
+}
+
+let pluginStateUnlisten: (() => void) | null = null;
+
+/**
+ * 初始化插件状态事件监听：后端在 enable/disable/uninstall/install/update 成功后广播，
+ * 这里统一失效命令反查缓存、卡片注册表并重拉插件列表。启停入口（store action / 设置页）
+ * 因此不需要各自记得刷新；`bindPluginRouteStore` 只订阅 store，随列表引用变化刷新路由。
+ *
+ * 幂等：多次调用不会重复注册（HMR 友好），形态对齐 `initGatewayStatusListener`。
+ */
+export function initPluginStateListener(): () => void {
+  if (pluginStateUnlisten) { return () => {}; }
+  const pending = listen<PluginStateChangedPayload>("plugin-state-changed", () => {
+    invalidatePluginCommandCache();
+    void refreshCardContributions();
+    void usePluginStore.getState().loadPlugins();
+  });
+  // 占位避免并发初始化（listen 是 async）。
+  pluginStateUnlisten = () => {};
+  void pending.then((fn) => {
+    pluginStateUnlisten = fn;
+  });
+  return () => {
+    pluginStateUnlisten?.();
+    pluginStateUnlisten = null;
+  };
+}
+
 export const usePluginStore = create<PluginState>((set, get) => ({
   plugins: [],
   loading: false,
@@ -49,9 +85,17 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     try {
       const plugins = await invoke<PluginSummaryDto[]>("plugin_list");
       set({ plugins, loading: false });
+      // 域页的 requiresPlugin 门槛只认这份启用投影；失败时传 null 让门槛整体失效，
+      // 不能把一次后端抖动放大成「所有依赖插件的页面消失」。
+      // 浏览器模式没有插件安装根（browserMock 的 plugin_list 恒为 mock 列表），
+      // 那里启用门槛会让本地开发/e2e 的股票页凭空消失 ⇒ 只在 Tauri 真机生效。
+      setEnabledPlugins(
+        isTauri() ? plugins.filter((p) => p.enabled).flatMap((p) => [p.name, p.id]) : null,
+      );
     } catch (e) {
       const errorMsg = translateBackendError(e);
       set({ error: errorMsg, loading: false });
+      setEnabledPlugins(null);
       if (import.meta.env.DEV) {
         console.error("Failed to load plugins:", e);
       }
@@ -129,6 +173,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         plugins: s.plugins.map((p) => p.id === pluginId ? { ...p, enabled: true } : p),
         error: null,
       }));
+      // 本地补丁只覆盖 enabled；commands/pages/eventStats 等投影字段须重拉取回真相。
+      // 事件到达时也会重拉，这里保留是 emit 缺失时的兜底（两次都是幂等读取）。
+      await get().loadPlugins();
       return true;
     } catch (e) {
       const errorMsg = translateBackendError(e);
@@ -147,6 +194,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         plugins: s.plugins.map((p) => p.id === pluginId ? { ...p, enabled: false } : p),
         error: null,
       }));
+      await get().loadPlugins();
       return true;
     } catch (e) {
       const errorMsg = translateBackendError(e);
@@ -165,6 +213,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         plugins: s.plugins.filter((p) => p.id !== pluginId),
         error: null,
       }));
+      await get().loadPlugins();
       return true;
     } catch (e) {
       const errorMsg = translateBackendError(e);

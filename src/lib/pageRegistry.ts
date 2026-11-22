@@ -59,7 +59,6 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   settings: "/settings",
   "tasks-center": "/tasks",
   "dynamic-ui": "/dynamic-ui",
-  wiki: "/wiki",
 
   // ── 运维域（devops）：路径保持顶级（/gateway） ──
   gateway: "/gateway",

@@ -128,7 +128,8 @@ pub async fn start_background_services(
                 channels = ?active,
                 "出站推送渠道装配完成"
             );
-            // 判据③：主行情源（quote/klines 链首重排）随 settings 装配，重启后即生效。
+            // 启动装配的是宿主自己持有的 `AStockClient` 链首，不是业务命令：
+            // 命令 `stock_set_market_data_primary_vendor` 归股票插件，重启后的链首恢复仍在这里。
             state
                 .stock()
                 .astock_client

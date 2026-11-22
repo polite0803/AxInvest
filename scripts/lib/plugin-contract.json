@@ -51,6 +51,7 @@
         "stock_analyze_backtest_feedback",
         "stock_parse_vlm_portfolio_screenshot",
         "stock_set_vendor_status",
+        "stock_set_market_data_primary_vendor",
         "stock_cancel_stock_analysis",
         "stock_list_time_travel_batches",
         "stock_reco_ic_stats",

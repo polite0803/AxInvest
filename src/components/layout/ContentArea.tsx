@@ -9,12 +9,19 @@ import { useIpcHealth } from "@/hooks/useIpcHealth";
 import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub } from "@/lib/devtoolsSubTabs";
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { useDomainPageRoutes } from "@/lib/domainPageRegistry";
+import { translateBackendError } from "@/lib/errorI18n";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
-import { usePluginDomainRouteMappings, usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
+import {
+  getPluginPageRoutesError,
+  refreshPluginPageRoutes,
+  usePluginDomainRouteMappings,
+  usePluginPageRoutes,
+  usePluginPageRoutesReady,
+} from "@/lib/pluginRouteRegistry";
 import { workspaceTabPath } from "@/lib/workspaceTabs";
 
 import { Button, Result, Spin } from "antd";
-import { lazy, memo, Suspense } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
@@ -42,11 +49,8 @@ const LazyLearningGraphPage = lazy(() =>
 const LazyDynamicPageViewer = lazy(() =>
   import("@/pages/DynamicPageViewer").then((m) => ({ default: m.DynamicPageViewer }))
 );
-// 2026-11-11 #263：投资域主页的装载权已交回域自身（域目录 `routes.tsx` 经注册表投影贡献），
-// 宿主主壳不再点名域页面组件。
-const LazyReplayWorkbenchPage = lazy(() =>
-  import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
-);
+// 2026-11-11 #263：投资域页面（含 /invest/replay）的装载权已交回域自身
+// （域目录 `routes.tsx` 经注册表投影贡献），宿主主壳不再点名域页面组件。
 const LazyTasksCenterPage = lazy(() =>
   import("@/pages/TasksCenterPage/TasksCenterPage").then((m) => ({ default: m.TasksCenterPage }))
 );
@@ -80,23 +84,71 @@ function PageLoader() {
   );
 }
 
+const PLUGIN_PROJECTION_TIMEOUT_MS = 3000;
+
+/** 投影超时/失败态：明确告知并提供重试，不让直达链停在无限 loading。 */
+function PluginProjectionFailed() {
+  const { t } = useTranslation();
+  const error = getPluginPageRoutesError();
+  return (
+    <div style={{ padding: 48, textAlign: "center" }}>
+      <Result
+        status="warning"
+        title={t("plugin.pages.loadFailed")}
+        subTitle={error === null ? undefined : translateBackendError(error)}
+        extra={
+          <Button
+            type="primary"
+            onClick={() => {
+              void refreshPluginPageRoutes().catch(() => undefined);
+            }}
+          >
+            {t("common.retry")}
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
+/** 插件页投影 ready 前的等待/失败态；ready 后返回 null，交给正常路由分支。 */
+function usePluginProjectionGate(): React.ReactNode {
+  const ready = usePluginPageRoutesReady();
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (ready) { return; }
+    const timer = window.setTimeout(() => setTimedOut(true), PLUGIN_PROJECTION_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [ready]);
+  if (ready) { return null; }
+  return timedOut ? <PluginProjectionFailed /> : <PageLoader />;
+}
+
 /**
  * 旧 OPC 域路径的插件页渲染口：有插件投影时渲染同一个插件页；
- * 插件未加载/已禁用时回落到 OPC 聚合页，不保留第二套旧页组件。
+ * 投影未就绪时等待（避免首帧闪跳 /opc），已禁用/未安装时给明确降级页。
  */
 function PluginLegacyDomainPageRoute() {
   const { t } = useTranslation();
   const location = useLocation();
-  const mapping = usePluginDomainRouteMappings()
-    .find((item) => item.legacyPath === location.pathname);
+  const mappings = usePluginDomainRouteMappings();
+  const pending = usePluginProjectionGate();
+  if (pending) { return pending; }
+  const mapping = mappings.find((item) => item.legacyPath === location.pathname);
   if (!mapping) {
-    return <Navigate to="/opc" replace />;
+    return (
+      <div style={{ padding: 48, textAlign: "center" }}>
+        <Result status="404" title={t("plugin.pages.empty")} subTitle={location.pathname} />
+      </div>
+    );
   }
   return (
     <PageErrorBoundary title={t("error.page")}>
-      <Suspense fallback={<PageLoader />}>
-        <PluginPageRouteHost pluginSlug={mapping.pluginSlug} pageId={mapping.pageId} />
-      </Suspense>
+      <PageContextProvider page={mapping.navKey}>
+        <Suspense fallback={<PageLoader />}>
+          <PluginPageRouteHost pluginSlug={mapping.pluginSlug} pageId={mapping.pageId} />
+        </Suspense>
+      </PageContextProvider>
     </PageErrorBoundary>
   );
 }
@@ -115,6 +167,12 @@ function SafeLazyPage({ Page }: { Page: React.LazyExoticComponent<React.Componen
 function NotFoundRoute() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const pending = usePluginProjectionGate();
+  // 只有插件页路径才等投影；普通 404 立即显示，不被插件加载拖住。
+  const isPluginPath = location.pathname.startsWith("/plugins/")
+    || location.pathname.startsWith("/opc/domain/");
+  if (isPluginPath && pending) { return pending; }
   return (
     <div style={{ padding: 48, textAlign: "center" }}>
       <Result
@@ -267,20 +325,10 @@ export const ContentArea = memo(function ContentArea() {
             }
           />
           {
-            /* 2026-11-11 #263：/invest 主页路由已移交投资域声明（`src/pages/invest/routes.tsx`
-            经注册表投影渲染），本文件不再登记；下面的 /invest/replay 仍走宿主表取 path，
-            属后续批次（导航声明权移交）的范围。 */
+            /* 2026-11-11 #263：投资域主页与回放工作台（/invest、/invest/replay）均由
+              `src/pages/invest/routes.tsx` 声明，经注册表投影渲染；两条路由都受 stock
+              插件门槛约束，本文件不再登记。旧 /replay-workbench 链已删除。 */
           }
-          {/* 回放工作台：2026-10-28 起归入投资域，旧 /replay-workbench 302 */}
-          <Route
-            path={`${BUILTIN_PAGE_PATH["finance-investment"]}/replay`}
-            element={
-              <PageContextProvider page="finance-investment">
-                <SafeLazyPage Page={LazyReplayWorkbenchPage} />
-              </PageContextProvider>
-            }
-          />
-          {/* 2026-10-28：/replay-workbench 旧链已删除，统一走 /invest/replay。 */}
           <Route
             path={BUILTIN_PAGE_PATH["tasks-center"]}
             element={
@@ -306,12 +354,12 @@ export const ContentArea = memo(function ContentArea() {
               }
             />
           ))}
-          {pluginPages.map(({ id, path, Page }) => (
+          {pluginPages.map(({ id, path, navKey, Page }) => (
             <Route
               key={id}
               path={path}
               element={
-                <PageContextProvider page="chat">
+                <PageContextProvider page={navKey}>
                   <SafeLazyPage Page={Page} />
                 </PageContextProvider>
               }

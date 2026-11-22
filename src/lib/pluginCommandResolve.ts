@@ -12,10 +12,16 @@ import type { PluginSummaryDto } from "@/types";
  *
  * 为什么缓存：`plugin_list` 不是纯内存读 —— 宿主每次都会先做一轮内置插件落盘同步
  * （`sync_bundled_plugins`：目录比对 + 哈希），而这里被搜索框每次回车命中。
- * 缓存的是「命令 → 插件 id」，插件被禁用后命令会失败，调用方按「没有插件」处置；
- * 不为此加失效广播（禁用后重启生效的下一次解析自然拿不到）。
+ * 缓存的是「命令 → 插件 id」。插件启停/卸载后由 `plugin-state-changed` 事件调用
+ * [`invalidatePluginCommandCache`] 整体失效 —— 否则禁用后命令反查仍指向旧插件，
+ * UI 会继续展示已不可用的命令入口（用户报告的「启停对 UI 无变化」形态之一）。
  */
 const resolved = new Map<string, Promise<string | null>>();
+
+/** 插件状态变更后清空反查缓存；下一次解析会重新拉 `plugin_list`。 */
+export function invalidatePluginCommandCache(): void {
+  resolved.clear();
+}
 
 export function resolvePluginForCommand(command: string): Promise<string | null> {
   const cached = resolved.get(command);

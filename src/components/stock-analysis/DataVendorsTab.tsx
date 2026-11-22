@@ -285,7 +285,7 @@ export function DataVendorsTab() {
   const { t } = useTranslation();
   const settings = useSettingsStore((s) => s.settings);
   const saveSettings = useSettingsStore((s) => s.saveSettings);
-  // 判据③：主行情源只改配置（quote/klines 链首重排），不动主壳代码。
+  // 主行情源命令归股票插件；宿主只保存 settings 并在启动时恢复链首（不是业务命令）。
   const primaryVendor = settings.marketDataPrimaryVendor ?? null;
   const primaryOptions = useMemo(
     () => VENDORS.filter((v) => v.capabilities.includes("quote")).map((v) => ({ value: v.enName })),
@@ -295,10 +295,10 @@ export function DataVendorsTab() {
     async (vendor: string | null) => {
       await saveSettings({ marketDataPrimaryVendor: vendor });
       try {
-        await invoke("stock_set_market_data_primary_vendor", { vendor });
+        await invokePluginCommand("stock_set_market_data_primary_vendor", { vendor });
         message.success(t("stockAnalysis.settings.vendors.primarySaved"));
       } catch {
-        // 浏览器模式无后端：仅本地保存
+        // 插件未装/未启用或浏览器模式无后端：设置已落本地，链首重排待下次启动装配
       }
     },
     [saveSettings, message, t],

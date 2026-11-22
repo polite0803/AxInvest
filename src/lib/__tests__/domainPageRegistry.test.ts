@@ -6,11 +6,13 @@ import {
   getDomainPageRoutes,
   loadedDomainRouteSources,
   resolveContributedPageKey,
+  setEnabledPlugins,
   subscribeDomainPageRoutes,
 } from "@/lib/domainPageRegistry";
+import { getNavItems } from "@/lib/navRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import { type ComponentType, lazy, type LazyExoticComponent } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
  * 域页面路由注册表（#36 迁出期：宿主内容区改为渲染注册表投影）。
@@ -30,6 +32,10 @@ function probePage(name: string): LazyExoticComponent<ComponentType> {
 }
 
 describe("domainPageRegistry", () => {
+  afterEach(() => {
+    setEnabledPlugins(null);
+  });
+
   it("glob 装载口求值了域路由模块（命中为空 ⇒ 域目录改名，不是「没有域页面」）", () => {
     const sources = loadedDomainRouteSources();
     expect(sources.filter((s) => s.includes("pages/opc/routes"))).toHaveLength(1);
@@ -37,13 +43,13 @@ describe("domainPageRegistry", () => {
     expect(sources.filter((s) => s.includes("pages/invest/routes"))).toHaveLength(1);
   });
 
-  it("注册表共 5 条路由：OPC 4（主页两段 + 需求发现 + 域聚合页）+ 投资域 1", () => {
+  it("注册表共 6 条路由：OPC 4（主页两段 + 需求发现 + 域聚合页）+ 投资域 2", () => {
     const routes = getDomainPageRoutes();
-    expect(routes).toHaveLength(5);
+    expect(routes).toHaveLength(6);
     expect(routes.filter((r) => r.id.startsWith("domain:"))).toHaveLength(0);
-    // 带侧栏入口的 2 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口；
-    // 投资域 `/invest` 无入口（侧栏项仍由宿主 builtinNavItems 持有，见 invest/routes.tsx 头注）
-    expect(routes.filter((r) => r.nav)).toHaveLength(2);
+    // 带侧栏入口的 4 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口。
+    // 投资域两条入口已随插件门槛迁进 invest/routes.tsx 的 nav 声明。
+    expect(routes.filter((r) => r.nav)).toHaveLength(4);
   });
 
   it("path 由域模块字面量声明，宿主 BUILTIN_PAGE_PATH 已不再登记域页面", () => {
@@ -60,9 +66,19 @@ describe("domainPageRegistry", () => {
     expect(BUILTIN_PAGE_PATH.chat).toBe("/chat");
   });
 
-  it("侧栏入口随路由声明：2 项，组归属与组内次序不变", () => {
+  it("侧栏入口随路由声明：4 项，组归属与组内次序不变", () => {
     const nav = getContributedNavItems();
-    expect(nav).toHaveLength(2);
+    expect(nav).toHaveLength(4);
+    expect(nav.find((n) => n.key === "finance-investment")).toMatchObject({
+      path: "/invest",
+      group: "invest",
+      domain: "finance",
+    });
+    expect(nav.find((n) => n.key === "invest-replay")).toMatchObject({
+      path: "/invest/replay",
+      group: "invest",
+      domain: "finance",
+    });
     const ordered = (group: string) =>
       nav.filter((n) => n.group === group).sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0));
     expect(ordered("opc").map((n) => [n.key, n.path, n.groupOrder])).toEqual([
@@ -75,13 +91,45 @@ describe("domainPageRegistry", () => {
     }
   });
 
+  it("迁移后的股票入口在宿主骨架与域贡献里各只出现一次", () => {
+    // 宿主 navGroups.itemKeys 若还点名这两个 key，Sidebar 会把它们同时当宿主项与域项渲染。
+    const keys = getNavItems().map((n) => n.key);
+    for (const key of ["finance-investment", "invest-replay"]) {
+      expect(keys.filter((k) => k === key)).toHaveLength(1);
+    }
+  });
+
   it("pathname → pageKey 反查覆盖精确 / 参数段 / L1 兜底", () => {
     expect(resolveContributedPageKey("/opc")).toBe("automation-operations");
     expect(resolveContributedPageKey("/opc/finance")).toBe("automation-operations");
     expect(resolveContributedPageKey("/opc/domains/finance")).toBe("automation-operations");
     expect(resolveContributedPageKey("/opc/domain/security")).toBe("automation-operations");
     expect(resolveContributedPageKey("/demand-discovery")).toBe("demand-discovery");
+    expect(resolveContributedPageKey("/invest")).toBe("finance-investment");
+    expect(resolveContributedPageKey("/invest/replay")).toBe("finance-investment");
     expect(resolveContributedPageKey("/knowledge")).toBeUndefined();
+  });
+
+  it("requiresPlugin：stock 未启用时股票路由与侧栏入口一起消失，其它域页不受影响", () => {
+    const hasInvest = () =>
+      ["invest:index", "invest:replay"].every((id) => getDomainPageRoutes().some((r) => r.id === id));
+    const hasInvestNav = () =>
+      ["finance-investment", "invest-replay"].every((key) => getContributedNavItems().some((n) => n.key === key));
+    expect(hasInvest() && hasInvestNav()).toBe(true);
+
+    setEnabledPlugins(["other@bundled", "other"]);
+    expect(hasInvest()).toBe(false);
+    expect(hasInvestNav()).toBe(false);
+    expect(resolveContributedPageKey("/invest")).toBeUndefined();
+    expect(resolveContributedPageKey("/invest/replay")).toBeUndefined();
+    expect(getDomainPageRoutes().some((r) => r.id === "opc:index")).toBe(true);
+
+    setEnabledPlugins(["stock@bundled", "stock"]);
+    expect(hasInvest() && hasInvestNav()).toBe(true);
+
+    // 插件列表尚未投影 / 投影失败 ⇒ 门槛整体失效，不能把域页整片抹掉。
+    setEnabledPlugins(null);
+    expect(hasInvest() && hasInvestNav()).toBe(true);
   });
 
   it("同 id 重复注册 = 覆盖，不追加（域模块被二次求值也不会长出重复路由）", () => {

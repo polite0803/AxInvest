@@ -2,6 +2,7 @@
 
 import { resolveContributedPageKey } from "@/lib/domainPageRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
+import { getPluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import type { PageKey } from "@/types";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -30,6 +31,13 @@ const pathToPageKey = (path: string): PageKey => {
   const contributed = resolveContributedPageKey(path);
   if (contributed !== undefined) {
     return contributed as PageKey;
+  }
+  // 插件页与宿主/域页共用同一张路由投影；插件禁用后从表里消失，反查自然回落 chat。
+  const pluginPage = getPluginPageRoutes().find(
+    (entry) => path === entry.path || path.startsWith(`${entry.path}/`),
+  );
+  if (pluginPage) {
+    return pluginPage.navKey as PageKey;
   }
   const key = path.slice(1);
   if (key in pageKeyToPath) {

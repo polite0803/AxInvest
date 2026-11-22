@@ -410,6 +410,12 @@ if (canRunFrontend) {
   step("同一事实多份载体自检（正负对照）", "node scripts/check-single-source-facts.mjs --selftest");
   step("同一事实多份载体（行号引用腐烂 / reranker 文件名漂移）", "node scripts/check-single-source-facts.mjs --ci");
 
+  // 插件页路径由运行期投影生成，静态入口扫描看不到它；反向断言宿主必须保留投影点和
+  // /opc/domain/:pageId 旧链兜底，否则清单声明的页面与旧书签会静默落 404。自检先行。
+  // 与 `.github/workflows/ci.yml` 的「Check route reachability」两行命令逐字同源。
+  step("路由可达性自检（正负对照）", "node scripts/check-route-reachability.mjs --selftest");
+  step("路由可达性（插件页投影 / 旧链 / 孤儿键）", "node scripts/check-route-reachability.mjs --strict");
+
   // ── 估值缺省参数等式（2026-09-22 补，见 AUDIT-300642-run-variance-2026-09-22.md §9.6）──
   // 为什么需要：同一组估值参数（永续增长率 / 折现率 / 缺省增长率 / 增长率上下界 /
   //   预测年数 / 债券收益率基准）横跨 3 个技术栈共 4 处载体，历史上**各自停在不同的

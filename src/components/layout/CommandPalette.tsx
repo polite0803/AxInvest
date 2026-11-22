@@ -3,6 +3,7 @@
 import { useSkillCommands } from "@/hooks/useSkillCommands";
 import { useWorkspaceTabNavigator } from "@/hooks/useWorkspaceTabNavigator";
 import { CHAT_ICON_COLORS } from "@/lib/iconColors";
+import { usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { executeActionChain } from "@/lib/skillActionExecutor";
 import { resolveIconComponent } from "@/lib/skillIcons";
 import { workspaceTabShortcutLabel } from "@/lib/workspaceShortcuts";
@@ -108,6 +109,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const switchWorkspaceTab = useWorkspaceTabNavigator();
   const showDevTools = useSettingsStore((s) => s.settings.showDeveloperTools !== false);
+  const pluginPages = usePluginPageRoutes();
 
   // 基础命令 + 注册的动态命令
   const commands = useMemo<Command[]>(() => {
@@ -248,11 +250,23 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       };
     });
 
+    // 插件页导航命令：与侧栏共用同一张路由投影，启用/禁用后立即增删。
+    const pluginCommands: Command[] = pluginPages.map((entry) => ({
+      id: `plugin-page:${entry.id}`,
+      label: `${nav}: ${entry.navLabel}`,
+      icon: <Puzzle size={16} style={{ color: CHAT_ICON_COLORS.Puzzle }} />,
+      category: nav,
+      action: () => {
+        navigate(entry.path);
+        onClose();
+      },
+    }));
+
     // 合并动态注册的命令（去重）
     const ids = new Set(builtin.map((c) => c.id));
     const extra = commandRegistry.filter((c) => !ids.has(c.id));
-    return [...builtin, ...workspaceCommands, ...extra];
-  }, [t, navigate, toggleSidebar, switchWorkspaceTab, showDevTools, onClose]);
+    return [...builtin, ...workspaceCommands, ...pluginCommands, ...extra];
+  }, [t, navigate, toggleSidebar, switchWorkspaceTab, showDevTools, onClose, pluginPages]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) {

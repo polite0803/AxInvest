@@ -23,7 +23,7 @@
  */
 
 import { translateBackendError } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invoke, listen } from "@/lib/invoke";
 import { Card, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -121,20 +121,32 @@ export function PluginDashboardPanels() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    invoke<DashboardPluginInfoDto[]>("dashboard_list_plugins")
-      .then((list) => {
-        if (!cancelled) {
-          setPlugins(list);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(translateBackendError(e));
-        }
-      });
+    let disposed = false;
+    const reload = () => {
+      invoke<DashboardPluginInfoDto[]>("dashboard_list_plugins")
+        .then((list) => {
+          if (!disposed) {
+            setPlugins(list);
+          }
+        })
+        .catch((e) => {
+          if (!disposed) {
+            setError(translateBackendError(e));
+          }
+        });
+    };
+    reload();
+    // 面板声明来自插件清单：启停/装卸后必须随事件重拉，否则已禁用面板继续挂着。
+    let unlisten: (() => void) | null = null;
+    void listen("plugin-state-changed", () => {
+      if (!disposed) { reload(); }
+    }).then((fn) => {
+      if (disposed) { fn(); }
+      else { unlisten = fn; }
+    });
     return () => {
-      cancelled = true;
+      disposed = true;
+      unlisten?.();
     };
   }, []);
 

@@ -53,7 +53,7 @@ describe("pluginDomainPageRoutes", () => {
     expect(pluginRouteSlug("opc-security")).toBe("opc-security");
   });
 
-  it("只投影启用的域插件 bundle 页面", () => {
+  it("只投影启用插件的 bundle 页面", () => {
     const routes = resolvePluginDomainPageRoutes(
       [pageInfo("opc-security@bundled", true, [page("opc-security"), page("form", "schema")])],
       [packInfo("opc-security@bundled", true, [domainPack("security")])],
@@ -81,13 +81,21 @@ describe("pluginDomainPageRoutes", () => {
     });
   });
 
-  it("插件无域包或页面未启用时不产生路由", () => {
-    expect(
-      resolvePluginDomainPageRoutes(
-        [pageInfo("opc-security@bundled", true, [page("opc-security")])],
-        [packInfo("opc-security@bundled", true, [])],
-      ),
-    ).toEqual([]);
+  it("非 OPC 插件无域包也有独立路由，只是没有旧链映射", () => {
+    const routes = resolvePluginDomainPageRoutes(
+      [pageInfo("stock", true, [page("stock-home")])],
+      [packInfo("stock", true, [])],
+    );
+    expect(routes).toHaveLength(1);
+    expect(routes[0]).toMatchObject({
+      pluginId: "stock",
+      pageId: "stock-home",
+      path: "/plugins/stock/stock-home",
+    });
+    expect(routes[0]?.legacyPath).toBeUndefined();
+  });
+
+  it("页面未启用时不产生路由", () => {
     expect(
       resolvePluginDomainPageRoutes(
         [pageInfo("opc-security@bundled", false, [page("opc-security")])],
@@ -101,6 +109,8 @@ describe("pluginDomainPageRoutes", () => {
       [pageInfo("opc-accounting", true, [page("opc-accounting"), page("bad/page")])],
       [packInfo("opc-accounting", false, [domainPack("accounting")])],
     );
-    expect(routes).toEqual([]);
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.pageId).toBe("opc-accounting");
+    expect(routes[0]?.legacyPath).toBeUndefined();
   });
 });

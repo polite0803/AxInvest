@@ -246,6 +246,7 @@ vi.mock("@/stores", () => ({
       }),
     { getState: () => ({ pendingApprovals: [], loading: false, panelOpen: false }) },
   ),
+  initPluginStateListener: () => () => {},
   initAnimationPreference: () => () => {},
 }));
 

@@ -1008,7 +1008,6 @@ macro_rules! register_all_commands {
             commands::stock_analysis::delete_stock_cron,
             commands::stock_analysis::delete_validate_decisions_cron,
             commands::stock_analysis::remove_from_watchlist,
-            commands::stock_market_vendor::stock_set_market_data_primary_vendor,
             commands::stock_pipeline::core::run_stock_pipeline,
             commands::stock_workflow::core::cancel_stock_workflow,
             commands::stock_workflow::core::run_stock_workflow,

@@ -4,6 +4,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
 import { NAV_GROUPS } from "@/lib/navGroups";
 import { getNavItems } from "@/lib/navRegistry";
+import { usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { useAgentPanelStore, useOnboardingStore } from "@/stores";
 import { theme } from "antd";
 import { ArrowLeft, Bot, HelpCircle } from "lucide-react";
@@ -54,12 +55,17 @@ export function AppHeader() {
 
   const isChatPage = location.pathname === "/chat" || location.pathname === "/" || location.pathname === "";
   const labelKey = resolvePageLabel(location.pathname);
+  // 插件页标题是清单自带的纯文本（不是 i18n key），与侧栏 navRegistry 同源同一张投影。
+  const pluginRoutes = usePluginPageRoutes();
+  const pluginLabel = pluginRoutes.find(
+    (entry) => location.pathname === entry.path || location.pathname.startsWith(`${entry.path}/`),
+  )?.navLabel;
   const contextSummary = getPageContext(location.pathname, t);
 
   // 对话页不显示 AppHeader（对话页有自己的 TabBar）
   if (isChatPage) { return null; }
-  // 股票业务页面不显示 AppHeader（股票页面有自己的 sa-header）
-  if (labelKey === null) { return null; }
+  // 没有宿主/插件标题的页面（如自带 header 的股票页）不叠加 AppHeader
+  if (labelKey === null && !pluginLabel) { return null; }
 
   return (
     <div
@@ -102,7 +108,7 @@ export function AppHeader() {
             whiteSpace: "nowrap",
           }}
         >
-          {labelKey ? t(labelKey) : t("nav.app")}
+          {pluginLabel ?? (labelKey ? t(labelKey) : t("nav.app"))}
         </span>
 
         {/* 上下文摘要 */}

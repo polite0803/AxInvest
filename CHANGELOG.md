@@ -1,7 +1,82 @@
 # Changelog
 
 All notable changes to AxAgent will be documented in this file.
-## [unreleased]
+## [v3.0.2] - 2026-11-22
+
+### ✨ New Features
+- P6.2 批 1 拆出 accounting 独立插件
+- P6.2 批 2 拆出 security 声明式插件
+- P6.2 批 3 拆出 game_dev 声明式插件
+- P6.2 批 4 拆出九个声明式域插件
+- P6.2 批 6 拆出 sales_growth 独立插件
+- P6.2 批 7 拆出 content_media 独立插件
+- 插件 workspace 跨根 path 依赖边界门禁
+- OPC 插件 SDK 独立树验收
+- 全插件 SDK 独立树验收
+- accounting 真 bundle 禁用恢复端到端
+- sales_growth 真 bundle 禁用恢复端到端
+- content_media 真 bundle 禁用恢复端到端
+- security 声明式插件真 bundle 启停端到端
+- 域包底册随 SDK 仓走并完成独立树 bundle 验收
+- 独立树产物宿主安装链验收
+- 插件源码审计门禁
+- 新增 SDK plugin-testkit 并纳入独立树验收
+- 增加 SDK 发布物包表面门禁
+- sales_growth/content_media 落地真实 SDK 页面
+- 声明式 OPC 域落地真实页面数据
+- 插件域页增加动态路由与导航
+- 落地 Wiki 功能包第一片与 wiki.store 写接缝
+- Wiki 插件增加笔记读取命令
+- Wiki 插件承接笔记列表与按路径读取
+- Wiki 插件承接笔记创建命令
+- Wiki 插件承接笔记更新命令
+- Wiki 插件承接笔记更新与删除
+- 主壳 OPC 域页接入插件投影
+- Wiki 插件承接笔记出链
+- Wiki 插件承接笔记反链
+- Wiki 插件承接笔记链接同步
+- Wiki 插件承接模板读写命令
+- Wiki 插件承接图谱与社区缓存命令
+- Wiki 插件承接笔记版本历史命令
+- Wiki 插件承接搜索、导入导出与模板删除
+- Wiki 插件承接图谱原图与缓存失效命令
+- Wiki 插件承接元数据更新与重建索引命令
+- 统一插件仓为 Rust worker 契约形态
+
+
+### 🐛 Bug Fixes
+- 收敛插件页路由刷新与首帧状态
+- 对齐 Wiki 删除命令安全档位并退役旧名命令
+
+
+### 📝 Documentation
+- 登记 OPC SDK 独立树验收并修准文档行号
+- 固化 SDK 发布物清单与漂移门禁
+- 固化 P6.1 终局依赖断边进度
+- 固化 P6.3 启动取证基线
+- 对齐插件文档主仓版本
+
+
+### 📦 Miscellaneous
+- 统一 OPC 页面生成物格式
+- bump version to v3.0.2
+
+
+### 🔨 Refactoring
+- P6.2 公共包命令归属改为底册派生
+- 收口 P6.2 公共命令 owner 与实施记录
+- 断宿主对插件 stock-core 的依赖
+
+
+### 🧪 Testing
+- opc 升级收敛数据保留实测
+- accounting 协议测试使用 SDK testkit
+- sales_growth/content_media 协议测试使用 SDK testkit
+- 覆盖 11 个声明式 OPC 域启停矩阵
+- 补股票插件卸载隔离与数据保留验收
+- 让插件 E2E staging 门禁不再静默跳过
+
+## [v3.0.1] - 2026-11-18
 
 ### ⚡ Performance
 - 轨迹读口 LIMIT 下推并把 steps/rewards 改为批查（#121）
@@ -39,6 +114,63 @@ All notable changes to AxAgent will be documented in this file.
 - session.store 改为宿主内部接缝，插件调用显式拒绝（#102）
 - 补 min_score 检索级单测与集合存在性独立读口（#120/#122）
 - 荐股面板补候选池批次留痕与扫描面读数（W4-3）
+- 事件总线加每订阅者兜底超时与两级丢弃计数，投递计数接到 plugin_list（#135 / B3 收口）
+- dao 期望侧加外部表声明入口，四条硬判据锁住「只增不改」（#134 第一片）
+- 打通插件 schema.json → 宿主 additive-only 建表（#134 第二片）
+- 股票插件 worker 骨架（B4-a），跑通 describe/shutdown 帧通道
+- 插件目录打包脚本 plugin:bundle，产物自带握手自检
+- 股票插件首个真实能力 get_stock_quote（B4-c，经宿主 market.quote 取数）
+- 股票插件接通 T2 命令面（stock_get_quote），工具与命令共用取数路径
+- 内置插件改从资源目录找（发布版不再静默零插件）+ 暂存入口
+- 股票插件交付链路与调用面完成迁移（B4-i/j/k）
+- 前端 bundle 通道打通（#35 B8-0a）
+- compute_evidence_weights 迁入股票插件（#35 B9-1a，双声明期）
+- 插件命名命令并入智能体命令面（#35 B10-1）
+- 🚀 新功能：插件可声明任务中心任务源（B8-1b，任务 #148 / PLAN §98）
+- 🚀 feat(plugins): workflow.run 新增只读 op list_recent，插件任务源看得见已结束执行
+- 新建 analysis.record 接缝，插件可读宿主发起的分析记录
+- 插件 ui.json schema 注册通道 + 任务源详情槽
+- 股票任务源改由插件提供并删除宿主 adapter（#149 第 3 步）
+- 新建 OPC 插件 worker 骨架并参数化打包（#36 第 1 批）
+- 🚀 feat(plugin-opc): 建 opc.store 只读接缝，OPC 接入首条端到端插件命令（#36 第 3–4 步）
+- 🚀 feat(opc.store): 建接缝第一个写 op publish_blog_post + 插件第二条命名命令（#36/#179）
+- 🚀 智能体侧插件命令三处硬缺陷收口：参数面上索引、失败串带码、死臂要么可达要么删（#170/#171/#181）
+- check-doc-refs 第二层 SYMDRIFT 只对活文档收口 + 棘轮键入库 + 回写判据前置闸
+- 把 #201 的一次性普查固化成 scan-mock-camel-reads.mjs，并抓出并修掉 1 处漏改
+- 博客写面补 delete/create 三态契约+受保护 id，插件命令双声明（#180-①②）
+- 任务卡片投影全链——清单校验/宿主卡/前端注册表/任务中心消费（#216）
+- 中立性门禁域归属映射表——7 域 18 store 假阳性消解，基线 96→62（#194 C 档）
+- 补提任务卡片模块声明与 detailSchema 归属复核（#216）
+- 新增插件命名命令桥，OPC blog 工具改经桥执行 (#225)
+- OPC 只读面九条工具改走插件命令桥
+- 四条写操作改走插件命名命令（#36 批 2）
+- 九条写/流程工具改走插件命名命令（#36 批 3）
+- OPC 页面路由表下沉到 src/pages/opc/routes.tsx（#36 前端刀）
+- opc.store 补三写 op——update/delete 客户 + delete 发票（#32 批 A）
+- 前端插件命令桥统一出口并接入批 1a（#35 批 1a 前端半）
+- 十一条行情只读命令迁入 T2 插件命令通道（#35 批 2a）
+- quote 并入表驱动路由 + 新增 kline 命令，命令面键名收口 camelCase（#35 批 2b）
+- 五条行情榜单命令并入表驱动路由接入 T2 命令面（#35 批 2c Rust 半）
+- 六面板切插件命令桥 + dev mock 显式登记（#35 批 2c 前端半）
+- 看板总览改走插件聚合接缝（#267）
+- 🚀 #264 批 7 刀 A：十一条 OPC 宿主命令迁 T2 插件命名命令通道
+- 🚀 #264 批 7 刀 A 补全：opc.store provider 接上 with_app_dir 调用
+- 🚀 #279 G19 死通道整条退役：dojo_sdk 模块 + astock 9 条 DojoSDK 工具声明
+- 判据② 闭合——axagent-plugins CHANGELOG 建档（版本演进约定 + 3.0.0 快照）+ §157 销账
+- #35 候选 A 行情资讯直映批 10 条迁 T2 命令面（Rust 半）
+- OPC 前端 pages[] 声明与 bundle 装载通道闭合——探针页 + webDir 接线
+- 第五道门补「智能体工具面」读数——agent_command 标注面进门成锚
+- 🚀 feat(plugins): #311 四条零新 op 纯智能体工具迁 T2（worker://stock_*）
+- #350 B 线回正——T3 插件页贡献通道 + 股票垂直切片
+- #352 判据③「可替换/可关」垂直验证——A+B+C 三链落地
+- #358 storage 接真收官 + P6.0-① 阶段0/1 启动
+- #358 无障碍树语义化阶段1——harness 契约层与 MockUiTreeProvider
+- #358 无障碍树语义化阶段2——kit 三平台 UiTreeProvider 实现
+- P6.2 域包插件边界底册与门禁
+- 补齐域包命令归属判据
+- 落地前两个域包逻辑清单
+- 完成 14 域包逻辑清单
+- 域包清单随插件产物打包
 
 
 ### 🎨 Styling
@@ -47,6 +179,7 @@ All notable changes to AxAgent will be documented in this file.
 - 收掉 #107 交付里 knowledge_vector.rs 的一处 rustfmt 未落盘（minSimilarity 断言两行折行）
 - 修 B1 遗留的 harness/lib.rs mod 排序（cargo fmt 门）
 - 清掉 8 根 workspace 的既有 rustfmt 债（#19 前置）
+- 全量 cargo fmt --all 收敛前序阶段的格式欠账
 
 
 ### 🐛 Bug Fixes
@@ -62,6 +195,62 @@ All notable changes to AxAgent will be documented in this file.
 - pre-push 改为 UNC 可执行的直调入口并修执行器 cwd（#129）
 - 修 vite 配置加载器在共享盘上把 root 解析成畸形串（#111）
 - 微调产物默认落点改宿主数据目录，不再随进程 CWD 漂移（#110）
+- 行尾门不再扫 gitignore 的 .tmp/，无关并行临时文件不再拦提交
+- 第五道门两条现值重锚 + 旧读数补到 15 段自证区段（#136）
+- UNC 下 vitest 定点过滤器不再恒 0 命中；插件面板渲染事件投递计数（#137 / #139）
+- alsoAt 区段按「出现行 ±3 行自证」放行，堵住窗口吞数的假健康（#138）
+- npm 的 typecheck / lint / format 改走 node 入口，UNC 下不再空跑
+- SMB 上 vitest 默认换 threads 池，绕开 fork 启动的 60s 硬常量
+- 插件清单补 subprocess_execution，并验证真安装链路
+- 🐛 修复(任务中心)：让 deepLink 真正可打开（openSource 是死能力）
+- 🐛 修复(动态UI安全)：插件来源 schema 的声明式动作按来源 fail-closed
+- 🐛 修复(动态UI安全)：闭合独立审查查出的三条可绕过路径
+- 🐛 修复(动态UI安全)：补后端归属校验，堵死 origin 自报与写命令越权
+- 🐛 fix(plugins): 关闭插件来源 Schema 的两条权限绕过面（#165）
+- 🐛 fix(dynamic-ui): dev mock 与后端归属锚点对齐，并摘 ./wiki 重复 star 导出（#186 + #178首刀）
+- 🐛 fix(plugins): 单元测试与编译期 bundled 根解耦，投影计数不再随 dev 暂存产物涨落（#189 前置）
+- 🐛 dev mock 补齐 dynamic_ui 五条命令闸门 + schemaJson 落库缺陷（#188）
+- 🐛 补 7741457bf 漏掉的 store mock：DecisionBanner 测试不再在 render 期抛 TypeError（#178 ③）
+- 🐛 修 HEAD 存了两批的 9 条 test-target 编译错误：assert_eq 拿 Ok(...) 比不带 PartialEq 的错误类型
+- audit-l1-blockers 默认不再无条件落未登记审计文档 + 前端反向口径加软锚点
+- dev mock 键形/路径死点收口（A 71 处 + B/C 裁定落地）+ create/update_artifact 调用方形状纠正
+- 退役 OpcSendNotification 死工具 + schema_json 字节上限/归属错误码 + 三层红收口（含 tool.set 198→197 对账）
+- 摘除 artifact 的 6 处前后端不一致字段（language/previewMode/metadata）+ mock 与真机对齐
+- update_artifact 的 id 面 fail-closed（先核 dao 语义再改，非凭猜）
+- schema_versions 两个读面补归属闸门（插件行全文快照可被任意读）
+- 数据源侧两条 NL 命令改为必须显式声明权限（#196 裁定的余项）
+- 插件 ui.json 安装通道补体积/条数上限（与宿主写入闸同口径）
+- dev mock 与后端 dynamic_ui 的 9 条语义差逐条对齐（版本/级联/钉入/必填/默认键）
+- dev mock 补版本表两个上限（读 50 条 / 每 schema 留 30 份）
+- 两处裸删除收口到 service + 内容向导用后端返回的 id
+- 清掉 OPC 种子/专家/能力清单里 31 处已退役工具声明 + 递增 11 个模板版本
+- 清掉配置/专家 prompt 里的 OpcSendNotification 声明 + 回写过时注释
+- 授权档位贯通——派发层单一裁决，存档不再被 default 覆盖（#181）
+- workflow.run 事件补 asOfDate——step/end 两 payload 时间锚透传
+- 插件命令权限档位 + 交付域发票改名/过滤 + harness 视图键测试补齐
+- command.handler 代码锚点重锚 1653→1649（E 批插入 4 行致位移）
+- 回滚 #240 误认领的三条前端口径读数（工作树值→HEAD 树值）
+- 清单内联化——判据③ Rust 面缺口①修绿（协议 crate 自足）
+- 知识图谱声明表 evidence 随 #194 搬家订正——GraphView.tsx wiki/→shared/、164→174（4 处；pre-push decl 门真腐烂清零）
+- pre-push 单一事实门 6 条既存引用腐烂订正——空行/已迁走文件改指现位（HEAD~3 树上同样红，前批推送绕钩子）
+- 4 道面板门随 #194/§322 落点订正——面板路径→stock-analysis、b() 真源→stock-analysis-defaults.ts、面板读数第二消费者→trading_engine_service.rs
+- R13 记录来历字面量两处改走 harness AnalysisKind::Live.as_storage()（pre-push 决策结论档门）
+- 分析师 id 门扫描面随 #194 改指 stock-analysis/AgentProfileList.tsx + missing 行空数组防御（pre-push 崩栈）
+- pre-push 两道门收口——autoIncrement 错误路径名撞 SQL 方言规则改名 + #264 批5/6 遗留 too_many_arguments/collapsible_if（dao 397 测试绿）
+- #345 serenity core 用 harness 类型别名，commands 直连 sea_orm 计数回基线（不新增棘轮）
+- #351 订正 single-source 五处 file:line 漂移 + 补齐 STOCK_TASK 错误码后端登记
+- 清零本地门禁——doc-refs 全量订正收紧 + 两条 HEAD 既存 vitest 修复
+- #354 B2 切片页三条带参命令空串入参改级联取参（红灯订正）
+- 降低 cargo jobs 16→2，修复全量编译导致 WSL OOM 卡死
+- #358 清退 self_verifier 旧坐标工具名残留
+- 修复 v3.0.1 推送后的 CI 门禁失败
+- 对齐 Tauri 版本并收口 Android 与门禁失败
+- 补齐拆分 CI 的 libsoup3 构建依赖
+- 拆分 CI 补齐 WebKit 与 JavaScriptCore 依赖
+- 收口 v3.0.1 推送后的三处 CI 门禁失败
+- 告警事件门禁 R18 认插件命令通道形态
+- 升级 mcp-bridge 0.12→0.13，消除 windows-core 双版本
+- 修复 npm audit 门禁，minimatch 升到修复版
 
 
 ### 📝 Documentation
@@ -102,6 +291,74 @@ All notable changes to AxAgent will be documented in this file.
 - 产出股票域 17 张表归属与 op 清单（#35 B4 前置）
 - 记账 #105/#110 半程/#111 与 W4-3 入库
 - 记录 B2 开工前读数（124 中 13 处为测试构造器，生产面 111）
+- 补入 11-02 / 11-03 两份审计快照（§0.10 数字来源的历史留档）
+- 订正 §66 F6 探针读数（27→26）并记下区间假健康这条判据债（#136 收尾）
+- 钉死纯域逻辑的落位（插件侧 foundation crate axagent-stock-core）
+- B8 前端收口分解（54 处按四条终局分类 + 批次顺序）
+- B8-1 终局裁定——插件卡片不取主 origin React（#35 §93）
+- 📝 文档：PLAN §102 详情槽设计 / §103 B8-3 首刀 / §104 OPC 路线推翻
+- 📝 文档：补 PLAN §105 文档引用门禁 / §106 共享基元判定，并登记中性判定文档
+- 📝 docs(PLAN): 纠 §113.5-1/-2 的过期陈述——后端归属校验已由 43803e5ac 闭合
+- 📝 追加 PLAN §118–§120：中立性批 A 归一取证 + dev mock 闸门批 + 本轮排期
+- 📝 裁定并落地 origin="ai" 档（#187）：标签保留 + 注释纠正「安全锚点 vs 展示语义」
+- 📝 check-doc-refs：列距离常量的理由补全（#182 收尾）
+- 📝 追加 PLAN §121–§122：中立性收紧面取证 + 独立审查轮与 #182 落地轮
+- 📝 PLAN §123 + 三处行号锚改指（批 C 的文档侧同批收尾）
+- 📝 修 entities origin 列的过期注释：它早已是授权锚点，注释还写着「纯展示元数据，不参与任何权限分支」（#197）
+- 📝 第五道门判据缺陷修复 + 本轮对账批：章节号不再被当读数，前端反向阻塞 47/34 → 56/43 逐提交归因（#176 / PLAN §124–§125）
+- 📝 AGENTS.md：把「docs/INDEX.md 是 docs/ 下全部文档唯一登记处」入库（盘上遗留一行，非本轮撰写）
+- 📝 AGENTS.md 禁区 3：开「已摘门面的迁出中域类型 ⇒ 深路径导入」的封闭例外（#198，四域逐条点名）
+- 文档治理——状态行/改名搬家/README 品牌口径+SYMDRIFT 基线
+- 第五道门对账批修绿 + #226 批 1 读数回写
+- §125.7 与不做清单的 OPC 前端反向读数补 #230 时点更新
+- 同步 PLAN 中 OPC 前端反向阻塞的 12/9 读数
+- STOCK 前端反向阻塞文件数 43→45 差额逐条归因
+- 订正 9 条活文档 SYMDRIFT 行号（判红 9→0）
+- 第五道门对账——域门面批 2 与前端刀 A 读数回写
+- asOfDate 批读数对账订正（域自有引用 488→486/44→43，纠「待改写 −2」错账）
+- #241 刀 C——前端反向 STOCK 25/23 逐条分类台账（只登记不改读数）
+- §132.3 撞词列改全角引号，消除新造的第二层 SYMDRIFT 新增
+- 订正 opc_sync_fleet 行号引用 1129-1257→866-999（f9a61432c 删 149 行后越界）
+- §132.6 刀 C 收口验证与自身踩坑记录
+- 记录 As-Of 类型上收落地并订正 §132.3 事实前提
+- 订正 PluginCommandBridge 实现行 583→623（SYMDRIFT）
+- 回写 SYMDRIFT 第五条已修与两处错误归因
+- 订正 §132.5/§132.7 三处与盘上不符的自述
+- 回写 As-Of 上收刀的提交树读数（46/37 · 87 540）
+- 订正 §132.5 第 3 条（提交树读数已回写，理由方向曾写反）
+- 订正 frontendFileCaliber 3993 行差额性质为口径扩张（§133）
+- 订正 §134 ① 的 ipc-schemas 取证行号与 §132.5 过期读数
+- §135 编号避开 planOld 旧读数，补编号取舍说明
+- #244 stock_analysis 接缝核实批落账（§136）——Rust 待改写归零，接缝以「计算 fn 上收 harness + 3 op 走桥」形态先行落地
+- #248 试点批收口——PLAN §137 登记与能力注册表回写
+- 📝 docs: #254 收口 —— 前端反向 OPC 读数 1/1 → 0/0 回写登记表与 PLAN 镜像行
+- 记录 #259 死命令退役前置核查（cron 管理三族 18 条逐条判定）
+- #260 导航声明权半收口登记 + 5 条因宿主表收缩腐烂的引用订正
+- 补 #35 批 2a 的 vitest 验收记录与未做边界
+- 补 #35 批 2c 与 #263 第一批的验收记录与未做边界
+- 📝 #264/#279/#280 文档对账批：退役注记 + SYMDRIFT 订正 + 门禁修复
+- PLAN §158-§159 落盘（T4 转表底册 + ③ 类裁定）与改名刀文档随迁
+- PLAN §160 T2 批 3 前置底册落盘（剩余 258 条三档 + 候选 A/B/C 设计）
+- SYMDRIFT 基线外 21 条对账收口 + #264 批 7 刀 B 登记回写
+- SYMDRIFT 对账批——#293-#296 扩面漂移的文档行号订正（25+5 键全清）
+- §157 底册 #297 后现状回写——plugin-stock 判据①缺口补记（analysis-engine path 在位）+ 判据②机制精确化（bundle :262 workerPackage.version 注入、无 CHANGELOG）
+- §157 判据②机制断言订正——bump 脚本不覆盖 axagent-plugins（读 scripts/bump-version.mjs 实现体纠「随主仓联动」误写）
+- feForeignReverse 软锚对账回写（STOCK 30/24 → 10/9）
+- l1ForeignStock 判据①闭合销账 + SYMDRIFT 12 条既存债订正
+- 📝 文档(docs): null 键读口普查收口（#317），销 §174 未做③
+- #325 F9 自成模块 H 桶白名单登记 + F3 八条分类取证（PLAN §183）
+- #339 批 A13——8 条 Dangerous 逐条裁定（全部留宿主终局，零代码改动）
+- #340 quant_backtest_run 预算取证——PG 现网/SQLite 快照 quant_runs 均 0 行，维持留宿主（附解锁 SQL 与 #338 重启核对基线）
+- #346 两处 Rust 注释引用的前端行号回正（B20 后 1451 已为空行，指向 status running 真实行 1352）
+- #355 行号回正——#355 引擎改动位移的 13 处引用回正
+- #358 批 E 账内一处引用改无行号写法（doc-refs 门禁回绿）
+- 订正 PROPOSAL 中 config_schema 与 NodeContract 的维度混淆
+- #358 无障碍树语义化迁移立项——阶段0 提案与索引登记
+- #358 订正提案三平台实现形态为脚本驱动 UIA/AX
+- P6.1 完成度审计——判据行四项与盘上实况对账
+- 订正 P6.1 两阶段判据
+- P6.2 OPC 迁出启动基线审计
+- P6.2 改为按域包拆分插件
 
 
 ### 📦 Miscellaneous
@@ -109,10 +366,34 @@ All notable changes to AxAgent will be documented in this file.
 - 下调分层棘轮基线 628→625（#128）
 - 3 份微调产物退出索引（.gitignore 管不到已跟踪文件，工作区保留）
 - 重新生成命令注册清单，补 plugin_list_pages 滞后
+- 📦 chore(register): 第五道门对账批——同步 11 项读数并补 PLAN §116 证据
+- 📦 chore(register): 第二轮对账（4 项读数 + 3 处证据锚点）并追加 PLAN §117
+- 🔒 摘除插件档三条 *_form_data 白名单，插件 Schema 命令面收到只剩一条只读投影（#191）
+- 📦 dprint 格式化 d1a1716e6 遗漏的一处折行（纯格式，无语义改动）
+- 🔒 声明式数据源两道守卫合批收口：invoke 白名单改显式枚举、fetch 补权限面并收敛 RequestInit（#204 + #206 / PLAN §126.3）
+- 判据同源化批：前端反向 scanFeDomain 补两条豁免（禁区 3 四域 types 深路径 + 同域互引），对齐 Rust §1 fileOwner 三态
+- 前端刀收口——登记表 33/27→30/24 回写 + PLAN 注记 + 旧名锚随迁
+- 分层护栏基线重铸——4 条既存越界钉现值 + 10 文件下调（HEAD~3 实测已红，前批推送绕过了钩子；本轮 --update-baseline 按门指示重铸）
+- i18n 硬编码基线随 #194/#222 等历史提交行号漂移重铸（21 处全为既存行号错位，非新增硬编码；strict 门复跑 All passed）
+- 豁免预算门基线外三类清零——新 allowlist 条写实理由、10 处豁免补 until=2026-12-31、7 个死文件条目移除（前置门连锁推进）
+- 清理 .trae/.codegraph 历史计划残留并忽略本地临时产物
+- #355 判定档三锚 +1 对账——2048/330/246 与 PLAN §0.7 同批回写
+- 环境清理——移除旧 Windows 硬编码路径，改用脚本位置推断仓库根
+- 清理历史 L1 阻塞审计快照并同步索引
+- bump version to v3.0.1
+- 重锚能力判据登记行号
 
 
 ### 🔧 CI / Build
 - pre-commit 改为 UNC 可用的直接入口并加 tsc 扫描面守卫（#106）
+- 🔧 ci(门禁): 新增文档「文件:行号」段对齐巡检（check-doc-refs）
+- 🔧 check-doc-refs 加第二层判据 SYMDRIFT：符号在不在所指行（#182 的 ②）
+- 🔧 check-doc-refs：SYMDRIFT 形态计数一条只计一次（#182 收尾）
+- 🔧 中立性批 C：空洞通过防护双锚 + NEUTRAL 支退回精确匹配（#199 + #200）
+- 🔧 中立性棘轮基线收紧 212→186（#177，批 B）：26 条已修复键一次性钉下
+- 🔧 check-doc-refs 的 SMB 瞬时读错误不再整道门崩溃，改落独立的「未检查」桶（#203）
+- 🔧 中立性棘轮第二次收紧 186→161：timeAnchor 迁 shared 消掉的 25 条一次性钉下（#194 第①刀的钉账）
+- ci.yml 补 vitest 步骤（用户按次授权；与本地 ci-check.mjs 逐字同源）
 
 
 ### 🔨 Refactoring
@@ -125,10 +406,145 @@ All notable changes to AxAgent will be documented in this file.
 - 退役 monitor 内部 alert_tx 死频道（#115）
 - 监控读数收口 harness，R12 改判「权威唯一 + 命令层只别名引用」（#105）
 - 装配段两处切 harness 权威，并按证据推翻 B2 的 −6~−9 读数（#35）
+- 意图解析迁入 foundation crate axagent-stock-core（#35 B4-g）
+- 工具层域依赖倒置，股票工具定义/执行外置（B5）
+- AppState 摘出六个股票域字段（B6）
+- 引擎构造与启动期域装配下沉（#35 B7）
+- tools crate 退役最后一个 AStockClient 直连（#35 B7b）
+- 删宿主 compute_evidence_weights 并收口注册表（#35 B9-2）
+- 聊天侧股票卡片死代码清零，B8-1 试点改判（#35 B8-1a）
+- 🔨 重构(B8-2 第一刀)：任务中心详情面改由任务源声明
+- 🔨 重构(B8-3 首刀)：schema-gen 扩面出前端消费型 DTO
+- 🔨 重构(#36)：删除 company-runtime 对 analysis-engine 的无用依赖边
+- 🔨 重构(任务中心)：删死能力位 openSource，可打开性只由 deepLink 表达
+- 🔨 重构(#36)：OPC 子树整棵迁入 company-runtime，跨包口 29 → 0
+- 🔨 重构(B8-4a)：两处真中性基元下沉，前端股票反向阻塞 51 → 49
+- 股票 DTO 改由 schema-gen 生成并收口前端手写类型
+- 拆股票域 barrel，消费方改深路径（B8-5 第一批）
+- 🔨 refactor(types): 摘股票域类型门面并拆 ./pipeline barrel（B8-5 第二批，#162）
+- 🔨 refactor(plugin-opc): 消除插件出口的 snake_case 适配，出参逐字 camelCase（#167）
+- 🔨 refactor(types): 摘 ./opc barrel，OPC 域类型只经深路径直取（B8-5 第三刀，#172）
+- 🔨 中立性门禁批 A：owner 比较加 camel↔kebab 归一（#168）
+- 🔨 修 HEAD 既存的 2 处 dprint 债：axagent-plugins 根 Cargo.toml 与 crates/README.md（#183）
+- 🔨 清 plugin-stock 的既存 rustfmt 债（#175）
+- 🔨 B8-5 第三刀后半：摘 ./quant 宿主类型门面 + highlightedPanel 迁中性 uiStore（#178 ②③）
+- 🔨 补 #179 遗留的 rustfmt 债：publish_blog_post 写体的 if/else 折行
+- 🔨 timeAnchorStore 由 stores/feature 迁 stores/shared：归类纠正，中立性违规一次消 25 条（#194 第①刀）
+- 🔨 stock-workspace 整目录搬进 stock-analysis/_workspace：最大单组 22 条中立性违规物理消除，两个体量口径同批对账（#195 / PLAN §126）
+- 中立性 A/B 批下沉 12 条跨域引用（#193）
+- 中立性 D 类首批消 7 键（wiki 页级 props + 删死件）+ 清 34 组孤儿 i18n key（#194）
+- 中立性 D 类第二批消 5 键（settings 族按 owner 目录搬迁 + props 下传）（#194）
+- 数据源 DTO 收归 types，SourceManager 改页级注入（#219）
+- 域包 DTO 上收 harness，主壳经 CapabilityPackRegistry trait 消费（#221）
+- 进化能力端口化页级注入+store 异步接真（#220/#218）
+- 中立性 A 档类型/常量/函数下沉中性位+currentToolCall 收归 executionStore（#194）
+- 补提 LlmDiagnoseV2 下沉的 store 侧消费（#194）
+- 中立性微修两处（#194）
+- 博客写面切插件通道，删宿主三命令（#36）
+- 中立性 B 档收口——23 组件 store 消费 hook 化 + 3 组件下沉 + 横切登记表（#194）
+- #222/#224 barrel 显形跨域消费 hook 化(85 条)与门禁改判机制
+- 把 OPC 专用 store/hook 共置进域子目录
+- time-travel 两个共用件下沉 shared（中立性消 4 键）
+- 股票分析设置族归位 stock-analysis（中立性 24→22）
+- #35 stock-core 接管因子/成本/命中率（反向阻塞 54/16 不变）
+- #35 域门面批 2——宿主直连 44→22 处 / 14→13 文件
+- 前端刀 A——删零消费死代码岛（office/panels 两卡 + useOfficeStrategies）
+- #194 中立性 D 类收口——7 组挪目录 + 4 hook 提取 + 白名单 5 条 + 基线 24→0
+- 发票/客户/项目面板迁插件命令通道 + camelCase 键（#32 批 B）
+- 宿主删六个已插件化命令 + 登记表读数收口（#32 批 C）
+- #35 批 R 待改写 22/13→6/6 + 前端死页清理 + 读数回写
+- D-3/D-1 收口——宿主删十条已插件化命令 + 登记表读数回写
+- 落地页与联系人迁插件通道并删六条宿主命令（#36 D-4）
+- #240 E 批——tools 三工具跨包口归零（待改写 3/3 + 跨包口 0/0）
+- As-Of 降级类型上收前端中立层 @/types/asOf
+- #248 股票命令 T2 试点批前端半——4 条宿主命令调用方切到插件命名命令
+- #248 试点批 Rust 半——4 条股票命令接入 T2 插件桥
+- 12 条 cron 配置命令接入 T2 插件命令桥（#35 批 1a Rust 半）
+- #254 建域页面路由注册表，宿主内容区摘除对 OPC 的点名 import
+- OPC 域页面的 path/pageKey/导航项声明权移交域模块
+- 退役 9 条零调用 cron 死命令（#35 批 1）
+- 退役 9 条 cron 宿主 wrapper，命令面 1509→1500
+- 退役 delete_recommendation_cron 宿主命令（#35 批 1c）
+- /invest 主页装载权交回投资域（#263 第一批）
+- 退役七条双声明宿主命令并回写命令面读数（#36 #266 A 子刀）
+- 交付域五命令整模块迁插件通道并回写读数（#264 批 1）
+- 需求发现八命令整模块迁 T2 并删宿主模块（#264 批 2）
+- 需求实现三命令迁 T2 插件通道并删宿主模块
+- #264 批 4 领域工作流三只读命令迁 T2 并删宿主模块
+- #264 批 5 交付面六命令迁 T2 并删宿主交付段
+- #264 批 6 发现面五命令迁 T2 并删宿主 demand_discovery 模块
+- #263 QuoteBlock/QuotePreviewBar 改名 CiteBlock/CitePreviewBar 消股票域词面误报
+- #263 补提 QuoteBlock/QuotePreviewBar 旧文件删除
+- 需求订阅三条命令前端调用点切插件命令通道
+- 🔨 refactor(#264 前端域搬迁批): stock-analysis 域文件归位 + 体量锚回写
+- 前端反向消账——两个 Marketplace 改名 Gallery 消 market 词面误伤（§159）
+- 7 条 OPC 读命令迁 T2 worker 通道（#278 刀 B）
+- 🔨 12 条 OPC 宿主命令迁 T2（六读六写，opc.store 接缝 12 op）
+- 🔨 #264 刀 B3 —— 8 条 OPC 宿主命令迁 T2（4 读 4 写），命令面 1428→1420
+- 🔨 重构(#264 刀C批1): 5 条只读域包命令迁 opc.store T2 接缝
+- 🔨 重构(#264 刀C批2): 两条执行口 OPC 命令迁 opc.store T2 接缝
+- 七条学习面 OPC 命令迁 T2，宿主模块退出命令面（#264 刀 C 批 3）
+- 七条工作项命令迁 opc.store T2 接缝（#264 批 4a Rust 半，双声明期）
+- refactor(opc): 域包与内容资产五命令迁 opc.store T2 接缝（#264 批 4b Rust 半，双声明期）
+- 工作项/域包/内容资产 12 命令前端切插件通道（#264 批 4 前端半）
+- 批 4 双声明收口——删宿主 opc.rs 12 命令 + opc 模块退出 + 登记表/判定档/PLAN 收口（#264 批 4）
+- 删 plugin-opc 对 company-runtime 的死依赖（#281 判据①闭合 #297）
+- bundle 脚本随 SDK 仓走——#281 判据③缺口③修绿（axagent-plugins 自带打包工具链）
+- agency_expert 改判平台资产——OPC 边界口径整口径消失（#299）
+- #35 候选 A 前端半——9 处调用点切 stock_* 插件命名命令
+- #35 候选 B trade_intent 整模块命令面退役（−8 命令 −1 模块）
+- #35 C2 aggregator 三命令退役（等价 op 在 worker 分派层）
+- C3 市场主线十条命令退役——1 read op 扩面 + 9 直退
+- 🔨 重构(refactor): 三条纯智能体工具迁 T2（#307）
+- F3 首刀四条零新 op 直调迁 T2（#326）
+- 24 条行情只读宿主命令退役（#327 批 A1）
+- 五条宿主命令退役（2 条 DB 直读迁 T2 新读 op）+ 两条 Dangerous 清单档位对齐（#328 批 A2）
+- F3 余三条迁 T2——discover 零新 op 插件侧编排 + 两条新写 op 执行体留宿主（#329 批 A3）
+- #330 批 A4——get_latest_analyses_for_stocks 迁 T2 读 op，批量体逐票复用单数版 core（消双查询口径耦合）+ 前端切插件名（PLAN §188）
+- #331 批 A5——get_evolution_drift_timeline / get_agreement_score_history 两条 DB 只读迁 T2 读 op + 前端切插件名（PLAN §189）
+- #331 收口——core 内 use 上收文件顶部，消掉分层护栏 direct-db 计数 +1（不抬基线）
+- #332 批 A6——get_node_feedbacks / get_node_feedback_stats 通用版两条迁 T2 读 op（core 复用，零重复实现；PLAN §190）
+- #333 批 A7——generate_monthly_report / macro_data_snapshot 两条迁 T2 读 op（宏观快照 provider 逐字下沉；PLAN §191）
+- #334 批 A8——list_mover_reflow_candidates 迁 T2 读 op，1302→1301
+- #335 批 A9——analyze_backtest_feedback（计算型）+ parse_vlm_portfolio_screenshot（读）两条迁 T2，1301→1299
+- #336 批 A10——quant 四条迁 T2（3 读 + register_rhai 写），1299→1295；quant_backtest_run 留宿主待裁
+- #337 批 A11——set_vendor_status / cancel_stock_analysis 两条迁 T2（写语义按写 op），1295→1293
+- #338 批 A12——mover_recall_analysis 三条迁 T2（reap 上收启动钩子，读路径零写），1293→1290；模块 151→150
+- #341+#342 批 A14+A15——三条纯删除 + 十六条迁 T2（watchlist/cron/watch 段），1290→1271，模块 150→149
+- #343 批 B17——组合/交易 6 + 进化审批 2 + 零新 op 5 迁 T2，1271→1258
+- #344 批 B18——provider 补三字段 + 29 条批量迁 T2，1258→1229，模块 149→148
+- #345 批 B19——双声明收口 2 + 16 条迁 T2，1229→1213，模块 148→145
+- #346 批 B20——权重/参数台账/估值/工具/What-If 11 条迁 T2，1213→1202
+- #347 批 B21——list_time_travel_batches 迁 T2 + 宿主保留终局清单（§204，可迁面清零），1202→1201
+- #348 批 B22——荐股信号/历史/缓存/代理/信任/反思统计八条迁 T2，1201→1193
+- #349 异步任务 seam 三 op + 20 条宿主退役，1193→1173
+- #353 P6.0-⑤ 引擎去域化——预取清单/实参改由模板变量声明
+- #353 收尾——rt-workflow 生产区股票词 30→0
+- #355 P6.0-② WorkEngine 角色定性 + P6.0-⑥ 批 A/B——通知执行器接缝化
+- #356 P6.0-⑥ 批 C——document_parser 执行器接真接缝
+- #357 P6.0-⑥ 批 D——死接缝接线 + vector_retrieve 接真
+- #358 P6.0-⑥ 批 E——五执行器外部 IO 接缝化，引擎侧协议栈清零
+- #358 P6.0-① 阶段2——反序列化注册表化 + 序列化形状锁定
+- #358 P6.0-① 阶段3——rt-workflow 三处 match 收口到注册表
+- #358 P6.0-① 阶段4——dispatcher 工厂化自动注册
+- #358 P6.0-① 阶段5——前端数据驱动与节点清单下发
+- #358 无障碍树语义化阶段3——命令面改造
+- #358 无障碍树语义化阶段4——工具/前端/i18n 全量语义化
+- #358 无障碍树语义化阶段5——截图链与依赖清退
 
 
 ### 🧪 Testing
 - 门 C 的 bundle 侧改为行为探测 (#79)
+- 实测 EVENT op 帧往返并裁定不进超时覆盖表
+- 首刀真宿主端到端 —— LoadedPlugin 装载股票插件并执行 get_stock_quote
+- lib.rs / hooks.rs 的插件测试同样钉死 bundled 根隔离（+ 反向钉桩防回退）
+- D-4 分派臂测试补齐 + 权限枚举锁升十（7→10 写 op）
+- #320 智能体工具面端到端实测，销 §176 未做③（PLAN §177）
+- #321 F1 余三条需新 op 迁 T2，销 §176 未做①（PLAN §178）
+- #322 F2 余四条+F6 别名族六条迁 T2，销 §178 未做①（PLAN §179）
+- #323 F4 删零调用命令+F5/F8/portfolio 三条迁 T2，五命令批（PLAN §181）
+- #324 F7 回测验证三条迁 T2（PLAN §182）
+- 修 vitest 全量 347 红的环境缺陷——Node 24 惰性 webstorage getter 盖住 jsdom Storage，setup.ts 重绑；全局 testTimeout 5s→30s 治满载 flaky
 
 ## [v3.0.0] - 2026-10-31
 

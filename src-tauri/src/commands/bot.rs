@@ -440,6 +440,26 @@ pub async fn delete_bot(
             .with_detail(other.to_string())
             .to_string(),
     })?;
+    // P2-b 级联（ADR-P2B-6 / IPC-P2B §1）：Bot 是可删个体、部门是常设组织。
+    // ① 清掉该 Bot 的全部部门归属行；② 以其为 Chief 的部门 chief_bot_id 置 NULL
+    // （部门保留）；③ 取消该 Bot 在途的委派单（终态保留审计）。失败仅记 warn ——
+    // 主操作已成功，不因级联回滚（与 P2-a 例程级联同口径）。
+    match axagent_dao::repo::bot_department::delete_memberships_of_bot(db, &bot_id).await {
+        Ok(n) if n > 0 => tracing::info!(bot_id = %bot_id, count = n, "已清理该 Bot 的部门归属"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(bot_id = %bot_id, error = %err, "清理部门归属失败"),
+    }
+    match axagent_dao::repo::bot_department::clear_chief_for_bot(db, &bot_id).await {
+        Ok(n) if n > 0 => tracing::info!(bot_id = %bot_id, count = n, "已置空相关部门的 Chief"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(bot_id = %bot_id, error = %err, "置空 Chief 失败"),
+    }
+    match axagent_dao::repo::bot_assignment::cancel_in_flight_of_bot(db, &bot_id).await {
+        Ok(n) if n > 0 => tracing::info!(bot_id = %bot_id, count = n, "已取消该 Bot 在途委派"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(bot_id = %bot_id, error = %err, "取消在途委派失败"),
+    }
+
     // 级联删除该 Bot 的例程（GAP G-10）：Bot 不在了，到点触发的例程只会
     // 反复落「Bot 已不存在」的失败历史。失败仅记 warn —— 主操作（删 Bot）
     // 已成功，例程残留可由用户手动清理，不因此回滚。

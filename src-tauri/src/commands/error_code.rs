@@ -69,6 +69,10 @@ pub mod bot {
     pub const MEMORY_READ_FAILED: &str = "BOT_MEMORY_READ_FAILED";
     /// SOUL 镜像写盘失败
     pub const SOUL_WRITE_FAILED: &str = "BOT_SOUL_WRITE_FAILED";
+    /// Bot 部门不存在（P2-b T2''）
+    pub const DEPARTMENT_NOT_FOUND: &str = "BOT_DEPARTMENT_NOT_FOUND";
+    /// Bot 已归属其他部门 / 同部门重复加入（P2-b T2''）
+    pub const DEPARTMENT_MEMBER_EXISTS: &str = "BOT_DEPARTMENT_MEMBER_EXISTS";
 }
 
 /// 微调训练相关错误码

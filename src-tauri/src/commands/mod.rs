@@ -23,6 +23,7 @@ pub mod background_tasks;
 pub mod backtest_validation;
 pub mod backup;
 pub mod bot;
+pub mod bot_department;
 pub mod branches;
 #[cfg(not(mobile))]
 pub mod browser;
@@ -180,7 +181,6 @@ pub mod opc_data;
 pub mod opc_learning_hook;
 pub mod opc_workflow_kpi_hook;
 pub mod opc_workflows;
-pub mod paper_portfolio;
 pub mod quant_backtest;
 pub mod screenshot_diagnosis;
 pub mod stock_analysis;

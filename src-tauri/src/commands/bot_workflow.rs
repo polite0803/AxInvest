@@ -7,13 +7,15 @@ use axagent_dao::repo::bot as bot_repo;
 use axagent_dao::repo::bot_department as dept_repo;
 use axagent_dao::repo::bot_workflow as workflow_repo;
 use axagent_dao::repo::bot_workflow_run as run_repo;
+use axagent_harness::event_names::IpcEventName;
 use axagent_harness::types::{
-    BotWorkflow, BotWorkflowStep, CreateBotWorkflow, UpdateBotWorkflowPatch,
+    BotWorkflow, BotWorkflowRun, BotWorkflowStep, CreateBotWorkflow, CreateBotWorkflowRun,
+    UpdateBotWorkflowPatch,
 };
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::AppState;
-use crate::bot_workflow_steps::{validate_definition, StepError};
+use crate::bot_workflow_steps::{StepError, validate_definition};
 use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::bot as bot_err;
 
@@ -29,6 +31,11 @@ fn map_error(err: axagent_harness::core_error::AxAgentError, code: &'static str)
     response(code, "id", err.to_string())
 }
 
+/// runner / 命令共用的 run 级错误出口（无需 AppState）。
+pub fn run_error(code: &'static str, detail: impl Into<String>) -> String {
+    response(code, "id", detail)
+}
+
 /// Bot 存在 / enabled / 部门成员检查（定义期 + 运行前共用的 DB 半段）。
 pub async fn validate_bot_refs(
     db: &axagent_dao::DatabaseConnection,
@@ -37,17 +44,29 @@ pub async fn validate_bot_refs(
 ) -> std::result::Result<(), String> {
     for step in steps {
         let bot = bot_repo::get_bot(db, &step.bot_id).await.map_err(|_| {
-            response(bot_err::WORKFLOW_STEP_BOT_MISSING, "botId", format!("Bot {} 不存在", step.bot_id))
+            response(
+                bot_err::WORKFLOW_STEP_BOT_MISSING,
+                "botId",
+                format!("Bot {} 不存在", step.bot_id),
+            )
         })?;
         if !bot.is_enabled {
-            return Err(response(bot_err::WORKFLOW_STEP_BOT_MISSING, "botId", format!("Bot {} 已禁用", step.bot_id)));
+            return Err(response(
+                bot_err::WORKFLOW_STEP_BOT_MISSING,
+                "botId",
+                format!("Bot {} 已禁用", step.bot_id),
+            ));
         }
         if let Some(dept) = department_id {
             let member = dept_repo::department_of_bot(db, &step.bot_id)
                 .await
                 .map_err(|e| map_error(e, bot_err::WORKFLOW_DEPARTMENT_REQUIRED))?;
             if member.as_deref() != Some(dept) {
-                return Err(response(bot_err::WORKFLOW_MEMBER_CHANGED, "botId", format!("Bot {} 不属于部门 {dept}", step.bot_id)));
+                return Err(response(
+                    bot_err::WORKFLOW_MEMBER_CHANGED,
+                    "botId",
+                    format!("Bot {} 不属于部门 {dept}", step.bot_id),
+                ));
             }
         }
     }
@@ -63,9 +82,17 @@ fn validate_definition_or_response(
     max_concurrency: i32,
     total_timeout_secs: i32,
 ) -> std::result::Result<(), String> {
-    validate_definition(name, description, owner_scope, department_id, steps, max_concurrency, total_timeout_secs)
-        .map(|_| ())
-        .map_err(StepError::into_response)
+    validate_definition(
+        name,
+        description,
+        owner_scope,
+        department_id,
+        steps,
+        max_concurrency,
+        total_timeout_secs,
+    )
+    .map(|_| ())
+    .map_err(StepError::into_response)
 }
 
 pub async fn create_inner(
@@ -74,16 +101,24 @@ pub async fn create_inner(
 ) -> Result<BotWorkflow, String> {
     if input.owner_scope == "department" {
         let Some(dept_id) = input.department_id.as_ref().and_then(|v| v.as_deref()) else {
-            return Err(response(bot_err::WORKFLOW_DEPARTMENT_REQUIRED, "departmentId", "部门编排必须指定部门"));
+            return Err(response(
+                bot_err::WORKFLOW_DEPARTMENT_REQUIRED,
+                "departmentId",
+                "部门编排必须指定部门",
+            ));
         };
         dept_repo::get_department(db, dept_id)
             .await
             .map_err(|e| map_error(e, bot_err::DEPARTMENT_NOT_FOUND))?;
     }
     validate_definition_or_response(
-        &input.name, &input.description, &input.owner_scope,
+        &input.name,
+        &input.description,
+        &input.owner_scope,
         input.department_id.as_ref().and_then(|v| v.as_deref()),
-        &input.steps, input.max_concurrency, input.total_timeout_secs,
+        &input.steps,
+        input.max_concurrency,
+        input.total_timeout_secs,
     )?;
     let dept = if input.owner_scope == "department" {
         input.department_id.as_ref().and_then(|v| v.as_deref())
@@ -133,29 +168,88 @@ pub async fn update_inner(
 
     if owner_scope == "department" {
         let Some(dept_id) = department_id.as_deref() else {
-            return Err(response(bot_err::WORKFLOW_DEPARTMENT_REQUIRED, "departmentId", "部门编排必须指定部门"));
+            return Err(response(
+                bot_err::WORKFLOW_DEPARTMENT_REQUIRED,
+                "departmentId",
+                "部门编排必须指定部门",
+            ));
         };
         dept_repo::get_department(db, dept_id)
             .await
             .map_err(|e| map_error(e, bot_err::DEPARTMENT_NOT_FOUND))?;
     }
     validate_definition_or_response(
-        &name, &description, &owner_scope, department_id.as_deref(),
-        &steps, max_concurrency, total_timeout_secs,
+        &name,
+        &description,
+        &owner_scope,
+        department_id.as_deref(),
+        &steps,
+        max_concurrency,
+        total_timeout_secs,
     )?;
     validate_bot_refs(db, &steps, department_id.as_deref()).await?;
 
-    workflow_repo::update_workflow(db, id, &UpdateBotWorkflowPatch {
-        name: Some(name),
-        description: Some(Some(description)),
-        owner_scope: Some(owner_scope),
-        department_id: Some(department_id),
-        steps: Some(steps),
-        max_concurrency: Some(max_concurrency),
-        total_timeout_secs: Some(total_timeout_secs),
-    })
+    workflow_repo::update_workflow(
+        db,
+        id,
+        &UpdateBotWorkflowPatch {
+            name: Some(name),
+            description: Some(Some(description)),
+            owner_scope: Some(owner_scope),
+            department_id: Some(department_id),
+            steps: Some(steps),
+            max_concurrency: Some(max_concurrency),
+            total_timeout_secs: Some(total_timeout_secs),
+        },
+    )
     .await
     .map_err(|e| map_error(e, bot_err::WORKFLOW_NOT_FOUND))
+}
+
+/// 由命令层的扁平入参组装 patch；外层 None = 不改，内层 None = 显式清除。
+fn update_patch_from_args(
+    name: Option<String>,
+    description: Option<Option<String>>,
+    owner_scope: Option<String>,
+    department_id: Option<Option<String>>,
+    steps: Option<Vec<BotWorkflowStep>>,
+    max_concurrency: Option<i32>,
+    total_timeout_secs: Option<i32>,
+) -> UpdateBotWorkflowPatch {
+    UpdateBotWorkflowPatch {
+        name,
+        description,
+        owner_scope,
+        department_id,
+        steps,
+        max_concurrency,
+        total_timeout_secs,
+    }
+}
+
+/// IPC-P3 §2.4：冻结入参 = 显式 `id` + 扁平 patch，无 `{ workflowId, input }` 兼容分支。
+#[tauri::command]
+pub async fn update_bot_workflow(
+    state: State<'_, AppState>,
+    id: String,
+    name: Option<String>,
+    description: Option<Option<String>>,
+    owner_scope: Option<String>,
+    department_id: Option<Option<String>>,
+    steps: Option<Vec<BotWorkflowStep>>,
+    max_concurrency: Option<i32>,
+    total_timeout_secs: Option<i32>,
+) -> Result<BotWorkflow, String> {
+    let patch = update_patch_from_args(
+        name,
+        description,
+        owner_scope,
+        department_id,
+        steps,
+        max_concurrency,
+        total_timeout_secs,
+    );
+    update_inner(state.harness.db(), &id, &patch).await
 }
 
 /// `None` = 全部；`Some(None)` = 仅 instance；`Some(Some(id))` = instance + 该部门。
@@ -163,9 +257,10 @@ pub async fn list_inner(
     db: &axagent_dao::DatabaseConnection,
     department_id: Option<Option<String>>,
 ) -> Result<Vec<BotWorkflow>, String> {
-    let mut rows = workflow_repo::list_workflows(db, department_id.as_ref().and_then(|v| v.as_deref()))
-        .await
-        .map_err(|e| map_error(e, bot_err::WORKFLOW_NOT_FOUND))?;
+    let mut rows =
+        workflow_repo::list_workflows(db, department_id.as_ref().and_then(|v| v.as_deref()))
+            .await
+            .map_err(|e| map_error(e, bot_err::WORKFLOW_NOT_FOUND))?;
     if matches!(department_id, Some(None)) {
         rows.retain(|w| w.owner_scope == "instance");
     }
@@ -180,10 +275,7 @@ pub async fn list_bot_workflows(
     list_inner(state.harness.db(), department_id).await
 }
 
-pub async fn delete_inner(
-    db: &axagent_dao::DatabaseConnection,
-    id: &str,
-) -> Result<(), String> {
+pub async fn delete_inner(db: &axagent_dao::DatabaseConnection, id: &str) -> Result<(), String> {
     workflow_repo::get_workflow(db, id)
         .await
         .map_err(|_| response(bot_err::WORKFLOW_NOT_FOUND, "id", format!("编排 {id} 不存在")))?;
@@ -199,16 +291,89 @@ pub async fn delete_inner(
 }
 
 #[tauri::command]
-pub async fn delete_bot_workflow(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_bot_workflow(state: State<'_, AppState>, id: String) -> Result<(), String> {
     delete_inner(state.harness.db(), &id).await
+}
+
+#[tauri::command]
+pub async fn run_bot_workflow(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workflow_id: String,
+    requester_conversation_id: Option<String>,
+    inputs: Option<std::collections::HashMap<String, String>>,
+) -> Result<BotWorkflowRun, String> {
+    let db = state.harness.db();
+    let workflow = workflow_repo::get_workflow(db, &workflow_id)
+        .await
+        .map_err(|e| map_error(e, bot_err::WORKFLOW_NOT_FOUND))?;
+    let Some(conversation_id) = requester_conversation_id.filter(|v| !v.trim().is_empty()) else {
+        return Err(response("ERR_VALIDATION", "requesterConversationId", "手工触发必须指定线程"));
+    };
+    let queued = run_repo::create_run(
+        db,
+        &CreateBotWorkflowRun {
+            workflow_id: workflow.id.clone(),
+            workflow_name: workflow.name.clone(),
+            origin: "person".to_string(),
+            requester_bot_id: None,
+            requester_conversation_id: conversation_id,
+            total_steps: workflow.steps.len() as i32,
+            inputs: inputs.unwrap_or_default(),
+        },
+    )
+    .await
+    .map_err(|e| map_error(e, bot_err::WORKFLOW_RUN_NOT_FOUND))?;
+    let _ = app.emit(IpcEventName::BotWorkflowRunUpdated.as_str(), &queued);
+    crate::bot_workflow_runner::start_run(db, Some(app), &queued.id).await
+}
+
+#[tauri::command]
+pub async fn list_bot_workflow_runs(
+    state: State<'_, AppState>,
+    workflow_id: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<BotWorkflowRun>, String> {
+    if let Some(value) = &status {
+        if !run_repo::status::is_valid(value) {
+            return Err(response("ERR_VALIDATION", "status", format!("非法 run 状态 {value}")));
+        }
+    }
+    run_repo::list_runs(state.harness.db(), workflow_id.as_deref(), status.as_deref())
+        .await
+        .map_err(|e| map_error(e, bot_err::WORKFLOW_RUN_NOT_FOUND))
+}
+
+#[tauri::command]
+pub async fn cancel_bot_workflow_run(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<BotWorkflowRun, String> {
+    crate::bot_workflow_runner::cancel_run(state.harness.db(), Some(&app), &run_id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_workflow_args_keep_missing_and_clear_distinct() {
+        let patch = update_patch_from_args(
+            Some("新名".into()),
+            Some(None),
+            None,
+            Some(None),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(patch.name.as_deref(), Some("新名"));
+        assert!(matches!(patch.description, Some(None)), "描述显式 null = 清除");
+        assert!(patch.owner_scope.is_none(), "缺键 = 不改");
+        assert!(matches!(patch.department_id, Some(None)), "部门显式 null = 清除");
+        assert!(patch.steps.is_none());
+    }
     use axagent_harness::types::BotWorkflowStep;
 
     async fn pool() -> axagent_dao::db::DbHandle {
@@ -216,10 +381,10 @@ mod tests {
     }
 
     async fn make_bot(db: &axagent_dao::DatabaseConnection, name: &str) -> String {
-        bot_repo::create_bot(db, &axagent_harness::types::CreateBot {
-            name: name.into(),
-            ..Default::default()
-        })
+        bot_repo::create_bot(
+            db,
+            &axagent_harness::types::CreateBot { name: name.into(), ..Default::default() },
+        )
         .await
         .expect("建 Bot")
         .id
@@ -256,10 +421,14 @@ mod tests {
         let instance_only = list_inner(db, Some(None)).await.expect("实例筛选");
         assert_eq!(instance_only.len(), 1);
 
-        let updated = update_inner(db, &created.id, &UpdateBotWorkflowPatch {
-            description: Some(Some("新描述".into())),
-            ..Default::default()
-        })
+        let updated = update_inner(
+            db,
+            &created.id,
+            &UpdateBotWorkflowPatch {
+                description: Some(Some("新描述".into())),
+                ..Default::default()
+            },
+        )
         .await
         .expect("更新");
         assert_eq!(updated.description, "新描述");

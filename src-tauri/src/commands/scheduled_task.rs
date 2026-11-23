@@ -5,6 +5,9 @@
 
 use axagent_dao::db::DatabaseConnection;
 use axagent_dao::repo::bot as bot_repo;
+use axagent_dao::repo::bot_department as dept_repo;
+use axagent_dao::repo::bot_workflow as workflow_repo;
+use axagent_dao::repo::conversation as conv_repo;
 
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
@@ -766,12 +769,28 @@ pub async fn get_task_execution_history(
 
 /// Bot 例程 DTO 中的 task_type 预设值。executor 分支（init/services.rs）据此识别 Bot 例程。
 pub(crate) const BOT_ROUTINE_TASK_TYPE: &str = "bot_routine";
+/// P3（IPC-P3 §2.4）：Bot 编排定时触发的 task_type 预设值。
+pub(crate) const BOT_WORKFLOW_TASK_TYPE: &str = "bot_workflow";
+
+/// P3 T4：cron 分支判定 —— 只有 `task_type="bot_workflow"` 的作业走编排执行路径。
+pub(crate) fn is_bot_workflow_job(job: &CronJob) -> bool {
+    job.task_type.as_deref() == Some(BOT_WORKFLOW_TASK_TYPE)
+}
+
+/// P3 T4：从编排定时作业 params 读取 workflowId（兼容历史 snake_case 写法）。
+pub(crate) fn bot_workflow_id_from_job(job: &CronJob) -> Option<String> {
+    if !is_bot_workflow_job(job) {
+        return None;
+    }
+    job.params
+        .as_ref()
+        .and_then(|p| p.get("workflowId").or_else(|| p.get("workflow_id")))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
 
 /// P2-a（IPC-P2 §2.1/§2.2）：Bot id 存在性校验；不存在 -> `BOT_NOT_FOUND`。
-pub(crate) async fn ensure_bot_exists(
-    db: &DatabaseConnection,
-    bot_id: &str,
-) -> Result<(), String> {
+pub(crate) async fn ensure_bot_exists(db: &DatabaseConnection, bot_id: &str) -> Result<(), String> {
     if bot_repo::get_bot(db, bot_id).await.is_ok() {
         return Ok(());
     }
@@ -813,9 +832,8 @@ pub async fn create_bot_scheduled_task(
     input: CreateBotScheduledTaskInput,
 ) -> Result<ScheduledTaskDto, String> {
     validate_bot_routine_prompt(&input.prompt)?;
-    validate_cron_detail(&input.cron_expression).map_err(|detail| {
-        ErrorResponse::err_with_detail(bot_err::SCHEDULE_CRON_INVALID, detail)
-    })?;
+    validate_cron_detail(&input.cron_expression)
+        .map_err(|detail| ErrorResponse::err_with_detail(bot_err::SCHEDULE_CRON_INVALID, detail))?;
     create_scheduled_task(
         state,
         CreateTaskInput {
@@ -859,7 +877,10 @@ mod p2_bot_schedule_tests {
         assert!(validate_timezone(None).is_ok(), "None = 宿主 Local，合法");
         assert!(validate_timezone(Some("Asia/Shanghai")).is_ok());
         assert!(validate_timezone(Some("UTC")).is_ok());
-        assert!(validate_timezone(Some("  ")).is_ok(), "空白由 normalized_timezone 归一化，此处只验 parse");
+        assert!(
+            validate_timezone(Some("  ")).is_ok(),
+            "空白由 normalized_timezone 归一化，此处只验 parse"
+        );
     }
 
     // P2-a：DTO 新字段透传（botId/timezone 序列化为 camelCase）。
@@ -904,10 +925,7 @@ mod p2_bot_schedule_tests {
             err.contains("COMMON_INVALID_INPUT"),
             "旧路径错误码不变（通用 INVALID_INPUT）: {err}"
         );
-        assert!(
-            err.contains("每分钟"),
-            "detail 文案保持原样: {err}"
-        );
+        assert!(err.contains("每分钟"), "detail 文案保持原样: {err}");
         assert!(validate_cron_expression("0 9 * * *").is_ok());
     }
 
@@ -920,5 +938,112 @@ mod p2_bot_schedule_tests {
         let detail2 = validate_cron_detail("*/1 * * * *").unwrap_err();
         assert!(detail2.contains("每分钟"), "detail: {detail2}");
         assert!(validate_cron_detail("0 9 * * *").is_ok());
+    }
+}
+
+// ───────────────────────────── Bot 编排定时命令（P3，IPC-P3 §2.4）─────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBotWorkflowScheduleInput {
+    pub workflow_id: String,
+    #[serde(rename = "cronExpression")]
+    pub cron_expression: String,
+    /// IANA 时区名；null/缺省 = 宿主 Local
+    pub timezone: Option<String>,
+    /// 缺省 true
+    pub enabled: Option<bool>,
+}
+
+/// IPC-P3 §2.4：为编排创建定时触发 —— task_type="bot_workflow"、params.workflowId、bot_id=None。
+#[tauri::command]
+pub async fn create_bot_workflow_schedule(
+    state: State<'_, AppState>,
+    input: CreateBotWorkflowScheduleInput,
+) -> Result<ScheduledTaskDto, String> {
+    let db = state.harness.db();
+    let workflow = workflow_repo::get_workflow(db, &input.workflow_id).await.map_err(|e| {
+        ErrorResponse::err_with_detail(bot_err::WORKFLOW_NOT_FOUND, format!("编排不存在: {e}"))
+    })?;
+
+    validate_cron_detail(&input.cron_expression)
+        .map_err(|detail| ErrorResponse::err_with_detail(bot_err::SCHEDULE_CRON_INVALID, detail))?;
+    validate_timezone(input.timezone.as_deref())?;
+
+    let schedule = input.cron_expression;
+    let name = format!("Bot 编排: {}", workflow.name);
+    let mut job = CronJob::new(&name, &schedule, &name, &name);
+    job.task_type = Some(BOT_WORKFLOW_TASK_TYPE.to_string());
+    job.bot_id = None;
+    job.timezone = normalized_timezone(input.timezone);
+    job.params = Some(serde_json::json!({ "workflowId": workflow.id }));
+    if input.enabled == Some(false) {
+        job.status = CronJobStatus::Paused;
+    }
+    state.cron_job_store.add(job.clone()).await;
+    Ok(cron_to_dto(&job))
+}
+
+/// Cron 触发 Bot 编排时创建持久线程（PLAN-P3 §4）：department 编排归 Chief，否则 bot_id NULL。
+pub(crate) async fn create_bot_workflow_persistent_conversation(
+    db: &DatabaseConnection,
+    workflow: &axagent_harness::types::BotWorkflow,
+) -> Result<axagent_harness::types::Conversation, String> {
+    let title = format!("Bot 编排定时: {}", workflow.name);
+    let bot_id = if workflow.owner_scope == "department" {
+        if let Some(dept_id) = workflow.department_id.as_deref() {
+            let dept = dept_repo::get_department(db, dept_id).await.map_err(|e| e.to_string())?;
+            dept.chief_bot_id
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    conv_repo::create_conversation_with_defaults(
+        db,
+        &title,
+        "",
+        "",
+        None,
+        conv_repo::ConversationParamDefaults::default(),
+        bot_id.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod p3_bot_workflow_schedule_tests {
+    use super::*;
+
+    fn job(task_type: Option<&str>, params: Option<serde_json::Value>) -> CronJob {
+        let mut job = CronJob::new("编排定时", "0 9 * * *", "编排定时", "编排定时");
+        job.task_type = task_type.map(str::to_string);
+        job.params = params;
+        job
+    }
+
+    #[test]
+    fn bot_workflow_branch_only_matches_declared_task_type() {
+        assert!(is_bot_workflow_job(&job(Some("bot_workflow"), None)));
+        assert!(!is_bot_workflow_job(&job(Some("bot_routine"), None)));
+        assert!(!is_bot_workflow_job(&job(None, None)));
+    }
+
+    #[test]
+    fn bot_workflow_branch_reads_workflow_id_from_params() {
+        let camel = job(Some("bot_workflow"), Some(serde_json::json!({ "workflowId": "wf-1" })));
+        assert_eq!(bot_workflow_id_from_job(&camel).as_deref(), Some("wf-1"));
+
+        let legacy = job(Some("bot_workflow"), Some(serde_json::json!({ "workflow_id": "wf-2" })));
+        assert_eq!(bot_workflow_id_from_job(&legacy).as_deref(), Some("wf-2"));
+
+        let missing = job(Some("bot_workflow"), Some(serde_json::json!({})));
+        assert_eq!(bot_workflow_id_from_job(&missing), None);
+
+        let wrong_type =
+            job(Some("bot_routine"), Some(serde_json::json!({ "workflowId": "wf-3" })));
+        assert_eq!(bot_workflow_id_from_job(&wrong_type), None);
     }
 }

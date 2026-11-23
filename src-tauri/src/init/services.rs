@@ -2444,6 +2444,92 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 }
             }
         }
+        // ── Bot 编排定时分支（P3，IPC-P3 §2.4 / PLAN-P3 §4）──
+        // task_type == "bot_workflow" 时按 params.workflowId 触发编排 run。
+        // 若同时存在 bot_id，以 task_type 为准并 warn（两类语义互斥）。
+        if crate::commands::scheduled_task::is_bot_workflow_job(&job) {
+            if job.bot_id.is_some() {
+                tracing::warn!(
+                    job_id = %job.id,
+                    "bot_workflow 定时任务同时带 bot_id，以 task_type=bot_workflow 为准"
+                );
+            }
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let app = app_handle.clone();
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            let workflow_id = crate::commands::scheduled_task::bot_workflow_id_from_job(&job);
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let outcome: Result<String, String> = async {
+                    let workflow_id = workflow_id.ok_or_else(|| "bot_workflow 任务缺少 params.workflowId".to_string())?;
+                    let workflow = axagent_dao::repo::bot_workflow::get_workflow(&db, &workflow_id)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let conv = crate::commands::scheduled_task::create_bot_workflow_persistent_conversation(&db, &workflow)
+                        .await?;
+                    let queued = axagent_dao::repo::bot_workflow_run::create_run(
+                        &db,
+                        &axagent_harness::types::CreateBotWorkflowRun {
+                            workflow_id: workflow.id.clone(),
+                            workflow_name: workflow.name.clone(),
+                            origin: "routine".to_string(),
+                            requester_bot_id: None,
+                            requester_conversation_id: conv.id,
+                            total_steps: workflow.steps.len() as i32,
+                            inputs: std::collections::HashMap::new(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    if let Some(app) = app.as_ref() {
+                        let _ = tauri::Emitter::emit(app, axagent_harness::event_names::IpcEventName::BotWorkflowRunUpdated.as_str(), &queued);
+                    }
+                    let started_run = crate::bot_workflow_runner::start_run(&db, app.clone(), &queued.id).await?;
+                    let terminal = loop {
+                        let run = axagent_dao::repo::bot_workflow_run::get_run(&db, &started_run.id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        if axagent_dao::repo::bot_workflow_run::status::is_terminal(&run.status) {
+                            break run;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    };
+                    if terminal.status == axagent_dao::repo::bot_workflow_run::status::COMPLETED {
+                        Ok(format!("workflow run {} completed", terminal.id))
+                    } else {
+                        Err(format!(
+                            "workflow run {} {}: {}",
+                            terminal.id,
+                            terminal.status,
+                            terminal.error_code.unwrap_or_else(|| "ERR_UNKNOWN".to_string())
+                        ))
+                    }
+                }
+                .await;
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: outcome.is_ok(),
+                    output: outcome.as_ref().ok().cloned(),
+                    error: outcome.as_ref().err().cloned(),
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                    skipped: false,
+                    partial: false,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性 bot_workflow 任务 '{job_id}' 置为 Disabled 失败"
+                    );
+                }
+            });
+            return;
+        }
         // ── Bot 例程分支（P2 / ADR-P2-2）──
         //
         // job.bot_id 非空 ⇒ 走 Bot 非交互轮（SOUL/MEMORY 注入 + Bot 档权限 +

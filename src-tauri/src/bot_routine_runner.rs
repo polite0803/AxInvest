@@ -135,10 +135,27 @@ async fn resolve_routine_provider(
     Ok((prov, adapter, ctx, model))
 }
 
+/// 每轮独立工具表（与 agent_turn_adapter 同理由 —— 独立实例避免与主 registry
+/// 的 tokio Mutex 死锁）。例程轮保留原有工具集 + Q6 新增的 `delegate_to_bot`；
+/// assignee 轮额外禁掉委派工具，保证 P2-b 委派深度恒为 1（ADR-P2B-5）。
+fn build_turn_tool_registry(assignee_round: bool) -> UnifiedToolRegistry {
+    let mut registry = UnifiedToolRegistry::new();
+    registry.init_all();
+    for name in registry.list_tools() {
+        if matches!(name.as_str(), "Agent" | "RemoteTrigger")
+            || (assignee_round && name == "delegate_to_bot")
+        {
+            registry.disable_tool(&name);
+        }
+    }
+    registry
+}
+
 /// 跑一轮 Bot 例程（非交互）。
 ///
-/// 返回本轮 assistant 文本；失败（含 ask 类操作被 `PermissionPolicy` 自动拒绝、
-/// provider 解析失败）返回 `Err`，调用方原样落 `TaskRunResult.error`。
+/// 这是 P2-a 原有函数的薄包装：不注入委派任务卡、不改工具表 —— 行为与
+/// P2-a 逐字节一致（既有 `bot_routine` 测试锁旧行为）。委派执行器走
+/// [`run_bot_non_interactive_turn`] 并显式传任务卡。
 pub async fn run_bot_routine_turn(
     ctx: &BotRoutineContext,
     bot_id: &str,
@@ -146,6 +163,32 @@ pub async fn run_bot_routine_turn(
     bot_provider_id: Option<&str>,
     bot_model_id: Option<&str>,
     prompt: &str,
+) -> Result<String, String> {
+    run_bot_non_interactive_turn(
+        ctx,
+        bot_id,
+        bot_approval_mode,
+        bot_provider_id,
+        bot_model_id,
+        prompt,
+        None,
+    )
+    .await
+}
+
+/// 非交互 Bot 轮的唯一实现（例程 P2-a + 委派执行器 P2-b 共用，ADR-P2-2）。
+///
+/// `task_card` 非空时注入 `<bot-delegation-task>` 段（任务正文 + requester 身份 +
+/// 结果回传边界），不注入 requester 的 SOUL/MEMORY。例程入口传 `None`，
+/// 系统提示词与旧实现逐字一致。
+pub async fn run_bot_non_interactive_turn(
+    ctx: &BotRoutineContext,
+    bot_id: &str,
+    bot_approval_mode: &str,
+    bot_provider_id: Option<&str>,
+    bot_model_id: Option<&str>,
+    prompt: &str,
+    task_card: Option<&str>,
 ) -> Result<String, String> {
     // 存在性校验（executor 已验过，此处兜底：Bot 被并发删除时不产生幽灵轮）。
     axagent_dao::repo::bot::get_bot(ctx.harness.db(), bot_id)
@@ -155,19 +198,17 @@ pub async fn run_bot_routine_turn(
     // ADR-P2-1 第 2 条：非交互源只取 Bot 档（custom -> Prompt 由映射表兜底）。
     let permission_mode = crate::bot_approval::resolve_bot_routine_level(bot_approval_mode);
 
-    let system_prompt = build_bot_system_prompt(&ctx.harness, bot_id).await;
+    let mut system_prompt = build_bot_system_prompt(&ctx.harness, bot_id).await;
+    if let Some(card) = task_card.filter(|c| !c.trim().is_empty()) {
+        system_prompt.push_str(&format!(
+            "\n\n<bot-delegation-task>\n{card}\n</bot-delegation-task>"
+        ));
+    }
     let (prov, adapter, mut req_ctx, model) =
         resolve_routine_provider(&ctx.harness, bot_provider_id, bot_model_id).await?;
 
-    // 工具装配：独立实例（与 agent_turn_adapter 同理由 —— 独立实例避免与主
-    // registry 的 tokio Mutex 死锁）；防递归禁 Agent / RemoteTrigger。
-    let mut tool_registry = UnifiedToolRegistry::new();
-    tool_registry.init_all();
-    for name in tool_registry.list_tools() {
-        if matches!(name.as_str(), "Agent" | "RemoteTrigger") {
-            tool_registry.disable_tool(&name);
-        }
-    }
+    // 工具装配：例程轮与 assignee 轮共用同一张表；后者禁委派工具防递归。
+    let tool_registry = build_turn_tool_registry(task_card.is_some());
 
     // 每轮新建的临时会话：execution_id 兼作 conversation_id（headless 先例同构）。
     let execution_id = format!("bot-routine-{}", uuid::Uuid::new_v4());
@@ -272,7 +313,19 @@ pub async fn finish_bot_routine(
 
 #[cfg(test)]
 mod p2_bot_routine_tests {
-    use super::*;
+
+    // ADR-P2B-5：一层委派的防环判据 —— assignee 轮工具表不得含 delegate_to_bot。
+    #[test]
+    fn assignee_round_tool_table_excludes_delegate() {
+        let routine = super::build_turn_tool_registry(false);
+        let assignee = super::build_turn_tool_registry(true);
+        assert!(routine.list_tools().iter().any(|n| n == "delegate_to_bot"),
+            "Q6：例程轮可发起委派");
+        assert!(!assignee.list_tools().iter().any(|n| n == "delegate_to_bot"),
+            "assignee 轮不得再委派（深度恒 1）");
+        assert!(!assignee.list_tools().iter().any(|n| n == "Agent" || n == "RemoteTrigger"),
+            "P2-a 既有的防递归工具禁用不得回归");
+    }
 
     // ADR-P2-4：Bot 五档映射在例程路径的落点 —— 例程函数无会话参数本身就是
     // 约束的一半（约束另一半在 bot_approval 单测）。这里锁定各档到执行档位

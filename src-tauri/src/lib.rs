@@ -16,6 +16,7 @@ mod capability_vector_search;
 // P6.0-⑥ 批 E：工作流节点外部 IO 接缝的宿主实现（HTTP / 文件 / SMTP）。
 mod bot_approval;
 mod bot_routine_runner;
+pub mod bot_assignment_runner;
 mod bot_context;
 mod capability_workflow_io;
 mod commands;

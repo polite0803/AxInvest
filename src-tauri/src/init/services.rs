@@ -2295,6 +2295,10 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
         harness: state.harness.clone(),
         session_manager: state.agent_session_manager.clone(),
     });
+    // P2-b T3''：dispatch 调度器与 consult 工具 runner 共用例程执行上下文；
+    // 无窗口的 headless 启动（app=None）只落库、不发事件。
+    crate::bot_assignment_runner::install_dispatch_scheduler(bot_routine_ctx.clone(), app.cloned());
+    crate::bot_assignment_runner::install_consult_runner(bot_routine_ctx.clone(), app.cloned());
     let astock_client = state.stock().astock_client.clone();
     // 漏检补分析与时间旅行批次共用这一把全局 as-of 锁（try_lock，不排队）
     let asof_lock = state.time_travel_batch_lock.clone();

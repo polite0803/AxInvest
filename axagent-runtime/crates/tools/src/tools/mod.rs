@@ -53,6 +53,7 @@ pub mod messaging;
 pub mod migration_tool;
 pub mod misc;
 pub mod monitor;
+pub mod bot_delegate;
 pub mod multi_agent;
 pub mod narrative_structure;
 pub mod network;
@@ -136,6 +137,7 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
         // ── Agent 和 Skill ──
         std::sync::Arc::new(agent::AgentTool),
         std::sync::Arc::new(multi_agent::DelegateTaskTool),
+        std::sync::Arc::new(bot_delegate::BotDelegateTool),
         std::sync::Arc::new(skill::SkillsListTool),
         std::sync::Arc::new(skill::SkillViewTool),
         std::sync::Arc::new(skill::SkillReferenceTool),

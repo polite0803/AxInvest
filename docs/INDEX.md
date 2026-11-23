@@ -325,6 +325,7 @@
 | `P3/IPC-P3.md` | 参考 | P3 IPC 冻结稿：新增 8 命令、改 delete_bot_department、新增 bot-workflow-run-updated 事件、BOT_WORKFLOW_* 10 码入 11 语言、门禁命令原文。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P3/PLAN-P3.md` | 计划 | P3 T1'''–T8''' 任务卡：依赖图、落点文件、逐卡验收命令、估时 14.5 人日、Q 列表 8 条（含建议答案与替代路径）与收口判定。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P3/I18N-KEYS-P3.md` | 参考 | P3 权威 i18n 键名清单：错误码 ×10 + 前端 47 键共 627 条 11 语言译文，落盘顺序与 check-bot-i18n-keys 必需集合扩展说明。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P3/ACCEPTANCE-P3.md` | 参考 | P3 T8''' 全量门禁实测台账：8 命令审计覆盖、纵向/多层链 e2e 输出、18 条门禁 exit/摘要、他线红项归属与 PLAN-P3 §10 六条逐项签字。 | active | 2026-11-24 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -742,6 +743,7 @@
 | `P3/IPC-P3.md` | Bot P3 IPC 契约（冻结稿） | 8 新命令 + 改 delete_bot_department；bot-workflow-run-updated 事件；BOT_WORKFLOW_* 10 码；门禁命令原文。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/MODEL-P3.md` `P3/PLAN-P3.md` |
 | `P3/PLAN-P3.md` | PLAN：Bot 集成的 P3 纵向切片 | 多 Bot 协作/例程编排：T1'''–T8''' 任务卡与依赖图、Q 列表 8 条（建议答案+替代路径）、收口判定。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/GAP-P3.md` `P3/ADR-P3.md` `P3/IPC-P3.md` |
 | `P3/I18N-KEYS-P3.md` | Bot P3 i18n 权威键清单 | 错误码 ×10 + 前端 47 键 = 627 条译文（11 语言）；落盘顺序与必需集合门禁扩展。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/IPC-P3.md` |
+| `P3/ACCEPTANCE-P3.md` | Bot 集成 P3 门禁验收台账 | P3 纵向与多层链 e2e 原始输出、T8''' 18 条门禁 exit/读数、非 Bot 红项归属，PLAN-P3 §10 六条逐条 PASS 签字。 | active | 2026-11-24 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/PLAN-P3.md` `P3/IPC-P3.md` |
 | `dependency-graph.md` | AxAgent 仓库依赖图与拆分分析 | 仓库依赖图与按技术层拆分可行性分析（参考） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `dependency-matrix.md` | AxAgent Crate 精确依赖矩阵（实测） | 逐 crate 读取 Cargo.toml 得到的精确依赖矩阵（2026-10-31 实测） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `gate-coverage-ledger.md` | 门禁覆盖台账（gate-coverage-ledger） | CI / 本地门禁覆盖面台账与补齐进度 | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 | `PLAN-declarative-schema-sync.md` |

@@ -192,7 +192,7 @@ export const BOT_IPC = {
       ],
     },
   ],
-  /** IPC.md §5 + IPC-P2 §3 + IPC-P2B §4：15 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
+  /** IPC.md §5 + IPC-P2 §3 + IPC-P2B §4：19 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
   errorCodes: [
     "BOT_NOT_FOUND",
     "BOT_NAME_INVALID",
@@ -211,6 +211,10 @@ export const BOT_IPC = {
     // P2-b（IPC-P2B §4）：部门错误码 ×2（T2''）；委派错误码 ×4 由 T4'' 追加
     "BOT_DEPARTMENT_NOT_FOUND",
     "BOT_DEPARTMENT_MEMBER_EXISTS",
+    "BOT_ASSIGNMENT_NOT_FOUND",
+    "BOT_DELEGATE_SELF",
+    "BOT_DELEGATE_BUSY",
+    "BOT_DELEGATE_TIMEOUT",
   ],
   /** IPC.md §6：P1 不新增事件。出现任何 `bot-*` 事件名即违约。 */
   forbiddenEventPrefix: "bot-",
@@ -579,20 +583,24 @@ export function auditBotIpc(sources) {
     }
   }
 
-  // 6) 事件：P1 不新增 bot-* 事件
+  // 6) 事件：P1 不新增 bot-* 事件；P2-b 唯一例外 `bot-assignment-updated`（IPC-P2B §5）。
+  const P2B_ALLOWED_EVENT = "bot-assignment-updated";
+  const P2B_ALLOWED_VARIANT = "BotAssignmentUpdated";
   const eventSources = [
     ["event_names.rs", sources.eventsEnum ?? ""],
     ["types/generated/events.ts", sources.eventsTs ?? ""],
   ];
   for (const [label, src] of eventSources) {
-    const re = new RegExp(`"${spec.forbiddenEventPrefix}[a-z0-9-]*"`);
-    const hit = re.exec(src);
-    if (hit) {
-      errors.push(`${label} 出现 P1 禁止的新事件 \`${hit[0]}\`（IPC.md §6：P1 不新增事件）`);
+    const re = new RegExp(`"${spec.forbiddenEventPrefix}[a-z0-9-]*"`, "g");
+    const hits = [...src.matchAll(re)].map((m) => m[0]);
+    const bad = hits.find((h) => h !== `"${P2B_ALLOWED_EVENT}"`);
+    if (bad) {
+      errors.push(`${label} 出现 P1 禁止的新事件 \`${bad}\`（IPC.md §6：P1 不新增事件）`);
     }
-    const variant = /\bBot[A-Z][A-Za-z0-9]*\b/.exec(src);
-    if (variant && /IpcEventName|pub\s+enum/.test(src)) {
-      errors.push(`${label} 出现 Bot 事件变体 \`${variant[0]}\`（P1 不新增事件）`);
+    const variants = [...src.matchAll(/\bBot[A-Z][A-Za-z0-9]*\b/g)].map((m) => m[0]);
+    const badVariant = variants.find((v) => v !== P2B_ALLOWED_VARIANT);
+    if (badVariant && /IpcEventName|pub\s+enum/.test(src)) {
+      errors.push(`${label} 出现 Bot 事件变体 \`${badVariant}\`（P1 不新增事件）`);
     }
   }
 
@@ -635,6 +643,76 @@ export function auditBotIpc(sources) {
       // P2 命令（如 `write_bot_soul`）与给外部集成方留的纯 API 面都可能没有 UI 调用点，
       // 这不足以判失败；但必须留痕，防止「实现了却永远走不到」悄悄变成死代码。
       warnings.push(`命令 \`${cmd.name}\` 在 src/** 无调用点（mock/测试除外）—— 声明了却没人用`);
+    }
+  }
+
+  // ── P2-b 段（IPC-P2B §1/§2.2/§6）：8 新命令两步注册 + DTO 字段 + 事件名 ──
+  // 仅在真实仓库检查（sources.p2b 显式给出）时执行；selftest 的合成 P1 源不触发。
+  const p2b = sources.p2b;
+  if (p2b) {
+    const P2B_COMMANDS = [
+      ["list_bot_departments", "bot_department"],
+      ["create_bot_department", "bot_department"],
+      ["update_bot_department", "bot_department"],
+      ["delete_bot_department", "bot_department"],
+      ["add_bot_to_department", "bot_department"],
+      ["remove_bot_from_department", "bot_department"],
+      ["create_bot_assignment", "bot_assignment"],
+      ["list_bot_assignments", "bot_assignment"],
+      ["cancel_bot_assignment", "bot_assignment"],
+    ];
+    const p2bSources = {
+      bot_department: p2b.deptRs ?? "",
+      bot_assignment: p2b.asmtRs ?? "",
+    };
+    for (const [name, mod] of P2B_COMMANDS) {
+      const src = p2bSources[mod];
+      if (!new RegExp(`pub\\s+async\\s+fn\\s+${name}\\b`).test(src)) {
+        errors.push(`[P2-b] 缺命令 \`${name}\`（${mod}.rs 中无 fn 定义）`);
+      }
+      if (!new RegExp(`commands::${mod}::${name}\\b`).test(sources.registerRs ?? "")) {
+        errors.push(`[P2-b] \`${name}\` 未出现在 register_commands.rs（两步注册缺一步）`);
+      }
+    }
+    // BotAssignment DTO 权威定义：harness types/bot.rs 与前端 types/bot.ts 双向字段核���。
+    const P2B_FIELDS = [
+      "id", "root_id", "parent_id", "depth", "origin", "requester_bot_id",
+      "requester_conversation_id", "assignee_bot_id", "assignee_name", "mode",
+      "task_text", "status", "result_text", "error_code", "error_detail",
+      "started_at", "finished_at", "created_at", "updated_at",
+    ];
+    const rustDto = /pub struct BotAssignment \{([\s\S]*?)\n\}/.exec(sources.typesRs ?? "");
+    if (!rustDto) {
+      errors.push("[P2-b] harness types/bot.rs 缺 BotAssignment 结构（IPC-P2B §2.2）");
+    } else {
+      const missing = P2B_FIELDS.filter((f) => !new RegExp(`\\b${f}\\s*:`).test(rustDto[1]));
+      if (missing.length) {
+        errors.push(`[P2-b] BotAssignment 缺字段: ${missing.join(", ")}`);
+      }
+      if (!/#\[serde\(rename_all = "camelCase"\)\]\s*\npub struct BotAssignment/.test(sources.typesRs ?? "")) {
+        errors.push("[P2-b] BotAssignment 缺 `#[serde(rename_all = \"camelCase\")]`");
+      }
+    }
+    const tsDto = /export interface BotAssignment \{([\s\S]*?)\n\}/.exec(sources.typesTs ?? "");
+    if (!tsDto) {
+      errors.push("[P2-b] src/types/bot.ts 缺 BotAssignment 接口（前端 DTO 权威镜像）");
+    } else {
+      const tsMissing = P2B_FIELDS.map((f) => f.replace(/_([a-z])/g, (_, c) => c.toUpperCase()))
+        .filter((f) => !new RegExp(`\\b${f}\\s*:`).test(tsDto[1]));
+      if (tsMissing.length) {
+        errors.push(`[P2-b] 前端 BotAssignment 缺 camelCase 字段: ${tsMissing.join(", ")}`);
+      }
+    }
+    // 事件：枚举 + 生成物 + 真实发射点（G 节通用判据之外再锁字面量）。
+    const EVENT = "bot-assignment-updated";
+    if (!(sources.eventsEnum ?? "").includes("BotAssignmentUpdated")) {
+      errors.push("[P2-b] IpcEventName 缺 BotAssignmentUpdated（IPC-P2B §5）");
+    }
+    if (!(sources.eventsTs ?? "").includes(`"${EVENT}"`)) {
+      errors.push(`[P2-b] 生成物 events.ts 缺 "${EVENT}"`);
+    }
+    if (!(p2b.asmtRs ?? "").includes("BotAssignmentUpdated.as_str()")) {
+      errors.push(`[P2-b] 无 "${EVENT}" 发射点（命令层/Runner 必须发）`);
     }
   }
 

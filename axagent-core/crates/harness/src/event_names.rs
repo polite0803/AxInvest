@@ -132,6 +132,8 @@ pub enum IpcEventName {
     WorkerProgress,
     WorkerCompleted,
     WorkerFailed,
+    // ── Bot 委派（P2-b IPC-P2B §5；前端委派面板监听） ──
+    BotAssignmentUpdated,
 }
 
 impl IpcEventName {
@@ -230,6 +232,7 @@ impl IpcEventName {
             IpcEventName::WorkerProgress => "worker-progress",
             IpcEventName::WorkerCompleted => "worker-completed",
             IpcEventName::WorkerFailed => "worker-failed",
+            IpcEventName::BotAssignmentUpdated => "bot-assignment-updated",
         }
     }
 
@@ -319,6 +322,7 @@ impl IpcEventName {
         IpcEventName::WorkerProgress,
         IpcEventName::WorkerCompleted,
         IpcEventName::WorkerFailed,
+        IpcEventName::BotAssignmentUpdated,
     ];
 }
 

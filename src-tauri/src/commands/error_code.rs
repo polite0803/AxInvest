@@ -73,6 +73,14 @@ pub mod bot {
     pub const DEPARTMENT_NOT_FOUND: &str = "BOT_DEPARTMENT_NOT_FOUND";
     /// Bot 已归属其他部门 / 同部门重复加入（P2-b T2''）
     pub const DEPARTMENT_MEMBER_EXISTS: &str = "BOT_DEPARTMENT_MEMBER_EXISTS";
+    /// 委派记录不存在（P2-b T4''）
+    pub const ASSIGNMENT_NOT_FOUND: &str = "BOT_ASSIGNMENT_NOT_FOUND";
+    /// Bot 不能委派给自己（P2-b T4''）
+    pub const DELEGATE_SELF: &str = "BOT_DELEGATE_SELF";
+    /// 委派并发已达上限（P2-b T4''）
+    pub const DELEGATE_BUSY: &str = "BOT_DELEGATE_BUSY";
+    /// 委派执行超时（P2-b T4''）
+    pub const DELEGATE_TIMEOUT: &str = "BOT_DELEGATE_TIMEOUT";
 }
 
 /// 微调训练相关错误码

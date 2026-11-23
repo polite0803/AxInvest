@@ -792,6 +792,11 @@ function checkBotContracts() {
     frontendFiles,
     eventsEnum: existsSync(EVENT_NAME_ENUM) ? read(EVENT_NAME_ENUM) : "",
     eventsTs: existsSync(EVENT_NAMES_TS) ? read(EVENT_NAMES_TS) : "",
+    // P2-b（IPC-P2B §6）：8 命令 + BotAssignment DTO + 事件的契约审计。
+    p2b: {
+      deptRs: read(join(SRC_TAURI, "src", "commands", "bot_department.rs")),
+      asmtRs: read(join(SRC_TAURI, "src", "commands", "bot_assignment.rs")),
+    },
   });
   console.log(`
 [BOT] Bot P1 IPC 契约：errors=${result.errors.length} warnings=${result.warnings.length}`);

@@ -55,6 +55,9 @@ const LazyTasksCenterPage = lazy(() =>
   import("@/pages/TasksCenterPage/TasksCenterPage").then((m) => ({ default: m.TasksCenterPage }))
 );
 const LazyBotsPage = lazy(() => import("@/pages/BotsPage").then((m) => ({ default: m.BotsPage })));
+const LazyBotWorkflowsPage = lazy(() =>
+  import("@/pages/BotWorkflowsPage").then((m) => ({ default: m.BotWorkflowsPage }))
+);
 
 /**
  * 旧链兼容：`/opc/industry/:packId` → `/opc/domain/:packId`。
@@ -261,6 +264,15 @@ export const ContentArea = memo(function ContentArea() {
             element={
               <PageContextProvider page="bots">
                 <SafeLazyPage Page={LazyBotsPage} />
+              </PageContextProvider>
+            }
+          />
+          {/* P3：Bot 编排页（与 /bots 并列的独立路由） */}
+          <Route
+            path="/bots/workflows"
+            element={
+              <PageContextProvider page="bots">
+                <SafeLazyPage Page={LazyBotWorkflowsPage} />
               </PageContextProvider>
             }
           />

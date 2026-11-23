@@ -24,7 +24,7 @@ import { message } from "@/lib/toast";
 import { useBotStore, useConversationStore, useProviderStore } from "@/stores";
 import type { Bot, BotDepartment, CreateBotInput, UpdateBotInput } from "@/types";
 import { BotRoutinesPanel } from "./BotsPage/BotRoutinesPanel";
-import { Alert, Spin, theme } from "antd";
+import { Alert, Button, Spin, theme } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -316,6 +316,11 @@ export function BotsPage() {
       </aside>
 
       <section style={{ flex: 1, minWidth: 0, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button type="link" href="/bots/workflows" data-testid="bot-workflow-entry">
+            {t("bot.workflow.title")}
+          </Button>
+        </div>
         {showError
           ? <Alert type="error" showIcon closable message={error} onClose={() => setDismissedError(error)} />
           : null}

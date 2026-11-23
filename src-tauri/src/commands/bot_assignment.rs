@@ -157,9 +157,10 @@ pub async fn list_bot_assignments(
     assignee_bot_id: Option<String>,
     bot_id: Option<String>,
     status: Option<String>,
+    root_id: Option<String>,
 ) -> Result<Vec<BotAssignment>, String> {
     let db = state.harness.db();
-    let filter = AssignmentFilter { requester_bot_id, assignee_bot_id, bot_id, status };
+    let filter = AssignmentFilter { requester_bot_id, assignee_bot_id, bot_id, status, root_id, ..Default::default() };
     let rows = asmt_repo::list_assignments(db, &filter, |_| String::new())
         .await
         .map_err(map_asmt_error)?;

@@ -192,7 +192,7 @@ export const BOT_IPC = {
       ],
     },
   ],
-  /** IPC.md §5 + IPC-P2 §3 + IPC-P2B §4：19 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
+  /** IPC.md §5 + IPC-P2 §3 + IPC-P2B §4 + IPC-P3 §4：31 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
   errorCodes: [
     "BOT_NOT_FOUND",
     "BOT_NAME_INVALID",
@@ -215,6 +215,19 @@ export const BOT_IPC = {
     "BOT_DELEGATE_SELF",
     "BOT_DELEGATE_BUSY",
     "BOT_DELEGATE_TIMEOUT",
+    // P3（IPC-P3 §4）：编排 10 个 + 多层委派 2 个
+    "BOT_DELEGATE_CYCLE",
+    "BOT_DELEGATE_MAX_DEPTH",
+    "BOT_WORKFLOW_NOT_FOUND",
+    "BOT_WORKFLOW_STEP_INVALID",
+    "BOT_WORKFLOW_CYCLE",
+    "BOT_WORKFLOW_DEPARTMENT_REQUIRED",
+    "BOT_WORKFLOW_MEMBER_CHANGED",
+    "BOT_WORKFLOW_RUN_NOT_FOUND",
+    "BOT_WORKFLOW_RUN_BUSY",
+    "BOT_WORKFLOW_STEP_BOT_MISSING",
+    "BOT_WORKFLOW_TIMEOUT",
+    "BOT_WORKFLOW_CANCEL_INVALID",
   ],
   /** IPC.md §6：P1 不新增事件。出现任何 `bot-*` 事件名即违约。 */
   forbiddenEventPrefix: "bot-",

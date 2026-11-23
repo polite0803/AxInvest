@@ -17,6 +17,7 @@ mod capability_vector_search;
 mod bot_approval;
 mod bot_routine_runner;
 pub mod bot_assignment_runner;
+pub mod bot_workflow_steps;
 mod bot_context;
 mod capability_workflow_io;
 mod commands;

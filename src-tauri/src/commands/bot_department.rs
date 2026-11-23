@@ -146,6 +146,10 @@ pub async fn delete_bot_department(
     let db = state.harness.db();
     // 先确认部门存在，避免「删了个空」返回成功。
     dept_repo::get_department(db, &department_id).await.map_err(map_dept_error)?;
+    // ADR-P3-3：删部门不清编排定义，转实例归属保留。
+    axagent_dao::repo::bot_workflow::transfer_department_to_instance(db, &department_id)
+        .await
+        .map_err(map_dept_error)?;
     let members = dept_repo::delete_department_members(db, &department_id)
         .await
         .map_err(map_dept_error)?;

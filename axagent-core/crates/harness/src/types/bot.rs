@@ -223,7 +223,7 @@ fn default_max_concurrency() -> i32 { 2 }
 fn default_total_timeout() -> i32 { 900 }
 
 /// 编排步骤（`steps_json` 元素，与前端 TS 类型共用同一份契约）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotWorkflowStep {
     pub step_key: String,

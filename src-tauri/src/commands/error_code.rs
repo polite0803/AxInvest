@@ -81,6 +81,30 @@ pub mod bot {
     pub const DELEGATE_BUSY: &str = "BOT_DELEGATE_BUSY";
     /// 委派执行超时（P2-b T4''）
     pub const DELEGATE_TIMEOUT: &str = "BOT_DELEGATE_TIMEOUT";
+    /// 委派链出现循环（P3 ADR-P3-2）
+    pub const DELEGATE_CYCLE: &str = "BOT_DELEGATE_CYCLE";
+    /// 委派链深度超过 3（P3 ADR-P3-2）
+    pub const DELEGATE_MAX_DEPTH: &str = "BOT_DELEGATE_MAX_DEPTH";
+    /// 未找到 Bot 编排（P3）
+    pub const WORKFLOW_NOT_FOUND: &str = "BOT_WORKFLOW_NOT_FOUND";
+    /// 编排步骤定义不合法（P3）
+    pub const WORKFLOW_STEP_INVALID: &str = "BOT_WORKFLOW_STEP_INVALID";
+    /// 编排步骤循环依赖（P3）
+    pub const WORKFLOW_CYCLE: &str = "BOT_WORKFLOW_CYCLE";
+    /// 部门编排缺部门（P3）
+    pub const WORKFLOW_DEPARTMENT_REQUIRED: &str = "BOT_WORKFLOW_DEPARTMENT_REQUIRED";
+    /// 步骤 Bot 已不属于该部门（P3）
+    pub const WORKFLOW_MEMBER_CHANGED: &str = "BOT_WORKFLOW_MEMBER_CHANGED";
+    /// 未找到编排运行记录（P3）
+    pub const WORKFLOW_RUN_NOT_FOUND: &str = "BOT_WORKFLOW_RUN_NOT_FOUND";
+    /// 编排存在未结束的运行（P3）
+    pub const WORKFLOW_RUN_BUSY: &str = "BOT_WORKFLOW_RUN_BUSY";
+    /// 步骤 Bot 不存在或已禁用（P3）
+    pub const WORKFLOW_STEP_BOT_MISSING: &str = "BOT_WORKFLOW_STEP_BOT_MISSING";
+    /// 编排运行超时（P3）
+    pub const WORKFLOW_TIMEOUT: &str = "BOT_WORKFLOW_TIMEOUT";
+    /// 终态 run 取消非法（P3）
+    pub const WORKFLOW_CANCEL_INVALID: &str = "BOT_WORKFLOW_CANCEL_INVALID";
 }
 
 /// 微调训练相关错误码

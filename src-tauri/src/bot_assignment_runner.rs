@@ -20,7 +20,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use axagent_harness::event_names::IpcEventName;
 use axagent_harness::types::{BotAssignment, MessageRole};
-use axagent_tools::tools::bot_delegate::{BotDelegateInput, BotDelegateOutcome, BotDelegateRunner};
+use axagent_tools::tools::bot_delegate::{
+    BotDelegateInput, BotDelegateOutcome, BotDelegateRunner, DelegateContext, MAX_DELEGATE_DEPTH,
+    MODE_CONSULT, MODE_DISPATCH,
+};
 use tauri::{AppHandle, Emitter};
 
 use axagent_dao::repo::bot_assignment as asmt_repo;
@@ -28,6 +31,8 @@ use axagent_dao::DatabaseConnection;
 
 /// dispatch 超时预算（IPC-P2B §3，Q5 冻结值）。常量集中在本文件头部。
 pub const DISPATCH_TIMEOUT_SECS: u64 = 300;
+/// ADR-P3-2 ④：同一 root 链每层在途 dispatch 上限（编排并发预算另算）。
+pub const MAX_IN_FLIGHT_PER_DEPTH: i64 = 2;
 
 /// 事件出口：生产接 AppHandle::emit；测试传闭包收状态序列，避免 Tauri 测试壳。
 pub type EventSink = dyn Fn(&BotAssignment) + Send + Sync;
@@ -37,6 +42,15 @@ pub type EventSink = dyn Fn(&BotAssignment) + Send + Sync;
 #[async_trait]
 pub trait AssignmentTurnExecutor: Send + Sync {
     async fn execute(&self, bot_id: &str, task_text: &str) -> Result<String, String>;
+
+    /// P3：真实执行器用链上下文放行子委派；P2-b 的 Fake 走默认实现，签名不变。
+    async fn execute_with_context(
+        &self,
+        assignment: &BotAssignment,
+        task_text: &str,
+    ) -> Result<String, String> {
+        self.execute(&assignment.assignee_bot_id, task_text).await
+    }
 }
 
 /// 真实执行器：与例程共用 `run_bot_non_interactive_turn`。
@@ -44,19 +58,38 @@ struct RoutineTurnExecutor {
     ctx: Arc<crate::bot_routine_runner::BotRoutineContext>,
 }
 
-#[async_trait]
-impl AssignmentTurnExecutor for RoutineTurnExecutor {
-    async fn execute(&self, bot_id: &str, task_text: &str) -> Result<String, String> {
-        let bot = axagent_dao::repo::bot::get_bot(self.ctx.harness.db(), bot_id)
-            .await
-            .map_err(|e| format!("assignee Bot 不存在: {e}"))?;
+impl RoutineTurnExecutor {
+    async fn execute_with_context_impl(
+        &self,
+        assignment: &BotAssignment,
+        task_text: &str,
+    ) -> Result<String, String> {
+        let bot = axagent_dao::repo::bot::get_bot(
+            self.ctx.harness.db(), &assignment.assignee_bot_id,
+        )
+        .await
+        .map_err(|e| format!("assignee Bot 不存在: {e}"))?;
         if !bot.is_enabled {
             return Err(format!("assignee Bot {} 已禁用", bot.id));
         }
-        let boundary = "本轮来自 Bot 委派：只使用你自己的 SOUL/MEMORY 与知识作答，\
-                        不要引用发起方身份或上下文。结果将回传发起方；\
-                        本轮不允许再委派其他 Bot（一层委派边界，ADR-P2B-5）。";
-        crate::bot_routine_runner::run_bot_non_interactive_turn(
+        let boundary = if assignment.depth < MAX_DELEGATE_DEPTH as i32 {
+            "本轮来自 Bot 委派：只使用你自己的 SOUL/MEMORY 与知识作答，\
+             不要引用发起方身份或上下文。结果将回传发起方；\
+             可继续委派（depth<3，ADR-P3-2）。"
+        } else {
+            "本轮来自 Bot 委派：只使用你自己的 SOUL/MEMORY 与知识作答，\
+             不要引用发起方身份或上下文。结果将回传发起方；\
+             本轮不得再委派（depth=3，ADR-P3-2）。"
+        };
+        let chain = DelegateContext {
+            parent_assignment_id: Some(assignment.id.clone()),
+            root_assignment_id: Some(assignment.root_id.clone()),
+            depth: assignment.depth as u8,
+            workflow_run_id: assignment.workflow_run_id.clone(),
+            step_key: assignment.step_key.clone(),
+            requester_conversation_id: assignment.requester_conversation_id.clone(),
+        };
+        crate::bot_routine_runner::run_bot_non_interactive_turn_with_context(
             &self.ctx,
             &bot.id,
             &bot.approval_mode,
@@ -64,24 +97,52 @@ impl AssignmentTurnExecutor for RoutineTurnExecutor {
             bot.model_id.as_deref(),
             task_text,
             Some(boundary),
+            chain,
         )
         .await
     }
 }
 
+#[async_trait]
+impl AssignmentTurnExecutor for RoutineTurnExecutor {
+    async fn execute(&self, bot_id: &str, task_text: &str) -> Result<String, String> {
+        self.execute_with_context_impl(
+            &BotAssignment { assignee_bot_id: bot_id.to_string(), ..Default::default() },
+            task_text,
+        )
+        .await
+    }
+
+    async fn execute_with_context(
+        &self,
+        assignment: &BotAssignment,
+        task_text: &str,
+    ) -> Result<String, String> {
+        self.execute_with_context_impl(assignment, task_text).await
+    }
+}
+
 /// 回执落回执线程（dispatch 专属；consult 不落，Q3）。
-async fn append_receipt(db: &DatabaseConnection, conversation_id: &str, text: &str) {
+/// P3：正文前缀 `[L{depth} · {stepKey} · {botName}]`，parent 仍指根 anchor。
+async fn append_receipt(
+    db: &DatabaseConnection,
+    conversation_id: &str,
+    parent_message_id: Option<&str>,
+    prefix: &str,
+    text: &str,
+) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return;
     }
+    let content = format!("{prefix}{trimmed}");
     if let Err(e) = axagent_dao::repo::message::create_message(
         db,
         conversation_id,
         MessageRole::Assistant,
-        trimmed,
+        &content,
         &[],
-        None,
+        parent_message_id,
         0,
     )
     .await
@@ -96,12 +157,13 @@ async fn append_receipt(db: &DatabaseConnection, conversation_id: &str, text: &s
 
 /// 跑一单 dispatch。状态迁移与事件在每一步落库后发；超时按 `timeout` 注入
 /// （测试传短时钟；生产走 `run_assignment` 的固定 300s）。
-pub async fn run_assignment_with_timeout(
+pub async fn run_assignment_inner(
     db: &DatabaseConnection,
     sink: &EventSink,
     assignment_id: &str,
     executor: &dyn AssignmentTurnExecutor,
     timeout: Duration,
+    completion: &(dyn Fn(&BotAssignment) + Sync),
 ) {
     // queued → running
     let running = match asmt_repo::transition(
@@ -119,8 +181,27 @@ pub async fn run_assignment_with_timeout(
         }
     };
     sink(&running);
+    completion(&running);
 
-    let assignee = running.assignee_bot_id.clone();
+    let bot_name = axagent_dao::repo::bot::get_bot(db, &running.assignee_bot_id)
+        .await
+        .map(|b| b.name)
+        .unwrap_or_else(|_| running.assignee_bot_id.clone());
+    let step_tag = running.step_key.as_deref().unwrap_or("-");
+    let receipt_prefix = if running.depth <= 1 {
+        format!("[步骤 {step_tag} · {bot_name}] ")
+    } else {
+        format!("[L{} · {step_tag} · {bot_name}] ", running.depth)
+    };
+    // run 内步骤/子孙回执 parent=根 anchor；纯委派链无 anchor 时 parent=None。
+    let anchor_id = if let Some(run_id) = &running.workflow_run_id {
+        axagent_dao::repo::bot_workflow_run::get_run(db, run_id)
+            .await
+            .ok()
+            .and_then(|r| r.anchor_message_id)
+    } else {
+        None
+    };
     let task_card = format!(
         "发起方：{}\n任务：{}",
         running
@@ -130,7 +211,11 @@ pub async fn run_assignment_with_timeout(
         running.task_text
     );
 
-    let outcome = match tokio::time::timeout(timeout, executor.execute(&assignee, &task_card)).await
+    let outcome = match tokio::time::timeout(
+        timeout,
+        executor.execute_with_context(&running, &task_card),
+    )
+    .await
     {
         Ok(Ok(text)) => Ok(text),
         Ok(Err(e)) => Err((None, e)),
@@ -155,9 +240,10 @@ pub async fn run_assignment_with_timeout(
             .await
             {
                 if let Some(conv) = &done.requester_conversation_id {
-                    append_receipt(db, conv, &text).await;
+                    append_receipt(db, conv, anchor_id.as_deref(), &receipt_prefix, &text).await;
                 }
                 sink(&done);
+                completion(&done);
             }
         }
         Err((code, detail)) => {
@@ -175,9 +261,35 @@ pub async fn run_assignment_with_timeout(
             .await
             {
                 sink(&failed);
+                completion(&failed);
             }
         }
     }
+}
+
+/// P3 步骤/子链入口：挂 run 完成钩子；执行器仍是 P2-b 的 RoutineTurnExecutor。
+pub async fn run_step_assignment(
+    db: &DatabaseConnection,
+    ctx: Arc<crate::bot_routine_runner::BotRoutineContext>,
+    assignment_id: &str,
+    timeout: Duration,
+    sink: &EventSink,
+    completion: &(dyn Fn(&BotAssignment) + Sync),
+) {
+    let executor = RoutineTurnExecutor { ctx };
+    run_assignment_inner(db, sink, assignment_id, &executor, timeout, completion).await;
+}
+
+/// P2-b 兼容入口：保留原签名，完成钩子为空（行为不变）。
+pub async fn run_assignment_with_timeout(
+    db: &DatabaseConnection,
+    sink: &EventSink,
+    assignment_id: &str,
+    executor: &dyn AssignmentTurnExecutor,
+    timeout: Duration,
+) {
+    let noop = |_: &BotAssignment| {};
+    run_assignment_inner(db, sink, assignment_id, executor, timeout, &noop).await;
 }
 
 /// 生产入口：300s 超时（IPC-P2B §3）。
@@ -192,12 +304,14 @@ pub async fn run_assignment(
             let _ = app.emit(IpcEventName::BotAssignmentUpdated.as_str(), a);
         }
     };
-    run_assignment_with_timeout(
+    let noop = |_: &BotAssignment| {};
+    run_assignment_inner(
         db,
         &sink,
         assignment_id,
         executor,
         Duration::from_secs(DISPATCH_TIMEOUT_SECS),
+        &noop,
     )
     .await;
 }
@@ -207,6 +321,11 @@ pub fn install_dispatch_scheduler(
     ctx: Arc<crate::bot_routine_runner::BotRoutineContext>,
     app: Option<AppHandle>,
 ) {
+    crate::bot_workflow_runner::install_runner(
+        ctx.harness.db().clone(),
+        ctx.clone(),
+        app.clone(),
+    );
     crate::commands::bot_assignment::set_dispatch_scheduler(move |id| {
         let ctx = ctx.clone();
         let app = app.clone();
@@ -218,7 +337,22 @@ pub fn install_dispatch_scheduler(
     });
 }
 
-/// consult 执行器：同步轮内调用，落终态审计行并发一次事件，不落回执线程。
+/// ErrorResponse 是 JSON 串，抽 `code` 字段供审计行落码。
+fn extract_error_code(raw: &str) -> &'static str {
+    if raw.contains(crate::commands::error_code::bot::DELEGATE_CYCLE) {
+        crate::commands::error_code::bot::DELEGATE_CYCLE
+    } else if raw.contains(crate::commands::error_code::bot::DELEGATE_MAX_DEPTH) {
+        crate::commands::error_code::bot::DELEGATE_MAX_DEPTH
+    } else if raw.contains(crate::commands::error_code::bot::DELEGATE_TIMEOUT) {
+        crate::commands::error_code::bot::DELEGATE_TIMEOUT
+    } else if raw.contains(crate::commands::error_code::bot::DELEGATE_BUSY) {
+        crate::commands::error_code::bot::DELEGATE_BUSY
+    } else {
+        "ERR_PERMISSION"
+    }
+}
+
+/// consult/dispatch 工具执行器：同步征询落终态审计行；dispatch 落 queued 子单。
 struct ConsultRunner {
     ctx: Arc<crate::bot_routine_runner::BotRoutineContext>,
     app: Option<AppHandle>,
@@ -236,6 +370,35 @@ impl BotDelegateRunner for ConsultRunner {
         }
         if input.requester_bot_id.as_deref() == Some(&input.bot_id) {
             return Err("BOT_DELEGATE_SELF: Bot 不能委派给自己".to_string());
+        }
+        let chain_input = axagent_harness::types::CreateBotAssignment {
+            assignee_bot_id: input.bot_id.clone(),
+            task_text: input.question.clone(),
+            mode: MODE_CONSULT.to_string(),
+            parent_assignment_id: input.parent_assignment_id.clone(),
+            root_assignment_id: input.root_assignment_id.clone(),
+            workflow_run_id: input.workflow_run_id.clone(),
+            step_key: input.step_key.clone(),
+            requester_bot_id: input.requester_bot_id.clone(),
+            ..Default::default()
+        };
+        if let Err(e) = crate::commands::bot_assignment::check_chain_constraints(db, &chain_input).await {
+            let code = extract_error_code(&e);
+            let row = asmt_repo::record_consult_assignment_with_code(
+                db,
+                &input.origin,
+                input.requester_bot_id.as_deref().unwrap_or(""),
+                &assignee.id,
+                &input.question,
+                Err(e.clone()),
+                Some(code),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            if let Some(app) = &self.app {
+                let _ = app.emit(IpcEventName::BotAssignmentUpdated.as_str(), &row);
+            }
+            return Err(e);
         }
         if let Some(requester) = &input.requester_bot_id {
             let bot = axagent_dao::repo::bot::get_bot(db, requester)
@@ -271,6 +434,55 @@ impl BotDelegateRunner for ConsultRunner {
             assignment_id: row.id,
             result_text: outcome.unwrap_or_default(),
             status: row.status,
+        })
+    }
+
+    /// P3 dispatch：创建子 assignment 后立即返回 queued，回执异步落同一线程。
+    async fn dispatch(&self, input: BotDelegateInput) -> Result<BotDelegateOutcome, String> {
+        let db = self.ctx.harness.db();
+        let assignee = axagent_dao::repo::bot::get_bot(db, &input.bot_id)
+            .await
+            .map_err(|e| format!("BOT_NOT_FOUND: {e}"))?;
+        if !assignee.is_enabled {
+            return Err("BOT_NOT_FOUND: assignee 已禁用".to_string());
+        }
+        let requester = input.requester_bot_id.clone().ok_or_else(|| {
+            "ERR_VALIDATION: dispatch 需要 requesterBotId".to_string()
+        })?;
+        let child = crate::commands::bot_assignment::create_step_assignment(
+            db,
+            &axagent_harness::types::CreateBotAssignment {
+                assignee_bot_id: input.bot_id.clone(),
+                task_text: input.question.clone(),
+                mode: MODE_DISPATCH.to_string(),
+                requester_bot_id: Some(requester),
+                requester_conversation_id: input.requester_conversation_id.clone(),
+                parent_assignment_id: input.parent_assignment_id.clone(),
+                root_assignment_id: input.root_assignment_id.clone(),
+                workflow_run_id: input.workflow_run_id.clone(),
+                step_key: input.step_key.clone(),
+                origin: Some("bot".to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        if let Some(app) = &self.app {
+            let _ = app.emit(IpcEventName::BotAssignmentUpdated.as_str(), &child);
+        }
+        let child_id = child.id.clone();
+        crate::commands::bot_assignment::schedule_step_dispatch(child_id);
+        tracing::info!(
+            error_code = "BOT_DELEGATE_DISPATCH_OK",
+            assignment_id = %child.id,
+            depth = child.depth,
+            "多层委派 dispatch 已落库"
+        );
+        Ok(BotDelegateOutcome {
+            assignment_id: child.id.clone(),
+            result_text: format!(
+                "{{\"assignmentId\":\"{}\",\"status\":\"queued\"}}", child.id
+            ),
+            status: child.status,
         })
     }
 }

@@ -48,6 +48,16 @@ fn schedule(id: String) {
     }
 }
 
+/// T3'''：步骤/子链落库后由 runner 决定调度路径（完成钩子要挂到 run），
+/// 不在此处直接 `schedule`。无 workflow 的纯链仍走 P2-b 默认路径。
+pub fn schedule_step_dispatch(id: String) {
+    if let Some(scheduler) = crate::bot_workflow_runner::step_scheduler() {
+        scheduler(id);
+    } else {
+        schedule(id);
+    }
+}
+
 fn validation_error(code: &str, field: &str, detail: impl Into<String>) -> String {
     ErrorResponse::new(code)
         .with_category(ErrorCategory::Validation)
@@ -75,7 +85,69 @@ async fn assignee_name(db: &axagent_dao::DatabaseConnection, id: &str) -> String
     bot_repo::get_bot(db, id).await.map(|b| b.name).unwrap_or_else(|_| id.to_string())
 }
 
-/// 校验 + 落库 + 并行门（纯 DB 版，命令与 T3'' runner 共用同一入口）。
+/// P3 ADR-P3-2 ③④：多层链的环/深度/逐层预算/链总预算校验。
+/// 返回的错误串含可审计的 error_code（工具层据此转 LLM 可读文本）。
+pub async fn check_chain_constraints(
+    db: &axagent_dao::DatabaseConnection,
+    input: &CreateBotAssignment,
+) -> std::result::Result<(), String> {
+    let Some(parent_id) = input.parent_assignment_id.as_deref() else {
+        return Ok(());
+    };
+    let parent = asmt_repo::get_assignment(db, parent_id, |_| String::new())
+        .await
+        .map_err(map_asmt_error)?;
+    let depth = parent.depth + 1;
+    if depth > asmt_repo::MAX_DEPTH {
+        return Err(validation_error(
+            bot_err::DELEGATE_MAX_DEPTH,
+            "parentAssignmentId",
+            format!("委派链深度上限为 {}", asmt_repo::MAX_DEPTH),
+        ));
+    }
+    let chain = asmt_repo::chain_bot_ids(db, parent_id).await.map_err(map_asmt_error)?;
+    if chain.iter().any(|id| id == &input.assignee_bot_id) {
+        return Err(validation_error(
+            bot_err::DELEGATE_CYCLE,
+            "assigneeBotId",
+            format!("Bot {} 已在委派链上", input.assignee_bot_id),
+        ));
+    }
+    let in_flight = asmt_repo::count_in_flight_dispatch_at_depth(db, &parent.root_id, depth)
+        .await
+        .map_err(map_asmt_error)?;
+    if in_flight >= 2 {
+        return Err(validation_error(
+            bot_err::DELEGATE_BUSY,
+            "assigneeBotId",
+            format!("root {} depth {depth} 在途已达 2", parent.root_id),
+        ));
+    }
+    // 链总预算从根开始计，不逐层重置。
+    let root = asmt_repo::get_assignment(db, &parent.root_id, |_| String::new())
+        .await
+        .map_err(map_asmt_error)?;
+    if axagent_harness::util_fns::now_ts().saturating_sub(root.created_at)
+        >= crate::bot_assignment_runner::DISPATCH_TIMEOUT_SECS as i64
+    {
+        return Err(validation_error(
+            bot_err::DELEGATE_TIMEOUT,
+            "parentAssignmentId",
+            "委派链总时长已达 300 秒",
+        ));
+    }
+    Ok(())
+}
+
+/// 编排步骤/子链的落库入口：复用 create_inner 的校验与并行门。
+/// 按 PLAN-P3 §3 不在此调用 scheduler —— 由 runner 挂完成钩子后显式调度。
+pub async fn create_step_assignment(
+    db: &axagent_dao::DatabaseConnection,
+    input: &CreateBotAssignment,
+) -> std::result::Result<BotAssignment, String> {
+    check_chain_constraints(db, input).await?;
+    create_inner(db, input).await
+}
 async fn create_inner(
     db: &axagent_dao::DatabaseConnection,
     input: &CreateBotAssignment,

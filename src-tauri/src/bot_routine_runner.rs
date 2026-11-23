@@ -26,6 +26,9 @@ use axagent_runtime_core::{
     ConversationRuntimeFactoryArgs, RuntimeFeatureConfig, create_conversation_runtime,
 };
 use axagent_tools::registry::UnifiedToolRegistry;
+use axagent_tools::tools::bot_delegate::{
+    with_delegate_context, DelegateContext, DELEGATE_CONTEXT, MAX_DELEGATE_DEPTH,
+};
 use tokio::sync::Mutex;
 
 /// 例程轮的执行依赖（executor 闭包捕获一次，每轮复用）。
@@ -135,15 +138,22 @@ async fn resolve_routine_provider(
     Ok((prov, adapter, ctx, model))
 }
 
-/// 每轮独立工具表（与 agent_turn_adapter 同理由 —— 独立实例避免与主 registry
-/// 的 tokio Mutex 死锁）。例程轮保留原有工具集 + Q6 新增的 `delegate_to_bot`；
-/// assignee 轮额外禁掉委派工具，保证 P2-b 委派深度恒为 1（ADR-P2B-5）。
-fn build_turn_tool_registry(assignee_round: bool) -> UnifiedToolRegistry {
+/// 轮次类型：例程/根轮恒保留委派工具；assignee 轮按深度放行（ADR-P3-2 ①）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnKind {
+    Routine,
+    Assignee,
+}
+
+/// 每轮独立工具表（独立实例避免与主 registry 的 tokio Mutex 死锁）。
+/// `Agent`/`RemoteTrigger` 恒禁；`delegate_to_bot` 在 depth<3 的 assignee 轮出示。
+pub fn build_turn_tool_registry(round_kind: TurnKind, depth: u8) -> UnifiedToolRegistry {
     let mut registry = UnifiedToolRegistry::new();
     registry.init_all();
     for name in registry.list_tools() {
+        let hide_delegate = round_kind == TurnKind::Assignee && depth >= MAX_DELEGATE_DEPTH;
         if matches!(name.as_str(), "Agent" | "RemoteTrigger")
-            || (assignee_round && name == "delegate_to_bot")
+            || (hide_delegate && name == "delegate_to_bot")
         {
             registry.disable_tool(&name);
         }
@@ -190,6 +200,25 @@ pub async fn run_bot_non_interactive_turn(
     prompt: &str,
     task_card: Option<&str>,
 ) -> Result<String, String> {
+    let chain = DELEGATE_CONTEXT.try_with(|v| v.clone()).unwrap_or_default();
+    run_bot_non_interactive_turn_with_context(
+        ctx, bot_id, bot_approval_mode, bot_provider_id, bot_model_id, prompt, task_card, chain,
+    )
+    .await
+}
+
+/// 带链上下文的非交互轮（P3）。内部链字段经 task-local 在工具调用期注入，
+/// 不进工具 JSON schema；例程入口仍走上面的无上下文包装，行为与 P2-a 一致。
+pub async fn run_bot_non_interactive_turn_with_context(
+    ctx: &BotRoutineContext,
+    bot_id: &str,
+    bot_approval_mode: &str,
+    bot_provider_id: Option<&str>,
+    bot_model_id: Option<&str>,
+    prompt: &str,
+    task_card: Option<&str>,
+    chain: DelegateContext,
+) -> Result<String, String> {
     // 存在性校验（executor 已验过，此处兜底：Bot 被并发删除时不产生幽灵轮）。
     axagent_dao::repo::bot::get_bot(ctx.harness.db(), bot_id)
         .await
@@ -207,8 +236,9 @@ pub async fn run_bot_non_interactive_turn(
     let (prov, adapter, mut req_ctx, model) =
         resolve_routine_provider(&ctx.harness, bot_provider_id, bot_model_id).await?;
 
-    // 工具装配：例程轮与 assignee 轮共用同一张表；后者禁委派工具防递归。
-    let tool_registry = build_turn_tool_registry(task_card.is_some());
+    // 工具装配：例程轮恒保留；assignee 轮按 task-local 深度放行（depth=3 禁用）。
+    let round_kind = if task_card.is_some() { TurnKind::Assignee } else { TurnKind::Routine };
+    let tool_registry = build_turn_tool_registry(round_kind, chain.depth);
 
     // 每轮新建的临时会话：execution_id 兼作 conversation_id（headless 先例同构）。
     let execution_id = format!("bot-routine-{}", uuid::Uuid::new_v4());
@@ -239,18 +269,19 @@ pub async fn run_bot_non_interactive_turn(
     // prompter = None（空表）：无人在场的轮 ask 类操作按权限策略自动 Deny（ADR-P2-4）。
     let prompters: Arc<Mutex<HashMap<String, ChannelPermissionPrompter>>> =
         Arc::new(Mutex::new(HashMap::new()));
-    let (summary, _updated) = ctx
-        .session_manager
-        .run_turn_with_tools(
+    let (summary, _updated) = with_delegate_context(
+        chain.clone(),
+        ctx.session_manager.run_turn_with_tools(
             &session_id,
             prompt.to_string(),
             runtime,
             execution_id.clone(),
             Some(cancel_token),
             prompters,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     // 占位会话即时清理（与 agent_turn_adapter 同一防堆积语义）。
     if let Err(e) = axagent_dao::repo::conversation::delete_placeholder_conversation(
@@ -314,17 +345,23 @@ pub async fn finish_bot_routine(
 #[cfg(test)]
 mod p2_bot_routine_tests {
 
-    // ADR-P2B-5：一层委派的防环判据 —— assignee 轮工具表不得含 delegate_to_bot。
+    // ADR-P3-2 ①：多层委派按深度放行（P2-b 一层断言自 P3 起 superseded）。
     #[test]
-    fn assignee_round_tool_table_excludes_delegate() {
-        let routine = super::build_turn_tool_registry(false);
-        let assignee = super::build_turn_tool_registry(true);
+    fn delegate_tool_respects_depth_cap() {
+        use super::TurnKind;
+        let routine = super::build_turn_tool_registry(TurnKind::Routine, 1);
         assert!(routine.list_tools().iter().any(|n| n == "delegate_to_bot"),
-            "Q6：例程轮可发起委派");
-        assert!(!assignee.list_tools().iter().any(|n| n == "delegate_to_bot"),
-            "assignee 轮不得再委派（深度恒 1）");
-        assert!(!assignee.list_tools().iter().any(|n| n == "Agent" || n == "RemoteTrigger"),
-            "P2-a 既有的防递归工具禁用不得回归");
+            "例程/根轮恒可发起委派");
+        for depth in [1u8, 2] {
+            let assignee = super::build_turn_tool_registry(TurnKind::Assignee, depth);
+            assert!(assignee.list_tools().iter().any(|n| n == "delegate_to_bot"),
+                "depth={depth} 应可继续委派");
+            assert!(!assignee.list_tools().iter().any(|n| n == "Agent" || n == "RemoteTrigger"),
+                "P2-a 既有的防递归工具禁用不得回归");
+        }
+        let capped = super::build_turn_tool_registry(TurnKind::Assignee, super::MAX_DELEGATE_DEPTH);
+        assert!(!capped.list_tools().iter().any(|n| n == "delegate_to_bot"),
+            "depth=3 不得再注册委派工具");
     }
 
     // ADR-P2-4：Bot 五档映射在例程路径的落点 —— 例程函数无会话参数本身就是

@@ -121,10 +121,7 @@ pub async fn list_assignments(
     if let Some(v) = &filter.step_key {
         query = query.filter(bot_assignments::Column::StepKey.eq(v.clone()));
     }
-    let rows = query
-        .order_by_desc(bot_assignments::Column::CreatedAt)
-        .all(db)
-        .await?;
+    let rows = query.order_by_desc(bot_assignments::Column::CreatedAt).all(db).await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -138,7 +135,10 @@ pub async fn list_assignments(
 /// 状态机校验与业务校验（Bot 存在 / 非自身 / 并行门）在命令层。
 pub const MAX_DEPTH: i32 = 3;
 
-pub async fn create_assignment(db: &DatabaseConnection, input: &CreateBotAssignment) -> Result<BotAssignment> {
+pub async fn create_assignment(
+    db: &DatabaseConnection,
+    input: &CreateBotAssignment,
+) -> Result<BotAssignment> {
     let id = gen_id();
     let now = now_ts();
 
@@ -148,7 +148,8 @@ pub async fn create_assignment(db: &DatabaseConnection, input: &CreateBotAssignm
         let child_depth = parent.depth + 1;
         if child_depth > MAX_DEPTH {
             return Err(AxAgentError::Validation(format!(
-                "委派链深度超过 {MAX_DEPTH}: parent={} depth={}", parent.id, parent.depth
+                "委派链深度超过 {MAX_DEPTH}: parent={} depth={}",
+                parent.id, parent.depth
             )));
         }
         // 环防护：父链上已出现同一 Bot 时拒绝（T3 的动态环检测在工具层，这里是落库兜底）。
@@ -160,7 +161,8 @@ pub async fn create_assignment(db: &DatabaseConnection, input: &CreateBotAssignm
             }
             if row.assignee_bot_id == input.assignee_bot_id {
                 return Err(AxAgentError::Validation(format!(
-                    "Bot {} 已在委派链上", input.assignee_bot_id
+                    "Bot {} 已在委派链上",
+                    input.assignee_bot_id
                 )));
             }
             cursor = match &row.parent_id {
@@ -168,13 +170,19 @@ pub async fn create_assignment(db: &DatabaseConnection, input: &CreateBotAssignm
                 None => None,
             };
         }
-        root_id = if let Some(r) = &input.root_assignment_id { r.clone() } else { parent.root_id.clone() };
+        root_id = if let Some(r) = &input.root_assignment_id {
+            r.clone()
+        } else {
+            parent.root_id.clone()
+        };
         parent_id = Some(parent.id.clone());
         depth = child_depth;
         inherited = (
             input.origin.clone().unwrap_or_else(|| "bot".to_string()),
             input.requester_bot_id.clone().or_else(|| Some(parent.assignee_bot_id.clone())),
-            input.requester_conversation_id_override.clone()
+            input
+                .requester_conversation_id_override
+                .clone()
                 .or_else(|| input.requester_conversation_id.clone())
                 .or_else(|| parent.requester_conversation_id.clone()),
             input.workflow_run_id.clone().or(parent.workflow_run_id.clone()),
@@ -189,12 +197,16 @@ pub async fn create_assignment(db: &DatabaseConnection, input: &CreateBotAssignm
                 input.requester_bot_id.as_ref().map(|_| "bot").unwrap_or("person").to_string()
             }),
             input.requester_bot_id.clone(),
-            input.requester_conversation_id_override.clone().or_else(|| input.requester_conversation_id.clone()),
+            input
+                .requester_conversation_id_override
+                .clone()
+                .or_else(|| input.requester_conversation_id.clone()),
             input.workflow_run_id.clone(),
             input.step_key.clone(),
         );
     }
-    let (origin, requester_bot_id, requester_conversation_id, workflow_run_id, step_key) = inherited;
+    let (origin, requester_bot_id, requester_conversation_id, workflow_run_id, step_key) =
+        inherited;
 
     let am = bot_assignments::ActiveModel {
         id: Set(id.clone()),
@@ -284,10 +296,12 @@ pub async fn cancel_assignment(db: &DatabaseConnection, id: &str) -> Result<BotA
             id, row.status
         )));
     }
-    transition(db, id, status::CANCELLED, TransitionPatch {
-        finished_at: Some(now_ts()),
-        ..Default::default()
-    })
+    transition(
+        db,
+        id,
+        status::CANCELLED,
+        TransitionPatch { finished_at: Some(now_ts()), ..Default::default() },
+    )
     .await
 }
 
@@ -300,19 +314,22 @@ pub async fn cancel_in_flight_of_bot(db: &DatabaseConnection, bot_id: &str) -> R
                 .add(bot_assignments::Column::AssigneeBotId.eq(bot_id))
                 .add(bot_assignments::Column::RequesterBotId.eq(bot_id)),
         )
-        .filter(
-            bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]),
-        )
+        .filter(bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]))
         .all(db)
         .await?;
     let mut n = 0u64;
     for row in rows {
         let id = row.id.clone();
-        if transition(db, &id, status::CANCELLED, TransitionPatch {
-            error_detail: Some("assignee/requester bot deleted".to_string()),
-            finished_at: Some(now_ts()),
-            ..Default::default()
-        })
+        if transition(
+            db,
+            &id,
+            status::CANCELLED,
+            TransitionPatch {
+                error_detail: Some("assignee/requester bot deleted".to_string()),
+                finished_at: Some(now_ts()),
+                ..Default::default()
+            },
+        )
         .await
         .is_ok()
         {
@@ -329,9 +346,7 @@ pub async fn count_in_flight_dispatch(
 ) -> Result<i64> {
     let mut query = bot_assignments::Entity::find()
         .filter(bot_assignments::Column::Mode.eq("dispatch"))
-        .filter(
-            bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]),
-        );
+        .filter(bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]));
     if let Some(r) = requester_bot_id {
         query = query.filter(bot_assignments::Column::RequesterBotId.eq(r));
     } else {
@@ -344,9 +359,7 @@ pub async fn count_in_flight_dispatch(
 pub async fn count_in_flight_dispatch_global(db: &DatabaseConnection) -> Result<i64> {
     let n = bot_assignments::Entity::find()
         .filter(bot_assignments::Column::Mode.eq("dispatch"))
-        .filter(
-            bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]),
-        )
+        .filter(bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]))
         .count(db)
         .await?;
     Ok(n as i64)
@@ -362,11 +375,39 @@ pub async fn record_consult_assignment(
     task_text: &str,
     outcome: std::result::Result<String, String>,
 ) -> Result<BotAssignment> {
+    record_consult_assignment_with_code(
+        db,
+        origin,
+        requester_bot_id,
+        assignee_bot_id,
+        task_text,
+        outcome,
+        None,
+    )
+    .await
+}
+
+/// P3：带 error_code 的 consult 审计行（环/深度门拒绝时落 BOT_DELEGATE_* 码）。
+pub async fn record_consult_assignment_with_code(
+    db: &DatabaseConnection,
+    origin: &str,
+    requester_bot_id: &str,
+    assignee_bot_id: &str,
+    task_text: &str,
+    outcome: std::result::Result<String, String>,
+    error_code_override: Option<&str>,
+) -> Result<BotAssignment> {
     let id = gen_id();
     let now = now_ts();
     let (status_v, result_text, error_code, error_detail, finished_at) = match &outcome {
         Ok(text) => (status::COMPLETED, Some(text.clone()), None, None, Some(now)),
-        Err(e) => (status::FAILED, None, Some("ERR_PERMISSION".to_string()), Some(e.clone()), Some(now)),
+        Err(e) => (
+            status::FAILED,
+            None,
+            Some(error_code_override.unwrap_or("ERR_PERMISSION").to_string()),
+            Some(e.clone()),
+            Some(now),
+        ),
     };
     let am = bot_assignments::ActiveModel {
         id: Set(id.clone()),
@@ -401,10 +442,12 @@ pub async fn list_by_workflow_run(
     run_id: &str,
     assignee_name: impl Fn(&str) -> String,
 ) -> Result<Vec<BotAssignment>> {
-    list_assignments(db, &AssignmentFilter {
-        workflow_run_id: Some(run_id.to_string()),
-        ..Default::default()
-    }, assignee_name).await
+    list_assignments(
+        db,
+        &AssignmentFilter { workflow_run_id: Some(run_id.to_string()), ..Default::default() },
+        assignee_name,
+    )
+    .await
 }
 
 /// 按链根列出全部子孙 assignment（按 depth / 创建时间正序，便于终态等待）。
@@ -413,10 +456,12 @@ pub async fn list_by_root(
     root_id: &str,
     assignee_name: impl Fn(&str) -> String,
 ) -> Result<Vec<BotAssignment>> {
-    let mut rows = list_assignments(db, &AssignmentFilter {
-        root_id: Some(root_id.to_string()),
-        ..Default::default()
-    }, assignee_name).await?;
+    let mut rows = list_assignments(
+        db,
+        &AssignmentFilter { root_id: Some(root_id.to_string()), ..Default::default() },
+        assignee_name,
+    )
+    .await?;
     rows.sort_by_key(|a| (a.depth, a.created_at, a.id.clone()));
     Ok(rows)
 }
@@ -497,10 +542,13 @@ mod tests {
         let h = pool().await;
         let db = &h.conn;
         let root = create_assignment(db, &input("bot-a", None)).await.expect("根单");
-        let child = create_assignment(db, &CreateBotAssignment {
-            parent_assignment_id: Some(root.id.clone()),
-            ..input("bot-b", Some("bot-a"))
-        })
+        let child = create_assignment(
+            db,
+            &CreateBotAssignment {
+                parent_assignment_id: Some(root.id.clone()),
+                ..input("bot-b", Some("bot-a"))
+            },
+        )
         .await
         .expect("第二层");
         assert_eq!(child.root_id, root.id);
@@ -508,12 +556,15 @@ mod tests {
         assert_eq!(child.depth, 2);
         assert_eq!(child.origin, "bot");
 
-        let grand = create_assignment(db, &CreateBotAssignment {
-            parent_assignment_id: Some(child.id.clone()),
-            workflow_run_id: Some("run-1".into()),
-            step_key: Some("step-1".into()),
-            ..input("bot-c", Some("bot-b"))
-        })
+        let grand = create_assignment(
+            db,
+            &CreateBotAssignment {
+                parent_assignment_id: Some(child.id.clone()),
+                workflow_run_id: Some("run-1".into()),
+                step_key: Some("step-1".into()),
+                ..input("bot-c", Some("bot-b"))
+            },
+        )
         .await
         .expect("第三层");
         assert_eq!(grand.depth, 3);
@@ -521,19 +572,28 @@ mod tests {
         assert_eq!(grand.workflow_run_id.as_deref(), Some("run-1"));
         assert_eq!(grand.step_key.as_deref(), Some("step-1"));
 
-        let too_deep = create_assignment(db, &CreateBotAssignment {
-            parent_assignment_id: Some(grand.id.clone()),
-            ..input("bot-d", Some("bot-c"))
-        })
+        let too_deep = create_assignment(
+            db,
+            &CreateBotAssignment {
+                parent_assignment_id: Some(grand.id.clone()),
+                ..input("bot-d", Some("bot-c"))
+            },
+        )
         .await;
         assert!(matches!(too_deep, Err(AxAgentError::Validation(_))), "第四层应拒绝: {too_deep:?}");
 
-        let repeat = create_assignment(db, &CreateBotAssignment {
-            parent_assignment_id: Some(root.id.clone()),
-            ..input("bot-a", Some("bot-a"))
-        })
+        let repeat = create_assignment(
+            db,
+            &CreateBotAssignment {
+                parent_assignment_id: Some(root.id.clone()),
+                ..input("bot-a", Some("bot-a"))
+            },
+        )
         .await;
-        assert!(matches!(repeat, Err(AxAgentError::Validation(_))), "同链重复 Bot 应拒绝: {repeat:?}");
+        assert!(
+            matches!(repeat, Err(AxAgentError::Validation(_))),
+            "同链重复 Bot 应拒绝: {repeat:?}"
+        );
 
         let chain = chain_bot_ids(db, &grand.id).await.expect("祖先链");
         assert_eq!(chain, vec!["bot-c", "bot-b", "bot-a"]);
@@ -543,24 +603,39 @@ mod tests {
         assert_eq!(count_in_flight_dispatch_at_depth(db, &root.id, 3).await.expect("层计数"), 1);
 
         // 显式 run 字段的子孙继承。
-        let inherited = create_assignment(db, &CreateBotAssignment {
-            parent_assignment_id: Some(grand.id.clone()),
-            ..input("bot-d", Some("bot-c"))
-        }).await;
+        let inherited = create_assignment(
+            db,
+            &CreateBotAssignment {
+                parent_assignment_id: Some(grand.id.clone()),
+                ..input("bot-d", Some("bot-c"))
+            },
+        )
+        .await;
         assert!(inherited.is_err(), "超深拦截优先于继承");
-        let step_root = create_assignment(db, &CreateBotAssignment {
-            workflow_run_id: Some("run-2".into()),
-            step_key: Some("s2".into()),
-            ..input("bot-x", None)
-        }).await.expect("编排根单");
+        let step_root = create_assignment(
+            db,
+            &CreateBotAssignment {
+                workflow_run_id: Some("run-2".into()),
+                step_key: Some("s2".into()),
+                ..input("bot-x", None)
+            },
+        )
+        .await
+        .expect("编排根单");
         assert_eq!(step_root.workflow_run_id.as_deref(), Some("run-2"));
-        let inherited_child = create_assignment(db, &CreateBotAssignment {
-            parent_assignment_id: Some(step_root.id.clone()),
-            ..input("bot-y", Some("bot-x"))
-        }).await.expect("继承子单");
+        let inherited_child = create_assignment(
+            db,
+            &CreateBotAssignment {
+                parent_assignment_id: Some(step_root.id.clone()),
+                ..input("bot-y", Some("bot-x"))
+            },
+        )
+        .await
+        .expect("继承子单");
         assert_eq!(inherited_child.workflow_run_id.as_deref(), Some("run-2"));
         assert_eq!(inherited_child.step_key.as_deref(), Some("s2"));
-        let by_run = list_by_workflow_run(db, "run-2", |id| id.to_string()).await.expect("按 run 列");
+        let by_run =
+            list_by_workflow_run(db, "run-2", |id| id.to_string()).await.expect("按 run 列");
         assert_eq!(by_run.len(), 2);
     }
 
@@ -575,11 +650,16 @@ mod tests {
             .expect("queued→running");
         assert!(running.started_at.is_some(), "进入 running 记 started_at");
 
-        let done = transition(db, &a.id, status::COMPLETED, TransitionPatch {
-            result_text: Some("结论：震荡".to_string()),
-            finished_at: Some(now_ts()),
-            ..Default::default()
-        })
+        let done = transition(
+            db,
+            &a.id,
+            status::COMPLETED,
+            TransitionPatch {
+                result_text: Some("结论：震荡".to_string()),
+                finished_at: Some(now_ts()),
+                ..Default::default()
+            },
+        )
         .await
         .expect("running→completed");
         assert_eq!(done.status, status::COMPLETED);
@@ -643,22 +723,33 @@ mod tests {
         );
 
         // 终态后退出计数。
-        let list = list_assignments(db, &AssignmentFilter {
-            requester_bot_id: Some(r.clone()),
-            status: Some(status::QUEUED.to_string()),
-            ..Default::default()
-        }, |id| format!("name:{id}")).await.expect("列表");
+        let list = list_assignments(
+            db,
+            &AssignmentFilter {
+                requester_bot_id: Some(r.clone()),
+                status: Some(status::QUEUED.to_string()),
+                ..Default::default()
+            },
+            |id| format!("name:{id}"),
+        )
+        .await
+        .expect("列表");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].assignee_name, "name:bot-b", "assignee_name 回填生效");
         // 先转 running 再转终态（状态机不允许 queued 直迁终态）。
         transition(db, &list[0].id, status::RUNNING, TransitionPatch::default())
             .await
             .expect("转 running");
-        transition(db, &list[0].id, status::FAILED, TransitionPatch {
-            error_code: Some("BOT_DELEGATE_TIMEOUT".into()),
-            finished_at: Some(now_ts()),
-            ..Default::default()
-        })
+        transition(
+            db,
+            &list[0].id,
+            status::FAILED,
+            TransitionPatch {
+                error_code: Some("BOT_DELEGATE_TIMEOUT".into()),
+                finished_at: Some(now_ts()),
+                ..Default::default()
+            },
+        )
         .await
         .expect("失败");
         assert_eq!(count_in_flight_dispatch(db, Some(&r)).await.expect("计数"), 1);
@@ -673,11 +764,16 @@ mod tests {
         transition(db, &finished.id, status::RUNNING, TransitionPatch::default())
             .await
             .expect("转 running");
-        transition(db, &finished.id, status::COMPLETED, TransitionPatch {
-            result_text: Some("完".into()),
-            finished_at: Some(now_ts()),
-            ..Default::default()
-        })
+        transition(
+            db,
+            &finished.id,
+            status::COMPLETED,
+            TransitionPatch {
+                result_text: Some("完".into()),
+                finished_at: Some(now_ts()),
+                ..Default::default()
+            },
+        )
         .await
         .expect("完成");
 

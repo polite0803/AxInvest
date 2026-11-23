@@ -143,7 +143,7 @@ pub struct UpdateBotDepartmentPatch {
 }
 
 /// 委派合同（输出 DTO，与 `bot_assignments` 实体一一对应；状态五态）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotAssignment {
     pub id: String,
@@ -213,14 +213,21 @@ fn default_assignment_mode() -> String {
     "dispatch".to_string()
 }
 
-
 // ───────────────────────────── P3 编排 DTO ─────────────────────────────
 // 契约权威：docs/bot-integration/P3/IPC-P3.md §2（camelCase 序列化）。
 
-fn default_step_timeout() -> i32 { 300 }
-fn default_on_failure() -> String { "abort".to_string() }
-fn default_max_concurrency() -> i32 { 2 }
-fn default_total_timeout() -> i32 { 900 }
+fn default_step_timeout() -> i32 {
+    300
+}
+fn default_on_failure() -> String {
+    "abort".to_string()
+}
+fn default_max_concurrency() -> i32 {
+    2
+}
+fn default_total_timeout() -> i32 {
+    900
+}
 
 /// 编排步骤（`steps_json` 元素，与前端 TS 类型共用同一份契约）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -270,7 +277,9 @@ pub struct CreateBotWorkflow {
     pub total_timeout_secs: i32,
 }
 
-fn default_owner_scope() -> String { "instance".to_string() }
+fn default_owner_scope() -> String {
+    "instance".to_string()
+}
 
 /// `None` = 不改；`Some(None)` = 显式清空（P2-a 的 Option<Option<T>> 口径）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -59,6 +59,7 @@ async fn make_assignment(db: &DatabaseConnection, assignee: &str, conversation: 
             mode: "dispatch".to_string(),
             requester_conversation_id: conversation.map(str::to_string),
             requester_bot_id: None,
+        ..Default::default()
         },
     )
     .await

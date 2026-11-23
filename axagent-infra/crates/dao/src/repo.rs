@@ -10,6 +10,8 @@ pub mod backup;
 pub mod bot;
 pub mod bot_assignment;
 pub mod bot_department;
+pub mod bot_workflow;
+pub mod bot_workflow_run;
 pub mod capability_domain_override;
 pub mod capability_policy;
 pub mod capability_relationship;

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `bot_assignments` —— Bot 委派合同（docs/bot-integration/P2/MODEL-P2B §2.3）。
+//! `bot_assignments` —— Bot 委派合同（docs/bot-integration/P3/MODEL-P3 §2.3）。
 //!
-//! `root_id`/`parent_id`/`depth` 三列随表落地，但 P2-b 校验规则恒
-//! `depth == 1`、`parent_id == NULL`（ADR-P2B-5：一层委派 + 防环，P3 解禁
-//! 只改工具注册条件与赋值逻辑）。`executions`/`evidence` 列留 P3 加列
-//! （声明式加列无迁移成本）。
+//! P3 放开多层委派 depth≤3：`root_id/parent_id/depth` 是运行期树边
+//! （根 `root_id=id / parent_id=NULL / depth=1`，子行继承 root 并 `depth=parent+1`）；
+//! `workflow_run_id/step_key` 沿树继承，标记编排步骤及其子孙。历史行两列为 NULL，
+//! 语义 = 普通委派（声明式加列 + 可空，无 migration）。
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -17,10 +17,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 树根（自链第一单的 id；一层委派时 = 自身 id）。
+    #[sea_orm(indexed)]
     pub root_id: String,
-    /// 上游 assignment（P2-b 恒 NULL，字段先落，Q1）。
+    /// 上游 assignment（根派发恒 NULL；子派发 = 发起该子轮的 assignment id）。
+    #[sea_orm(indexed)]
     pub parent_id: Option<String>,
-    /// P2-b 恒 1。
+    /// 运行期树深度，取值域 1..3（MAX_DEPTH=3）。
     #[sea_orm(default_value = 1)]
     pub depth: i32,
     /// `person` / `bot` / `routine`（例程发起，Q6）。
@@ -35,6 +37,11 @@ pub struct Model {
     #[sea_orm(default_value = "dispatch")]
     pub mode: String,
     pub task_text: String,
+    /// 编排 run id；子孙继承父行值，纯委派链恒 NULL。
+    #[sea_orm(indexed)]
+    pub workflow_run_id: Option<String>,
+    /// `steps_json[].stepKey`；子孙继承父行值，纯委派链恒 NULL。
+    pub step_key: Option<String>,
     /// `queued/running/completed/failed/cancelled` 五态（GAP G-B7）。
     #[sea_orm(indexed)]
     #[sea_orm(default_value = "queued")]

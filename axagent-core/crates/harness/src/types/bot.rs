@@ -160,6 +160,10 @@ pub struct BotAssignment {
     /// `consult` / `dispatch`。
     pub mode: String,
     pub task_text: String,
+    /// 编排 run id；子孙继承父行值，纯委派链恒 NULL（P3）。
+    pub workflow_run_id: Option<String>,
+    /// 编排步骤 key；子孙继承父行值，纯委派链恒 NULL（P3）。
+    pub step_key: Option<String>,
     /// `queued/running/completed/failed/cancelled`。
     pub status: String,
     pub result_text: Option<String>,
@@ -185,8 +189,173 @@ pub struct CreateBotAssignment {
     pub requester_conversation_id: Option<String>,
     #[serde(default)]
     pub requester_bot_id: Option<String>,
+    /// P3 内部字段：父 assignment id（不暴露给 Tauri 入参 DTO 契约）。
+    #[serde(default)]
+    pub parent_assignment_id: Option<String>,
+    /// P3 内部字段：链根 assignment id。
+    #[serde(default)]
+    pub root_assignment_id: Option<String>,
+    /// P3 内部字段：编排 run id（步骤 assignment 落库用）。
+    #[serde(default)]
+    pub workflow_run_id: Option<String>,
+    /// P3 内部字段：编排步骤 key。
+    #[serde(default)]
+    pub step_key: Option<String>,
+    /// P3 内部字段：任务来源（person / bot / routine / workflow）。
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// P3 内部字段：回执落点（编排 run 线程）。
+    #[serde(default)]
+    pub requester_conversation_id_override: Option<String>,
 }
 
 fn default_assignment_mode() -> String {
     "dispatch".to_string()
+}
+
+
+// ───────────────────────────── P3 编排 DTO ─────────────────────────────
+// 契约权威：docs/bot-integration/P3/IPC-P3.md §2（camelCase 序列化）。
+
+fn default_step_timeout() -> i32 { 300 }
+fn default_on_failure() -> String { "abort".to_string() }
+fn default_max_concurrency() -> i32 { 2 }
+fn default_total_timeout() -> i32 { 900 }
+
+/// 编排步骤（`steps_json` 元素，与前端 TS 类型共用同一份契约）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotWorkflowStep {
+    pub step_key: String,
+    pub bot_id: String,
+    pub prompt_template: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default = "default_step_timeout")]
+    pub timeout_secs: i32,
+    #[serde(default = "default_on_failure")]
+    pub on_failure: String,
+}
+
+/// 编排定义 DTO（DB 的 steps_json 在命令层 parse 为 steps 数组）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotWorkflow {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub owner_scope: String,
+    pub department_id: Option<String>,
+    pub steps: Vec<BotWorkflowStep>,
+    pub max_concurrency: i32,
+    pub total_timeout_secs: i32,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBotWorkflow {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_owner_scope")]
+    pub owner_scope: String,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub department_id: Option<Option<String>>,
+    pub steps: Vec<BotWorkflowStep>,
+    #[serde(default = "default_max_concurrency")]
+    pub max_concurrency: i32,
+    #[serde(default = "default_total_timeout")]
+    pub total_timeout_secs: i32,
+}
+
+fn default_owner_scope() -> String { "instance".to_string() }
+
+/// `None` = 不改；`Some(None)` = 显式清空（P2-a 的 Option<Option<T>> 口径）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBotWorkflowPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub description: Option<Option<String>>,
+    #[serde(default)]
+    pub owner_scope: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub department_id: Option<Option<String>>,
+    #[serde(default)]
+    pub steps: Option<Vec<BotWorkflowStep>>,
+    #[serde(default)]
+    pub max_concurrency: Option<i32>,
+    #[serde(default)]
+    pub total_timeout_secs: Option<i32>,
+}
+
+/// 单步输出（写入 run.context_json.outputs）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotWorkflowStepOutput {
+    pub assignment_id: String,
+    pub result_text: String,
+}
+
+/// run 上下文（inputs / outputs / skipped，整列 JSON 演进）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotWorkflowRunContext {
+    #[serde(default)]
+    pub inputs: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub outputs: std::collections::HashMap<String, BotWorkflowStepOutput>,
+    #[serde(default)]
+    pub skipped: Vec<String>,
+}
+
+/// 运行实例 DTO。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotWorkflowRun {
+    pub id: String,
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub status: String,
+    pub origin: String,
+    pub requester_bot_id: Option<String>,
+    pub requester_conversation_id: String,
+    pub anchor_message_id: Option<String>,
+    pub context: BotWorkflowRunContext,
+    pub completed_steps: i32,
+    pub total_steps: i32,
+    pub error_code: Option<String>,
+    pub error_detail: Option<String>,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 新建 run 的内部输入（命令层构造，不直接暴露为 Tauri 入参）。
+#[derive(Debug, Clone)]
+pub struct CreateBotWorkflowRun {
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub origin: String,
+    pub requester_bot_id: Option<String>,
+    pub requester_conversation_id: String,
+    pub total_steps: i32,
+    pub inputs: std::collections::HashMap<String, String>,
+}
+
+/// run 状态补丁（runner 单入口）。
+#[derive(Debug, Clone, Default)]
+pub struct BotWorkflowRunPatch {
+    pub status: Option<String>,
+    pub anchor_message_id: Option<String>,
+    pub context: Option<BotWorkflowRunContext>,
+    pub completed_steps: Option<i32>,
+    pub error_code: Option<String>,
+    pub error_detail: Option<String>,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
 }

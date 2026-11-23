@@ -199,6 +199,7 @@ mod tests {
             mode: mode.to_string(),
             requester_conversation_id: None,
             requester_bot_id: requester.map(|s| s.to_string()),
+            ..Default::default()
         }
     }
 

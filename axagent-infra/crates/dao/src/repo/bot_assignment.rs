@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `bot_assignments` 表的仓库层（docs/bot-integration/P2/MODEL-P2B §2.3）。
+//! `bot_assignments` 表的仓库层（P2-B MODEL-P2B §2.3 + P3 MODEL-P3 §2.3）。
 //!
 //! 状态机迁移（queued→running→终态 + cancelled）的合法性校验在 runner/命令层，
 //! 本层提供 [`transition`] 一个受控入口按 IPC-P2B 的五态表逐态把关。
-//! P2-b 恒一层（ADR-P2B-5）：`root_id = id`、`parent_id = NULL`、`depth = 1`。
+//! 无 `parent_assignment_id` 时仍是 P2-b 一层根单（`root_id = id`、`depth = 1`）；
+//! 多层委派由 `parent_assignment_id` 显式搭树，depth 上限 3（ADR-P3-2）。
 
 use sea_orm::*;
 
@@ -41,6 +42,8 @@ fn assignment_from_entity(m: bot_assignments::Model, assignee_name: String) -> B
         assignee_name,
         mode: m.mode,
         task_text: m.task_text,
+        workflow_run_id: m.workflow_run_id,
+        step_key: m.step_key,
         status: m.status,
         result_text: m.result_text,
         error_code: m.error_code,
@@ -76,6 +79,11 @@ pub struct AssignmentFilter {
     pub assignee_bot_id: Option<String>,
     pub bot_id: Option<String>,
     pub status: Option<String>,
+    /// P3 运行期树边筛选。
+    pub root_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub workflow_run_id: Option<String>,
+    pub step_key: Option<String>,
 }
 
 pub async fn list_assignments(
@@ -101,6 +109,18 @@ pub async fn list_assignments(
     if let Some(v) = &filter.status {
         query = query.filter(bot_assignments::Column::Status.eq(v.clone()));
     }
+    if let Some(v) = &filter.root_id {
+        query = query.filter(bot_assignments::Column::RootId.eq(v.clone()));
+    }
+    if let Some(v) = &filter.parent_id {
+        query = query.filter(bot_assignments::Column::ParentId.eq(v.clone()));
+    }
+    if let Some(v) = &filter.workflow_run_id {
+        query = query.filter(bot_assignments::Column::WorkflowRunId.eq(v.clone()));
+    }
+    if let Some(v) = &filter.step_key {
+        query = query.filter(bot_assignments::Column::StepKey.eq(v.clone()));
+    }
     let rows = query
         .order_by_desc(bot_assignments::Column::CreatedAt)
         .all(db)
@@ -114,22 +134,81 @@ pub async fn list_assignments(
         .collect())
 }
 
-/// 新建委派合同。P2-b 恒一层：`root_id = id`、`parent_id = NULL`、`depth = 1`。
+/// 新建委派合同。无 parent 时保持 P2-b 一层根单；有 parent 时挂到其链上。
 /// 状态机校验与业务校验（Bot 存在 / 非自身 / 并行门）在命令层。
+pub const MAX_DEPTH: i32 = 3;
+
 pub async fn create_assignment(db: &DatabaseConnection, input: &CreateBotAssignment) -> Result<BotAssignment> {
     let id = gen_id();
     let now = now_ts();
+
+    let (root_id, parent_id, depth, inherited);
+    if let Some(parent_id_value) = &input.parent_assignment_id {
+        let parent = load(db, parent_id_value).await?;
+        let child_depth = parent.depth + 1;
+        if child_depth > MAX_DEPTH {
+            return Err(AxAgentError::Validation(format!(
+                "委派链深度超过 {MAX_DEPTH}: parent={} depth={}", parent.id, parent.depth
+            )));
+        }
+        // 环防护：父链上已出现同一 Bot 时拒绝（T3 的动态环检测在工具层，这里是落库兜底）。
+        let mut cursor = Some(parent.clone());
+        let mut seen = std::collections::HashSet::new();
+        while let Some(row) = cursor {
+            if !seen.insert(row.id.clone()) {
+                return Err(AxAgentError::Validation("委派链存在环".into()));
+            }
+            if row.assignee_bot_id == input.assignee_bot_id {
+                return Err(AxAgentError::Validation(format!(
+                    "Bot {} 已在委派链上", input.assignee_bot_id
+                )));
+            }
+            cursor = match &row.parent_id {
+                Some(pid) => bot_assignments::Entity::find_by_id(pid).one(db).await?,
+                None => None,
+            };
+        }
+        root_id = if let Some(r) = &input.root_assignment_id { r.clone() } else { parent.root_id.clone() };
+        parent_id = Some(parent.id.clone());
+        depth = child_depth;
+        inherited = (
+            input.origin.clone().unwrap_or_else(|| "bot".to_string()),
+            input.requester_bot_id.clone().or_else(|| Some(parent.assignee_bot_id.clone())),
+            input.requester_conversation_id_override.clone()
+                .or_else(|| input.requester_conversation_id.clone())
+                .or_else(|| parent.requester_conversation_id.clone()),
+            input.workflow_run_id.clone().or(parent.workflow_run_id.clone()),
+            input.step_key.clone().or(parent.step_key.clone()),
+        );
+    } else {
+        root_id = input.root_assignment_id.clone().unwrap_or_else(|| id.clone());
+        parent_id = None;
+        depth = 1;
+        inherited = (
+            input.origin.clone().unwrap_or_else(|| {
+                input.requester_bot_id.as_ref().map(|_| "bot").unwrap_or("person").to_string()
+            }),
+            input.requester_bot_id.clone(),
+            input.requester_conversation_id_override.clone().or_else(|| input.requester_conversation_id.clone()),
+            input.workflow_run_id.clone(),
+            input.step_key.clone(),
+        );
+    }
+    let (origin, requester_bot_id, requester_conversation_id, workflow_run_id, step_key) = inherited;
+
     let am = bot_assignments::ActiveModel {
         id: Set(id.clone()),
-        root_id: Set(id.clone()),
-        parent_id: Set(None),
-        depth: Set(1),
-        origin: Set(input.requester_bot_id.as_ref().map(|_| "bot".to_string()).unwrap_or_else(|| "person".to_string())),
-        requester_bot_id: Set(input.requester_bot_id.clone()),
-        requester_conversation_id: Set(input.requester_conversation_id.clone()),
+        root_id: Set(root_id),
+        parent_id: Set(parent_id),
+        depth: Set(depth),
+        origin: Set(origin),
+        requester_bot_id: Set(requester_bot_id),
+        requester_conversation_id: Set(requester_conversation_id),
         assignee_bot_id: Set(input.assignee_bot_id.clone()),
         mode: Set(input.mode.clone()),
         task_text: Set(input.task_text.clone()),
+        workflow_run_id: Set(workflow_run_id),
+        step_key: Set(step_key),
         status: Set(status::QUEUED.to_string()),
         result_text: Set(None),
         error_code: Set(None),
@@ -300,6 +379,8 @@ pub async fn record_consult_assignment(
         assignee_bot_id: Set(assignee_bot_id.to_string()),
         mode: Set("consult".to_string()),
         task_text: Set(task_text.to_string()),
+        workflow_run_id: Set(None),
+        step_key: Set(None),
         status: Set(status_v.to_string()),
         result_text: Set(result_text),
         error_code: Set(error_code),
@@ -312,6 +393,66 @@ pub async fn record_consult_assignment(
     am.insert(db).await?;
     let row = load(db, &id).await?;
     Ok(assignment_from_entity(row, String::new()))
+}
+
+/// 按编排 run 列出全部步骤 assignment（含继承链上的子孙单）。
+pub async fn list_by_workflow_run(
+    db: &DatabaseConnection,
+    run_id: &str,
+    assignee_name: impl Fn(&str) -> String,
+) -> Result<Vec<BotAssignment>> {
+    list_assignments(db, &AssignmentFilter {
+        workflow_run_id: Some(run_id.to_string()),
+        ..Default::default()
+    }, assignee_name).await
+}
+
+/// 按链根列出全部子孙 assignment（按 depth / 创建时间正序，便于终态等待）。
+pub async fn list_by_root(
+    db: &DatabaseConnection,
+    root_id: &str,
+    assignee_name: impl Fn(&str) -> String,
+) -> Result<Vec<BotAssignment>> {
+    let mut rows = list_assignments(db, &AssignmentFilter {
+        root_id: Some(root_id.to_string()),
+        ..Default::default()
+    }, assignee_name).await?;
+    rows.sort_by_key(|a| (a.depth, a.created_at, a.id.clone()));
+    Ok(rows)
+}
+
+/// 从某单沿 parent 向上收集自身 + 祖先的 Bot id（动态环检测 / 同 Bot 抑制）。
+pub async fn chain_bot_ids(db: &DatabaseConnection, assignment_id: &str) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut cursor = Some(load(db, assignment_id).await?);
+    let mut seen = std::collections::HashSet::new();
+    while let Some(row) = cursor {
+        if !seen.insert(row.id.clone()) {
+            return Err(AxAgentError::Validation(format!("委派链存在环: {}", row.id)));
+        }
+        out.push(row.assignee_bot_id.clone());
+        cursor = match &row.parent_id {
+            Some(pid) => bot_assignments::Entity::find_by_id(pid).one(db).await?,
+            None => None,
+        };
+    }
+    Ok(out)
+}
+
+/// 同一根链上、指定层号的在途 dispatch 数（每层在途 <= 2 的落库计数口径）。
+pub async fn count_in_flight_dispatch_at_depth(
+    db: &DatabaseConnection,
+    root_id: &str,
+    depth: i32,
+) -> Result<i64> {
+    let n = bot_assignments::Entity::find()
+        .filter(bot_assignments::Column::RootId.eq(root_id))
+        .filter(bot_assignments::Column::Depth.eq(depth))
+        .filter(bot_assignments::Column::Mode.eq("dispatch"))
+        .filter(bot_assignments::Column::Status.is_in([status::QUEUED, status::RUNNING]))
+        .count(db)
+        .await?;
+    Ok(n as i64)
 }
 
 #[cfg(test)]
@@ -329,6 +470,7 @@ mod tests {
             mode: "dispatch".to_string(),
             requester_conversation_id: None,
             requester_bot_id: requester.map(|s| s.to_string()),
+            ..Default::default()
         }
     }
 
@@ -347,7 +489,79 @@ mod tests {
         let b = create_assignment(db, &input("bot-c", Some("bot-b"))).await.expect("建单2");
         assert_eq!(b.origin, "bot");
         assert_eq!(b.requester_bot_id.as_deref(), Some("bot-b"));
-        assert_eq!(b.depth, 1, "Q1：Bot 发起仍恒一层");
+        assert_eq!(b.depth, 1, "无 parent 的 Bot 发起仍是根单（depth=1）");
+    }
+
+    #[tokio::test]
+    async fn multilayer_chain_fields_and_workflow_inheritance() {
+        let h = pool().await;
+        let db = &h.conn;
+        let root = create_assignment(db, &input("bot-a", None)).await.expect("根单");
+        let child = create_assignment(db, &CreateBotAssignment {
+            parent_assignment_id: Some(root.id.clone()),
+            ..input("bot-b", Some("bot-a"))
+        })
+        .await
+        .expect("第二层");
+        assert_eq!(child.root_id, root.id);
+        assert_eq!(child.parent_id.as_deref(), Some(root.id.as_str()));
+        assert_eq!(child.depth, 2);
+        assert_eq!(child.origin, "bot");
+
+        let grand = create_assignment(db, &CreateBotAssignment {
+            parent_assignment_id: Some(child.id.clone()),
+            workflow_run_id: Some("run-1".into()),
+            step_key: Some("step-1".into()),
+            ..input("bot-c", Some("bot-b"))
+        })
+        .await
+        .expect("第三层");
+        assert_eq!(grand.depth, 3);
+        assert_eq!(grand.root_id, root.id);
+        assert_eq!(grand.workflow_run_id.as_deref(), Some("run-1"));
+        assert_eq!(grand.step_key.as_deref(), Some("step-1"));
+
+        let too_deep = create_assignment(db, &CreateBotAssignment {
+            parent_assignment_id: Some(grand.id.clone()),
+            ..input("bot-d", Some("bot-c"))
+        })
+        .await;
+        assert!(matches!(too_deep, Err(AxAgentError::Validation(_))), "第四层应拒绝: {too_deep:?}");
+
+        let repeat = create_assignment(db, &CreateBotAssignment {
+            parent_assignment_id: Some(root.id.clone()),
+            ..input("bot-a", Some("bot-a"))
+        })
+        .await;
+        assert!(matches!(repeat, Err(AxAgentError::Validation(_))), "同链重复 Bot 应拒绝: {repeat:?}");
+
+        let chain = chain_bot_ids(db, &grand.id).await.expect("祖先链");
+        assert_eq!(chain, vec!["bot-c", "bot-b", "bot-a"]);
+        let by_root = list_by_root(db, &root.id, |id| id.to_string()).await.expect("按根列");
+        assert_eq!(by_root.len(), 3);
+        assert_eq!(by_root.iter().map(|a| a.depth).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(count_in_flight_dispatch_at_depth(db, &root.id, 3).await.expect("层计数"), 1);
+
+        // 显式 run 字段的子孙继承。
+        let inherited = create_assignment(db, &CreateBotAssignment {
+            parent_assignment_id: Some(grand.id.clone()),
+            ..input("bot-d", Some("bot-c"))
+        }).await;
+        assert!(inherited.is_err(), "超深拦截优先于继承");
+        let step_root = create_assignment(db, &CreateBotAssignment {
+            workflow_run_id: Some("run-2".into()),
+            step_key: Some("s2".into()),
+            ..input("bot-x", None)
+        }).await.expect("编排根单");
+        assert_eq!(step_root.workflow_run_id.as_deref(), Some("run-2"));
+        let inherited_child = create_assignment(db, &CreateBotAssignment {
+            parent_assignment_id: Some(step_root.id.clone()),
+            ..input("bot-y", Some("bot-x"))
+        }).await.expect("继承子单");
+        assert_eq!(inherited_child.workflow_run_id.as_deref(), Some("run-2"));
+        assert_eq!(inherited_child.step_key.as_deref(), Some("s2"));
+        let by_run = list_by_workflow_run(db, "run-2", |id| id.to_string()).await.expect("按 run 列");
+        assert_eq!(by_run.len(), 2);
     }
 
     #[tokio::test]

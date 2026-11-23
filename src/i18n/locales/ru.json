@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] Обнаружена недействительная ссылка на модель {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} и {{modelKey}} должны быть заданы вместе или оба быть null. Текущее {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "Неизвестная ошибка"
+    "unknown": "Неизвестная ошибка",
+    "BOT_DEPARTMENT_NOT_FOUND": "Отдел ботов не найден",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "Бот уже относится к другому отделу",
+    "BOT_ASSIGNMENT_NOT_FOUND": "Запись о поручении не найдена",
+    "BOT_DELEGATE_SELF": "Бот не может поручить задачу самому себе",
+    "BOT_DELEGATE_BUSY": "Достигнут лимит одновременных поручений",
+    "BOT_DELEGATE_TIMEOUT": "Превышено время выполнения поручения"
   },
   "errorBoundary": {
     "copied": "Скопировано",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "Генерация изображений",
       "stock_analysis": "Анализ акций"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "Отделы",
+      "untitled": "Без группы",
+      "create": "Новый отдел",
+      "edit": "Изменить отдел",
+      "name": "Название отдела",
+      "nameRequired": "Введите название отдела",
+      "description": "Описание",
+      "chief": "Шеф",
+      "chiefPlaceholder": "Выбрать бота-шефа",
+      "chiefEmpty": "Шеф не назначен",
+      "addMember": "Добавить в отдел",
+      "removeMember": "Убрать из отдела",
+      "hint": "Отдел — постоянная организационная принадлежность бота; ИИ-офис — сценарий временного сотрудничества, они независимы."
+    },
+    "assignment": {
+      "title": "Поручение",
+      "create": "Новое поручение",
+      "assignee": "Бот-исполнитель",
+      "task": "Задача",
+      "taskRequired": "Введите содержание задачи",
+      "modeDispatch": "Поручение",
+      "send": "Отправить",
+      "cancel": "Отменить",
+      "statusQueued": "В очереди",
+      "statusRunning": "Выполняется",
+      "statusCompleted": "Завершено",
+      "statusFailed": "Ошибка",
+      "statusCancelled": "Отменено",
+      "empty": "Поручений пока нет"
     }
   }
 }

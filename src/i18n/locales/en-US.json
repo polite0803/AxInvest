@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] Invalid model reference detected {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} and {{modelKey}} must be set together or both null, current {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "Unknown error"
+    "unknown": "Unknown error",
+    "BOT_DEPARTMENT_NOT_FOUND": "Bot department not found",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "Bot already belongs to a department",
+    "BOT_ASSIGNMENT_NOT_FOUND": "Bot assignment not found",
+    "BOT_DELEGATE_SELF": "A bot cannot delegate to itself",
+    "BOT_DELEGATE_BUSY": "Too many in-flight delegations",
+    "BOT_DELEGATE_TIMEOUT": "Delegation timed out"
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -19283,6 +19289,39 @@
     "workflow": {
       "image_generation": "Image Generation",
       "stock_analysis": "Stock Analysis"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "Departments",
+      "untitled": "Ungrouped",
+      "create": "New department",
+      "edit": "Edit department",
+      "name": "Department name",
+      "nameRequired": "Please enter a department name",
+      "description": "Description",
+      "chief": "Chief",
+      "chiefPlaceholder": "Select a chief bot",
+      "chiefEmpty": "No chief",
+      "addMember": "Add to department",
+      "removeMember": "Remove from department",
+      "hint": "Departments are a bot's standing organizational home; AI Office is a temporary collaboration scene — the two are independent."
+    },
+    "assignment": {
+      "title": "Delegation",
+      "create": "New delegation",
+      "assignee": "Assignee bot",
+      "task": "Task",
+      "taskRequired": "Please enter the task",
+      "modeDispatch": "Dispatch",
+      "send": "Send",
+      "cancel": "Cancel",
+      "statusQueued": "Queued",
+      "statusRunning": "Running",
+      "statusCompleted": "Completed",
+      "statusFailed": "Failed",
+      "statusCancelled": "Cancelled",
+      "empty": "No delegations yet"
     }
   }
 }

@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] 無効なモデル参照を検出しました {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}}と{{modelKey}}は同時に設定するか、同時にnullである必要があります。現在 {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "不明なエラー"
+    "unknown": "不明なエラー",
+    "BOT_DEPARTMENT_NOT_FOUND": "Bot部門が見つかりません",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "Botはすでに別の部門に所属しています",
+    "BOT_ASSIGNMENT_NOT_FOUND": "委譲記録が見つかりません",
+    "BOT_DELEGATE_SELF": "Botは自分自身に委譲できません",
+    "BOT_DELEGATE_BUSY": "委譲の同時実行が上限に達しました",
+    "BOT_DELEGATE_TIMEOUT": "委譲の実行がタイムアウトしました"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "图像生成",
       "stock_analysis": "股票分析"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "部門",
+      "untitled": "未グループ",
+      "create": "新しい部門",
+      "edit": "部門を編集",
+      "name": "部門名",
+      "nameRequired": "部門名を入力してください",
+      "description": "説明",
+      "chief": "チーフ",
+      "chiefPlaceholder": "チーフBotを選択",
+      "chiefEmpty": "チーフなし",
+      "addMember": "部門に追加",
+      "removeMember": "部門から削除",
+      "hint": "部門はBotの常設の組織帰属です。AIオフィスは一時的なコラボレーション场景であり、両者は独立しています。"
+    },
+    "assignment": {
+      "title": "委譲",
+      "create": "新しい委譲",
+      "assignee": "実行Bot",
+      "task": "タスク内容",
+      "taskRequired": "タスク内容を入力してください",
+      "modeDispatch": "派遣",
+      "send": "送信",
+      "cancel": "キャンセル",
+      "statusQueued": "待機中",
+      "statusRunning": "実行中",
+      "statusCompleted": "完了",
+      "statusFailed": "失敗",
+      "statusCancelled": "キャンセル済み",
+      "empty": "委譲記録はまだありません"
     }
   }
 }

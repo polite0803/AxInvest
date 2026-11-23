@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] अमान्य मॉडल संदर्भ पहचाना गया {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} और {{modelKey}} या तो एक साथ सेट होने चाहिए या दोनों null होने चाहिए। वर्तमान में {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "अज्ञात त्रुटि"
+    "unknown": "अज्ञात त्रुटि",
+    "BOT_DEPARTMENT_NOT_FOUND": "बॉट विभाग नहीं मिला",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "बॉट पहले से किसी विभाग से संबंधित है",
+    "BOT_ASSIGNMENT_NOT_FOUND": "बॉट कार्य सौंपने का रिकॉर्ड नहीं मिला",
+    "BOT_DELEGATE_SELF": "बॉट स्वयं को कार्य सौंप नहीं सकता",
+    "BOT_DELEGATE_BUSY": "बहुत सारे चल रहे प्रत्यायोजन",
+    "BOT_DELEGATE_TIMEOUT": "प्रत्यायोजन का समय समाप्त"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "छवि निर्माण",
       "stock_analysis": "स्टॉक विश्लेषण"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "विभाग",
+      "untitled": "असमूहित",
+      "create": "नया विभाग",
+      "edit": "विभाग संपादित करें",
+      "name": "विभाग का नाम",
+      "nameRequired": "कृपया विभाग का नाम दर्ज करें",
+      "description": "विवरण",
+      "chief": "प्रमुख",
+      "chiefPlaceholder": "मुख्य बॉट चुनें",
+      "chiefEmpty": "कोई प्रमुख नहीं",
+      "addMember": "विभाग में जोड़ें",
+      "removeMember": "विभाग से हटाएँ",
+      "hint": "विभाग बॉट का स्थायी संगठनात्मक संबंध है; AI ऑफिस एक अस्थायी सहयोग परिदृश्य है — दोनों स्वतंत्र हैं।"
+    },
+    "assignment": {
+      "title": "प्रत्यायोजन",
+      "create": "नया प्रत्यायोजन",
+      "assignee": "निष्पादक बॉट",
+      "task": "कार्य सामग्री",
+      "taskRequired": "कृपया कार्य सामग्री दर्ज करें",
+      "modeDispatch": "कार्य सौंपना",
+      "send": "भेजें",
+      "cancel": "रद्द करें",
+      "statusQueued": "कतार में",
+      "statusRunning": "चल रहा है",
+      "statusCompleted": "पूर्ण",
+      "statusFailed": "विफल",
+      "statusCancelled": "रद्द",
+      "empty": "अभी कोई प्रत्यायोजन नहीं"
     }
   }
 }

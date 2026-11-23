@@ -43,6 +43,10 @@ export interface BotDetailProps {
    * import pages/**；未传则不渲染该 Tab，组件在无例程依赖场景保持可用）。
    */
   routinesPanel?: React.ReactNode;
+  /**
+   * P2-b：「委派」Tab 内容（页面层注入，组件中立性同 routinesPanel；未传则不渲染）。
+   */
+  assignmentsPanel?: React.ReactNode;
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
@@ -58,7 +62,16 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThread, onOpenThread, routinesPanel }: BotDetailProps) {
+export function BotDetail({
+  bot,
+  deleting = false,
+  onEdit,
+  onDelete,
+  onCreateThread,
+  onOpenThread,
+  routinesPanel,
+  assignmentsPanel,
+}: BotDetailProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const listThreads = useBotStore((s) => s.listThreads);
@@ -216,6 +229,9 @@ export function BotDetail({ bot, deleting = false, onEdit, onDelete, onCreateThr
           },
           ...(routinesPanel
             ? [{ key: "routines", label: t("bots.tabRoutines"), children: routinesPanel }]
+            : []),
+          ...(assignmentsPanel
+            ? [{ key: "assignments", label: t("bot.assignment.title"), children: assignmentsPanel }]
             : []),
         ]}
       />

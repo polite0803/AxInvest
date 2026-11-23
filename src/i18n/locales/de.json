@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] Ungültige Modellreferenz erkannt {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} und {{modelKey}} müssen entweder beide gesetzt oder beide null sein. Aktuell {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "Unbekannter Fehler"
+    "unknown": "Unbekannter Fehler",
+    "BOT_DEPARTMENT_NOT_FOUND": "Bot-Abteilung nicht gefunden",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "Bot gehört bereits zu einer Abteilung",
+    "BOT_ASSIGNMENT_NOT_FOUND": "Bot-Auftragszuweisung nicht gefunden",
+    "BOT_DELEGATE_SELF": "Ein Bot kann nicht an sich selbst delegieren",
+    "BOT_DELEGATE_BUSY": "Zu viele laufende Delegierungen",
+    "BOT_DELEGATE_TIMEOUT": "Zeitüberschreitung bei der Delegierung"
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "Bildgenerierung",
       "stock_analysis": "Aktienanalyse"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "Abteilungen",
+      "untitled": "Ungruppiert",
+      "create": "Neue Abteilung",
+      "edit": "Abteilung bearbeiten",
+      "name": "Abteilungsname",
+      "nameRequired": "Bitte Abteilungsname eingeben",
+      "description": "Beschreibung",
+      "chief": "Chief",
+      "chiefPlaceholder": "Chief-Bot auswählen",
+      "chiefEmpty": "Kein Chief",
+      "addMember": "Zur Abteilung hinzufügen",
+      "removeMember": "Aus Abteilung entfernen",
+      "hint": "Abteilungen sind die dauerhafte organisatorische Zuordnung eines Bots; das KI-Büro ist eine temporäre Kollaborationsszene — beide sind unabhängig."
+    },
+    "assignment": {
+      "title": "Delegierung",
+      "create": "Neue Delegierung",
+      "assignee": "Ausführender Bot",
+      "task": "Aufgabe",
+      "taskRequired": "Bitte Aufgabe eingeben",
+      "modeDispatch": "Auftrag",
+      "send": "Senden",
+      "cancel": "Abbrechen",
+      "statusQueued": "In Warteschlange",
+      "statusRunning": "Wird ausgeführt",
+      "statusCompleted": "Abgeschlossen",
+      "statusFailed": "Fehlgeschlagen",
+      "statusCancelled": "Abgebrochen",
+      "empty": "Noch keine Delegierungen"
     }
   }
 }

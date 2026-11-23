@@ -131,6 +131,36 @@ export const BOT_I18N_KEYS = [
   "bots.approvalEffective",
   "bots.approvalEffectiveHint",
   "bots.unreadBadge",
+  // ── P2-b T5'' 新增（2026-11-23，权威清单 docs/bot-integration/P2/I18N-KEYS-P2B.md §2）──
+  // 部门（13，含 ADR-P2B-1 区分文案 hint）
+  "bot.department.title",
+  "bot.department.untitled",
+  "bot.department.create",
+  "bot.department.edit",
+  "bot.department.name",
+  "bot.department.nameRequired",
+  "bot.department.description",
+  "bot.department.chief",
+  "bot.department.chiefPlaceholder",
+  "bot.department.chiefEmpty",
+  "bot.department.addMember",
+  "bot.department.removeMember",
+  "bot.department.hint",
+  // 委派（14）
+  "bot.assignment.title",
+  "bot.assignment.create",
+  "bot.assignment.assignee",
+  "bot.assignment.task",
+  "bot.assignment.taskRequired",
+  "bot.assignment.modeDispatch",
+  "bot.assignment.send",
+  "bot.assignment.cancel",
+  "bot.assignment.statusQueued",
+  "bot.assignment.statusRunning",
+  "bot.assignment.statusCompleted",
+  "bot.assignment.statusFailed",
+  "bot.assignment.statusCancelled",
+  "bot.assignment.empty",
 ];
 
 /** ADR-009：删除确认必须说明线程与记忆会保留。 */

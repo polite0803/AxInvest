@@ -56,6 +56,29 @@ interface RoutineDto {
   createdAt: string;
 }
 
+interface DepartmentDto {
+  id: string;
+  name: string;
+  description: string;
+  chiefBotId: string | null;
+  botIds: string[];
+}
+
+interface AssignmentDto {
+  id: string;
+  rootId: string;
+  parentId: string | null;
+  depth: number;
+  origin: string;
+  requesterBotId: string | null;
+  assigneeBotId: string;
+  assigneeName: string;
+  mode: string;
+  taskText: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  errorCode: string | null;
+}
+
 async function makeRoutine(botId: string, name = "例程"): Promise<RoutineDto> {
   return handleCommand<RoutineDto>("create_bot_scheduled_task", {
     botId,
@@ -341,5 +364,168 @@ describe("browserMock: Bot 数据面", () => {
     await expect(handleCommand("read_bot_soul", { botId: "missing" })).rejects.toThrow(
       /BOT_NOT_FOUND/,
     );
+  });
+});
+
+
+// ── P2-b：部门与委派（IPC-P2B 冻结契约）─────────────────────────────────
+
+describe("browserMock P2-b 部门", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("创建/列出/更新/删除部门；空名拒绝", async () => {
+    const dept = await handleCommand<DepartmentDto>("create_bot_department", {
+      input: { name: "投研部", description: "d" },
+    });
+    expect(dept.name).toBe("投研部");
+    expect(dept.chiefBotId).toBeNull();
+    expect(dept.botIds).toEqual([]);
+
+    await expect(
+      handleCommand("create_bot_department", { input: { name: "  " } }),
+    ).rejects.toThrow(/BOT_NAME_INVALID/);
+
+    const updated = await handleCommand<DepartmentDto>("update_bot_department", {
+      departmentId: dept.id,
+      input: { description: "新描述", chiefBotId: null },
+    });
+    expect(updated.description).toBe("新描述");
+
+    const listed = await handleCommand<DepartmentDto[]>("list_bot_departments");
+    expect(listed.map((d) => d.id)).toContain(dept.id);
+
+    await handleCommand("delete_bot_department", { departmentId: dept.id });
+    const after = await handleCommand<DepartmentDto[]>("list_bot_departments");
+    expect(after.map((d) => d.id)).not.toContain(dept.id);
+  });
+
+  it("成员增删；重复归属报 BOT_DEPARTMENT_MEMBER_EXISTS（Q2 单部门口径）", async () => {
+    const botA = await makeBot("A");
+    const dept1 = await handleCommand<DepartmentDto>("create_bot_department", { input: { name: "甲" } });
+    const dept2 = await handleCommand<DepartmentDto>("create_bot_department", { input: { name: "乙" } });
+
+    await handleCommand("add_bot_to_department", { departmentId: dept1.id, botId: botA.id });
+    let listed = await handleCommand<DepartmentDto[]>("list_bot_departments");
+    expect(listed.find((d) => d.id === dept1.id)?.botIds).toContain(botA.id);
+
+    // 同部门重复 add：不得产生重复行
+    await handleCommand("add_bot_to_department", { departmentId: dept1.id, botId: botA.id });
+    listed = await handleCommand<DepartmentDto[]>("list_bot_departments");
+    expect(listed.find((d) => d.id === dept1.id)?.botIds.filter((id) => id === botA.id)).toHaveLength(1);
+
+    // 加入第二个部门：MEMBER_EXISTS（Q2）
+    await expect(
+      handleCommand("add_bot_to_department", { departmentId: dept2.id, botId: botA.id }),
+    ).rejects.toThrow(/BOT_DEPARTMENT_MEMBER_EXISTS/);
+
+    await handleCommand("remove_bot_from_department", { departmentId: dept1.id, botId: botA.id });
+    listed = await handleCommand<DepartmentDto[]>("list_bot_departments");
+    expect(listed.find((d) => d.id === dept1.id)?.botIds).not.toContain(botA.id);
+  });
+
+  it("删 Bot 级联（ADR-P2B-6）：成员行清空、chief 置空、部门保留、在途委派取消", async () => {
+    const botA = await makeBot("Chief-A");
+    const botB = await makeBot("B");
+    const dept = await handleCommand<DepartmentDto>("create_bot_department", {
+      input: { name: "部", chiefBotId: botA.id },
+    });
+    await handleCommand("add_bot_to_department", { departmentId: dept.id, botId: botA.id });
+    await handleCommand("add_bot_to_department", { departmentId: dept.id, botId: botB.id });
+    await handleCommand<AssignmentDto>("create_bot_assignment", {
+      assigneeBotId: botA.id, // 在途单挂在被删 Bot 上（级联只取消该 Bot 的单）
+      taskText: "在途单",
+    });
+
+    await handleCommand("delete_bot", { botId: botA.id });
+
+    const listed = await handleCommand<DepartmentDto[]>("list_bot_departments");
+    const kept = listed.find((d) => d.id === dept.id);
+    expect(kept).toBeDefined(); // 部门保留
+    expect(kept?.chiefBotId).toBeNull(); // Chief 置空
+    expect(kept?.botIds).not.toContain(botA.id); // 成员行清理
+    expect(kept?.botIds).toContain(botB.id); // 其他成员不动
+
+    const assignments = await handleCommand<AssignmentDto[]>("list_bot_assignments");
+    expect(assignments.every((a) => a.status !== "queued")).toBe(true);
+  });
+});
+
+describe("browserMock P2-b 委派", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("dispatch：落 queued、depth=1、root=自身；空任务与 consult 拒绝", async () => {
+    const assignee = await makeBot("执行者");
+    const row = await handleCommand<AssignmentDto>("create_bot_assignment", {
+      assigneeBotId: assignee.id,
+      taskText: "整理研报",
+    });
+    expect(row.status).toBe("queued");
+    expect(row.mode).toBe("dispatch");
+    expect(row.depth).toBe(1);
+    expect(row.rootId).toBe(row.id);
+    expect(row.parentId).toBeNull();
+    expect(row.origin).toBe("person");
+    expect(row.assigneeName).toBe("执行者");
+
+    await expect(
+      handleCommand("create_bot_assignment", { assigneeBotId: assignee.id, taskText: "  " }),
+    ).rejects.toThrow();
+    await expect(
+      handleCommand("create_bot_assignment", {
+        assigneeBotId: assignee.id,
+        taskText: "x",
+        mode: "consult",
+      }),
+    ).rejects.toThrow(/ERR_VALIDATION/); // IPC-P2B §2.3：前端不发 consult，命令层拒绝
+  });
+
+  it("同 Bot 委派报 BOT_DELEGATE_SELF；未知 assignee 报 BOT_NOT_FOUND", async () => {
+    const bot = await makeBot("自指");
+    await expect(
+      handleCommand("create_bot_assignment", {
+        assigneeBotId: bot.id,
+        requesterBotId: bot.id,
+        taskText: "自我委派",
+      }),
+    ).rejects.toThrow(/BOT_DELEGATE_SELF/);
+    await expect(
+      handleCommand("create_bot_assignment", { assigneeBotId: "no-such-bot", taskText: "x" }),
+    ).rejects.toThrow(/BOT_NOT_FOUND/);
+  });
+
+  it("list 过滤：botId 双向（发起+被指派）；status 过滤", async () => {
+    const a = await makeBot("A");
+    const b = await makeBot("B");
+    await handleCommand("create_bot_assignment", { assigneeBotId: b.id, taskText: "t1" });
+    await handleCommand("create_bot_assignment", { assigneeBotId: a.id, taskText: "t2" });
+
+    const byA = await handleCommand<AssignmentDto[]>("list_bot_assignments", { botId: a.id });
+    expect(byA).toHaveLength(1);
+    expect(byA[0].assigneeBotId).toBe(a.id);
+
+    const byB = await handleCommand<AssignmentDto[]>("list_bot_assignments", { botId: b.id });
+    expect(byB).toHaveLength(1);
+    expect(byB[0].assigneeBotId).toBe(b.id);
+
+    const queued = await handleCommand<AssignmentDto[]>("list_bot_assignments", { status: "queued" });
+    expect(queued).toHaveLength(2);
+  });
+
+  it("cancel：queued 可取消；终态再取消报错（IPC-P2B §1）", async () => {
+    const assignee = await makeBot("执行者");
+    const row = await handleCommand<AssignmentDto>("create_bot_assignment", {
+      assigneeBotId: assignee.id,
+      taskText: "待取消",
+    });
+    await handleCommand("cancel_bot_assignment", { assignmentId: row.id });
+    const listed = await handleCommand<AssignmentDto[]>("list_bot_assignments");
+    expect(listed[0].status).toBe("cancelled");
+    await expect(
+      handleCommand("cancel_bot_assignment", { assignmentId: row.id }),
+    ).rejects.toThrow(); // cancelled 已是终态
   });
 });

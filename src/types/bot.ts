@@ -90,3 +90,64 @@ export interface DeleteBotResult {
   detachedThreads: number;
   memoryPath: string;
 }
+
+// ── P2-b：部门与委派（IPC-P2B §2 冻结契约，逐字对齐）──
+
+/** 部门 DTO（IPC-P2B §2.1；botIds 由命令层 join 成员表得出）。 */
+export interface BotDepartment {
+  id: string;
+  name: string;
+  description: string;
+  chiefBotId: string | null;
+  botIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 委派状态五态（GAP G-B7）。 */
+export type BotAssignmentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+/** 委派发起来源。 */
+export type BotAssignmentOrigin = "person" | "bot" | "routine";
+
+/** 委派模式：consult 是 assignee 轮内工具语义（前端禁发），dispatch 走命令层（IPC-P2B §2.3）。 */
+export type BotAssignmentMode = "consult" | "dispatch";
+
+/** 委派合同 DTO（IPC-P2B §2.2，逐字对齐）。 */
+export interface BotAssignment {
+  id: string;
+  rootId: string;
+  parentId: string | null;
+  depth: number;
+  origin: BotAssignmentOrigin;
+  requesterBotId: string | null;
+  requesterConversationId: string | null;
+  assigneeBotId: string;
+  assigneeName: string;
+  mode: BotAssignmentMode;
+  taskText: string;
+  status: BotAssignmentStatus;
+  resultText: string | null;
+  errorCode: string | null;
+  errorDetail: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** create_bot_assignment 入参（IPC-P2B §2.3；consult 由前端禁用）。 */
+export interface CreateBotAssignmentInput {
+  assigneeBotId: string;
+  taskText: string;
+  mode?: BotAssignmentMode;
+  requesterConversationId?: string | null;
+  requesterBotId?: string | null;
+}
+
+/** 部门创建/更新入参（update 的可空语义与 UpdateBotInput 一致：null=置空，缺键=不改）。 */
+export interface SaveBotDepartmentInput {
+  name?: string;
+  description?: string;
+  chiefBotId?: string | null;
+}

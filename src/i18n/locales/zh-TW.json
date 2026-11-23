@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] 偵測到無效模型參考 {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} 和 {{modelKey}} 必須同時設定或同時為 null，目前 {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "未知錯誤"
+    "unknown": "未知錯誤",
+    "BOT_DEPARTMENT_NOT_FOUND": "找不到 Bot 部門",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "該 Bot 已歸屬其他部門",
+    "BOT_ASSIGNMENT_NOT_FOUND": "找不到委派記錄",
+    "BOT_DELEGATE_SELF": "Bot 不能委派給自己",
+    "BOT_DELEGATE_BUSY": "委派並行已達上限",
+    "BOT_DELEGATE_TIMEOUT": "委派執行逾時"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "图像生成",
       "stock_analysis": "股票分析"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "部門",
+      "untitled": "未分組",
+      "create": "新增部門",
+      "edit": "編輯部門",
+      "name": "部門名稱",
+      "nameRequired": "請輸入部門名稱",
+      "description": "描述",
+      "chief": "Chief",
+      "chiefPlaceholder": "選擇 Chief Bot",
+      "chiefEmpty": "暫無 Chief",
+      "addMember": "加入部門",
+      "removeMember": "移出部門",
+      "hint": "部門是 Bot 的常設組織歸屬；AI 辦公室是臨時協作場景，兩者獨立。"
+    },
+    "assignment": {
+      "title": "委派",
+      "create": "發起委派",
+      "assignee": "執行 Bot",
+      "task": "任務內容",
+      "taskRequired": "請輸入任務內容",
+      "modeDispatch": "派工",
+      "send": "發起",
+      "cancel": "取消",
+      "statusQueued": "排隊中",
+      "statusRunning": "執行中",
+      "statusCompleted": "已完成",
+      "statusFailed": "失敗",
+      "statusCancelled": "已取消",
+      "empty": "暫無委派記錄"
     }
   }
 }

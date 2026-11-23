@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] تم اكتشاف مرجع نموذج غير صالح {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] يجب تعيين {{providerKey}} و {{modelKey}} معًا أو أن يكونا فارغين معًا. حاليًا {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "خطأ غير معروف"
+    "unknown": "خطأ غير معروف",
+    "BOT_DEPARTMENT_NOT_FOUND": "لم يتم العثور على قسم البوت",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "البوت ينتمي بالفعل إلى قسم",
+    "BOT_ASSIGNMENT_NOT_FOUND": "لم يتم العثور على مهمة التفويض",
+    "BOT_DELEGATE_SELF": "لا يمكن للبوت تفويض نفسه",
+    "BOT_DELEGATE_BUSY": "عدد كبير جداً من عمليات التفويض الجارية",
+    "BOT_DELEGATE_TIMEOUT": "انتهت مهلة التفويض"
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "توليد الصور",
       "stock_analysis": "تحليل الأسهم"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "الأقسام",
+      "untitled": "غير مجمّع",
+      "create": "قسم جديد",
+      "edit": "تعديل القسم",
+      "name": "اسم القسم",
+      "nameRequired": "يرجى إدخال اسم القسم",
+      "description": "الوصف",
+      "chief": "الرئيس",
+      "chiefPlaceholder": "اختر بوت رئيس",
+      "chiefEmpty": "لا يوجد رئيس",
+      "addMember": "إضافة إلى القسم",
+      "removeMember": "إزالة من القسم",
+      "hint": "الأقسام هي التنظيم الدائم للبوتات؛ ومكتب الذكاء الاصطناعي هو سيناريو تعاون مؤقت — وكلاهما مستقل."
+    },
+    "assignment": {
+      "title": "التفويض",
+      "create": "تفويض جديد",
+      "assignee": "بوت المنفذ",
+      "task": "المهمة",
+      "taskRequired": "يرجى إدخال المهمة",
+      "modeDispatch": "إسناد عمل",
+      "send": "إرسال",
+      "cancel": "إلغاء",
+      "statusQueued": "في الانتظار",
+      "statusRunning": "قيد التنفيذ",
+      "statusCompleted": "مكتمل",
+      "statusFailed": "فشل",
+      "statusCancelled": "ملغى",
+      "empty": "لا توجد تفويضات بعد"
     }
   }
 }

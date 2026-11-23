@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] 检测到无效模型引用 {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} 和 {{modelKey}} 必须同时设置或同时为 null，当前 {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "未知错误"
+    "unknown": "未知错误",
+    "BOT_DEPARTMENT_NOT_FOUND": "未找到 Bot 部门",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "该 Bot 已归属其他部门",
+    "BOT_ASSIGNMENT_NOT_FOUND": "未找到委派记录",
+    "BOT_DELEGATE_SELF": "Bot 不能委派给自己",
+    "BOT_DELEGATE_BUSY": "委派并发已达上限",
+    "BOT_DELEGATE_TIMEOUT": "委派执行超时"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -19285,6 +19291,39 @@
     "workflow": {
       "image_generation": "图像生成",
       "stock_analysis": "股票分析"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "部门",
+      "untitled": "未分组",
+      "create": "新建部门",
+      "edit": "编辑部门",
+      "name": "部门名称",
+      "nameRequired": "请输入部门名称",
+      "description": "描述",
+      "chief": "Chief",
+      "chiefPlaceholder": "选择 Chief Bot",
+      "chiefEmpty": "暂无 Chief",
+      "addMember": "加入部门",
+      "removeMember": "移出部门",
+      "hint": "部门是 Bot 的常设组织归属；AI 办公室是临时协作场景，两者独立。"
+    },
+    "assignment": {
+      "title": "委派",
+      "create": "发起委派",
+      "assignee": "执行 Bot",
+      "task": "任务内容",
+      "taskRequired": "请输入任务内容",
+      "modeDispatch": "派工",
+      "send": "发起",
+      "cancel": "取消",
+      "statusQueued": "排队中",
+      "statusRunning": "执行中",
+      "statusCompleted": "已完成",
+      "statusFailed": "失败",
+      "statusCancelled": "已取消",
+      "empty": "暂无委派记录"
     }
   }
 }

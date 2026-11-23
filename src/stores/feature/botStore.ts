@@ -11,7 +11,20 @@
 
 import { backendErrorText } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import type { Bot, BotMemory, BotSoul, Conversation, CreateBotInput, DeleteBotResult, ScheduledTask, UpdateBotInput } from "@/types";
+import type {
+  Bot,
+  BotAssignment,
+  BotDepartment,
+  BotMemory,
+  BotSoul,
+  Conversation,
+  CreateBotAssignmentInput,
+  CreateBotInput,
+  DeleteBotResult,
+  ScheduledTask,
+  SaveBotDepartmentInput,
+  UpdateBotInput,
+} from "@/types";
 import { create } from "zustand";
 
 export interface BotStoreState {
@@ -53,6 +66,26 @@ export interface BotStoreState {
   deleteBotRoutine: (taskId: string) => Promise<void>;
   pauseBotRoutine: (taskId: string) => Promise<void>;
   resumeBotRoutine: (taskId: string) => Promise<void>;
+
+  // ── P2-b：部门 ──
+  listBotDepartments: () => Promise<BotDepartment[]>;
+  createBotDepartment: (input: SaveBotDepartmentInput) => Promise<BotDepartment>;
+  updateBotDepartment: (departmentId: string, input: SaveBotDepartmentInput) => Promise<BotDepartment>;
+  deleteBotDepartment: (departmentId: string) => Promise<void>;
+  addBotToDepartment: (departmentId: string, botId: string) => Promise<void>;
+  removeBotFromDepartment: (departmentId: string, botId: string) => Promise<void>;
+  // ── P2-b：委派 ──
+  createBotAssignment: (input: CreateBotAssignmentInput) => Promise<BotAssignment>;
+  listBotAssignments: (filter?: BotAssignmentFilter) => Promise<BotAssignment[]>;
+  cancelBotAssignment: (assignmentId: string) => Promise<void>;
+}
+
+/** IPC-P2B §2 `list_bot_assignments` 过滤参数（皆可选）。 */
+export interface BotAssignmentFilter {
+  requesterBotId?: string | null;
+  assigneeBotId?: string | null;
+  botId?: string | null;
+  status?: BotAssignment["status"] | null;
 }
 
 /** IPC-P2 §2.1 create_bot_scheduled_task 入参 */
@@ -229,5 +262,94 @@ export const useBotStore = create<BotStoreState>((set) => ({
 
   resumeBotRoutine: async (taskId) => {
     await invoke("resume_scheduled_task", { taskId });
+  },
+
+  // ── P2-b：部门（IPC-P2B §1 五命令）──
+
+  listBotDepartments: () => invoke<BotDepartment[]>("list_bot_departments"),
+
+  createBotDepartment: async (input) => {
+    set({ saving: true, error: null });
+    try {
+      const department = await invoke<BotDepartment>("create_bot_department", { input });
+      set({ saving: false });
+      return department;
+    } catch (e) {
+      set({ saving: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  updateBotDepartment: async (departmentId, input) => {
+    set({ saving: true, error: null });
+    try {
+      const department = await invoke<BotDepartment>("update_bot_department", { departmentId, input });
+      set({ saving: false });
+      return department;
+    } catch (e) {
+      set({ saving: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  deleteBotDepartment: async (departmentId) => {
+    try {
+      await invoke("delete_bot_department", { departmentId });
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  addBotToDepartment: async (departmentId, botId) => {
+    try {
+      await invoke("add_bot_to_department", { departmentId, botId });
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  removeBotFromDepartment: async (departmentId, botId) => {
+    try {
+      await invoke("remove_bot_from_department", { departmentId, botId });
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  // ── P2-b：委派（IPC-P2B §1 三命令；mode 前端固定 dispatch，IPC-P2B §2.3）──
+
+  createBotAssignment: async (input) => {
+    try {
+      return await invoke<BotAssignment>("create_bot_assignment", {
+        assigneeBotId: input.assigneeBotId,
+        taskText: input.taskText,
+        mode: input.mode ?? "dispatch",
+        requesterConversationId: input.requesterConversationId ?? null,
+        requesterBotId: input.requesterBotId ?? null,
+      });
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  listBotAssignments: (filter) =>
+    invoke<BotAssignment[]>("list_bot_assignments", {
+      requesterBotId: filter?.requesterBotId ?? null,
+      assigneeBotId: filter?.assigneeBotId ?? null,
+      botId: filter?.botId ?? null,
+      status: filter?.status ?? null,
+    }),
+
+  cancelBotAssignment: async (assignmentId) => {
+    try {
+      await invoke("cancel_bot_assignment", { assignmentId });
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
   },
 }));

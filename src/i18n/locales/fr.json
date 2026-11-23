@@ -3107,7 +3107,13 @@
       "invalidModelRefDetected": "[toDto] Référence de modèle invalide détectée {{sourceKey}}",
       "mustBeSetTogether": "[SettingsDto] {{providerKey}} et {{modelKey}} doivent être définis ensemble ou tous deux null. Actuellement {{providerKey}}={{providerId}}, {{modelKey}}={{modelId}}"
     },
-    "unknown": "Erreur inconnue"
+    "unknown": "Erreur inconnue",
+    "BOT_DEPARTMENT_NOT_FOUND": "Département de bot introuvable",
+    "BOT_DEPARTMENT_MEMBER_EXISTS": "Le bot appartient déjà à un département",
+    "BOT_ASSIGNMENT_NOT_FOUND": "Tâche de délégation introuvable",
+    "BOT_DELEGATE_SELF": "Un bot ne peut pas se déléguer à lui-même",
+    "BOT_DELEGATE_BUSY": "Trop de délégations en cours",
+    "BOT_DELEGATE_TIMEOUT": "Délai d'attente de la délégation dépassé"
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -19289,6 +19295,39 @@
     "workflow": {
       "image_generation": "Génération d'images",
       "stock_analysis": "Analyse d'actions"
+    }
+  },
+  "bot": {
+    "department": {
+      "title": "Départements",
+      "untitled": "Non groupé",
+      "create": "Nouveau département",
+      "edit": "Modifier le département",
+      "name": "Nom du département",
+      "nameRequired": "Veuillez saisir le nom du département",
+      "description": "Description",
+      "chief": "Responsable",
+      "chiefPlaceholder": "Sélectionner un bot responsable",
+      "chiefEmpty": "Aucun responsable",
+      "addMember": "Ajouter au département",
+      "removeMember": "Retirer du département",
+      "hint": "Les départements sont le rattachement organisationnel permanent d'un bot ; le Bureau IA est une scène de collaboration temporaire — les deux sont indépendants."
+    },
+    "assignment": {
+      "title": "Délégation",
+      "create": "Nouvelle délégation",
+      "assignee": "Bot exécutant",
+      "task": "Tâche",
+      "taskRequired": "Veuillez saisir la tâche",
+      "modeDispatch": "Exécution",
+      "send": "Envoyer",
+      "cancel": "Annuler",
+      "statusQueued": "En file d'attente",
+      "statusRunning": "En cours",
+      "statusCompleted": "Terminé",
+      "statusFailed": "Échec",
+      "statusCancelled": "Annulé",
+      "empty": "Aucune délégation pour l'instant"
     }
   }
 }

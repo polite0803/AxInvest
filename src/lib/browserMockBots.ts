@@ -58,6 +58,28 @@ export const BOT_ROUTINE_COMMANDS = [
 /** 与后端 `BOT_ROUTINE_TASK_TYPE` 同字面量（scheduled_task.rs）。 */
 export const BOT_ROUTINE_TASK_TYPE = "bot_routine" as const;
 
+/**
+ * P2-b 部门命令（IPC-P2B §1，5 条）。T5'' 冻结契约的字面名，不得改名。
+ */
+export const BOT_DEPARTMENT_COMMANDS = [
+  "list_bot_departments",
+  "create_bot_department",
+  "update_bot_department",
+  "delete_bot_department",
+  "add_bot_to_department",
+  "remove_bot_from_department",
+] as const;
+
+/**
+ * P2-b 委派命令（IPC-P2B §1，3 条）。dispatch 只落 queued（执行器在 T3''，
+ * 浏览器 mock 无运行时）；取消仅 queued 可取消（IPC-P2B §1 cancel 语义）。
+ */
+export const BOT_ASSIGNMENT_COMMANDS = [
+  "create_bot_assignment",
+  "list_bot_assignments",
+  "cancel_bot_assignment",
+] as const;
+
 export const APPROVAL_MODES = ["ask", "edits", "auto", "full", "custom"] as const;
 
 const BOTS_KEY = "bots";
@@ -250,6 +272,88 @@ function soulView(bot: MockBot) {
   return { content: bot.soul, hash: dbHash, drift };
 }
 
+// ── 部门与委派（P2-b，IPC-P2B）─────────────────────────────────────────
+
+const DEPARTMENTS_KEY = "bot_departments";
+const ASSIGNMENTS_KEY = "bot_assignments";
+
+/** 部门 DTO（浏览器 mock 形态）：键与 IPC-P2B §2.1 `BotDepartmentDto` 对齐。 */
+interface MockDepartment {
+  id: string;
+  name: string;
+  description: string;
+  chiefBotId: string | null;
+  botIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 委派 DTO（浏览器 mock 形态）：键与 IPC-P2B §2.2 `BotAssignmentDto` 对齐。 */
+interface MockAssignment {
+  id: string;
+  rootId: string;
+  parentId: string | null;
+  depth: number;
+  origin: "person" | "bot" | "routine";
+  requesterBotId: string | null;
+  requesterConversationId: string | null;
+  assigneeBotId: string;
+  assigneeName: string;
+  mode: "consult" | "dispatch";
+  taskText: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  resultText: string | null;
+  errorCode: string | null;
+  errorDetail: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function loadDepartments(): MockDepartment[] {
+  return readStore<MockDepartment[]>(DEPARTMENTS_KEY, []);
+}
+
+function saveDepartments(rows: MockDepartment[]): void {
+  writeStore(DEPARTMENTS_KEY, rows);
+}
+
+function findDepartment(id: string): { rows: MockDepartment[]; idx: number; row: MockDepartment } {
+  const rows = loadDepartments();
+  const idx = rows.findIndex((d) => d.id === id);
+  if (idx === -1) {
+    throw botError("BOT_DEPARTMENT_NOT_FOUND");
+  }
+  return { rows, idx, row: rows[idx] };
+}
+
+function loadAssignments(): MockAssignment[] {
+  return readStore<MockAssignment[]>(ASSIGNMENTS_KEY, []);
+}
+
+function saveAssignments(rows: MockAssignment[]): void {
+  writeStore(ASSIGNMENTS_KEY, rows);
+}
+
+function findAssignment(id: string): { rows: MockAssignment[]; idx: number; row: MockAssignment } {
+  const rows = loadAssignments();
+  const idx = rows.findIndex((x) => x.id === id);
+  if (idx === -1) {
+    throw botError("BOT_ASSIGNMENT_NOT_FOUND");
+  }
+  return { rows, idx, row: rows[idx] };
+}
+
+/** Q2：单 Bot 单部门 —— 该 Bot 已在任一部门（重复 add 或加入第二个部门）→ MEMBER_EXISTS。 */
+function assertBotNotInAnyDepartment(botId: string, exceptDepartmentId?: string): void {
+  for (const dept of loadDepartments()) {
+    if (dept.id !== exceptDepartmentId && dept.botIds.includes(botId)) {
+      throw botError("BOT_DEPARTMENT_MEMBER_EXISTS");
+    }
+  }
+}
+
 // ── 例程（P2-a，IPC-P2 §2）──────────────────────────────────────────────
 
 function loadRoutines(): MockRoutine[] {
@@ -403,6 +507,8 @@ export async function handleBotCommand(
   if (
     !(BOT_COMMANDS as readonly string[]).includes(cmd)
     && !(BOT_ROUTINE_COMMANDS as readonly string[]).includes(cmd)
+    && !(BOT_DEPARTMENT_COMMANDS as readonly string[]).includes(cmd)
+    && !(BOT_ASSIGNMENT_COMMANDS as readonly string[]).includes(cmd)
   ) {
     return BOT_UNHANDLED;
   }
@@ -557,6 +663,22 @@ export async function handleBotCommand(
       const routines = loadRoutines().filter((r) => r.botId !== botId);
       const removedRoutines = loadRoutines().length - routines.length;
       saveRoutines(routines);
+      // P2-b（ADR-P2B-6）：清部门成员行 + 清 chief 引用（部门保留）+ 取消该 Bot 的在途委派。
+      const departments = loadDepartments();
+      for (const dept of departments) {
+        dept.botIds = dept.botIds.filter((id) => id !== botId);
+        if (dept.chiefBotId === botId) {
+          dept.chiefBotId = null;
+        }
+        dept.updatedAt = Date.now();
+      }
+      saveDepartments(departments);
+      const assignments = loadAssignments().map((row) =>
+        row.assigneeBotId === botId && (row.status === "queued" || row.status === "running")
+          ? { ...row, status: "cancelled" as const, finishedAt: Date.now(), updatedAt: Date.now() }
+          : row,
+      );
+      saveAssignments(assignments);
       return { detachedThreads: detached, removedRoutines, memoryPath: `~/.axagent/bots/${botId}` };
     }
     case "list_bot_threads": {
@@ -712,6 +834,181 @@ export async function handleBotCommand(
     }
 
     // delete_bot 级联删例程（GAP G-10 / T2'）：见上方 delete_bot case 内联实现。
+
+    // ── P2-b 部门（IPC-P2B §1，5 命令）──
+
+    case "list_bot_departments": {
+      return loadDepartments().sort((x, y) => x.createdAt - y.createdAt);
+    }
+
+    case "create_bot_department": {
+      const input = field<Record<string, unknown>>(a, "input") ?? {};
+      const name = (field<string>(input, "name") ?? "").trim();
+      if (!name || name.length > 100) {
+        throw botError("BOT_NAME_INVALID");
+      }
+      const now = Date.now();
+      const row: MockDepartment = {
+        id: `dept-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        description: field<string>(input, "description") ?? "",
+        chiefBotId: field<string | null>(input, "chiefBotId") ?? null,
+        botIds: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (row.chiefBotId) {
+        findBot(row.chiefBotId); // chief 必须是存在的 Bot（MODEL-P2B §2.1 命令层校验口径）
+      }
+      const rows = loadDepartments();
+      rows.push(row);
+      saveDepartments(rows);
+      return row;
+    }
+
+    case "update_bot_department": {
+      const departmentId = field<string>(a, "departmentId") ?? "";
+      const { rows, idx, row } = findDepartment(departmentId);
+      const input = field<Record<string, unknown>>(a, "input") ?? {};
+      const name = field<string>(input, "name");
+      if (name !== undefined) {
+        const trimmed = name.trim();
+        if (!trimmed || trimmed.length > 100) {
+          throw botError("BOT_NAME_INVALID");
+        }
+        row.name = trimmed;
+      }
+      const description = field<string>(input, "description");
+      if (description !== undefined) {
+        row.description = description;
+      }
+      if (hasField(input, "chiefBotId")) {
+        const chiefBotId = field<string | null>(input, "chiefBotId") ?? null;
+        if (chiefBotId) {
+          findBot(chiefBotId);
+        }
+        row.chiefBotId = chiefBotId;
+      }
+      row.updatedAt = Date.now();
+      rows[idx] = row;
+      saveDepartments(rows);
+      return row;
+    }
+
+    case "delete_bot_department": {
+      const departmentId = field<string>(a, "departmentId") ?? "";
+      const { rows, idx } = findDepartment(departmentId);
+      rows.splice(idx, 1); // ADR-P2B-6：成员行随部门删除，Bot 本体不动
+      saveDepartments(rows);
+      return undefined;
+    }
+
+    case "add_bot_to_department": {
+      const departmentId = field<string>(a, "departmentId") ?? "";
+      const botId = field<string>(a, "botId") ?? "";
+      findDepartment(departmentId);
+      findBot(botId);
+      assertBotNotInAnyDepartment(botId, departmentId);
+      const { rows, idx, row } = findDepartment(departmentId);
+      if (!row.botIds.includes(botId)) {
+        row.botIds.push(botId);
+        row.updatedAt = Date.now();
+        rows[idx] = row;
+        saveDepartments(rows);
+      }
+      return undefined;
+    }
+
+    case "remove_bot_from_department": {
+      const departmentId = field<string>(a, "departmentId") ?? "";
+      const botId = field<string>(a, "botId") ?? "";
+      findDepartment(departmentId);
+      const { rows, idx, row } = findDepartment(departmentId);
+      row.botIds = row.botIds.filter((id) => id !== botId);
+      row.updatedAt = Date.now();
+      rows[idx] = row;
+      saveDepartments(rows);
+      return undefined;
+    }
+
+    // ── P2-b 委派（IPC-P2B §1，3 命令）──
+
+    case "create_bot_assignment": {
+      const assigneeBotId = field<string>(a, "assigneeBotId") ?? "";
+      const taskText = field<string>(a, "taskText") ?? "";
+      const mode = field<string>(a, "mode") ?? "dispatch";
+      const requesterBotId = field<string | null>(a, "requesterBotId") ?? null;
+      if (!taskText.trim() || taskText.length > 20000) {
+        throw botError("ERR_VALIDATION");
+      }
+      if (mode === "consult") {
+        throw botError("ERR_VALIDATION"); // IPC-P2B §2.3：consult 由前端禁用，命令层拒绝
+      }
+      const assignee = findBot(assigneeBotId);
+      if (requesterBotId) {
+        const requester = findBot(requesterBotId);
+        if (requester.id === assignee.id) {
+          throw botError("BOT_DELEGATE_SELF");
+        }
+      }
+      const now = Date.now();
+      const row: MockAssignment = {
+        id: `assign-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        rootId: "",
+        parentId: null,
+        depth: 1,
+        origin: requesterBotId ? "bot" : "person",
+        requesterBotId,
+        requesterConversationId: field<string | null>(a, "requesterConversationId") ?? null,
+        assigneeBotId: assignee.id,
+        assigneeName: assignee.name,
+        mode: "dispatch",
+        taskText,
+        status: "queued",
+        resultText: null,
+        errorCode: null,
+        errorDetail: null,
+        startedAt: null,
+        finishedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      row.rootId = row.id; // ADR-P2B-5：一层委派时 root = 自身
+      const rows = loadAssignments();
+      rows.push(row);
+      saveAssignments(rows);
+      return row;
+    }
+
+    case "list_bot_assignments": {
+      const requesterBotId = field<string | null>(a, "requesterBotId") ?? null;
+      const assigneeBotId = field<string | null>(a, "assigneeBotId") ?? null;
+      const botId = field<string | null>(a, "botId") ?? null;
+      const status = field<string | null>(a, "status") ?? null;
+      return loadAssignments()
+        .filter((x) => {
+          if (requesterBotId && x.requesterBotId !== requesterBotId) return false;
+          if (assigneeBotId && x.assigneeBotId !== assigneeBotId) return false;
+          if (botId && x.assigneeBotId !== botId && x.requesterBotId !== botId) return false;
+          if (status && x.status !== status) return false;
+          return true;
+        })
+        .sort((x, y) => y.createdAt - x.createdAt);
+    }
+
+    case "cancel_bot_assignment": {
+      const assignmentId = field<string>(a, "assignmentId") ?? "";
+      const { rows, idx, row } = findAssignment(assignmentId);
+      if (row.status !== "queued" && row.status !== "running") {
+        throw botError("BOT_ASSIGNMENT_NOT_FOUND"); // 终态取消 → 后端报错；mock 同语义
+      }
+      row.status = "cancelled";
+      row.finishedAt = Date.now();
+      row.updatedAt = Date.now();
+      rows[idx] = row;
+      saveAssignments(rows);
+      return undefined;
+    }
 
     default:
       return BOT_UNHANDLED;

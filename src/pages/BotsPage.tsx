@@ -12,15 +12,17 @@
  * ChatPage 把 `botId` 传给 ChatSidebar 做归属过滤，新建会话也带该 `botId`。
  */
 
+import { BotDepartmentModal } from "@/components/bot/BotDepartmentModal";
 import { BotDetail } from "@/components/bot/BotDetail";
 import { BotEditor, type BotEditorModelOption, type BotEditorValues } from "@/components/bot/BotEditor";
 import { BotEmptyState } from "@/components/bot/BotEmptyState";
 import { BotList } from "@/components/bot/BotList";
+import { BotAssignmentsPanel } from "@/components/bot/BotAssignmentsPanel";
 import { backendErrorText } from "@/lib/errorI18n";
 import { countUnread, getNotifications } from "@/lib/notification";
 import { message } from "@/lib/toast";
 import { useBotStore, useConversationStore, useProviderStore } from "@/stores";
-import type { Bot, CreateBotInput, UpdateBotInput } from "@/types";
+import type { Bot, BotDepartment, CreateBotInput, UpdateBotInput } from "@/types";
 import { BotRoutinesPanel } from "./BotsPage/BotRoutinesPanel";
 import { Alert, Spin, theme } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -99,6 +101,25 @@ export function BotsPage() {
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
   const [editingBotId, setEditingBotId] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+
+  // P2-b：部门数据（分组侧栏 + 部门管理弹窗的数据源）
+  const listBotDepartments = useBotStore((s) => s.listBotDepartments);
+  const [departments, setDepartments] = useState<BotDepartment[]>([]);
+  const [departmentModalOpen, setDepartmentModalOpen] = useState(false);
+  const [editingDepartment, setEditingDepartment] = useState<BotDepartment | null>(null);
+
+  const reloadDepartments = useCallback(() => {
+    void listBotDepartments()
+      .then((rows) => setDepartments(Array.isArray(rows) ? rows : []))
+      .catch(() => {
+        // 部门加载失败不阻断 Bot 列表（侧栏退化为无分组）
+        setDepartments([]);
+      });
+  }, [listBotDepartments]);
+
+  useEffect(() => {
+    reloadDepartments();
+  }, [reloadDepartments]);
 
   useEffect(() => {
     void loadBots();
@@ -280,8 +301,17 @@ export function BotsPage() {
           bots={bots}
           activeBotId={activeBot?.id ?? null}
           unreadByBot={unreadByBot}
+          departments={departments}
           onSelect={setActiveBot}
           onCreate={openCreate}
+          onManageDepartments={() => {
+            setEditingDepartment(null);
+            setDepartmentModalOpen(true);
+          }}
+          onEditDepartment={(department) => {
+            setEditingDepartment(department);
+            setDepartmentModalOpen(true);
+          }}
         />
       </aside>
 
@@ -302,6 +332,7 @@ export function BotsPage() {
               bot={activeBot}
               deleting={deleting}
               routinesPanel={<BotRoutinesPanel botId={activeBot.id} />}
+              assignmentsPanel={<BotAssignmentsPanel bot={activeBot} bots={bots} />}
               onEdit={() => {
                 void openEdit();
               }}
@@ -316,6 +347,13 @@ export function BotsPage() {
           )
           : <BotEmptyState onCreate={openCreate} />}
       </section>
+
+      <BotDepartmentModal
+        open={departmentModalOpen}
+        editing={editingDepartment}
+        onClose={() => setDepartmentModalOpen(false)}
+        onSaved={reloadDepartments}
+      />
 
       <BotEditor
         open={editorOpen}

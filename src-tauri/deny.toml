@@ -6,9 +6,7 @@ unmaintained = "workspace"
 # Mitigation plan: evaluate fork or migrate to tokio-retry by Q3 2026.
 # 2026-09-19: RUSTSEC-2026-0194/0195（quick-xml）已消除——calamine 0.26→0.36（document-parser）
 # 改用 quick-xml ^0.41。locked 文件已无旧 quick-xml，ignore 条目移除。
-ignore = [
-  "RUSTSEC-2025-0012",
-]
+ignore = []
 
 [licenses]
 private = { ignore = true }

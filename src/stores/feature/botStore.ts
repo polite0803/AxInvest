@@ -420,7 +420,9 @@ export const useBotStore = create<BotStoreState>((set) => ({
   updateWorkflow: async (workflowId, input) => {
     set({ workflowSaving: true, error: null });
     try {
-      const workflow = await invoke<BotWorkflow>("update_bot_workflow", { workflowId, input });
+      // IPC-P3 §2.4 冻结入参：扁平 `{ id, name?, description?, ownerScope?, departmentId?, steps?, ... }`。
+      // 后端保留了 `{ workflowId, input }` 兼容分支，但前端按契约走显式入参，别再依赖兼容层。
+      const workflow = await invoke<BotWorkflow>("update_bot_workflow", { id: workflowId, ...input });
       set((s) => ({
         workflows: s.workflows.map((w) => (w.id === workflow.id ? workflow : w)),
         workflowSaving: false,
@@ -434,7 +436,8 @@ export const useBotStore = create<BotStoreState>((set) => ({
 
   deleteWorkflow: async (workflowId) => {
     try {
-      await invoke("delete_bot_workflow", { workflowId });
+      // IPC-P3 §2.4：delete_bot_workflow 只认 `{ id }`（后端命令参数名 id，不是 workflowId）。
+      await invoke("delete_bot_workflow", { id: workflowId });
       set((s) => ({
         workflows: s.workflows.filter((w) => w.id !== workflowId),
         workflowRuns: s.workflowRuns.filter((r) => r.workflowId !== workflowId),
@@ -448,7 +451,13 @@ export const useBotStore = create<BotStoreState>((set) => ({
   runWorkflow: async (input) => {
     set({ error: null });
     try {
-      const run = await invoke<BotWorkflowRun>("run_bot_workflow", { input });
+      // IPC-P3 §2.4：run_bot_workflow 是显式入参（workflowId 必填，手工触发还要线程 id），
+      // 后端不接受 `{ input }` 包裹（会报缺 workflowId）。
+      const run = await invoke<BotWorkflowRun>("run_bot_workflow", {
+        workflowId: input.workflowId,
+        requesterConversationId: input.requesterConversationId ?? null,
+        ...(input.inputs ? { inputs: input.inputs } : {}),
+      });
       set((s) => ({ workflowRuns: [run, ...s.workflowRuns.filter((r) => r.id !== run.id)] }));
       return run;
     } catch (e) {

@@ -108,7 +108,7 @@ export interface BotDepartment {
 export type BotAssignmentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 /** 委派发起来源。 */
-export type BotAssignmentOrigin = "person" | "bot" | "routine";
+export type BotAssignmentOrigin = "person" | "bot" | "routine" | "workflow";
 
 /** 委派模式：consult 是 assignee 轮内工具语义（前端禁发），dispatch 走命令层（IPC-P2B §2.3）。 */
 export type BotAssignmentMode = "consult" | "dispatch";
@@ -120,6 +120,10 @@ export interface BotAssignment {
   parentId: string | null;
   depth: number;
   origin: BotAssignmentOrigin;
+  /** P3：编排步骤归属（子孙继承父行值）；纯委派链为 null。 */
+  workflowRunId?: string | null;
+  /** P3：对应步骤 stepKey（子孙继承父行值）；纯委派链为 null。 */
+  stepKey?: string | null;
   requesterBotId: string | null;
   requesterConversationId: string | null;
   assigneeBotId: string;
@@ -150,4 +154,124 @@ export interface SaveBotDepartmentInput {
   name?: string;
   description?: string;
   chiefBotId?: string | null;
+}
+
+// ── P3：Bot 编排与多层委派（IPC-P3 §2 / MODEL-P3 §2 冻结契约）──
+
+/** 步骤失败策略：abort 中止后续、continue 跳过下游继续（MODEL-P3 §2.1.1）。 */
+export type BotWorkflowStepOnFailure = "abort" | "continue";
+
+/** 编排归属范围：实例级无部门，部门级用于筛选与运行前成员校验（ADR-P3-3）。 */
+export type BotWorkflowOwnerScope = "instance" | "department";
+
+/** 编排步骤 DTO（`steps_json` 元素，前端只见数组不见 JSON 字符串）。 */
+export interface BotWorkflowStep {
+  stepKey: string;
+  botId: string;
+  promptTemplate: string;
+  dependsOn: string[];
+  timeoutSecs: number;
+  onFailure: BotWorkflowStepOnFailure;
+}
+
+/** 编排定义 DTO（IPC-P3 §2.2）。 */
+export interface BotWorkflow {
+  id: string;
+  name: string;
+  description: string;
+  ownerScope: BotWorkflowOwnerScope;
+  departmentId: string | null;
+  steps: BotWorkflowStep[];
+  maxConcurrency: number;
+  totalTimeoutSecs: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 编排运行六态（IPC-P3 §2.3；waiting = 等待依赖，不是等待用户输入）。 */
+export type BotWorkflowRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+
+/** 编排触发来源：手工 / 例程（编排 run 无 bot 来源）。 */
+export type BotWorkflowRunOrigin = "person" | "routine";
+
+/** 运行上下文：步骤输出、输入与跳过清单。 */
+export interface BotWorkflowRunContext {
+  inputs: Record<string, string>;
+  outputs: Record<string, { assignmentId: string; resultText: string }>;
+  skipped: string[];
+}
+
+/** 编排运行 DTO（IPC-P3 §2.3）。 */
+export interface BotWorkflowRun {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  status: BotWorkflowRunStatus;
+  origin: BotWorkflowRunOrigin;
+  requesterBotId: string | null;
+  requesterConversationId: string;
+  anchorMessageId: string | null;
+  context: BotWorkflowRunContext;
+  completedSteps: number;
+  totalSteps: number;
+  errorCode: string | null;
+  errorDetail: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** create_bot_workflow 入参（IPC-P3 §2.4）。 */
+export interface CreateBotWorkflowInput {
+  name: string;
+  description?: string;
+  ownerScope: BotWorkflowOwnerScope;
+  departmentId?: string | null;
+  steps: BotWorkflowStep[];
+  maxConcurrency?: number;
+  totalTimeoutSecs?: number;
+}
+
+/** update_bot_workflow 入参：可空字段 null=清除，缺键=不改（IPC-P3 §2.4）。 */
+export interface UpdateBotWorkflowInput {
+  name?: string;
+  description?: string;
+  ownerScope?: BotWorkflowOwnerScope;
+  departmentId?: string | null;
+  steps?: BotWorkflowStep[];
+  maxConcurrency?: number;
+  totalTimeoutSecs?: number;
+}
+
+/** run_bot_workflow 入参：手工触发必须带当前线程 id（IPC-P3 §2.4）。 */
+export interface RunBotWorkflowInput {
+  workflowId: string;
+  requesterConversationId: string | null;
+  inputs?: Record<string, string>;
+}
+
+/** create_bot_workflow_schedule 入参（IPC-P3 §2.4）。 */
+export interface CreateBotWorkflowScheduleInput {
+  workflowId: string;
+  cronExpression: string;
+  timezone?: string | null;
+  enabled?: boolean;
+}
+
+/** 前端 DAG 预校验错误码，必须是后端 IPC-P3 §4 语义常量的子集。 */
+export type BotWorkflowValidationCode =
+  | "BOT_WORKFLOW_STEP_INVALID"
+  | "BOT_WORKFLOW_CYCLE"
+  | "BOT_WORKFLOW_DEPARTMENT_REQUIRED";
+
+export interface BotWorkflowValidationIssue {
+  code: BotWorkflowValidationCode;
+  /** 触发问题的 stepKey（定义级问题缺省）。 */
+  stepKey?: string;
+}
+
+export interface BotWorkflowValidationResult {
+  ok: boolean;
+  issues: BotWorkflowValidationIssue[];
 }

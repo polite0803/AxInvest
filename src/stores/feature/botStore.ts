@@ -17,13 +17,19 @@ import type {
   BotDepartment,
   BotMemory,
   BotSoul,
+  BotWorkflow,
+  BotWorkflowRun,
   Conversation,
   CreateBotAssignmentInput,
   CreateBotInput,
+  CreateBotWorkflowInput,
+  CreateBotWorkflowScheduleInput,
   DeleteBotResult,
-  ScheduledTask,
+  RunBotWorkflowInput,
   SaveBotDepartmentInput,
+  ScheduledTask,
   UpdateBotInput,
+  UpdateBotWorkflowInput,
 } from "@/types";
 import { create } from "zustand";
 
@@ -39,6 +45,12 @@ export interface BotStoreState {
   error: string | null;
   /** 当前选中的 Bot（详情面板与新建线程的归属来源） */
   activeBotId: string | null;
+
+  // P3：编排工作流（workflow slice，扁平挂在 botStore 上，不另起 store）
+  workflows: BotWorkflow[];
+  workflowRuns: BotWorkflowRun[];
+  workflowLoading: boolean;
+  workflowSaving: boolean;
 
   loadBots: (includeDisabled?: boolean) => Promise<Bot[]>;
   setActiveBot: (botId: string | null) => void;
@@ -78,6 +90,16 @@ export interface BotStoreState {
   createBotAssignment: (input: CreateBotAssignmentInput) => Promise<BotAssignment>;
   listBotAssignments: (filter?: BotAssignmentFilter) => Promise<BotAssignment[]>;
   cancelBotAssignment: (assignmentId: string) => Promise<void>;
+
+  // P3：编排定义 / 运行 / 定时（IPC-P3 §2）
+  loadWorkflows: (departmentId?: string | null) => Promise<BotWorkflow[]>;
+  createWorkflow: (input: CreateBotWorkflowInput) => Promise<BotWorkflow>;
+  updateWorkflow: (workflowId: string, input: UpdateBotWorkflowInput) => Promise<BotWorkflow>;
+  deleteWorkflow: (workflowId: string) => Promise<void>;
+  runWorkflow: (input: RunBotWorkflowInput) => Promise<BotWorkflowRun>;
+  loadWorkflowRuns: (filter?: BotWorkflowRunFilter) => Promise<BotWorkflowRun[]>;
+  cancelWorkflowRun: (runId: string) => Promise<void>;
+  createWorkflowSchedule: (input: CreateBotWorkflowScheduleInput) => Promise<ScheduledTask>;
 }
 
 /** IPC-P2B §2 `list_bot_assignments` 过滤参数（皆可选）。 */
@@ -86,6 +108,14 @@ export interface BotAssignmentFilter {
   assigneeBotId?: string | null;
   botId?: string | null;
   status?: BotAssignment["status"] | null;
+  /** IPC-P3 §1：按委派树根汇总（root_id = 自身 id 的链根）。 */
+  rootId?: string | null;
+}
+
+/** IPC-P3 §2.4 list_bot_workflow_runs 过滤参数。 */
+export interface BotWorkflowRunFilter {
+  workflowId?: string | null;
+  status?: BotWorkflowRun["status"] | null;
 }
 
 /** IPC-P2 §2.1 create_bot_scheduled_task 入参 */
@@ -97,8 +127,6 @@ export interface BotRoutineInput {
   timezone?: string | null;
 }
 
-
-
 /** 防止并发 loadBots 的旧响应覆盖新响应（切换 includeDisabled 时的高发点）。 */
 let loadSeq = 0;
 
@@ -109,6 +137,10 @@ export const useBotStore = create<BotStoreState>((set) => ({
   deleting: false,
   error: null,
   activeBotId: null,
+  workflows: [],
+  workflowRuns: [],
+  workflowLoading: false,
+  workflowSaving: false,
 
   loadBots: async (includeDisabled = false) => {
     const seq = ++loadSeq;
@@ -210,8 +242,7 @@ export const useBotStore = create<BotStoreState>((set) => ({
   listThreads: (botId, includeArchived = false) =>
     invoke<Conversation[]>("list_bot_threads", { botId, includeArchived }),
 
-  listBotRoutines: (botId) =>
-    invoke<ScheduledTask[]>("list_bot_scheduled_tasks", { botId }),
+  listBotRoutines: (botId) => invoke<ScheduledTask[]>("list_bot_scheduled_tasks", { botId }),
 
   createBotRoutine: async (input) => {
     set({ saving: true, error: null });
@@ -342,6 +373,8 @@ export const useBotStore = create<BotStoreState>((set) => ({
       assigneeBotId: filter?.assigneeBotId ?? null,
       botId: filter?.botId ?? null,
       status: filter?.status ?? null,
+      // IPC-P3 §1：新增可选 rootId 过滤，旧调用方传 null 行为不变。
+      rootId: filter?.rootId ?? null,
     }),
 
   cancelBotAssignment: async (assignmentId) => {
@@ -349,6 +382,118 @@ export const useBotStore = create<BotStoreState>((set) => ({
       await invoke("cancel_bot_assignment", { assignmentId });
     } catch (e) {
       set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  // ── P3：编排（IPC-P3 §2 命令名与参数逐字对齐）──
+
+  loadWorkflows: async (departmentId) => {
+    set({ workflowLoading: true, error: null });
+    try {
+      // undefined = 全部可见；显式 null = 仅 instance 归属。
+      const params = departmentId === undefined ? {} : { departmentId };
+      const workflows = await invoke<BotWorkflow[]>("list_bot_workflows", params);
+      set({ workflows: Array.isArray(workflows) ? workflows : [], workflowLoading: false });
+      return workflows;
+    } catch (e) {
+      set({ workflowLoading: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  createWorkflow: async (input) => {
+    set({ workflowSaving: true, error: null });
+    try {
+      const workflow = await invoke<BotWorkflow>("create_bot_workflow", { input });
+      set((s) => ({
+        workflows: [workflow, ...s.workflows.filter((w) => w.id !== workflow.id)],
+        workflowSaving: false,
+      }));
+      return workflow;
+    } catch (e) {
+      set({ workflowSaving: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  updateWorkflow: async (workflowId, input) => {
+    set({ workflowSaving: true, error: null });
+    try {
+      const workflow = await invoke<BotWorkflow>("update_bot_workflow", { workflowId, input });
+      set((s) => ({
+        workflows: s.workflows.map((w) => (w.id === workflow.id ? workflow : w)),
+        workflowSaving: false,
+      }));
+      return workflow;
+    } catch (e) {
+      set({ workflowSaving: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  deleteWorkflow: async (workflowId) => {
+    try {
+      await invoke("delete_bot_workflow", { workflowId });
+      set((s) => ({
+        workflows: s.workflows.filter((w) => w.id !== workflowId),
+        workflowRuns: s.workflowRuns.filter((r) => r.workflowId !== workflowId),
+      }));
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  runWorkflow: async (input) => {
+    set({ error: null });
+    try {
+      const run = await invoke<BotWorkflowRun>("run_bot_workflow", { input });
+      set((s) => ({ workflowRuns: [run, ...s.workflowRuns.filter((r) => r.id !== run.id)] }));
+      return run;
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  loadWorkflowRuns: async (filter) => {
+    set({ workflowLoading: true, error: null });
+    try {
+      const runs = await invoke<BotWorkflowRun[]>("list_bot_workflow_runs", {
+        workflowId: filter?.workflowId ?? null,
+        status: filter?.status ?? null,
+      });
+      set({ workflowRuns: Array.isArray(runs) ? runs : [], workflowLoading: false });
+      return runs;
+    } catch (e) {
+      set({ workflowLoading: false, error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  cancelWorkflowRun: async (runId) => {
+    try {
+      await invoke("cancel_bot_workflow_run", { runId });
+      set((s) => ({
+        workflowRuns: s.workflowRuns.map((r) =>
+          r.id === runId ? { ...r, status: "cancelled" as const, updatedAt: Date.now() } : r
+        ),
+      }));
+    } catch (e) {
+      set({ error: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  createWorkflowSchedule: async (input) => {
+    set({ workflowSaving: true, error: null });
+    try {
+      const task = await invoke<ScheduledTask>("create_bot_workflow_schedule", { input });
+      set({ workflowSaving: false });
+      return task;
+    } catch (e) {
+      set({ workflowSaving: false, error: backendErrorText(e) });
       throw e;
     }
   },

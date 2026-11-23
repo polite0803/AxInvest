@@ -16,6 +16,8 @@
  * 判据来源：`docs/bot-integration/IPC.md`（命令/参数/返回/错误码）、`PLAN.md` T3（前端类型）。
  */
 
+import { decorateWithP3 } from "./bot-ipc-audit-p3-fixture.mjs";
+
 /** P1 契约清单。顺序与 IPC.md §1 一致；任何字段变更都应先改文档再改这里。 */
 export const BOT_IPC = {
   commands: [
@@ -229,7 +231,7 @@ export const BOT_IPC = {
     "BOT_WORKFLOW_TIMEOUT",
     "BOT_WORKFLOW_CANCEL_INVALID",
   ],
-  /** IPC.md §6：P1 不新增事件。出现任何 `bot-*` 事件名即违约。 */
+  /** IPC.md §6：P1 不新增事件；P2-b / P3 冻结事件为例外（见下方白名单）。 */
   forbiddenEventPrefix: "bot-",
   /** T3：前端类型文件里的导出（缺失 ⇒ 组件只能 `any`，契约形同虚设）。 */
   frontendTypes: [
@@ -596,9 +598,15 @@ export function auditBotIpc(sources) {
     }
   }
 
-  // 6) 事件：P1 不新增 bot-* 事件；P2-b 唯一例外 `bot-assignment-updated`（IPC-P2B §5）。
-  const P2B_ALLOWED_EVENT = "bot-assignment-updated";
-  const P2B_ALLOWED_VARIANT = "BotAssignmentUpdated";
+  // 6) 事件：P1 不新增 bot-* 事件；冻结例外 = P2-b `bot-assignment-updated` + P3 `bot-workflow-run-updated`。
+  const ALLOWED_BOT_EVENTS = new Set([
+    "bot-assignment-updated", // IPC-P2B §5
+    "bot-workflow-run-updated", // IPC-P3 §3
+  ]);
+  const ALLOWED_BOT_VARIANTS = new Set([
+    "BotAssignmentUpdated", // IPC-P2B §5
+    "BotWorkflowRunUpdated", // IPC-P3 §3
+  ]);
   const eventSources = [
     ["event_names.rs", sources.eventsEnum ?? ""],
     ["types/generated/events.ts", sources.eventsTs ?? ""],
@@ -606,12 +614,12 @@ export function auditBotIpc(sources) {
   for (const [label, src] of eventSources) {
     const re = new RegExp(`"${spec.forbiddenEventPrefix}[a-z0-9-]*"`, "g");
     const hits = [...src.matchAll(re)].map((m) => m[0]);
-    const bad = hits.find((h) => h !== `"${P2B_ALLOWED_EVENT}"`);
+    const bad = hits.find((h) => !ALLOWED_BOT_EVENTS.has(h.slice(1, -1)));
     if (bad) {
       errors.push(`${label} 出现 P1 禁止的新事件 \`${bad}\`（IPC.md §6：P1 不新增事件）`);
     }
     const variants = [...src.matchAll(/\bBot[A-Z][A-Za-z0-9]*\b/g)].map((m) => m[0]);
-    const badVariant = variants.find((v) => v !== P2B_ALLOWED_VARIANT);
+    const badVariant = variants.find((v) => !ALLOWED_BOT_VARIANTS.has(v));
     if (badVariant && /IpcEventName|pub\s+enum/.test(src)) {
       errors.push(`${label} 出现 Bot 事件变体 \`${badVariant}\`（P1 不新增事件）`);
     }
@@ -729,6 +737,128 @@ export function auditBotIpc(sources) {
     }
   }
 
+
+  // ── P3 段（IPC-P3 §1/§2/§3/§5）：8 命令 + DTO 字段 + 事件 + 定时分支 ──
+  // 仅在真实仓库检查（sources.p3 显式给出）时执行；selftest 的合成 P1 源不触发。
+  const p3 = sources.p3;
+  if (p3) {
+    const P3_COMMANDS = [
+      ["create_bot_workflow", "bot_workflow"],
+      ["update_bot_workflow", "bot_workflow"],
+      ["list_bot_workflows", "bot_workflow"],
+      ["delete_bot_workflow", "bot_workflow"],
+      ["run_bot_workflow", "bot_workflow"],
+      ["list_bot_workflow_runs", "bot_workflow"],
+      ["cancel_bot_workflow_run", "bot_workflow"],
+      ["create_bot_workflow_schedule", "scheduled_task"],
+    ];
+    const p3Sources = {
+      bot_workflow: p3.workflowRs ?? "",
+      scheduled_task: p3.scheduleRs ?? "",
+    };
+    const registerRs = sources.registerRs ?? "";
+    for (const [name, mod] of P3_COMMANDS) {
+      const src = p3Sources[mod];
+      if (!src.includes("pub async fn " + name + "(")) {
+        errors.push("[P3] 缺命令 " + name + "（" + mod + ".rs 中无 fn 定义）");
+      }
+      if (!registerRs.includes("commands::" + mod + "::" + name + ",")) {
+        errors.push("[P3] " + name + " 未出现在 register_commands.rs（两步注册缺一步）");
+      }
+    }
+
+    const structBody = (src, header) => {
+      const start = src.indexOf(header);
+      if (start < 0) return null;
+      const end = src.indexOf("\n}", start);
+      return end < 0 ? null : src.slice(start, end);
+    };
+    const P3_WORKFLOW_FIELDS = [
+      "id", "name", "description", "owner_scope", "department_id", "steps",
+      "max_concurrency", "total_timeout_secs", "created_at", "updated_at",
+    ];
+    const P3_RUN_FIELDS = [
+      "id", "workflow_id", "workflow_name", "status", "origin", "requester_bot_id",
+      "requester_conversation_id", "anchor_message_id", "context", "completed_steps",
+      "total_steps", "error_code", "error_detail", "started_at", "finished_at",
+      "created_at", "updated_at",
+    ];
+    for (const [dtoName, fields] of [["BotWorkflow", P3_WORKFLOW_FIELDS], ["BotWorkflowRun", P3_RUN_FIELDS]]) {
+      const rust = structBody(sources.typesRs ?? "", "pub struct " + dtoName + " {");
+      if (!rust) {
+        errors.push("[P3] harness types/bot.rs 缺 " + dtoName + " 结构（IPC-P3 §2.2/§2.3）");
+      } else {
+        const missing = fields.filter((f) => !rust.includes(f + ":"));
+        if (missing.length) {
+          errors.push("[P3] " + dtoName + " 缺字段: " + missing.join(", "));
+        }
+      }
+      const ts = structBody(sources.typesTs ?? "", "export interface " + dtoName + " {");
+      if (!ts) {
+        errors.push("[P3] src/types/bot.ts 缺 " + dtoName + " 接口（前端 DTO 权威镜像）");
+      } else {
+        const tsMissing = fields.map((f) => f.replace(/_([a-z])/g, (_, c) => c.toUpperCase()))
+          .filter((f) => !ts.includes(f + ":"));
+        if (tsMissing.length) {
+          errors.push("[P3] 前端 " + dtoName + " 缺 camelCase 字段: " + tsMissing.join(", "));
+        }
+      }
+    }
+
+    const P3_EVENT = "bot-workflow-run-updated";
+    if (!(sources.eventsEnum ?? "").includes("BotWorkflowRunUpdated")) {
+      errors.push("[P3] IpcEventName 缺 BotWorkflowRunUpdated（IPC-P3 §3）");
+    }
+    if (!(sources.eventsTs ?? "").includes('"' + P3_EVENT + '"')) {
+      errors.push('[P3] 生成物 events.ts 缺 "' + P3_EVENT + '"');
+    }
+    const p3Emitters = [p3.workflowRs, p3.runnerRs, p3.servicesRs, p3.scheduleRs]
+      .map((v) => v ?? "").join("\n");
+    if (!p3Emitters.includes("BotWorkflowRunUpdated.as_str()")) {
+      errors.push('[P3] 无 "' + P3_EVENT + '" 发射点（命令/runner/cron 分支任一必须发）');
+    }
+
+    if (!(p3.scheduleRs ?? "").includes('pub(crate) const BOT_WORKFLOW_TASK_TYPE: &str = "bot_workflow"')) {
+      errors.push('[P3] scheduled_task.rs 缺 task_type="bot_workflow" 字符串常量（IPC-P3 §2.4）');
+    }
+    if (!(p3.scheduleRs ?? "").includes('"workflowId"')) {
+      errors.push("[P3] create_bot_workflow_schedule 缺 params.workflowId（IPC-P3 §2.4）");
+    }
+    if (!(p3.servicesRs ?? "").includes("is_bot_workflow_job(&job)")) {
+      errors.push("[P3] init/services.rs 缺 bot_workflow cron 执行分支（PLAN-P3 §4）");
+    }
+    // §1/§5：list_bot_assignments 新增 rootId（Rust 名 root_id + 前端 camelCase 键）。
+    const asmtFn = /pub\s+async\s+fn\s+list_bot_assignments\s*\(([\s\S]*?)\)\s*->/.exec(p3.assignmentRs ?? "");
+    if (!asmtFn || !/root_id\s*:\s*Option<String>/.test(asmtFn[1])) {
+      errors.push("[P3] list_bot_assignments 缺 `root_id: Option<String>`（IPC-P3 §1）");
+    }
+    const asmtCallers = (sources.frontendFiles ?? [])
+      .filter((f) => !isMockOrTest(f.path) && f.src.includes('"list_bot_assignments"'));
+    if (asmtCallers.length > 0 && !asmtCallers.some((f) =>
+      /["']list_bot_assignments["'][\s\S]{0,400}?rootId\s*:/.test(f.src))) {
+      errors.push("[P3] 前端调用 list_bot_assignments 未传 camelCase `rootId`（IPC-P3 §1）");
+    }
+    // §2.6：delegate_to_bot 只暴露公开入参，内部链字段不得进 LLM schema。
+    const delegateRs = p3.delegateRs ?? "";
+    const schemaStart = /fn\s+input_schema\s*\([^)]*\)\s*->\s*Value\s*\{[\s\S]*?json!\(\s*\{/.exec(delegateRs);
+    if (!schemaStart) {
+      errors.push("[P3] delegate_to_bot 缺 input_schema() json! 定义（IPC-P3 §2.6）");
+    } else {
+      const open = delegateRs.indexOf("{", schemaStart.index + schemaStart[0].length - 1);
+      const close = matchBracket(delegateRs, open);
+      const body = close < 0 ? "" : delegateRs.slice(open + 1, close);
+      for (const hidden of ["rootId", "parentId", "depth", "workflowRunId", "stepKey",
+        "root_id", "parent_id", "workflow_run_id", "step_key"]) {
+        if (body.includes(`"${hidden}":`) || body.includes(`'${hidden}':`)) {
+          errors.push("[P3] delegate_to_bot schema 暴露内部字段 `" + hidden + "`（IPC-P3 §2.6）");
+        }
+      }
+      if (!/["']mode["']\s*:/.test(body)) {
+        errors.push("[P3] delegate_to_bot schema 缺公开入参 `mode`（IPC-P3 §2.6）");
+      }
+    }
+  }
+
   return { errors, warnings };
 }
 
@@ -820,7 +950,7 @@ function generateValidSources() {
 export function botSelftest() {
   const cases = [];
   const add = (name, mutate, expectedPattern, kind = "errors") => {
-    const sources = generateValidSources();
+    const sources = decorateWithP3(generateValidSources());
     mutate(sources);
     const { errors, warnings } = auditBotIpc(sources);
     const pool = kind === "warnings" ? warnings : errors;
@@ -834,7 +964,7 @@ export function botSelftest() {
 
   // 正控：未破坏时必须 0 错（否则所有破坏都「命中」= 假绿）
   {
-    const { errors } = auditBotIpc(generateValidSources());
+    const { errors } = auditBotIpc(decorateWithP3(generateValidSources()));
     cases.push({
       name: "正控：完整契约 ⇒ 0 错",
       pass: errors.length === 0,
@@ -909,6 +1039,22 @@ export function botSelftest() {
       "",
     );
   }, /命令 `read_bot_memory` 在 src\/\*\* 无调用点/, "warnings");
+
+  add("P3 缺命令 run_bot_workflow", (s) => {
+    s.p3.workflowRs = s.p3.workflowRs.replace("pub async fn run_bot_workflow", "pub async fn removed_run");
+  }, /\[P3\] 缺命令 run_bot_workflow/);
+
+  add("P3 list_bot_assignments 丢 root_id", (s) => {
+    s.p3.assignmentRs = s.p3.assignmentRs.replace("root_id: Option<String>", "other: Option<String>");
+  }, /list_bot_assignments 缺 `root_id/);
+
+  add("P3 delegate schema 泄露 depth", (s) => {
+    s.p3.delegateRs = s.p3.delegateRs.replace('"mode"', '"depth"');
+  }, /schema 暴露内部字段 `depth`/);
+
+  add("P3 事件变体缺失", (s) => {
+    s.eventsEnum = s.eventsEnum.replace("BotWorkflowRunUpdated,", "");
+  }, /IpcEventName 缺 BotWorkflowRunUpdated/);
 
   const failed = cases.filter((c) => !c.pass);
   return { cases, failed };

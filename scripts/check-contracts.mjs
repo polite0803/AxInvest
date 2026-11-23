@@ -797,6 +797,21 @@ function checkBotContracts() {
       deptRs: read(join(SRC_TAURI, "src", "commands", "bot_department.rs")),
       asmtRs: read(join(SRC_TAURI, "src", "commands", "bot_assignment.rs")),
     },
+    // P3（IPC-P3 §5）：8 命令 + DTO + 事件 + task_type 常量 + cron 执行分支。
+    p3: {
+      workflowRs: existsSync(join(SRC_TAURI, "src", "commands", "bot_workflow.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "bot_workflow.rs")) : "",
+      scheduleRs: existsSync(join(SRC_TAURI, "src", "commands", "scheduled_task.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "scheduled_task.rs")) : "",
+      runnerRs: existsSync(join(SRC_TAURI, "src", "bot_workflow_runner.rs"))
+        ? read(join(SRC_TAURI, "src", "bot_workflow_runner.rs")) : "",
+      servicesRs: existsSync(join(SRC_TAURI, "src", "init", "services.rs"))
+        ? read(join(SRC_TAURI, "src", "init", "services.rs")) : "",
+      assignmentRs: existsSync(join(SRC_TAURI, "src", "commands", "bot_assignment.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "bot_assignment.rs")) : "",
+      delegateRs: existsSync(join(ROOT, "axagent-runtime", "crates", "tools", "src", "tools", "bot_delegate.rs"))
+        ? read(join(ROOT, "axagent-runtime", "crates", "tools", "src", "tools", "bot_delegate.rs")) : "",
+    },
   });
   console.log(`
 [BOT] Bot P1 IPC 契约：errors=${result.errors.length} warnings=${result.warnings.length}`);

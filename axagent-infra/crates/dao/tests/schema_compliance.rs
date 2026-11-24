@@ -198,6 +198,21 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bot_department_quotas",
+        &[
+            ("id", "TEXT"),
+            ("department_id", "TEXT"),
+            ("max_concurrency", "INTEGER"),
+            ("total_timeout_secs", "INTEGER"),
+            ("max_steps", "INTEGER"),
+            ("max_in_flight_per_depth", "INTEGER"),
+            ("step_timeout_secs", "INTEGER"),
+            ("max_concurrent_runs", "INTEGER"),
+            ("created_at", "BIGINT"),
+            ("updated_at", "BIGINT"),
+        ],
+    ),
+    (
         "background_tasks",
         &[
             ("id", "TEXT"),

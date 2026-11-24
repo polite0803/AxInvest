@@ -368,3 +368,66 @@ pub struct BotWorkflowRunPatch {
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
 }
+
+// ─────────────────────────── P4 ───────────────────────────
+// 部门运行配额（docs/bot-integration/P4/MODEL-P4 §2、IPC-P4 §2）。
+
+/// 部门运行配额 DTO。`is_default = true` 表示该部门没有配额行，字段值即 P3
+/// 默认值（ADR-P4-1：无配额行的部门行为与 P3 逐项一致）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotDepartmentQuota {
+    pub department_id: String,
+    pub max_concurrency: i32,
+    pub total_timeout_secs: i32,
+    pub max_steps: i32,
+    pub max_in_flight_per_depth: i32,
+    pub step_timeout_secs: i32,
+    pub max_concurrent_runs: i32,
+    pub is_default: bool,
+    pub updated_at: Option<i64>,
+}
+
+/// 写配额入参（全量 upsert，IPC-P4 §2）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotDepartmentQuotaInput {
+    pub department_id: String,
+    pub max_concurrency: i32,
+    pub total_timeout_secs: i32,
+    pub max_steps: i32,
+    pub max_in_flight_per_depth: i32,
+    pub step_timeout_secs: i32,
+    pub max_concurrent_runs: i32,
+}
+
+/// P3 默认配额的唯一真值来源：六个上限逐项等于 P3 冻结常量
+/// （`bot_workflow_runner::{MAX_CONCURRENCY,TOTAL_TIMEOUT_SECS,MAX_STEPS}`、
+/// `bot_assignment_runner::{MAX_IN_FLIGHT_PER_DEPTH,DISPATCH_TIMEOUT_SECS}`，
+/// 以及 `bot_workflow_steps` 的按步超时上限与 P3 并发 run 预算）。
+/// 单测 `default_matches_p3_constants` 锁定二者一致，禁止各改一头。
+pub mod quota_defaults {
+    pub const MAX_CONCURRENCY: i32 = 2;
+    pub const TOTAL_TIMEOUT_SECS: i32 = 900;
+    pub const MAX_STEPS: i32 = 12;
+    pub const MAX_IN_FLIGHT_PER_DEPTH: i32 = 2;
+    pub const STEP_TIMEOUT_SECS: i32 = 300;
+    pub const MAX_CONCURRENT_RUNS: i32 = 2;
+}
+
+impl BotDepartmentQuota {
+    /// 无配额行时的 DTO：P3 默认值 + `is_default = true` + `updated_at = None`。
+    pub fn defaults(department_id: &str) -> Self {
+        Self {
+            department_id: department_id.to_string(),
+            max_concurrency: quota_defaults::MAX_CONCURRENCY,
+            total_timeout_secs: quota_defaults::TOTAL_TIMEOUT_SECS,
+            max_steps: quota_defaults::MAX_STEPS,
+            max_in_flight_per_depth: quota_defaults::MAX_IN_FLIGHT_PER_DEPTH,
+            step_timeout_secs: quota_defaults::STEP_TIMEOUT_SECS,
+            max_concurrent_runs: quota_defaults::MAX_CONCURRENT_RUNS,
+            is_default: true,
+            updated_at: None,
+        }
+    }
+}

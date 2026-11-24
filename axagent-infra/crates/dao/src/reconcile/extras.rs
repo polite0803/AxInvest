@@ -780,6 +780,46 @@ pub const CHECK_CONSTRAINTS: &[CheckDecl] = &[
         expr: "decision_action IS NULL OR decision_action = ANY (ARRAY['买入','增持','持有','观望','减持','卖出','不确定','数据缺失'])",
         dialect: Some(Dialect::Postgres),
     },
+    // ── P4 部门运行配额（2026-11-25 声明式新增；无迁移）──
+    // 六个上限的 CHECK 上限逐项等于 P3 默认：配额只能收紧、不能放大（ADR-P4-2）。
+    // SQLite 建表时内联进 CREATE TABLE；这条边界是「静默夹紧」之外的
+    // 第二道防线（命令层仍以 BOT_QUOTA_INVALID 拒绝越界输入）。
+    CheckDecl {
+        table: "bot_department_quotas",
+        name: "ck_bot_department_quotas_max_concurrency",
+        expr: "max_concurrency BETWEEN 1 AND 4",
+        dialect: None,
+    },
+    CheckDecl {
+        table: "bot_department_quotas",
+        name: "ck_bot_department_quotas_total_timeout",
+        expr: "total_timeout_secs BETWEEN 60 AND 3600",
+        dialect: None,
+    },
+    CheckDecl {
+        table: "bot_department_quotas",
+        name: "ck_bot_department_quotas_max_steps",
+        expr: "max_steps BETWEEN 1 AND 12",
+        dialect: None,
+    },
+    CheckDecl {
+        table: "bot_department_quotas",
+        name: "ck_bot_department_quotas_in_flight_depth",
+        expr: "max_in_flight_per_depth BETWEEN 1 AND 4",
+        dialect: None,
+    },
+    CheckDecl {
+        table: "bot_department_quotas",
+        name: "ck_bot_department_quotas_step_timeout",
+        expr: "step_timeout_secs BETWEEN 30 AND 900",
+        dialect: None,
+    },
+    CheckDecl {
+        table: "bot_department_quotas",
+        name: "ck_bot_department_quotas_max_runs",
+        expr: "max_concurrent_runs BETWEEN 1 AND 8",
+        dialect: None,
+    },
 ];
 
 // ═══════════════ GIN 索引（tsvector 全文检索，实体无访问方法开关） ═══════════════
@@ -853,6 +893,18 @@ const MULTI_COL_INDEXES: &[IndexDecl] = &[
         method: None,
         where_clause: None,
         dialect: None, // 声明式新增（2026-11-23，P2-b T1''）
+    },
+    // P4 部门运行配额（docs/bot-integration/P4/MODEL-P4 §2）：一个部门至多一行
+    // 配额。UNIQUE 是功能必需（upsert 按 department_id 判存在），单列唯一索引
+    // 同样走本清单 —— 实体语法只有表级内联 UNIQUE，不产生具名索引。
+    IndexDecl {
+        table: "bot_department_quotas",
+        name: "idx_bot_department_quotas_department_uniq",
+        cols: &["department_id"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-25，P4 A1）
     },
     IndexDecl {
         table: "agent_sessions",
@@ -1363,9 +1415,9 @@ mod counts {
     /// 表达式默认值覆盖的列数（8 = artifacts.updated_at 等，全部是 `*_at` 文本时间列）。
     const EXPECT_EXPR_DEFAULT_COLS: usize = 8;
     const EXPECT_FUNCTIONS: usize = 1;
-    const EXPECT_CHECKS: usize = 5;
+    const EXPECT_CHECKS: usize = 11;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 38;
+    const EXPECT_MULTI: usize = 39;
     /// partial 索引条目数。
     ///
     /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条

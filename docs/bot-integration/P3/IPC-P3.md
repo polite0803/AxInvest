@@ -4,7 +4,7 @@
 >
 > 前端可据此契约与后端并行开工；任何字段增删须先改本文再改代码。
 
-## 1. 命令总览（新增 8，修改 1，事件新增 1）
+## 1. 命令总览（新增 8，修改 2，事件新增 1；工具入参变更 1）
 
 | 命令 | 类型 | 落点 |
 |---|---|---|
@@ -17,7 +17,8 @@
 | `cancel_bot_workflow_run` | 新增 | 同上 |
 | `create_bot_workflow_schedule` | 新增 | `src-tauri/src/commands/scheduled_task.rs`（复用 `create_scheduled_task`，`task_type="bot_workflow"`） |
 | `delete_bot_department` | **修改** | `src-tauri/src/commands/bot_department.rs`：先将该部门编排转实例归属（清 `department_id`、`owner_scope='instance'`）再删部门，定义保留（ADR-P3-3） |
-| `delete_bot` / P2-b 委派命令 / G5 `delegate_task` | **不动** | 删 Bot 由运行前校验报错；委派一层语义不变 |
+| `list_bot_assignments` | **修改** | 增可选 `rootId?: string` 过滤，供前端按委派树 root 汇总；原有 requester/assignee/botId/status 过滤不变 |
+| `create_bot_assignment` / `cancel_bot_assignment` / `delete_bot` / G5 `delegate_task` | **不动** | 命令入参不变；P3 多层语义只体现在工具层与 DAO 链字段。删 Bot 由运行前校验报错 |
 
 ## 2. DTO 契约（camelCase）
 
@@ -52,6 +53,14 @@
 
 P2-b `BotAssignmentDto.origin` 为 `'person'|'bot'|'routine'`；P3 步骤行新增 `'workflow'`，前端类型与筛选器同步扩展（旧值不变，无数据迁移）。编排 run 的 origin 只有 `'person'|'routine'`。
 
+`BotAssignmentDto.depth` 值域由 P2-b 恒 `1` 扩展为 `1..3`；`rootId`/`parentId` 在多层链中不再恒为「自身 / NULL」，前端 badge 与链视图按新语义渲染。
+
+### 2.6 工具入参契约变更（`delegate_to_bot`，非 Tauri 命令）
+
+`input_schema` 新增可选 `mode: 'consult'|'dispatch'`（默认 `consult`），语义：consult 同步返回工具结果、assignment 直接终态；dispatch 创建子 assignment 后立即返回 `{ assignmentId, status: 'queued' }`，子回执异步落同一线程。**不向 LLM 暴露** `rootId`/`parentId`/`depth`/`workflowRunId`/`stepKey`：这些由 `run_bot_non_interactive_turn` 经 task-local 注入 `BotDelegateInput` 内部字段，防伪造。
+
+`BotDelegateInput` 内部新增 `parent_assignment_id: Option<String>`、`root_assignment_id: Option<String>`、`depth: u8`、`mode: String`；P2-b 的 `MAX_CONSULT_PER_TURN=2` 保持，但深度门优先：depth=3 轮次无工具，depth<3 才计数。子轮 `requester_bot_id` = 当前 assignee，`origin='bot'`；部门编排步骤内再委派仍继承 `workflow_run_id`/`step_key`，成员校验只在步骤根做（子链由链门与 Bot 档约束）。
+
 ## 3. 执行与事件契约
 
 | 事件 | payload | 触发点 |
@@ -63,8 +72,9 @@ P2-b `BotAssignmentDto.origin` 为 `'person'|'bot'|'routine'`；P3 步骤行新�
 - 回执消息：role=Assistant，正文前缀 `[步骤 {stepKey} · {botName}] `，`parent_message_id = anchor_message_id`；anchor 是 run 开始时写入同一线程的 role=System 消息（正文含编排名与 runId）。
 - 通知：`Notification.botId = 步骤 assigneeBotId`，复用 P2-a 管线；run 级不另发通知，避免一次编排刷 N+1 条。
 - 前端监听 `bot-workflow-run-updated` 刷新运行列表/进度；步骤状态跟随既有 assignment 列表（可按 `workflowRunId` 过滤）。
+**多层链补充（P3 翻 Q1 后）**：子孙 assignment 同样发 `bot-assignment-updated`、同样按 assignee 写 Bot 维度通知，不新增事件族。子孙回执落同一线程（`parent_message_id=根 anchor`），正文前缀 `[L{depth} · {stepKey} · {botName}]`；前端调用 `list_bot_assignments(rootId)` 组装链视图。run 终态条件改为「该 run 下所有 assignment 终态」，根步骤 completed 不等于 run 完成（ADR-P3-2 ⑤）。
 
-## 4. 错误码（新增 10，`BOT_WORKFLOW_*` 段，入 11 语言）
+## 4. 错误码（新增 12：编排 10 + 多层委派 2，入 11 语言）
 
 落点：`src-tauri/src/commands/error_code.rs`（bot 段追加常量）+ `src/i18n/locales/*.json`（11 语言齐更）。
 
@@ -83,11 +93,18 @@ P2-b `BotAssignmentDto.origin` 为 `'person'|'bot'|'routine'`；P3 步骤行新�
 
 > 错误码是**语义常量**，没有 1xx/2xx/3xx/4xx 数字段位；P3 按 `BOT_WORKFLOW_*` 语义前缀扩块，不要写数字段，`check-errorcode-alignment.mjs` 不认数字段。
 
-> 复用不新增：步骤级 `BOT_DELEGATE_BUSY` / `BOT_DELEGATE_TIMEOUT` / `BOT_NOT_FOUND` / `BOT_DISABLED` 仍按 P2-b 语义继承到 run.error_code。门禁基线：P2-b 收口时后端 473 码 ↔ 11 语言对齐；P3 后应为 483 码（实测以 `check-errorcode-alignment.mjs` 输出为准）。
+**多层委派新增 2 码（`BOT_DELEGATE_*` 段，归 T3'''）**
+
+| 码 | zh-CN 源文案 | 触发点 |
+|---|---|---|
+| `BOT_DELEGATE_CYCLE` | 委派链出现循环 | root 链祖先 Bot 集合命中 assignee |
+| `BOT_DELEGATE_MAX_DEPTH` | 委派链深度已达上限 | parent.depth+1 > 3（depth 取值域 1..3） |
+
+> 复用不新增：`BOT_DELEGATE_SELF`（直接自派）/ `BOT_DELEGATE_BUSY`（并发门）/ `BOT_DELEGATE_TIMEOUT`（超时）/ `BOT_NOT_FOUND` / `BOT_DISABLED` / `ERR_PERMISSION` 仍按 P2-b 语义继承到 run.error_code。门禁基线：P2-b 收口时后端 473 码 ↔ 11 语言对齐；P3 后应为 **485 码**（实测以 `check-errorcode-alignment.mjs` 输出为准）。两码在工具层也转 LLM 可读错误文本，审计行仍落码。
 
 ## 5. 契约审计扩展
 
-`scripts/lib/bot-ipc-audit.mjs` 增补 P3 段：8 命令注册核对、`BotWorkflowDto`/`BotWorkflowRunDto` camelCase 字段核对、10 错误码 ×11 语言、`bot-workflow-run-updated` 进入 `IpcEventName` 枚举核对、`params.workflowId` 与 `task_type="bot_workflow"` 字符串常量核对。`check-contracts.mjs` A–H 节自动覆盖新增引用。
+`scripts/lib/bot-ipc-audit.mjs` 增补 P3 段：8 命令注册核对 + `list_bot_assignments` 的 `rootId` 参数核对、`BotWorkflowDto`/`BotWorkflowRunDto` camelCase 字段核对、12 错误码 ×11 语言、`bot-workflow-run-updated` 进入 `IpcEventName` 枚举核对、`params.workflowId` 与 `task_type="bot_workflow"` 字符串常量核对、`delegate_to_bot` schema 只含公开入参（不含 rootId/parentId/depth）核对。`check-contracts.mjs` A–H 节自动覆盖新增引用。
 
 ## 6. 门禁命令原文（WSL ext4，`ssh -o BatchMode=yes wsl 'bash -s'` 内执行）
 
@@ -113,8 +130,8 @@ npm run check:routes
 npm run check:serde
 npx playwright test e2e/bot-delegation.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 # P3 新增门禁
-cargo test --manifest-path src-tauri/Cargo.toml --test bot_workflow --test bot_assignment --test bot_routine
-npx playwright test e2e/bot-workflow.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
+cargo test --manifest-path src-tauri/Cargo.toml --test bot_workflow --test bot_assignment --test bot_routine --test bot_delegation_chain
+npx playwright test e2e/bot-workflow.spec.ts e2e/bot-delegation-chain.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 ```
 
 > 台账第 9 条 `cargo test --manifest-path axagent-ai/Cargo.toml --test bot_assignment --test bot_routine` 是错误路径（exit 101），此处已替换为实测正确路径 `src-tauri/Cargo.toml`（台账 9a）。

@@ -4,7 +4,7 @@
 >
 > **11 语言以现库实测为准**：`src/i18n/locales/` 下 `ar.json`、`de.json`、`en-US.json`、`es.json`、`fr.json`、`hi.json`、`ja.json`、`ko.json`、`ru.json`、`zh-CN.json`、`zh-TW.json`。P2 文档里举例的 `en`/`en-GB`/`pt-BR` 不是本仓库实际文件名，P3 不沿用。
 
-## 1. 后端错误码 ×10（`error` 段，IPC-P3 §4 冻结）
+## 1. 后端错误码 ×12（`error` 段，IPC-P3 §4 冻结）
 
 | 键 | zh-CN 源文案 | 卡 |
 |---|---|---|
@@ -18,8 +18,10 @@
 | `BOT_WORKFLOW_STEP_BOT_MISSING` | 编排步骤引用的 Bot 不存在或已禁用 | T3''' |
 | `BOT_WORKFLOW_TIMEOUT` | 编排运行超时 | T3''' |
 | `BOT_WORKFLOW_CANCEL_INVALID` | 编排运行已结束，无法取消 | T2''' |
+| `BOT_DELEGATE_CYCLE` | 委派链出现循环 | T3''' |
+| `BOT_DELEGATE_MAX_DEPTH` | 委派链深度已达上限 | T3''' |
 
-10 码 × 11 语言 = **110 条译文**；P2-b 收口基线 473 码，P3 后期望 483 码（以脚本实测输出为准）。
+12 码 × 11 语言 = **132 条译文**（编排 10 + 多层委派 2）；P2-b 收口基线 473 码，P3 后期望 **485 码**（以脚本实测输出为准）。
 
 ## 2. 前端键（T6'''）
 
@@ -35,13 +37,17 @@
 
 `title`（定时触发）、`create`（创建定时编排）、`cron`（Cron 表达式）、`timezone`（时区）、`hint`（编排定时与单 Bot 例程互不冲突）。
 
-**前端合计 47 键 × 11 语言 = 517 条译文；前后端总计 627 条。**
+### 2.4 `bot.assignment.*` 补键（多层委派链，T6'''）
+
+`depth`（层级）、`chain`（委派链）——2 键，用于链视图的 L1/L2/L3 徽章与按 rootId 分组标题；既有 P2-b `bot.assignment.*` 14 键不动。
+
+**前端合计 49 键 × 11 语言 = 539 条译文；前后端总计 671 条。**
 
 ## 3. 落盘顺序（门禁执行口径）
 
-1. 先补 11 语言 locale：`error` 段 10 码 + `bot.workflow*`/`bot.workflowRun*`/`bot.workflowSchedule*` 47 键；
-2. 再把 10 码常量写进 `src-tauri/src/commands/error_code.rs`（`check-errorcode-alignment.mjs` B 节：码 ⊆ locale 且无孤儿）；
-3. 把 47 个 UI 键加入 `scripts/check-bot-i18n-keys.mjs` 的 `BOT_I18N_KEYS` 必需集合（防 11 语言一起漏掉仍假绿；P1/P2 既有键保持不动，预计从 102 增至 149）；
+1. 先补 11 语言 locale：`error` 段 12 码 + `bot.workflow*`/`bot.workflowRun*`/`bot.workflowSchedule*` 47 键 + `bot.assignment.depth`/`bot.assignment.chain` 2 键；
+2. 再把 12 码常量写进 `src-tauri/src/commands/error_code.rs`（`check-errorcode-alignment.mjs` B 节：码 ⊆ locale 且无孤儿）；
+3. 把 49 个 UI 键加入 `scripts/check-bot-i18n-keys.mjs` 的 `BOT_I18N_KEYS` 必需集合（防 11 语言一起漏掉仍假绿；P1/P2 既有键保持不动，预计从 102 增至 151）；
 4. 前端组件（T6'''）最后引键 → `check:i18n` / `check:i18n:key-parity` 零缺失、零多余。
 
 ## 4. 文案约束
@@ -49,6 +55,8 @@
 - `bot.workflow.ownerScope` 的「实例级/部门级」必须与 ADR-P3-3 一致：部门级只是筛选与成员校验，不是资产所有权；帮助文案不得暗示「删部门会删编排」。
 - `bot.workflowRun.statusWaiting` 译为「等待依赖」，不得译成「等待用户输入」（P3 无 needs_input，ADR-P3-6）。
 - 步骤回执前缀由后端拼 `[步骤 {key} · {botName}] `，前端不另加方括号，避免双前缀。
+- 多层链回执前缀 `[L{depth} · {stepKey} · {botName}]` 由后端拼装，前端只渲染 `bot.assignment.depth` 徽章，不重复拼 L 前缀。
+- `BOT_DELEGATE_CYCLE` / `BOT_DELEGATE_MAX_DEPTH` 是链门错误码，不得译成编排 DAG 的「步骤循环」文案（那是 `BOT_WORKFLOW_CYCLE`）。
 
 ## 5. DoD
 

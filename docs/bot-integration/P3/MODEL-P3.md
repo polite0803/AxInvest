@@ -76,16 +76,30 @@
 
 **状态语义**：`waiting` = 仍有步骤因依赖未就绪而没派发（不是交互式等待）；`needs_input` 不引入——ask 类操作在 assignee 轮按 P2-a `prompter=None` 自动 Deny。
 
-### 2.3 `bot_assignments` 增量（2 列，`AddColumn + DEFAULT NULL`）
+### 2.3 `bot_assignments` 增量（2 列 + 链字段启用）
 
 | 新列 | 类型 | 语义 |
 |---|---|---|
-| `workflow_run_id` | TEXT NULL, INDEXED | 编排步骤归属；普通委派恒 NULL |
-| `step_key` | TEXT NULL | 对应 `steps_json[].stepKey`；普通委派恒 NULL |
+| `workflow_run_id` | TEXT NULL, INDEXED | 编排步骤归属；**子孙继承父行值**，纯委派链恒 NULL |
+| `step_key` | TEXT NULL | 对应 `steps_json[].stepKey`；**子孙继承父行值**，纯委派链恒 NULL |
 
-其余列保持不变：`root_id = id`、`parent_id = NULL`、`depth = 1` 仍恒成立（ADR-P2B-5 在 P3 维持）；`origin` 列是自由 TEXT，编排步骤写 `'workflow'`，无需改列类型（DTO 联合类型扩展见 IPC-P3 §2）。
+P2-b 既有三列升级为动态树边（ADR-P3-2，用户翻 Q1 案）：
 
-落点：`axagent-core/crates/entities/src/bot_assignments.rs` 两字段 + 注释更新（删掉「P3 解禁」字样，改为「P3 维持一层」）。
+| 既有列 | P2-b 旧语义 | P3 新语义 |
+|---|---|---|
+| `root_id` | 恒等于自身 id | 恒指向链根 assignment id；子行复制父行 `root_id`，链根仍 `root_id=id` |
+| `parent_id` | 恒 NULL | 根派发恒 NULL；子行 = 发起该子轮的 assignee assignment id |
+| `depth` | 恒 1 | 根 depth=1；子 depth=parent.depth+1；取值域 **1..3**，`MAX_DEPTH=3` 硬门 |
+
+落点：`axagent-core/crates/entities/src/bot_assignments.rs` 加两列并把头注改为「P3 放开多层 depth≤3，`root_id/parent_id/depth` 是运行期树边；`workflow_run_id/step_key` 沿树继承」。DAO `create_assignment` 接受内部字段 `parent_assignment_id`/`root_assignment_id`（不进 Tauri 入参 DTO），`root_id`/`parent_id`/`depth` 由 DAO 按上表计算，不由调用方自由填写。`root_id` 与 `parent_id` 声明索引支撑链查询（P2-b `status` 索引保留）。
+
+#### 2.3.1 链状态机与防环
+
+- **根派发**（person / routine / 编排步骤 / 非 assignee 轮工具）：`depth=1 / parent_id=NULL / root_id=id`；编排步骤同时写 `workflow_run_id`/`step_key`。
+- **子派发**（assignee 轮 `delegate_to_bot`，`depth<3`）：`depth=parent.depth+1`、`parent_id=当前 assignment.id`、`root_id=当前 assignment.root_id`；`workflow_run_id`/`step_key` 继承；`origin='bot'`。`mode=consult` 直接落终态审计行；`mode=dispatch` 走 P2-b 状态机入 queued。
+- **防环**：派发前按 `root_id` 查全链，取祖先 `assignee_bot_id` 集合；命中同 Bot → `BOT_DELEGATE_CYCLE`（新增码，直接自派仍用 `BOT_DELEGATE_SELF`）；`depth+1>3` → `BOT_DELEGATE_MAX_DEPTH`（新增码）。静态 `steps_json` 的 `validate_dag` 仍独立拦截定义期环（`BOT_WORKFLOW_CYCLE`）。
+- **深度上下文传递**：`run_bot_non_interactive_turn` 增可选 `AssignmentContext { assignment_id, root_id, parent_id, depth, workflow_run_id, step_key }`，用 `tokio::task_local!` 限定在单轮内；`BotDelegateTool` 从 task-local 读取内部字段，LLM 的 JSON 入参只含 `botId`/`question`/`mode`/`requesterBotId`/`origin`，无 root/depth/parent 字段（防伪造）。例程轮传 None，行为不变。
+- **子树终态**：`run` 的完成条件为 `workflow_run_id=run.id` 的所有 assignment 均终态（completed/failed/cancelled）；根步骤 completed 但子链在途时 run 仍 `running`。`abort`/`cancel`/总超时按 `root_id` 取消整棵非终态子树。
 
 ## 3. 既有表排除理由
 
@@ -109,10 +123,20 @@
 |---|---|
 | 删编排定义 | 存在非终态 run → `BOT_WORKFLOW_RUN_BUSY`；否则删定义 + 保留终态 run 作审计 |
 | 删部门 | 该部门下编排转 `owner_scope='instance', department_id=NULL`，定义保留（ADR-P3-3） |
-| 删 Bot | 编排定义保留；运行前校验发现步骤 Bot 不存在 → run failed + `BOT_WORKFLOW_STEP_BOT_MISSING`；in-flight 步骤按 P2-b 既有路径 cancelled |
+| 删 Bot | 编排定义保留；运行前校验发现步骤 Bot 不存在 → run failed + `BOT_WORKFLOW_STEP_BOT_MISSING`；in-flight 步骤及其整棵子树（同 `root_id`）按 P2-b 既有路径 cancelled |
 
 ## 6. 并发与超时的落库口径
 
 - run 级并发来自 `max_concurrency`（默认 2），与 P2-b 命令层门（单 requester 4 / 全局 8）**叠加**：编排最多占 2 个名额，超 P2-b 门仍返回 `BOT_DELEGATE_BUSY`（步骤 assignment 的 error_code 继承）。
 - 总超时 `total_timeout_secs` 到点：取消所有在途步骤 assignment → run `failed` + `BOT_WORKFLOW_TIMEOUT`。
 - 单步超时沿用 P2-b 300s / `BOT_DELEGATE_TIMEOUT`；`timeoutSecs` 只许更小（1..300）。
+
+## 7. 多层委派的链预算与回执口径（P3 翻 Q1 后）
+
+| 预算/口径 | 规则 | 与既有门的关系 |
+|---|---|---|
+| 每深度并发 | `per(root_id, depth)` 在途 ≤2（新增链门，常量集中 runner 头部） | 与编排 `maxConcurrency`（仅 runner 放行就绪步骤）是**两套独立预算**，叠加生效；步骤根同时占链门 depth=1 与编排门 |
+| 单 requester / 全局 | P2-b 4 / 8 保持，超限 `BOT_DELEGATE_BUSY` | 子 assignment 仍经 `create_inner` 校验，不绕过 |
+| 链总超时 | 根到子孙共享 300s 预算（不逐层重置），到点整棵链 failed + `BOT_DELEGATE_TIMEOUT` | 编排总超时 900s 是更外层预算，先到者生效 |
+| 回执 | 所有子孙写同一 `requester_conversation_id` 线程；`parent_message_id=根 anchor`；正文前缀 `[L{depth} · {stepKey} · {botName}]` | 不新增线程/消息类型/`receipt_message_id` 列；树形关系由 root/parent/depth 字段 + 前端按 `rootId` 过滤呈现 |
+| 事件/通知 | 子孙同样发 `bot-assignment-updated`、同样按 assignee 写 `Notification.botId` | 复用 P2-b/P2-a 管线，不新增事件族 |

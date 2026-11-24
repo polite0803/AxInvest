@@ -24,7 +24,7 @@
 | G-P2 | 依赖顺序调度 | 无 DAG/拓扑排序；`cron` 调度器只做「到点派一个」 | **C** | **做**：runner 内 Kahn 拓扑 + 就绪集并发门 | 不能改 cron 调度器（30s tick/leader 租约/在途去重已验证），只在 task_type 分支内编排 |
 | G-P3 | 委派执行器 | P2-b 已有 `bot_assignment_runner::run_assignment_with_timeout`（状态机/300s/事件/回执）与共享 `run_bot_non_interactive_turn` | **A** | **复用，不重建** | 编排的每一步就是一张 assignment；只加完成钩子驱动下一层，不写第二个模型调用路径 |
 | G-P4 | 执行上下文积木 | `bot_context.rs`（SOUL/MEMORY）+ `bot_approval.rs`（只取 Bot 档）+ 占位会话清理，例程与委派共用 | **A** | **复用** | P2-a/P2-b 已锁行为，重造会产生审批与记忆注入的双真相源 |
-| G-P5 | 委派深度 | `bot_assignments.root_id/parent_id/depth` 已落但恒 1；assignee 轮工具表禁 `delegate_to_bot`（ADR-P2B-5） | **A（约束）** | **维持一层**：编排步骤仍 `depth=1 / parent_id=NULL` | 步骤目标由定义在编写时固定，不由模型动态再委派；环在定义期 DAG 校验中消除，运行时零递归 |
+| G-P5 | 委派深度 | `bot_assignments.root_id/parent_id/depth` 已落但恒 1；assignee 轮工具表禁 `delegate_to_bot`（ADR-P2B-5） | **B（接线改造，用户翻 Q1 案）** | **放开多层 depth≤3**：根 depth=1、子 depth+1、parent/root 写链；depth<3 出示委派工具，depth=3 禁用 | 用户已拍板翻掉 P2-b 一层案（ADR-P3-2）；字段是 P2-b 特意预留，运行时树与静态编排 DAG 各管一层语义 |
 | G-P6 | waiting / needs_input | assignment 五态无 waiting；例程 ask 自动 Deny（prompter=None） | **B** | **只做 run 级 waiting**（依赖阻塞）；**不做 needs_input** | 编排是多 Bot 无人值守，needs_input 无回答者；等待依赖用 run.status=waiting 表达即可 |
 | G-P7 | 部门归属 | `bot_departments` + `bot_department_members` 已有，一个 Bot 一部门；Chief 只是标注 | **A（需接线）** | **编排归属实例**，`department_id` 仅作可见性/成员校验（ADR-P3-3） | 编排是自动化资产，常跨部门；绑部门会让跨部门协作无处安放 |
 | G-P8 | 部门成员校验 | `bot_department_members` DAO 有查询；编排定义无校验 | **B** | **做**：部门编排的每步 Bot 必须是当前成员，运行前复查 | 成员变更后运行要失败而不是静默越权；错误码 `BOT_WORKFLOW_MEMBER_CHANGED` |
@@ -38,13 +38,15 @@
 | G-P16 | Bot 群聊 / rooms | `fleet_messages` 是办公室场景，P2-b 已判不涉 | **A'（不涉）** | **不做** | 编排是任务图，不是聊天室 |
 | G-P17 | 预算/并发 | P2-b 有单 requester 4 / 全局 8 / 300s；编排层无 | **B** | **加 run 级**：并发 ≤2（可配 1..4）、总超时 900s、步骤数 ≤12 | 与 P2-b 门叠加而非替代；防止一个编排吞掉全局 8 个委派名额 |
 | G-P18 | 删除级联 | `delete_bot` 已清部门成员/chief/在途 assignment；编排定义引用 Bot 未纳入 | **B** | **做**：删 Bot 不删编排，运行时校验失败并给专用错误码 | 删部门同理：编排转实例归属保留（ADR-P3-3），自动化资产不随组织变更销毁 |
+| G-P19 | 动态委派树 vs 静态编排 DAG | 静态 `steps_json` 依赖已冻结；运行期树（root/parent/depth）尚未启用 | **C** | **两套并存**：静态 DAG 驱动 run 步骤，动态树允许步骤内再委派；`workflow_run_id`/`step_key` 沿树继承，run 等整棵子树终态 | 两者输入源不同（定义期 vs 运行期），合并会让定义期校验失效（ADR-P3-2） |
+| G-P20 | 多层防环/预算/回执 | 一层时防环退化为「无工具」，无逐层预算与树形汇总 | **C** | **做**：root 链 visited 集 + depth cap=3 + 新增 2 码；per(root,depth)≤2 与 P2-b 全局 8 叠加；回执仍单线程扁平、按 root 字段汇总 | OMB `runtime-contract.md` 的委派链语义落地；不新增线程/事件/消息类型 |
 
 ## 3. 判定汇总与 P3 边界
 
 - **A（直接复用）**：G-P3 委派执行器、G-P4 三积木、G-P7 部门表、G-P10 通知管线、G-P16 不涉。
 - **B（接线/改造）**：G-P6 run 级 waiting、G-P8 成员校验、G-P9 单线程回执、G-P12 cron 新分支、G-P17 预算、G-P18 删除语义。
 - **C（新建）**：G-P1 两实体、G-P2 拓扑 runner、G-P11 run 事件、G-P14 最小变量替换。
-- **P3 明确不做**：多层自由委派与图环放行（Q1 维持一层）、needs_input 交互阻塞、自动事故线程/自动重试、Bot 群聊、P2-c 三件事、新调度器/新会话池/新模型调用路径。
+- **P3 明确不做**：needs_input 交互阻塞、自动事故线程/自动重试、Bot 群聊、P2-c 三件事、新调度器/新会话池/新模型调用路径、图状任意回边（只放行无环 depth≤3 树）。
 
 ## 4. 落地后主线流程
 

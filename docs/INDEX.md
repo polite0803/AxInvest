@@ -319,13 +319,14 @@
 | `P2/I18N-KEYS-P2B.md` | 参考 | P2-b 权威 i18n 键名清单：错误码 ×6 + 前端 27 键共 363 条 11 语言译文，落盘顺序（先 locale 后代码）防孤儿码红。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P2/ACCEPTANCE-P2B.md` | 参考 | P2-b T6'' e2e 与 T7'' 全量门禁实测台账：5 卡提交链、6 红转绿核查、15 条命令逐项 exit/摘要、存量 serde 红与 mock 边界声明。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P2/GATES-P2.md` | 计划 | T7' 前置：P1 列出的 5 项 P2 门禁缺口成文方案（prompt-slots / 例程 botId 归属 / 审批矩阵六规则 / 通知计数四断言 / schema_compliance 登记）+ 证据日志 *.log→.md 迁移；只方案不实现，T1'–T4' 合入后收口。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `P3/GAP-P3.md` | 参考 | P3 差距分析（多 Bot 协作/例程编排）：18 条 A/B/C 逐条判定，关键结论「步骤复用 P2-b assignment、编排归属实例、维持一层委派」。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `P3/ADR-P3.md` | 参考 | P3 7 条决策：定义+运行两实体、维持一层防环、实例归属+部门筛选、单线程锚点回执、cron 新分支并列、失败可见不自动重试、最小变量替换。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P3/GAP-P3.md` | 参考 | P3 差距分析（多 Bot 协作/例程编排）：20 条 A/B/C 逐条判定，关键结论「步骤复用 P2-b assignment、编排归属实例、用户翻 Q1 案放开多层 depth≤3」。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P3/ADR-P3.md` | 参考 | P3 7 条决策：定义+运行两实体、翻 P2-b Q1 案放开 depth≤3 动态树、实例归属+部门筛选、单线程锚点回执、cron 新分支并列、失败可见不自动重试、最小变量替换。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P3/MODEL-P3.md` | 参考 | P3 数据模型：新增 bot_workflows / bot_workflow_runs 两表 + bot_assignments 加 2 列；steps_json 步骤契约、SCHEMA 登记与删除语义。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `P3/IPC-P3.md` | 参考 | P3 IPC 冻结稿：新增 8 命令、改 delete_bot_department、新增 bot-workflow-run-updated 事件、BOT_WORKFLOW_* 10 码入 11 语言、门禁命令原文。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `P3/PLAN-P3.md` | 计划 | P3 T1'''–T8''' 任务卡：依赖图、落点文件、逐卡验收命令、估时 14.5 人日、Q 列表 8 条（含建议答案与替代路径）与收口判定。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `P3/I18N-KEYS-P3.md` | 参考 | P3 权威 i18n 键名清单：错误码 ×10 + 前端 47 键共 627 条 11 语言译文，落盘顺序与 check-bot-i18n-keys 必需集合扩展说明。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P3/IPC-P3.md` | 参考 | P3 IPC 冻结稿：新增 8 命令、改 2 命令（含 rootId 过滤）、1 新事件、12 码（编排 10 + 多层 2）入 11 语言、门禁命令原文。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P3/PLAN-P3.md` | 计划 | P3 T1'''–T8''' 任务卡：依赖图、逐卡验收命令、估时 19.5 人日（Q1 翻案 +5）、Q 列表 8 条（含建议答案与替代路径）与收口判定。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P3/I18N-KEYS-P3.md` | 参考 | P3 权威 i18n 键名清单：错误码 ×12 + 前端 49 键共 671 条 11 语言译文，落盘顺序与 check-bot-i18n-keys 必需集合扩展说明。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P3/ACCEPTANCE-P3.md` | 参考 | P3 T8''' 全量门禁实测台账：8 命令审计覆盖、纵向/多层链 e2e 输出、18 条门禁 exit/摘要、他线红项归属与 PLAN-P3 §10 六条逐项签字。 | active | 2026-11-24 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P4/PLAN-P4.md` | 计划 | P4 草案（未冻结）：Q7 部门运行配额与 Q8 needs_input 交互答应两条纵向切片，含新表/新命令拟案、D0–A5/B5 拆卡与 D1–D8 待用户裁决项。 | 草案 | 2026-11-24 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -737,13 +738,14 @@
 | `P2/MODEL-P2.md` | Bot P2-a 数据模型（零 schema 变更） | CronJob JSON 加 botId/timezone（serde default 免迁移）、calculate_next_run 时区参数、逐表排除与 reconcile 安全核对。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/ADR-P2.md` `P2/IPC-P2.md` |
 | `P2/ACCEPTANCE-P2B.md` | Bot 集成 P2-b 门禁验收台账 | T6'' 委派 e2e 原始输出与 T7'' 15 条门禁逐项 PASS/FAIL；记录 serde 存量红与 axagent-ai/src-tauri 测试路径差异。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/PLAN-P2B.md` |
 | `P2/IPC-P2.md` | Bot P2-a IPC 契约（冻结稿） | 新增 create/list_bot_scheduled_tasks，修改 create/list/update_scheduled_task（Option&lt;Option&lt;T&gt;&gt; 清除语义），2 个新错误码 11 语言，事件零新增。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P2/MODEL-P2.md` |
-| `P3/GAP-P3.md` | AxAgent × OpenMausBot P3 差距分析 | 多 Bot 协作/例程编排 18 条 A/B/C 判定：复用 P2-b 执行器、维持一层委派、P3 做/不做清单。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/ADR-P3.md` `P3/PLAN-P3.md` |
-| `P3/ADR-P3.md` | Bot 集成 P3 架构决策记录（7 条） | 定义+运行两实体、委派恒一层、实例归属、单线程锚点、cron 并列分支、失败可见不重试、最小变量替换。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/MODEL-P3.md` `P3/IPC-P3.md` |
+| `P3/GAP-P3.md` | AxAgent × OpenMausBot P3 差距分析 | 多 Bot 协作/例程编排 20 条 A/B/C 判定：复用 P2-b 执行器、翻 Q1 案多层 depth≤3、P3 做/不做清单。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/ADR-P3.md` `P3/PLAN-P3.md` |
+| `P3/ADR-P3.md` | Bot 集成 P3 架构决策记录（7 条） | 定义+运行两实体、翻 Q1 案 depth≤3 动态树、实例归属、单线程锚点、cron 并列分支、失败可见不重试、最小变量替换。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/MODEL-P3.md` `P3/IPC-P3.md` |
 | `P3/MODEL-P3.md` | Bot P3 数据模型（2 新表 + 2 列） | bot_workflows / bot_workflow_runs、steps_json DAG 契约、bot_assignments 增 workflow_run_id/step_key、SCHEMA 与删除语义。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/ADR-P3.md` `P3/IPC-P3.md` |
-| `P3/IPC-P3.md` | Bot P3 IPC 契约（冻结稿） | 8 新命令 + 改 delete_bot_department；bot-workflow-run-updated 事件；BOT_WORKFLOW_* 10 码；门禁命令原文。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/MODEL-P3.md` `P3/PLAN-P3.md` |
+| `P3/IPC-P3.md` | Bot P3 IPC 契约（冻结稿） | 8 新命令 + 改 2 命令；bot-workflow-run-updated 事件；12 码（编排 10 + 多层 2）；门禁命令原文。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/MODEL-P3.md` `P3/PLAN-P3.md` |
 | `P3/PLAN-P3.md` | PLAN：Bot 集成的 P3 纵向切片 | 多 Bot 协作/例程编排：T1'''–T8''' 任务卡与依赖图、Q 列表 8 条（建议答案+替代路径）、收口判定。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/GAP-P3.md` `P3/ADR-P3.md` `P3/IPC-P3.md` |
-| `P3/I18N-KEYS-P3.md` | Bot P3 i18n 权威键清单 | 错误码 ×10 + 前端 47 键 = 627 条译文（11 语言）；落盘顺序与必需集合门禁扩展。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/IPC-P3.md` |
+| `P3/I18N-KEYS-P3.md` | Bot P3 i18n 权威键清单 | 错误码 ×12 + 前端 49 键 = 671 条译文（11 语言）；落盘顺序与必需集合门禁扩展。 | active | 2026-11-23 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/IPC-P3.md` |
 | `P3/ACCEPTANCE-P3.md` | Bot 集成 P3 门禁验收台账 | P3 纵向与多层链 e2e 原始输出、T8''' 18 条门禁 exit/读数、非 Bot 红项归属，PLAN-P3 §10 六条逐条 PASS 签字。 | active | 2026-11-24 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/PLAN-P3.md` `P3/IPC-P3.md` |
+| `P4/PLAN-P4.md` | PLAN：Bot 集成的 P4 纵向切片（草案） | 部门运行配额 + needs_input 交互答应两条切片：拟案数据模型/IPC、A1–A5/B1–B5 拆卡、估时 17.5–18 人日、D1–D8 待用户裁决。 | 草案 | 2026-11-24 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P3/PLAN-P3.md` `P3/IPC-P3.md` `P3/MODEL-P3.md` |
 | `dependency-graph.md` | AxAgent 仓库依赖图与拆分分析 | 仓库依赖图与按技术层拆分可行性分析（参考） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `dependency-matrix.md` | AxAgent Crate 精确依赖矩阵（实测） | 逐 crate 读取 Cargo.toml 得到的精确依赖矩阵（2026-10-31 实测） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `gate-coverage-ledger.md` | 门禁覆盖台账（gate-coverage-ledger） | CI / 本地门禁覆盖面台账与补齐进度 | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 | `PLAN-declarative-schema-sync.md` |

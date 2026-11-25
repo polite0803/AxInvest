@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "La chaîne de délégation contient un cycle",
     "BOT_DELEGATE_MAX_DEPTH": "Profondeur maximale de la chaîne de délégation atteinte",
     "BOT_QUOTA_INVALID": "Valeur de quota de département de bot invalide",
-    "BOT_QUOTA_EXCEEDED": "Quota d’exécution du département dépassé"
+    "BOT_QUOTA_EXCEEDED": "Quota d’exécution du département dépassé",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "Demande de saisie introuvable",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "Demande de saisie déjà traitée ou expirée",
+    "BOT_INPUT_ANSWER_EMPTY": "La réponse ne peut pas être vide"
   },
   "errorBoundary": {
     "copied": "Copié",

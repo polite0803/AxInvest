@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "Delegation chain contains a cycle",
     "BOT_DELEGATE_MAX_DEPTH": "Delegation chain depth limit reached",
     "BOT_QUOTA_INVALID": "Invalid bot department quota value",
-    "BOT_QUOTA_EXCEEDED": "Exceeds the department run quota"
+    "BOT_QUOTA_EXCEEDED": "Exceeds the department run quota",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "Input request not found",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "Input request already answered or expired",
+    "BOT_INPUT_ANSWER_EMPTY": "Answer cannot be empty"
   },
   "errorBoundary": {
     "copied": "Copied",

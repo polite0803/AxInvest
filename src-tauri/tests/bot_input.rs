@@ -434,3 +434,115 @@ mod bridge_lifecycle {
         assert!(draft.workflow_run_id.is_none() && draft.assignment_id.is_none(), "D4=A 恒 NULL");
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B3：命令层（list / answer / cancel）—— 只接受 pending、空答复拒绝、
+// 无活 sender 视为 NOT_PENDING、答复投递到 oneshot、取消唤醒等待方为「已取消」。
+// ─────────────────────────────────────────────────────────────────────────────
+mod commands {
+    use super::*;
+    use axagent_harness::types::bot::input_status;
+    use axagent_lib::bot_input_request as lifecycle;
+    use axagent_lib::{
+        answer_bot_input_request_inner as answer_inner,
+        cancel_bot_input_request_inner as cancel_inner,
+        list_bot_input_requests_inner as list_inner,
+    };
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::{Mutex, oneshot};
+
+    type Senders = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
+
+    fn senders() -> Senders {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
+    async fn seed(db: &axagent_dao::DatabaseConnection, ask: &str) -> String {
+        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), ask, "继续吗？", vec![])
+            .await
+            .expect("seed")
+            .id
+    }
+
+    #[tokio::test]
+    async fn answer_without_live_sender_is_not_pending() {
+        let h = pool().await;
+        let db = &h.conn;
+        let id = seed(db, "ask-nosender").await;
+        let err = answer_inner(db, &senders(), None, &id, "继续").await.expect_err("无 sender");
+        assert!(err.contains("BOT_INPUT_REQUEST_NOT_PENDING"), "{err}");
+        let row = input_repo::get_by_id(db, &id).await.expect("read").expect("row");
+        assert_eq!(row.status, input_status::PENDING, "拒绝时不得改写状态");
+    }
+
+    #[tokio::test]
+    async fn answer_delivers_to_oneshot_and_marks_answered() {
+        let h = pool().await;
+        let db = &h.conn;
+        let id = seed(db, "ask-live").await;
+        let map = senders();
+        let (tx, rx) = oneshot::channel();
+        map.lock().await.insert("ask-live".to_string(), tx);
+
+        let updated = answer_inner(db, &map, None, &id, "  继续  ").await.expect("answer");
+        assert_eq!(updated.status, input_status::ANSWERED);
+        assert_eq!(updated.answer.as_deref(), Some("继续"), "答复需 trim");
+        assert_eq!(rx.await.expect("模型侧收到答复"), "继续");
+
+        let err = answer_inner(db, &map, None, &id, "再来").await.expect_err("已终态");
+        assert!(err.contains("BOT_INPUT_REQUEST_NOT_PENDING"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn answer_rejects_blank_and_unknown() {
+        let h = pool().await;
+        let db = &h.conn;
+        let id = seed(db, "ask-blank").await;
+        let map = senders();
+        let (tx, _rx) = oneshot::channel();
+        map.lock().await.insert("ask-blank".to_string(), tx);
+
+        let blank = answer_inner(db, &map, None, &id, "   ").await.expect_err("空答复");
+        assert!(blank.contains("BOT_INPUT_ANSWER_EMPTY"), "{blank}");
+        let missing = answer_inner(db, &map, None, "no-such-id", "x").await.expect_err("不存在");
+        assert!(missing.contains("BOT_INPUT_REQUEST_NOT_FOUND"), "{missing}");
+    }
+
+    #[tokio::test]
+    async fn cancel_wakes_waiter_as_cancelled() {
+        let h = pool().await;
+        let db = &h.conn;
+        let id = seed(db, "ask-cancel").await;
+        let map = senders();
+        let (tx, rx) = oneshot::channel();
+        map.lock().await.insert("ask-cancel".to_string(), tx);
+
+        let updated = cancel_inner(db, &map, None, &id).await.expect("cancel");
+        assert_eq!(updated.status, input_status::CANCELLED);
+        assert!(rx.await.is_err(), "等待方收到通道关闭（= 已取消）");
+
+        let again = cancel_inner(db, &map, None, &id).await.expect_err("已终态");
+        assert!(again.contains("BOT_INPUT_REQUEST_NOT_PENDING"), "{again}");
+    }
+
+    #[tokio::test]
+    async fn list_validates_status_and_filters() {
+        let h = pool().await;
+        let db = &h.conn;
+        seed(db, "ask-1").await;
+        seed(db, "ask-2").await;
+
+        let all = list_inner(db, BotInputRequestFilter::default()).await.expect("all");
+        assert_eq!(all.len(), 2);
+
+        let mut f = BotInputRequestFilter::default();
+        f.status = Some("pending".into());
+        assert_eq!(list_inner(db, f).await.expect("pending").len(), 2);
+
+        let mut bad = BotInputRequestFilter::default();
+        bad.status = Some("waiting".into());
+        let err = list_inner(db, bad).await.expect_err("非法状态");
+        assert!(err.contains("ERR_VALIDATION"), "{err}");
+    }
+}

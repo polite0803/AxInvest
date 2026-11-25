@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "Цепочка делегирования содержит цикл",
     "BOT_DELEGATE_MAX_DEPTH": "Достижена максимальная глубина цепочки делегирования",
     "BOT_QUOTA_INVALID": "Недопустимое значение квоты отдела бота",
-    "BOT_QUOTA_EXCEEDED": "Превышена квота выполнения отдела"
+    "BOT_QUOTA_EXCEEDED": "Превышена квота выполнения отдела",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "Запрос ввода не найден",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "Запрос уже отвечен или истёк",
+    "BOT_INPUT_ANSWER_EMPTY": "Ответ не может быть пустым"
   },
   "errorBoundary": {
     "copied": "Скопировано",

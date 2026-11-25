@@ -21,6 +21,8 @@ pub mod bot_workflow_runner;
 pub mod bot_workflow_steps;
 pub mod bot_quota;
 pub mod bot_input_request;
+// P4-b 命令层内部实现（集成测试直接驱动，避免为测试复制 Tauri State）。
+pub use commands::bot_input::{answer_inner as answer_bot_input_request_inner, cancel_inner as cancel_bot_input_request_inner, list_inner as list_bot_input_requests_inner};
 mod bot_context;
 mod capability_workflow_io;
 mod commands;

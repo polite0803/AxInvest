@@ -234,6 +234,10 @@ export const BOT_IPC = {
     // P4（IPC-P4 §4）：配额错误码 ×2（待答错误码 ×3 由 B3 追加）
     "BOT_QUOTA_INVALID",
     "BOT_QUOTA_EXCEEDED",
+    // P4-b（IPC-P4 §4）：待答请求错误码 ×3
+    "BOT_INPUT_REQUEST_NOT_FOUND",
+    "BOT_INPUT_REQUEST_NOT_PENDING",
+    "BOT_INPUT_ANSWER_EMPTY",
   ],
   /** IPC.md §6：P1 不新增事件；P2-b / P3 冻结事件为例外（见下方白名单）。 */
   forbiddenEventPrefix: "bot-",
@@ -980,9 +984,17 @@ export function auditBotIpc(sources) {
       }
       const helper = p4.inputHelperRs ?? "";
       for (const status of ["pending", "answered", "expired", "cancelled"]) {
-        if (!helper.includes('"' + status + '"')) {
-          errors.push('[P4-b] 待答状态机缺 "' + status + '"（IPC-P4 §2 值域）');
+        if (!(sources.typesRs ?? "").includes('"' + status + '"')) {
+          errors.push('[P4-b] 值域缺 "' + status + '"（input_status，IPC-P4 §2）');
         }
+      }
+      for (const origin of ["person", "routine", "workflow"]) {
+        if (!(sources.typesRs ?? "").includes('"' + origin + '"')) {
+          errors.push('[P4-b] origin 值域缺 "' + origin + '"（input_origin，IPC-P4 §2）');
+        }
+      }
+      if (!helper.includes("input_status::")) {
+        errors.push("[P4-b] 生命周期 helper 未统一走 input_status 值域（字面量漂移风险）");
       }
       if (!(sources.eventsEnum ?? "").includes("BotInputRequestUpdated")) {
         errors.push("[P4-b] IpcEventName 缺 BotInputRequestUpdated（IPC-P4 §3）");
@@ -1210,6 +1222,14 @@ export function botSelftest() {
   add("P4 agent_respond_ask 返回类型漂移", (s) => {
     s.p4.agentRs = s.p4.agentRs.replace("-> Result<(), String>", "-> Result<bool, String>");
   }, /\[P4\] agent_respond_ask 返回类型变了/);
+
+  add("P4-b 事件漏枚举", (s) => {
+    s.eventsEnum = s.eventsEnum.replace("BotInputRequestUpdated,", "");
+  }, /\[P4-b\] IpcEventName 缺 BotInputRequestUpdated/);
+
+  add("P4-b 缺 answer 命令", (s) => {
+    s.p4.inputRs = s.p4.inputRs.replace("pub async fn answer_bot_input_request", "pub async fn removed_answer");
+  }, /\[P4-b\] 缺命令 answer_bot_input_request/);
 
   add("P4 超限出口丢失（静默夹紧）", (s) => {
     s.p4.quotaEnforceRs = s.p4.quotaEnforceRs.replace("BOT_QUOTA_EXCEEDED", "BOT_QUOTA_SOFT_CAP");

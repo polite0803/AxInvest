@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "توجد دورة في سلسلة التفويض",
     "BOT_DELEGATE_MAX_DEPTH": "تم الوصول إلى الحد الأقصى لعمق سلسلة التفويض",
     "BOT_QUOTA_INVALID": "قيمة حصة قسم البوت غير صالحة",
-    "BOT_QUOTA_EXCEEDED": "تم تجاوز حصة تشغيل القسم"
+    "BOT_QUOTA_EXCEEDED": "تم تجاوز حصة تشغيل القسم",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "لم يتم العثور على طلب الإدخال",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "تمت الإجابة على الطلب أو انتهت صلاحيته",
+    "BOT_INPUT_ANSWER_EMPTY": "لا يمكن أن تكون الإجابة فارغة"
   },
   "errorBoundary": {
     "copied": "تم النسخ",

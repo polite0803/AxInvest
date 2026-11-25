@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "प्रत्यायोजन श्रृंखला में चक्र है",
     "BOT_DELEGATE_MAX_DEPTH": "प्रत्यायोजन श्रृंखला की अधिकतम गहराई तक पहुँच गई",
     "BOT_QUOTA_INVALID": "बॉट विभाग कोटा मान अमान्य है",
-    "BOT_QUOTA_EXCEEDED": "विभाग निष्पादन कोटा पार हो गया"
+    "BOT_QUOTA_EXCEEDED": "विभाग निष्पादन कोटा पार हो गया",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "इनपुट अनुरोध नहीं मिला",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "इनपुट अनुरोध का उत्तर पहले ही दिया जा चुका है या समाप्त हो गया है",
+    "BOT_INPUT_ANSWER_EMPTY": "उत्तर खाली नहीं हो सकता"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",

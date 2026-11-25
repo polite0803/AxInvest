@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "La cadena de delegación contiene un ciclo",
     "BOT_DELEGATE_MAX_DEPTH": "Se alcanzó la profundidad máxima de la cadena de delegación",
     "BOT_QUOTA_INVALID": "Valor de cuota de departamento de bot no válido",
-    "BOT_QUOTA_EXCEEDED": "Se superó la cuota de ejecución del departamento"
+    "BOT_QUOTA_EXCEEDED": "Se superó la cuota de ejecución del departamento",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "Solicitud de entrada no encontrada",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "La solicitud ya fue respondida o ha caducado",
+    "BOT_INPUT_ANSWER_EMPTY": "La respuesta no puede estar vacía"
   },
   "errorBoundary": {
     "copied": "Copiado",

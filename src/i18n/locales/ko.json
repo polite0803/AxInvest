@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "위임 체인에 순환이 있습니다",
     "BOT_DELEGATE_MAX_DEPTH": "위임 체인의 깊이가 최대값에 도달했습니다",
     "BOT_QUOTA_INVALID": "Bot 부서 할당량 값이 올바르지 않습니다",
-    "BOT_QUOTA_EXCEEDED": "부서 실행 할당량을 초과했습니다"
+    "BOT_QUOTA_EXCEEDED": "부서 실행 할당량을 초과했습니다",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "대기 중인 요청을 찾을 수 없습니다",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "대기 중인 요청이 이미 응답되었거나 만료되었습니다",
+    "BOT_INPUT_ANSWER_EMPTY": "답변 내용은 비워둘 수 없습니다"
   },
   "errorBoundary": {
     "copied": "복사됨",

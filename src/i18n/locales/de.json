@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "Delegationskette enthält einen Zyklus",
     "BOT_DELEGATE_MAX_DEPTH": "Maximale Tiefe der Delegationskette erreicht",
     "BOT_QUOTA_INVALID": "Ungültiger Wert für das Bot-Abteilungskontingent",
-    "BOT_QUOTA_EXCEEDED": "Abteilungslaufkontingent überschritten"
+    "BOT_QUOTA_EXCEEDED": "Abteilungslaufkontingent überschritten",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "Eingabeanforderung nicht gefunden",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "Eingabeanforderung bereits beantwortet oder abgelaufen",
+    "BOT_INPUT_ANSWER_EMPTY": "Antwort darf nicht leer sein"
   },
   "errorBoundary": {
     "copied": "Kopiert",

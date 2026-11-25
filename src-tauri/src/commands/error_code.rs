@@ -109,6 +109,13 @@ pub mod bot {
     pub const QUOTA_INVALID: &str = "BOT_QUOTA_INVALID";
     /// 超出部门运行配额（P4 A2）
     pub const QUOTA_EXCEEDED: &str = "BOT_QUOTA_EXCEEDED";
+
+    /// 未找到待答请求（P4 B3）
+    pub const INPUT_REQUEST_NOT_FOUND: &str = "BOT_INPUT_REQUEST_NOT_FOUND";
+    /// 待答请求已回答或已失效（P4 B3）
+    pub const INPUT_REQUEST_NOT_PENDING: &str = "BOT_INPUT_REQUEST_NOT_PENDING";
+    /// 答复内容不能为空（P4 B3）
+    pub const INPUT_ANSWER_EMPTY: &str = "BOT_INPUT_ANSWER_EMPTY";
 }
 
 /// 微调训练相关错误码

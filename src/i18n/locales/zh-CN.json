@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "委派链出现循环",
     "BOT_DELEGATE_MAX_DEPTH": "委派链深度已达上限",
     "BOT_QUOTA_INVALID": "Bot 部门配额取值不合法",
-    "BOT_QUOTA_EXCEEDED": "超出部门运行配额"
+    "BOT_QUOTA_EXCEEDED": "超出部门运行配额",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "未找到待答请求",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "待答请求已回答或已失效",
+    "BOT_INPUT_ANSWER_EMPTY": "答复内容不能为空"
   },
   "errorBoundary": {
     "copied": "已复制",

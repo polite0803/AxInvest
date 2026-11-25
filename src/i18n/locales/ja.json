@@ -3127,7 +3127,10 @@
     "BOT_DELEGATE_CYCLE": "委任チェーンに循環があります",
     "BOT_DELEGATE_MAX_DEPTH": "委任チェーンの深さが上限に達しました",
     "BOT_QUOTA_INVALID": "Bot 部門クォータの値が不正です",
-    "BOT_QUOTA_EXCEEDED": "部門の実行クォータを超えています"
+    "BOT_QUOTA_EXCEEDED": "部門の実行クォータを超えています",
+    "BOT_INPUT_REQUEST_NOT_FOUND": "回答待ちリクエストが見つかりません",
+    "BOT_INPUT_REQUEST_NOT_PENDING": "回答待ちリクエストは回答済みか失効しています",
+    "BOT_INPUT_ANSWER_EMPTY": "回答内容を空にできません"
   },
   "errorBoundary": {
     "copied": "コピーしました",

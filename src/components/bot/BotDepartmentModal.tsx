@@ -13,10 +13,11 @@
 import { backendErrorText } from "@/lib/errorI18n";
 import { useBotStore } from "@/stores/feature/botStore";
 import type { BotDepartment } from "@/types";
-import { App, Form, Input, Modal, Select, Space, Tag, Typography } from "antd";
+import { App, Form, Input, Modal, Select, Space, Tabs, Tag, Typography } from "antd";
 import { MinusCircleOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BotQuotaPanel } from "./BotQuotaPanel";
 
 const { Text } = Typography;
 
@@ -28,6 +29,8 @@ export interface BotDepartmentModalProps {
   onClose: () => void;
   /** 保存成功后回调（页面层刷新部门列表） */
   onSaved: () => void;
+  /** P4-a：打开时默认激活的页签（配额入口从 /bots 直接跳入时使用）。 */
+  initialTab?: "basic" | "quota";
 }
 
 interface DepartmentFormValues {
@@ -36,7 +39,7 @@ interface DepartmentFormValues {
   chiefBotId?: string;
 }
 
-export function BotDepartmentModal({ open, editing, onClose, onSaved }: BotDepartmentModalProps) {
+export function BotDepartmentModal({ open, editing, onClose, onSaved, initialTab = "basic" }: BotDepartmentModalProps) {
   const { t } = useTranslation();
   const { message: antdMessage } = App.useApp();
   const [form] = Form.useForm();
@@ -51,12 +54,14 @@ export function BotDepartmentModal({ open, editing, onClose, onSaved }: BotDepar
   // 成员增删：编辑态即时落命令层（add/remove 各有独立 IPC），保存/关闭均刷新页面列表。
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [memberBusy, setMemberBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState<"basic" | "quota">(initialTab);
 
   useEffect(() => {
     if (open) {
       setMemberIds(editing?.botIds ?? []);
+      setActiveTab(initialTab);
     }
-  }, [open, editing]);
+  }, [open, editing, initialTab]);
 
   const chiefOptions = useMemo(
     () => bots.map((bot) => ({ value: bot.id, label: bot.name })),
@@ -104,6 +109,7 @@ export function BotDepartmentModal({ open, editing, onClose, onSaved }: BotDepar
   return (
     <Modal
       open={open}
+      footer={activeTab === "quota" ? null : undefined}
       title={isEdit ? t("bot.department.edit") : t("bot.department.create")}
       okText={isEdit ? t("common.save") : t("bot.department.create")}
       cancelText={t("common.cancel")}
@@ -140,71 +146,91 @@ export function BotDepartmentModal({ open, editing, onClose, onSaved }: BotDepar
       onCancel={onClose}
       data-testid="bot-department-modal"
     >
-      <Form form={form} layout="vertical" requiredMark="optional">
-        <Form.Item
-          name="name"
-          label={t("bot.department.name")}
-          rules={[
-            { required: true, message: t("bot.department.nameRequired") },
-            { whitespace: true, message: t("bot.department.nameRequired") },
-          ]}
-        >
-          <Input maxLength={100} data-testid="bot-department-name" />
-        </Form.Item>
-        <Form.Item name="description" label={t("bot.department.description")}>
-          <Input.TextArea rows={2} maxLength={500} />
-        </Form.Item>
-        <Form.Item name="chiefBotId" label={t("bot.department.chief")}>
-          <Select
-            allowClear
-            placeholder={t("bot.department.chiefPlaceholder")}
-            options={chiefOptions}
-            notFoundContent={t("bot.department.chiefEmpty")}
-            data-testid="bot-department-chief"
-          />
-        </Form.Item>
-        <p style={{ marginBottom: 0, opacity: 0.65, fontSize: 12 }}>{t("bot.department.hint")}</p>
-      </Form>
-
-      {isEdit && editing
-        ? (
-          <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 12 }}>
-            <Text strong style={{ fontSize: 13 }}>
-              {t("bot.department.addMember")}
-            </Text>
-            <Space wrap>
-              {memberIds.map((botId) => {
-                const bot = bots.find((b) => b.id === botId);
-                return (
-                  <Tag
-                    key={botId}
-                    closable
-                    disabled={memberBusy}
-                    closeIcon={<MinusCircleOutlined />}
-                    onClose={() => {
-                      void updateMember(botId, (id) => removeBotFromDepartment(editing.id, id));
-                    }}
-                    data-testid={`bot-department-member-${botId}`}
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as "basic" | "quota")}
+        destroyInactiveTabPane={false}
+        items={[
+          {
+            key: "basic",
+            label: t("bot.department.title"),
+            children: (
+              <>
+                <Form form={form} layout="vertical" requiredMark="optional">
+                  <Form.Item
+                    name="name"
+                    label={t("bot.department.name")}
+                    rules={[
+                      { required: true, message: t("bot.department.nameRequired") },
+                      { whitespace: true, message: t("bot.department.nameRequired") },
+                    ]}
                   >
-                    {bot?.name ?? botId}
-                  </Tag>
-                );
-              })}
-            </Space>
-            <Select
-              placeholder={t("bot.department.addMember")}
-              options={candidateOptions}
-              disabled={memberBusy}
-              value={null}
-              onChange={(value: string) => {
-                void updateMember(value, (id) => addBotToDepartment(editing.id, id));
-              }}
-              data-testid="bot-department-add-member"
-              style={{ width: "100%" }}
-            />
-          </Space>
-        )
-        : null}
+                    <Input maxLength={100} data-testid="bot-department-name" />
+                  </Form.Item>
+                  <Form.Item name="description" label={t("bot.department.description")}>
+                    <Input.TextArea rows={2} maxLength={500} />
+                  </Form.Item>
+                  <Form.Item name="chiefBotId" label={t("bot.department.chief")}>
+                    <Select
+                      allowClear
+                      placeholder={t("bot.department.chiefPlaceholder")}
+                      options={chiefOptions}
+                      notFoundContent={t("bot.department.chiefEmpty")}
+                      data-testid="bot-department-chief"
+                    />
+                  </Form.Item>
+                  <p style={{ marginBottom: 0, opacity: 0.65, fontSize: 12 }}>{t("bot.department.hint")}</p>
+                </Form>
+
+                {isEdit && editing ? (
+                  <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 12 }}>
+                    <Text strong style={{ fontSize: 13 }}>
+                      {t("bot.department.addMember")}
+                    </Text>
+                    <Space wrap>
+                      {memberIds.map((botId) => {
+                        const bot = bots.find((b) => b.id === botId);
+                        return (
+                          <Tag
+                            key={botId}
+                            closable
+                            disabled={memberBusy}
+                            closeIcon={<MinusCircleOutlined />}
+                            onClose={() => {
+                              void updateMember(botId, (id) => removeBotFromDepartment(editing.id, id));
+                            }}
+                            data-testid={`bot-department-member-${botId}`}
+                          >
+                            {bot?.name ?? botId}
+                          </Tag>
+                        );
+                      })}
+                    </Space>
+                    <Select
+                      placeholder={t("bot.department.addMember")}
+                      options={candidateOptions}
+                      disabled={memberBusy}
+                      value={null}
+                      onChange={(value: string) => {
+                        void updateMember(value, (id) => addBotToDepartment(editing.id, id));
+                      }}
+                      data-testid="bot-department-add-member"
+                      style={{ width: "100%" }}
+                    />
+                  </Space>
+                ) : null}
+              </>
+            ),
+          },
+          ...(isEdit && editing
+            ? [{
+                key: "quota",
+                label: t("bot.quota.title"),
+                children: <BotQuotaPanel departmentId={editing.id} />,
+              }]
+            : []),
+        ]}
+      />
     </Modal>
   );
 }

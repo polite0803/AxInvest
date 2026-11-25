@@ -19400,6 +19400,44 @@
       "cron": "Cron 運算式",
       "timezone": "時區",
       "hint": "編排定時與單一 Bot 例程互不衝突"
+    },
+    "quota": {
+      "title": "執行配額",
+      "subtitle": "配額只會收緊預設限制，不會放寬",
+      "inheritHint": "未設定時使用預設限制",
+      "maxConcurrency": "單編排並發上限",
+      "maxConcurrencyHint": "預設 2，可設 1–4",
+      "totalTimeout": "單編排總超時（秒）",
+      "totalTimeoutHint": "預設 900，可設 60–3600",
+      "maxSteps": "單編排步數上限",
+      "maxStepsHint": "預設 12，最多 12",
+      "perDepth": "委派鏈每層在途上限",
+      "perDepthHint": "預設 2，可設 1–4",
+      "stepTimeout": "單步超時（秒）",
+      "stepTimeoutHint": "預設 300，可設 30–900",
+      "maxRuns": "部門同時運行編排數",
+      "maxRunsHint": "預設 2，可設 1–8",
+      "save": "儲存配額",
+      "reset": "恢復預設",
+      "resetConfirm": "恢復預設會刪除該部門的配額設定，確定繼續？",
+      "invalidRange": "取值超出允許範圍",
+      "saved": "配額已儲存"
+    },
+    "input": {
+      "pendingTitle": "等待你的回答",
+      "pendingBadge": "待答",
+      "question": "問題",
+      "placeholder": "輸入你的回答",
+      "submit": "提交回答",
+      "cancel": "取消",
+      "cancelConfirm": "取消後該問題將不再等待回答，確定繼續？",
+      "expiresIn": "剩餘 {time}",
+      "expired": "該問題已過期",
+      "expiredHint": "應用程式重啟或超時後不可再作答",
+      "answered": "已回答",
+      "cancelled": "已取消",
+      "answerFailed": "提交失敗，請重試",
+      "empty": "暫無待答問題"
     }
   }
 }

@@ -38,11 +38,28 @@ export function installP3Shim(seed: P3ShimSeed): void {
 
   const now = () => Date.now();
   const uid = (prefix: string) => prefix + "-" + Math.random().toString(36).slice(2, 10);
+  // P4 刷新恢复用例需要状态跨 reload 存活：sessionStorage 仅在同标签页内共享，
+  // 每个 Playwright test 独立 context，不污染其它用例。
+  let persisted: { quotas?: any[]; inputRequests?: any[] } = {};
+  try {
+    persisted = JSON.parse(sessionStorage.getItem("__P3_SHIM_STATE__") ?? "{}");
+  } catch {
+    persisted = {};
+  }
   const state = {
     workflows: [] as any[], runs: [] as any[], assignments: [] as any[],
     schedules: [] as any[], receipts: [] as any[],
-    quotas: [] as any[], inputRequests: [] as any[],
+    quotas: persisted.quotas ?? [], inputRequests: persisted.inputRequests ?? [],
     log: [] as Array<{ cmd: string; args: any; at: number }>,
+  };
+  const persist = () => {
+    try {
+      sessionStorage.setItem("__P3_SHIM_STATE__", JSON.stringify({
+        quotas: state.quotas, inputRequests: state.inputRequests,
+      }));
+    } catch {
+      // 无 sessionStorage 时退回纯内存状态
+    }
   };
   const listeners = new Map<string, Set<number>>();
   const callbacks = new Map<number, (event: any) => void>();
@@ -151,6 +168,7 @@ export function installP3Shim(seed: P3ShimSeed): void {
   const seedInputRequest = (input: any): any => {
     const row = inputDto(input);
     state.inputRequests.push(row);
+    persist();
     emit("bot-input-request-updated", inputSnapshot(row));
     return row;
   };
@@ -158,6 +176,7 @@ export function installP3Shim(seed: P3ShimSeed): void {
   const settleInput = (row: any, status: string, patch: any = {}): any => {
     row.status = status;
     Object.assign(row, patch, { updatedAt: now() });
+    persist();
     emit("bot-input-request-updated", inputSnapshot(row));
     return { ...row };
   };
@@ -283,12 +302,14 @@ export function installP3Shim(seed: P3ShimSeed): void {
           ...P4_QUOTA_DEFAULTS, ...(index >= 0 ? state.quotas[index] : {}), ...next,
         };
         if (index >= 0) state.quotas[index] = merged; else state.quotas.push(merged);
+        persist();
         return merged;
       }
       case "reset_bot_department_quota": {
         const departmentId = args?.departmentId;
         if (!departmentId || !departmentExists(departmentId)) fail("BOT_DEPARTMENT_NOT_FOUND");
         state.quotas = state.quotas.filter((q: any) => q.departmentId !== departmentId);
+        persist();
         // IPC-P4 §1：reset 签名为 Result<(), ErrorResponse>，幂等（无行也 Ok），前端保存后自行 get。
         return undefined;
       }

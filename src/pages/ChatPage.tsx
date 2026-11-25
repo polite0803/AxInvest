@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { BotInputRequestPanel } from "@/components/bot/BotInputRequestPanel";
+import { ensureBotInputRequestListener } from "@/stores/feature/botStore";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import type { ChatViewScrollApi } from "@/components/chat/ChatView";
 import { ChatView } from "@/components/chat/ChatView";
@@ -17,7 +19,7 @@ import {
 } from "@/stores";
 import { theme } from "antd";
 import { ChevronLeft, ChevronRight, PanelRight } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 
@@ -236,6 +238,25 @@ export function ChatPage() {
   const activeConversation = conversations.find(
     (c) => c.id === activeConversationId,
   );
+  // P4-b：Bot 线程待答请求。事件增量 upsert；挂载/切换时按 botId 或 conversationId 主动拉取。
+  const inputRequests = useBotStore((s) => s.inputRequests) ?? [];
+  const loadInputRequests = useBotStore((s) => s.loadInputRequests);
+  useEffect(() => {
+    void ensureBotInputRequestListener?.();
+  }, []);
+  useEffect(() => {
+    if (typeof loadInputRequests !== "function") return;
+    if (activeBotId) {
+      void loadInputRequests({ botId: activeBotId }).catch(() => {});
+    } else if (activeConversationId) {
+      void loadInputRequests({ conversationId: activeConversationId }).catch(() => {});
+    }
+  }, [activeBotId, activeConversationId, loadInputRequests]);
+  // P4-b：已落库提问的 askId 集合——Bot 线程由持久卡承接，隐藏同 askId 的通用卡。
+  const hiddenAskIds = useMemo(
+    () => Array.from(new Set(inputRequests.map((r) => r.askId))),
+    [inputRequests],
+  );
   const setActiveConversation = useConversationStore(
     (s) => s.setActiveConversation,
   );
@@ -440,7 +461,8 @@ export function ChatPage() {
       )}
       {/* 中间主区域 */}
       <div className="chat-main" style={{ backgroundColor: token.colorBgElevated }}>
-        <ChatView onScrollToReady={handleScrollToReady} />
+        <BotInputRequestPanel botId={activeBotId} requests={inputRequests} />
+        <ChatView onScrollToReady={handleScrollToReady} hiddenAskIds={hiddenAskIds} />
       </div>
       {/* 右侧拖拽手柄 */}
       {showRightPanel && !rightPanelCollapsed && (

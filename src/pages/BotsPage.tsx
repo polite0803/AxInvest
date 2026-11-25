@@ -22,6 +22,7 @@ import { backendErrorText } from "@/lib/errorI18n";
 import { countUnread, getNotifications } from "@/lib/notification";
 import { message } from "@/lib/toast";
 import { useBotStore, useConversationStore, useProviderStore } from "@/stores";
+import { ensureBotInputRequestListener } from "@/stores/feature/botStore";
 import type { Bot, BotDepartment, CreateBotInput, UpdateBotInput } from "@/types";
 import { BotRoutinesPanel } from "./BotsPage/BotRoutinesPanel";
 import { Alert, Button, Spin, theme } from "antd";
@@ -107,6 +108,21 @@ export function BotsPage() {
   const [departments, setDepartments] = useState<BotDepartment[]>([]);
   const [departmentModalOpen, setDepartmentModalOpen] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<BotDepartment | null>(null);
+  const [departmentModalTab, setDepartmentModalTab] = useState<"basic" | "quota">("basic");
+
+  // P4-b：待答请求（事件订阅 + 挂载时拉 pending；归零即撤徽章）。
+  const inputRequests = useBotStore((s) => s.inputRequests) ?? [];
+  const loadInputRequests = useBotStore((s) => s.loadInputRequests);
+  useEffect(() => {
+    void ensureBotInputRequestListener?.();
+    if (typeof loadInputRequests === "function") {
+      void loadInputRequests({ status: "pending" }).catch(() => {});
+    }
+  }, [loadInputRequests]);
+  const pendingInputCount = useMemo(
+    () => inputRequests.filter((r) => r.status === "pending").length,
+    [inputRequests],
+  );
 
   const reloadDepartments = useCallback(() => {
     void listBotDepartments()
@@ -304,12 +320,22 @@ export function BotsPage() {
           departments={departments}
           onSelect={setActiveBot}
           onCreate={openCreate}
+          pendingBadgeCount={pendingInputCount}
+          onOpenQuota={departments.length > 0
+            ? () => {
+              setEditingDepartment(departments[0]);
+              setDepartmentModalTab("quota");
+              setDepartmentModalOpen(true);
+            }
+            : undefined}
           onManageDepartments={() => {
             setEditingDepartment(null);
+            setDepartmentModalTab("basic");
             setDepartmentModalOpen(true);
           }}
           onEditDepartment={(department) => {
             setEditingDepartment(department);
+            setDepartmentModalTab("basic");
             setDepartmentModalOpen(true);
           }}
         />
@@ -356,6 +382,7 @@ export function BotsPage() {
       <BotDepartmentModal
         open={departmentModalOpen}
         editing={editingDepartment}
+        initialTab={departmentModalTab}
         onClose={() => setDepartmentModalOpen(false)}
         onSaved={reloadDepartments}
       />

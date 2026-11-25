@@ -32,6 +32,10 @@ export interface BotListProps {
   onManageDepartments?: () => void;
   /** P2-b：编辑单个部门（部门组头上的菜单） */
   onEditDepartment?: (department: BotDepartment) => void;
+  /** P4-b：待答总数（>0 时头部徽章可见，归零隐藏） */
+  pendingBadgeCount?: number;
+  /** P4-a：配额入口（打开首个部门的配额面板） */
+  onOpenQuota?: () => void;
 }
 
 /** botId → 所属部门（单部门口径 Q2）。导出供单测直断。 */
@@ -65,6 +69,8 @@ export function BotList({
   onCreate,
   onManageDepartments,
   onEditDepartment,
+  pendingBadgeCount = 0,
+  onOpenQuota,
 }: BotListProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -132,6 +138,28 @@ export function BotList({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>
         <Text strong>{t("bots.title")}</Text>
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          {pendingBadgeCount > 0
+            ? (
+              <span data-testid="bot-input-badge" title={t("bot.input.pendingBadge")}>
+                <Badge count={pendingBadgeCount} size="small">
+                  <span style={{ fontSize: 12, padding: "0 4px" }}>{t("bot.input.pendingBadge")}</span>
+                </Badge>
+              </span>
+            )
+            : null}
+          {onOpenQuota
+            ? (
+              <Button
+                type="text"
+                size="small"
+                data-testid="bot-department-quota-open"
+                title={t("bot.quota.title")}
+                onClick={onOpenQuota}
+              >
+                {t("bot.quota.title")}
+              </Button>
+            )
+            : null}
           {onManageDepartments
             ? (
               <Button

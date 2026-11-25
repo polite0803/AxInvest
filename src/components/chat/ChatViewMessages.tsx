@@ -75,6 +75,7 @@ import type { Message } from "@/types";
 
 import { Tooltip } from "@/components/layout/Tooltip";
 import { AskUserCard } from "./AskUserCard";
+import { pickVisibleAskUsers } from "./askUserVisibility";
 import { Actions, AssistantFooter, styleBtn } from "./AssistantFooter";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { AssistantMarkdown, getChatCodeThemes, THINKING_LOADING_MARKER } from "./ChatMarkdownNodes";
@@ -102,6 +103,11 @@ export interface ChatViewMessagesProps {
     content: string,
     role: "user" | "assistant",
   ) => void;
+  /**
+   * P4-b：已落库的待答请求 askId 集合。Bot 线程用持久卡承接这些提问，
+   * 同一 askId 的通用 AskUserCard 必须隐藏，避免双卡。
+   */
+  hiddenAskIds?: readonly string[];
 }
 
 export function useChatViewMessages({
@@ -113,6 +119,7 @@ export function useChatViewMessages({
   bubbleStyle,
   bubbleListRef: _bubbleListRef,
   handleEditMessage,
+  hiddenAskIds,
 }: ChatViewMessagesProps) {
   const { t, i18n } = useTranslation();
   const { token } = theme.useToken();
@@ -1221,12 +1228,15 @@ export function useChatViewMessages({
             )
             : [];
           const msgAskUsers = isAgentMode && msg && activeConversationId
-            ? Object.values(agentPendingAskUser).filter(
-              (ask) =>
-                ask.conversationId === activeConversationId
-                && (ask.assistantMessageId === msg.id
-                  || (ask.assistantMessageId === ""
-                    && msg.id === streamingMessageId)),
+            ? pickVisibleAskUsers(
+              Object.values(agentPendingAskUser).filter(
+                (ask) =>
+                  ask.conversationId === activeConversationId
+                  && (ask.assistantMessageId === msg.id
+                    || (ask.assistantMessageId === ""
+                      && msg.id === streamingMessageId)),
+              ),
+              hiddenAskIds,
             )
             : [];
 

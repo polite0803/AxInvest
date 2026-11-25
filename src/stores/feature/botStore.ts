@@ -10,11 +10,15 @@
 // `components/chat/**` 禁止引用（跨模块走 `pages/**` 的 props 注入）。
 
 import { backendErrorText } from "@/lib/errorI18n";
-import { invoke } from "@/lib/invoke";
+import { invoke, listen, type UnlistenFn } from "@/lib/invoke";
 import type {
   Bot,
   BotAssignment,
   BotDepartment,
+  BotDepartmentQuota,
+  BotDepartmentQuotaInput,
+  BotInputRequest,
+  BotInputRequestFilter,
   BotMemory,
   BotSoul,
   BotWorkflow,
@@ -45,6 +49,16 @@ export interface BotStoreState {
   error: string | null;
   /** 当前选中的 Bot（详情面板与新建线程的归属来源） */
   activeBotId: string | null;
+
+  // P4-a：部门运行配额（面板数据源；isDefault=true 表示未落行）
+  departmentQuota: BotDepartmentQuota | null;
+  quotaLoading: boolean;
+  quotaSaving: boolean;
+  quotaError: string | null;
+  // P4-b：持久待答请求（事件增量 upsert；pending 计数驱动侧栏徽章）
+  inputRequests: BotInputRequest[];
+  inputRequestLoading: boolean;
+  inputRequestError: string | null;
 
   // P3：编排工作流（workflow slice，扁平挂在 botStore 上，不另起 store）
   workflows: BotWorkflow[];
@@ -100,6 +114,17 @@ export interface BotStoreState {
   loadWorkflowRuns: (filter?: BotWorkflowRunFilter) => Promise<BotWorkflowRun[]>;
   cancelWorkflowRun: (runId: string) => Promise<void>;
   createWorkflowSchedule: (input: CreateBotWorkflowScheduleInput) => Promise<ScheduledTask>;
+
+  // ── P4-a：部门配额（IPC-P4 §1 三命令）──
+  getDepartmentQuota: (departmentId: string) => Promise<BotDepartmentQuota>;
+  setDepartmentQuota: (input: BotDepartmentQuotaInput) => Promise<BotDepartmentQuota>;
+  resetDepartmentQuota: (departmentId: string) => Promise<void>;
+
+  // ── P4-b：待答请求（IPC-P4 §1 三命令 + bot-input-request-updated）──
+  loadInputRequests: (filter?: BotInputRequestFilter) => Promise<BotInputRequest[]>;
+  upsertInputRequest: (request: BotInputRequest) => void;
+  answerInputRequest: (requestId: string, answer: string) => Promise<BotInputRequest>;
+  cancelInputRequest: (requestId: string) => Promise<BotInputRequest>;
 }
 
 /** IPC-P2B §2 `list_bot_assignments` 过滤参数（皆可选）。 */
@@ -130,13 +155,20 @@ export interface BotRoutineInput {
 /** 防止并发 loadBots 的旧响应覆盖新响应（切换 includeDisabled 时的高发点）。 */
 let loadSeq = 0;
 
-export const useBotStore = create<BotStoreState>((set) => ({
+export const useBotStore = create<BotStoreState>((set, get) => ({
   bots: [],
   loading: false,
   saving: false,
   deleting: false,
   error: null,
   activeBotId: null,
+  departmentQuota: null,
+  quotaLoading: false,
+  quotaSaving: false,
+  quotaError: null,
+  inputRequests: [],
+  inputRequestLoading: false,
+  inputRequestError: null,
   workflows: [],
   workflowRuns: [],
   workflowLoading: false,
@@ -506,4 +538,120 @@ export const useBotStore = create<BotStoreState>((set) => ({
       throw e;
     }
   },
+
+  // ── P4-a：部门配额 ──
+
+  getDepartmentQuota: async (departmentId) => {
+    set({ quotaLoading: true, quotaError: null });
+    try {
+      const quota = await invoke<BotDepartmentQuota>("get_bot_department_quota", { departmentId });
+      set({ departmentQuota: quota, quotaLoading: false });
+      return quota;
+    } catch (e) {
+      set({ quotaLoading: false, quotaError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  setDepartmentQuota: async (input) => {
+    set({ quotaSaving: true, quotaError: null });
+    try {
+      const quota = await invoke<BotDepartmentQuota>("set_bot_department_quota", { input });
+      set({ departmentQuota: quota, quotaSaving: false });
+      return quota;
+    } catch (e) {
+      set({ quotaSaving: false, quotaError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  resetDepartmentQuota: async (departmentId) => {
+    set({ quotaSaving: true, quotaError: null });
+    try {
+      await invoke("reset_bot_department_quota", { departmentId });
+      set({ departmentQuota: null, quotaSaving: false });
+    } catch (e) {
+      set({ quotaSaving: false, quotaError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  // ── P4-b：待答请求 ──
+
+  loadInputRequests: async (filter) => {
+    set({ inputRequestLoading: true, inputRequestError: null });
+    try {
+      const requests = await invoke<BotInputRequest[]>("list_bot_input_requests", {
+        filter: {
+          conversationId: filter?.conversationId ?? null,
+          botId: filter?.botId ?? null,
+          status: filter?.status ?? null,
+          workflowRunId: filter?.workflowRunId ?? null,
+        },
+      });
+      const rows = Array.isArray(requests) ? requests : [];
+      // 按 id 合并：/bots 的 pending 全量拉取与单会话拉取会先后写入同一 slice，
+      // 直接覆盖会让另一处的待答数凭空消失。终态由事件 upsert 就地更新。
+      const merged = new Map(get().inputRequests.map((r) => [r.id, r] as const));
+      for (const row of rows) merged.set(row.id, row);
+      set({ inputRequests: Array.from(merged.values()), inputRequestLoading: false });
+      return rows;
+    } catch (e) {
+      set({ inputRequestLoading: false, inputRequestError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  upsertInputRequest: (request) => {
+    set((s) => {
+      const index = s.inputRequests.findIndex((r) => r.id === request.id);
+      if (index < 0) {
+        return { inputRequests: [request, ...s.inputRequests] };
+      }
+      const next = [...s.inputRequests];
+      next[index] = request;
+      return { inputRequests: next };
+    });
+  },
+
+  answerInputRequest: async (requestId, answer) => {
+    try {
+      const row = await invoke<BotInputRequest>("answer_bot_input_request", { requestId, answer });
+      set((s) => ({
+        inputRequests: s.inputRequests.map((r) => (r.id === row.id ? row : r)),
+      }));
+      return row;
+    } catch (e) {
+      set({ inputRequestError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  cancelInputRequest: async (requestId) => {
+    try {
+      const row = await invoke<BotInputRequest>("cancel_bot_input_request", { requestId });
+      set((s) => ({
+        inputRequests: s.inputRequests.map((r) => (r.id === row.id ? row : r)),
+      }));
+      return row;
+    } catch (e) {
+      set({ inputRequestError: backendErrorText(e) });
+      throw e;
+    }
+  },
 }));
+
+// ── P4-b：全局事件订阅（幂等；页面层调用）──
+let botInputListener: Promise<UnlistenFn> | null = null;
+
+/** 订阅 bot-input-request-updated，把行增量写进 store。重复调用复用同一订阅。 */
+export function ensureBotInputRequestListener(): Promise<UnlistenFn> {
+  if (botInputListener === null) {
+    botInputListener = listen<BotInputRequest>("bot-input-request-updated", ({ payload }) => {
+      useBotStore.getState().upsertInputRequest(payload);
+    }).catch(() => () => {
+      // 浏览器模式下没有后端事件通道时静默降级（页面仍可经 list 刷新）
+    });
+  }
+  return botInputListener;
+}

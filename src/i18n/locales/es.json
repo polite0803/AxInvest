@@ -19400,6 +19400,44 @@
       "cron": "Expresión Cron",
       "timezone": "Zona horaria",
       "hint": "La programación de flujos no conflictúa con las rutinas de un solo bot"
+    },
+    "quota": {
+      "title": "Runtime quotas",
+      "subtitle": "Quotas only tighten defaults; they never loosen them",
+      "inheritHint": "Defaults apply when unset",
+      "maxConcurrency": "Max concurrency per workflow",
+      "maxConcurrencyHint": "Default 2, range 1–4",
+      "totalTimeout": "Workflow timeout (seconds)",
+      "totalTimeoutHint": "Default 900, range 60–3600",
+      "maxSteps": "Max steps per workflow",
+      "maxStepsHint": "Default 12, max 12",
+      "perDepth": "Max in-flight per delegation depth",
+      "perDepthHint": "Default 2, range 1–4",
+      "stepTimeout": "Per-step timeout (seconds)",
+      "stepTimeoutHint": "Default 300, range 30–900",
+      "maxRuns": "Concurrent workflows per department",
+      "maxRunsHint": "Default 2, range 1–8",
+      "save": "Save quotas",
+      "reset": "Restore defaults",
+      "resetConfirm": "Restoring defaults deletes this department’s quota settings. Continue?",
+      "invalidRange": "Value out of allowed range",
+      "saved": "Quotas saved"
+    },
+    "input": {
+      "pendingTitle": "Awaiting your answer",
+      "pendingBadge": "Pending",
+      "question": "Question",
+      "placeholder": "Type your answer",
+      "submit": "Submit answer",
+      "cancel": "Cancel",
+      "cancelConfirm": "Cancelling will stop waiting for this question. Continue?",
+      "expiresIn": "{time} left",
+      "expired": "This question has expired",
+      "expiredHint": "Answers are no longer accepted after restart or timeout",
+      "answered": "Answered",
+      "cancelled": "Cancelled",
+      "answerFailed": "Failed to submit; please retry",
+      "empty": "No pending questions"
     }
   }
 }

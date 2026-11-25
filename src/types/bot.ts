@@ -275,3 +275,62 @@ export interface BotWorkflowValidationResult {
   ok: boolean;
   issues: BotWorkflowValidationIssue[];
 }
+
+// ── P4：部门配额与待答请求（IPC-P4 §2 冻结契约，逐字对齐）──
+
+/** 部门运行配额 DTO（无配额行时 isDefault=true，值为 P3 默认）。 */
+export interface BotDepartmentQuota {
+  departmentId: string;
+  maxConcurrency: number;
+  totalTimeoutSecs: number;
+  maxSteps: number;
+  maxInFlightPerDepth: number;
+  stepTimeoutSecs: number;
+  maxConcurrentRuns: number;
+  isDefault: boolean;
+  updatedAt: number | null;
+}
+
+/** 部门运行配额写入入参（全量 upsert）。 */
+export interface BotDepartmentQuotaInput {
+  departmentId: string;
+  maxConcurrency: number;
+  totalTimeoutSecs: number;
+  maxSteps: number;
+  maxInFlightPerDepth: number;
+  stepTimeoutSecs: number;
+  maxConcurrentRuns: number;
+}
+
+/** 待答请求状态四态（IPC-P4 §2）。 */
+export type BotInputRequestStatus = "pending" | "answered" | "expired" | "cancelled";
+
+/** 待答请求来源（D4=A 下恒 person，预留列）。 */
+export type BotInputRequestOrigin = "person" | "routine" | "workflow";
+
+/** 待答请求过滤参数（四字段全可选）。 */
+export interface BotInputRequestFilter {
+  conversationId?: string | null;
+  botId?: string | null;
+  status?: BotInputRequestStatus | null;
+  workflowRunId?: string | null;
+}
+
+/** 持久化待答请求 DTO（options 已是字符串数组，前端不接触 JSON 字符串）。 */
+export interface BotInputRequest {
+  id: string;
+  askId: string;
+  conversationId: string;
+  botId: string | null;
+  workflowRunId: string | null;
+  assignmentId: string | null;
+  origin: BotInputRequestOrigin;
+  question: string;
+  options: string[];
+  status: BotInputRequestStatus;
+  answer: string | null;
+  answeredAt: number | null;
+  expiresAt: number;
+  createdAt: number;
+  updatedAt: number;
+}

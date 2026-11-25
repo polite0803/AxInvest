@@ -64,11 +64,13 @@ import { useChatViewScroll } from "./useChatViewScroll";
 
 function ChatViewInner({
   onScrollToReady,
+  hiddenAskIds,
 }: {
   onScrollToReady?: (api: {
     scrollTo: (messageId: string) => void;
     scrollBoxRef: React.RefObject<HTMLElement | null>;
   }) => void;
+  hiddenAskIds?: readonly string[];
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -239,6 +241,7 @@ function ChatViewInner({
     bubbleStyle,
     bubbleListRef,
     handleEditMessage: actions.handleEditMessage,
+    hiddenAskIds,
   });
 
   const scroll = useChatViewScroll({
@@ -612,15 +615,17 @@ export interface ChatViewScrollApi {
 
 export function ChatView({
   onScrollToReady,
+  hiddenAskIds,
 }: {
   onScrollToReady?: (api: ChatViewScrollApi) => void;
+  hiddenAskIds?: readonly string[];
 }) {
   return (
     <ModuleErrorBoundary
       moduleName="ChatView"
       showDetails={import.meta.env.DEV}
     >
-      <ChatViewInner onScrollToReady={onScrollToReady} />
+      <ChatViewInner onScrollToReady={onScrollToReady} hiddenAskIds={hiddenAskIds} />
     </ModuleErrorBoundary>
   );
 }

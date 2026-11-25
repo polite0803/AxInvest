@@ -822,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "axagent"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -1335,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-mobile"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "axagent",
 ]

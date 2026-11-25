@@ -1,6 +1,24 @@
 # Changelog
 
 All notable changes to AxAgent will be documented in this file.
+## [v3.1.1] - 2026-11-25
+
+### 🎨 Styling
+- rustfmt 收口 13 个 Bot 集成文件，修 CI fmt 门禁
+
+
+### 🐛 Bug Fixes
+- 消除 clippy redundant_closure，修 CI Infra Clippy 红
+- 收口 CI 全红并提交全部在途改动（Bot 集成 P1-P5 / invest 路由下线 / 前端导航）
+
+
+### 📝 Documentation
+- 登记 Obsidian 知识库引用索引
+
+
+### 📦 Miscellaneous
+- bump version to v3.1.1
+
 ## [v3.1.0] - 2026-11-25
 
 ### ✨ New Features
@@ -37,6 +55,8 @@ All notable changes to AxAgent will be documented in this file.
 
 ### 🎨 Styling
 - 格式化打包脚本修复 dprint 门禁
+- dprint 格式收口 BotsPage 与 bot-needs-input e2e
+- rustfmt 收口 25 个 Bot 集成 Rust 文件，修 CI fmt 门禁
 
 
 ### 🐛 Bug Fixes
@@ -44,6 +64,9 @@ All notable changes to AxAgent will be documented in this file.
 - 资源限制验证改到子进程，避免污染父测试进程 rlimit
 - 页面数据生成器指向独立仓并按 JSON 语义校验
 - align P3 frontend IPC and stabilize workflow page test
+- B4-R 侧栏待答徽章按 botId 逐行计数
+- 桌面通知与 AppHandle 按 mobile cfg 收口，修 R1 Android 构建失败
+- 单列唯一索引独立清单，冻结总数 83 / MULTI 38，修 R1 Unit Tests 失败
 
 
 ### 📝 Documentation
@@ -59,6 +82,8 @@ All notable changes to AxAgent will be documented in this file.
 - P4 基线读数——clean HEAD cfaa35473 的 18 条门禁台账
 - 修正 P4 门禁命令——vitest-run.mjs 不支持 --grep-invert
 - 清理 bot-quota spec 头部过期的 fixme 说明
+- P5 范围候选对比 + INDEX P4 版本列改 3.1.0
+- 冻结 P5 规划 B 费用/Token 配额 + C1 每 Bot 技能归属
 
 
 ### 📦 Miscellaneous
@@ -123,9 +148,21 @@ All notable changes to AxAgent will be documented in this file.
 - 统一插件仓为 Rust worker 契约形态
 
 
+### 🎨 Styling
+- 统一插件模板前端格式以通过 CI
+
+
 ### 🐛 Bug Fixes
 - 收敛插件页路由刷新与首帧状态
 - 对齐 Wiki 删除命令安全档位并退役旧名命令
+- 修复远程 CI/Release 对仓外插件仓的强依赖
+- 修复远程 Release/CI 的插件 staging 与文档门禁
+- 修复主仓 CI 与 Release 的剩余门禁失败
+- 修复 Frontend/Parity 剩余两处门禁
+- 修复远程 CI/Release 失败并登记插件源码归属
+- 补齐插件更新标题的插值参数
+- 登记插件页路由装配边界的中立性白名单
+- 对齐能力登记镜像表与实测读数
 
 
 ### 📝 Documentation
@@ -139,6 +176,8 @@ All notable changes to AxAgent will be documented in this file.
 ### 📦 Miscellaneous
 - 统一 OPC 页面生成物格式
 - bump version to v3.0.2
+- 忽略 *.tmp.json 临时中间产物
+- 生成器补齐 rust-toolchain.toml 与版本一致性门禁
 
 
 ### 🔨 Refactoring

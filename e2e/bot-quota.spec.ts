@@ -11,14 +11,15 @@
  *    它证明「测试替身与冻结契约一致」，不证明 Rust 命令层行为；
  *    Rust 侧行为由 `src-tauri/tests/bot_quota.rs` 锁定。
  *
- * B. 页面证据（A4 未落地，`test.fixme`）：
+ * B. 页面证据（A4 已落盘，2026-11-25 复核 HEAD 749203835）：
  *    BotsPage 部门弹窗里的 BotQuotaPanel（默认值提示 / 越界预校验 / 保存回显 / 恢复默认）。
- *    点亮条件：A4 落盘且下列 data-testid 存在，随后把 `test.fixme` 改 `test`：
- *      bot-quota-panel、bot-quota-max-concurrency、bot-quota-total-timeout、
- *      bot-quota-max-steps、bot-quota-max-in-flight、bot-quota-step-timeout、
- *      bot-quota-max-runs、bot-quota-save、bot-quota-reset、bot-quota-default-hint、
- *      bot-quota-error、bot-department-quota-open。
- *    缺钩子时以「元素不存在」明确失败，不静默 skip（fixme 是显式待办，不是静默跳过）。
+ *    ✔ 「默认值 + isDefault 提示」与「保存回显 + 恢复默认」两条已点亮为 `test`
+ *      （testid 全齐：bot-quota-panel、六项输入、save/reset/default-hint/error、
+ *       bot-department-quota-open）。
+ *    ✘ 「越界前端预校验 + 后端码映射」保留 `test.fixme`，原因见该用例上方注释：
+ *      实现只渲染本地化字段标签，不含断言要求的原始字段名；且前端预校验在提交前拦截，
+ *      UI 无路径把后端 BOT_QUOTA_INVALID 暴露到 bot-quota-error。待契约/产品裁决后再点亮，
+ *      不迁就改断言。
  *
  * 未在本文件覆盖：cron 触发超配额 → history 失败（调度器闭包在 init/services.rs，
  * 浏览器面无入口）；该断言落在 `src-tauri/tests/bot_quota.rs` 的 cron_gate 用例。
@@ -77,6 +78,11 @@ const deptWorkflow = (over: Record<string, any> = {}) => ({
 
 const countCalls = (page: Page, cmd: string) => page.evaluate(
   (c) => (window as any).__P3_TEST__.state.log.filter((e: any) => e.cmd === c).length, cmd);
+
+/** 首启引导层会拦截指针事件（与 bot-workflow/bot-delegation-chain 同口径）；无引导时静默跳过。 */
+async function dismissOnboarding(page: Page) {
+  await page.getByTestId("onboarding-skip").click({ timeout: 8_000 }).catch(() => undefined);
+}
 
 // ── A. 契约自检（现在可跑） ─────────────────────────────────────────────
 
@@ -277,12 +283,13 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
 
 // ── B. 页面证据（A4 未落地：fixme 显式待办） ────────────────────────────
 
-test.describe("P4-a 配额 · 部门弹窗面板（待 A4 落地点亮）", () => {
-  test.fixme("UI：打开部门配额面板，6 项默认值来自 get 且显示 isDefault 提示", async ({ page }) => {
+test.describe("P4-a 配额 · 部门弹窗面板", () => {
+  test("UI：打开部门配额面板，6 项默认值来自 get 且显示 isDefault 提示", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
       bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
     });
     await page.goto("/bots");
+    await dismissOnboarding(page);
     await page.getByTestId("bot-department-quota-open").click();
 
     await expect(page.getByTestId("bot-quota-panel")).toBeVisible();
@@ -295,11 +302,18 @@ test.describe("P4-a 配额 · 部门弹窗面板（待 A4 落地点亮）", () =
     await expect(page.getByTestId("bot-quota-default-hint")).toBeVisible();
   });
 
+  // 保留 fixme（2026-11-25 复核，未迁就改断言）：
+  //   1) BotQuotaPanel.onSave 的越界文案是 `${bot.quota.invalidRange}: ${本地化字段标签}`
+  //      → 页面出现「取值超出允许范围: 单编排并发上限」，不含 maxConcurrency/maxSteps 原文；
+  //   2) 用例第二段想绕过预校验把后端 BOT_QUOTA_INVALID:maxSteps 映射到 bot-quota-error，
+  //      但先 fill(0) 再点保存会再次被同一预校验拦下，后端码永远到不了该错误位。
+  // 缺口：错误文案带 param（字段原名）此前端可见，或契约改写「字段名 = 本地化标签」。
   test.fixme("UI：越界前端预校验 + 后端码映射到 bot-quota-error（带字段名）", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
       bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
     });
     await page.goto("/bots");
+    await dismissOnboarding(page);
     await page.getByTestId("bot-department-quota-open").click();
 
     await page.getByTestId("bot-quota-max-concurrency").fill("5");
@@ -320,11 +334,12 @@ test.describe("P4-a 配额 · 部门弹窗面板（待 A4 落地点亮）", () =
     await expect(page.getByTestId("bot-quota-error")).toContainText("maxSteps");
   });
 
-  test.fixme("UI：保存后回显 + 恢复默认二次确认后回到 isDefault 读数", async ({ page }) => {
+  test("UI：保存后回显 + 恢复默认二次确认后回到 isDefault 读数", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
       bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
     });
     await page.goto("/bots");
+    await dismissOnboarding(page);
     await page.getByTestId("bot-department-quota-open").click();
 
     await page.getByTestId("bot-quota-max-steps").fill("3");
@@ -333,7 +348,7 @@ test.describe("P4-a 配额 · 部门弹窗面板（待 A4 落地点亮）", () =
     await expect(page.getByTestId("bot-quota-default-hint")).toBeHidden();
 
     await page.getByTestId("bot-quota-reset").click();
-    await page.getByRole("button", { name: /确认|恢复/ }).last().click();
+    await page.locator(".ant-popconfirm-buttons .ant-btn-primary").click();
     await expect(page.getByTestId("bot-quota-max-steps")).toHaveValue("12");
     await expect(page.getByTestId("bot-quota-default-hint")).toBeVisible();
   });

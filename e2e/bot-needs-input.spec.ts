@@ -10,12 +10,11 @@
  *    事件语义（pending→answered/expired/cancelled 各一次、错误码、过滤与排序、300s 过期）。
  *    Rust 侧生命周期（落库/投递 oneshot/重启清扫）由 `src-tauri/tests/bot_input.rs` 锁定。
  *
- * B. 页面证据（B4 未落地：`test.fixme` 显式待办）：
+ * B. 页面证据（B4 已落盘，2026-11-25 复核 HEAD 749203835：6 条全部点亮为 `test`）：
  *    Bot 线程持久化卡片、刷新恢复、过期/取消终态、非 Bot 聊天零变化、侧栏待答数。
- *    点亮条件：B4 落盘且下列 data-testid 存在，随后把 `test.fixme` 改 `test`：
- *      bot-input-request-card、bot-input-request-question、bot-input-request-options、
- *      bot-input-request-answer、bot-input-request-submit、bot-input-request-cancel、
- *      bot-input-request-status、bot-input-badge。
+ *    testid 全齐：bot-input-request-card、-question、-options、-answer、-submit、-cancel、
+ *    -status、bot-input-badge。种子事件前统一等事件订阅就绪（waitForInputSubscription），
+ *    避免「先 emit 后 listen」的假红。
  *
  * 未在本文件覆盖：「重启清扫 → pending 全过期」需要真实进程重启与 SQLite，
  * 浏览器面无法制造；该断言落在 `src-tauri/tests/bot_input.rs`（B2 expire_stale 用例）。
@@ -80,6 +79,18 @@ const pendingSeed = (over: Record<string, any> = {}) => ({
 /** 不带参数 = 默认 pending 行；传 over 覆盖字段（已含默认值，见 pendingSeed）。 */
 async function seedPending(page: Page, over: Record<string, any> = {}): Promise<any> {
   return page.evaluate((o) => (window as any).__P3_TEST__.seedInputRequest(o), pendingSeed(over));
+}
+
+/** 首启引导层会拦截指针事件（与 bot-workflow/bot-delegation-chain 同口径）；无引导时静默跳过。 */
+async function dismissOnboarding(page: Page) {
+  await page.getByTestId("onboarding-skip").click({ timeout: 8_000 }).catch(() => undefined);
+}
+
+/** 等页面把 bot-input-request-updated 订阅上再投种子，事件驱动路径才不是竞态。 */
+async function waitForInputSubscription(page: Page) {
+  await page.waitForFunction(
+    () => (((window as any).__P3_TEST__?.listeners?.() ?? {})["bot-input-request-updated"]?.length ?? 0) > 0,
+  );
 }
 
 // ── A. 契约自检（现在可跑） ─────────────────────────────────────────────
@@ -256,10 +267,12 @@ test.describe("P4-b 待答请求 · IPC 契约自检（shim）", () => {
 
 // ── B. 页面证据（B4 未落地：fixme 显式待办） ────────────────────────────
 
-test.describe("P4-b 待答请求 · Bot 线程持久化卡片（待 B4 落地点亮）", () => {
-  test.fixme("AC-B5-UI-1：Bot 线程提问 → 卡片（问题/选项）→ 作答 → 卡片转已答", async ({ page }) => {
+test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
+  test("AC-B5-UI-1：Bot 线程提问 → 卡片（问题/选项）→ 作答 → 卡片转已答", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/chat?bot=bot-input-a");
+    await dismissOnboarding(page);
+    await waitForInputSubscription(page);
     await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
       askId: "ask-ui-1", conversationId: "conv-bot-1", botId: "bot-input-a",
       question: "请确认标的池范围？", options: ["沪深300", "中证500"],
@@ -275,22 +288,27 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片（待 B4 落地点
     await expect(page.getByTestId("bot-input-request-status")).toContainText("已回答");
   });
 
-  test.fixme("AC-B5-UI-2：刷新页面后 pending 卡从 list_bot_input_requests 恢复", async ({ page }) => {
+  test("AC-B5-UI-2：刷新页面后 pending 卡从 list_bot_input_requests 恢复", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/chat?bot=bot-input-a");
+    await dismissOnboarding(page);
+    await waitForInputSubscription(page);
     await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
       askId: "ask-ui-2", conversationId: "conv-bot-1", botId: "bot-input-a",
       question: "刷新后仍在？",
     }));
 
     await page.reload();
+    await dismissOnboarding(page);
     await expect(page.getByTestId("bot-input-request-card")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("bot-input-request-question")).toContainText("刷新后仍在？");
   });
 
-  test.fixme("AC-B5-UI-3：超时 → 过期态（不可作答）", async ({ page }) => {
+  test("AC-B5-UI-3：超时 → 过期态（不可作答）", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/chat?bot=bot-input-a");
+    await dismissOnboarding(page);
+    await waitForInputSubscription(page);
     const at = Date.now();
     await page.evaluate(([now]) => (window as any).__P3_TEST__.seedInputRequest({
       askId: "ask-ui-3", conversationId: "conv-bot-1", botId: "bot-input-a",
@@ -302,9 +320,11 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片（待 B4 落地点
     await expect(page.getByTestId("bot-input-request-submit")).toBeDisabled();
   });
 
-  test.fixme("AC-B5-UI-4：cancel → 取消态", async ({ page }) => {
+  test("AC-B5-UI-4：cancel → 取消态", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/chat?bot=bot-input-a");
+    await dismissOnboarding(page);
+    await waitForInputSubscription(page);
     await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
       askId: "ask-ui-4", conversationId: "conv-bot-1", botId: "bot-input-a",
       question: "可取消的问题",
@@ -314,7 +334,7 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片（待 B4 落地点
     await expect(page.getByTestId("bot-input-request-status")).toContainText("已取消");
   });
 
-  test.fixme("AC-B5-UI-5：非 Bot 聊天 → 旧通用卡片与旧命令零变化", async ({ page }) => {
+  test("AC-B5-UI-5：非 Bot 聊天 → 旧通用卡片与旧命令零变化", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/chat");
 
@@ -330,9 +350,11 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片（待 B4 落地点
     expect(rows).toHaveLength(0);
   });
 
-  test.fixme("AC-B5-UI-6：/bots 侧栏待答数徽章随 pending/answered 事件增减", async ({ page }) => {
+  test("AC-B5-UI-6：/bots 侧栏待答数徽章随 pending/answered 事件增减", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/bots");
+    await dismissOnboarding(page);
+    await waitForInputSubscription(page);
     await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
       askId: "ask-ui-6", conversationId: "conv-bot-1", botId: "bot-input-a",
       question: "侧栏计数？",

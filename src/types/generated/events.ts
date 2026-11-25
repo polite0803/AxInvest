@@ -93,6 +93,7 @@ export const IPC_EVENT_NAMES = [
   "worker-failed",
   "bot-assignment-updated",
   "bot-workflow-run-updated",
+  "bot-input-request-updated",
 ] as const;
 
 /** IPC 事件名联合类型（`listen` 只接受这些名字）。 */

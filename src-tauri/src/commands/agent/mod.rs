@@ -80,6 +80,10 @@ struct AppAskUserBridge {
     >,
     conversation_id: String,
     assistant_message_id: String,
+    /// P4-b（IPC-P4 §1 / D4=A）：仅 Bot 线程落待答行；通用聊天 bot_id=None，
+    /// 落库与状态迁移全部 no-op，行为与 P3 一致。
+    db: axagent_dao::DatabaseConnection,
+    bot_id: Option<String>,
 }
 
 impl axagent_harness::AskUserBridge for AppAskUserBridge {
@@ -123,6 +127,29 @@ impl axagent_harness::AskUserBridge for AppAskUserBridge {
             .map(|a| a.iter().filter_map(|o| o.as_str().map(|s| s.to_string())).collect())
             .unwrap_or_default();
 
+        // P4-b：Bot 线程先落一行 pending（通用聊天 bot_id=None ⇒ 零数据库写入）。
+        if self.bot_id.is_some() {
+            let db = self.db.clone();
+            let app_handle = self.app_handle.clone();
+            let conversation = self.conversation_id.clone();
+            let bot_id = self.bot_id.clone();
+            let ask = ask_id.clone();
+            let question = question_text.clone();
+            let opts = options.clone();
+            tokio::task::block_in_place(|| {
+                let handle = tokio::runtime::Handle::current();
+                let _ = handle.block_on(crate::bot_input_request::persist_pending(
+                    &db,
+                    Some(&app_handle),
+                    &conversation,
+                    bot_id.as_deref(),
+                    &ask,
+                    &question,
+                    opts,
+                ));
+            });
+        }
+
         let event_payload = serde_json::json!({
             "conversationId": self.conversation_id,
             "assistantMessageId": self.assistant_message_id,
@@ -150,21 +177,65 @@ impl axagent_harness::AskUserBridge for AppAskUserBridge {
         // 阻塞等待用户回复，5 分钟超时
         let ask_senders_cleanup = self.ask_senders.clone();
         let ask_id_cleanup = ask_id.clone();
+        // P4-b：终态迁移的上下文（通用聊天没有行 ⇒ settle 查不到行，自然 no-op）。
+        let db_settle = self.db.clone();
+        let app_settle = self.app_handle.clone();
+        let ask_id_settle = ask_id.clone();
+        let answer_is_bot = self.bot_id.is_some();
         tokio::task::block_in_place(|| {
             let handle = tokio::runtime::Handle::current();
             handle.block_on(async {
                 match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                    Ok(Ok(answer)) => Ok(answer),
+                    Ok(Ok(answer)) => {
+                        // 先落账再回给模型：模型继续时 DB 已是 answered（IPC-P4 §1）。
+                        if answer_is_bot {
+                            let _ = crate::bot_input_request::settle_by_ask_id(
+                                &db_settle,
+                                Some(&app_settle),
+                                &ask_id_settle,
+                                axagent_harness::types::bot::input_status::ANSWERED,
+                                Some(&answer),
+                            )
+                            .await;
+                        }
+                        Ok(answer)
+                    },
                     Ok(Err(_)) => {
                         // sender 被丢弃，清理 ask_senders
                         let mut senders = ask_senders_cleanup.lock().await;
                         senders.remove(&ask_id_cleanup);
+                        if answer_is_bot {
+                            let status = crate::bot_input_request::terminal_status_for(
+                                agent_input_err::CHANNEL_CLOSED,
+                            );
+                            let _ = crate::bot_input_request::settle_by_ask_id(
+                                &db_settle,
+                                Some(&app_settle),
+                                &ask_id_settle,
+                                status,
+                                None,
+                            )
+                            .await;
+                        }
                         Err(ErrorResponse::err(agent_input_err::CHANNEL_CLOSED))
                     },
                     Err(_) => {
                         // 超时，清理 ask_senders
                         let mut senders = ask_senders_cleanup.lock().await;
                         senders.remove(&ask_id_cleanup);
+                        if answer_is_bot {
+                            let status = crate::bot_input_request::terminal_status_for(
+                                agent_input_err::WAIT_REPLY_TIMEOUT,
+                            );
+                            let _ = crate::bot_input_request::settle_by_ask_id(
+                                &db_settle,
+                                Some(&app_settle),
+                                &ask_id_settle,
+                                status,
+                                None,
+                            )
+                            .await;
+                        }
                         Err(ErrorResponse::err(agent_input_err::WAIT_REPLY_TIMEOUT))
                     },
                 }
@@ -2240,6 +2311,9 @@ pub async fn agent_query(
         ask_senders: app_state.agent_ask_senders.clone(),
         conversation_id: conversation_id.clone(),
         assistant_message_id: streaming_message_id.clone(),
+        // P4-b：线程归属 Bot 取会话记录（通用聊天为 None）。
+        db: app_state.harness.db().clone(),
+        bot_id: conversation.bot_id.clone(),
     }));
 
     // #225：注入插件命名命令桥，blog 等 OPC 工具经此执行 plugin-opc 的命令，

@@ -136,6 +136,8 @@ pub enum IpcEventName {
     BotAssignmentUpdated,
     // ── Bot 编排（P3 IPC-P3 §3；运行面板监听） ──
     BotWorkflowRunUpdated,
+    // ── Bot 待答请求（P4 IPC-P4 §3；提问卡/侧栏徽章刷新） ──
+    BotInputRequestUpdated,
 }
 
 impl IpcEventName {
@@ -236,6 +238,7 @@ impl IpcEventName {
             IpcEventName::WorkerFailed => "worker-failed",
             IpcEventName::BotAssignmentUpdated => "bot-assignment-updated",
             IpcEventName::BotWorkflowRunUpdated => "bot-workflow-run-updated",
+            IpcEventName::BotInputRequestUpdated => "bot-input-request-updated",
         }
     }
 
@@ -327,6 +330,7 @@ impl IpcEventName {
         IpcEventName::WorkerFailed,
         IpcEventName::BotAssignmentUpdated,
         IpcEventName::BotWorkflowRunUpdated,
+        IpcEventName::BotInputRequestUpdated,
     ];
 }
 

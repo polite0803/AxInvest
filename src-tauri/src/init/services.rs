@@ -84,6 +84,12 @@ pub async fn start_background_services(
     start_cron_scheduler(app, state).await;
     start_trigger_recovery(state);
     start_scheduler_recovery(app, state);
+    // P4-b（IPC-P4 §3 / D7=A）：把上一次运行遗留的 pending 待答请求全部置 expired
+    // 并广播最新快照；被中断的模型轮不恢复。
+    let swept = crate::bot_input_request::startup_sweep(state.harness.db(), Some(app)).await;
+    if swept > 0 {
+        tracing::info!("[bot_input_request] 启动清扫 {swept} 条遗留待答请求");
+    }
     start_stale_analysis_reclaim(state);
     start_mover_recall_batch_reclaim(state);
     start_interrupted_analysis_rerun(app);

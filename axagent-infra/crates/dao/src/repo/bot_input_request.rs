@@ -15,9 +15,9 @@ use sea_orm::*;
 
 use axagent_entities::bot_input_requests;
 use axagent_harness::core_error::{AxAgentError, Result};
-use axagent_harness::types::bot::{input_origin, input_status};
+use axagent_harness::types::bot::input_status;
 use axagent_harness::types::{BotInputRequest, BotInputRequestFilter};
-use axagent_harness::util_fns::{gen_id, now_ts};
+use axagent_harness::util_fns::{gen_id, now_ms};
 
 /// 待答请求过期窗口：300s（ADR-P4-4 / D5=A，与 P3 派发超时同源）。
 pub const INPUT_REQUEST_TTL_MS: i64 = 300_000;
@@ -55,7 +55,7 @@ fn to_dto(m: bot_input_requests::Model) -> Result<BotInputRequest> {
 pub async fn create(db: &DatabaseConnection, req: &BotInputRequest) -> Result<BotInputRequest> {
     let options_json = serde_json::to_string(&req.options)
         .map_err(|e| AxAgentError::Validation(format!("input options 序列化失败: {e}")))?;
-    let now = now_ts();
+    let now = now_ms();
     let am = bot_input_requests::ActiveModel {
         id: Set(if req.id.is_empty() { gen_id() } else { req.id.clone() }),
         ask_id: Set(req.ask_id.clone()),
@@ -189,6 +189,7 @@ pub async fn count_pending_by_bot(db: &DatabaseConnection, bot_id: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axagent_harness::types::bot::input_origin;
 
     async fn pool() -> crate::db::DbHandle {
         crate::db::create_test_pool().await.expect("test pool")
@@ -208,7 +209,7 @@ mod tests {
             status: input_status::PENDING.to_string(),
             answer: None,
             answered_at: None,
-            expires_at: now_ts() + INPUT_REQUEST_TTL_MS,
+            expires_at: now_ms() + INPUT_REQUEST_TTL_MS,
             created_at: 0,
             updated_at: 0,
         }
@@ -288,7 +289,7 @@ mod tests {
         let h = pool().await;
         let db = &h.conn;
         let r = create(db, &row("ask-t", "conv-1", Some("bot-1"))).await.expect("create");
-        let now = now_ts();
+        let now = now_ms();
 
         assert!(transition(db, &r.id, input_status::PENDING, input_status::ANSWERED, Some("A"), now)
             .await
@@ -317,11 +318,11 @@ mod tests {
         let p1 = create(db, &row("p1", "conv-1", Some("bot-1"))).await.expect("p1");
         let p2 = create(db, &row("p2", "conv-1", Some("bot-1"))).await.expect("p2");
         let done = create(db, &row("done", "conv-1", Some("bot-1"))).await.expect("done");
-        transition(db, &done.id, input_status::PENDING, input_status::ANSWERED, Some("ok"), now_ts())
+        transition(db, &done.id, input_status::PENDING, input_status::ANSWERED, Some("ok"), now_ms())
             .await
             .expect("answer done");
 
-        let swept = expire_stale(db, now_ts() + 1).await.expect("sweep");
+        let swept = expire_stale(db, now_ms() + 1).await.expect("sweep");
         assert_eq!(swept, 2, "two pending rows swept");
         for id in [&p1.id, &p2.id] {
             let r = get_by_id(db, id).await.expect("read").expect("row");
@@ -333,7 +334,7 @@ mod tests {
         assert_eq!(d.answer.as_deref(), Some("ok"));
 
         // 幂等：再扫一次为 0。
-        assert_eq!(expire_stale(db, now_ts() + 2).await.expect("sweep2"), 0);
+        assert_eq!(expire_stale(db, now_ms() + 2).await.expect("sweep2"), 0);
     }
 
     /// 侧栏徽章：只数某 Bot 的 pending。
@@ -345,7 +346,7 @@ mod tests {
         create(db, &row("x2", "conv-1", Some("bot-1"))).await.expect("x2");
         create(db, &row("y1", "conv-1", Some("bot-2"))).await.expect("y1");
         let answered = create(db, &row("x3", "conv-1", Some("bot-1"))).await.expect("x3");
-        transition(db, &answered.id, input_status::PENDING, input_status::ANSWERED, Some("v"), now_ts())
+        transition(db, &answered.id, input_status::PENDING, input_status::ANSWERED, Some("v"), now_ms())
             .await
             .expect("answer");
 

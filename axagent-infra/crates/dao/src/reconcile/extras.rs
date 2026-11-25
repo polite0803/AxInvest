@@ -512,7 +512,7 @@ pub const ORPHAN_EXEMPT: &[OrphanExemptDecl] = &[
 //
 // ## 这条声明修的是什么（2026-09-16 生产库实测事故）
 //
-// `axagent-core/crates/entities/src/lib.rs:286-293` 有 8 个**真 `pub mod`** 的侧车库实体：
+// `axagent-core/crates/entities/src/lib.rs:292-318` 有 8 个**真 `pub mod`** 的侧车库实体：
 // `ast_*`(5) + `file_index` + `l2_index_snapshots` + `l2_search_results`。该文件自己
 // 在注释里写着「⚠ 它们**不在主库**……在此声明的是 schema，与连接指向哪个库无关」。
 //
@@ -598,7 +598,7 @@ pub const NON_MAIN_DB: &[NonMainDbDecl] = &[
             "file_index",
         ],
         reason: "owner = src/indexing_triggers.rs:86 `INDEX_DB_FILENAME`（`index.db`，一个独立 \
-                 SQLite 文件）。这些实体只描述**那个文件**的 schema（见 entities/src/lib.rs:286-293）",
+                 SQLite 文件）。这些实体只描述**那个文件**的 schema（见 entities/src/lib.rs:292-318）",
         // 2026-09-17：原为 `Some(Dialect::Postgres)`。那是以「主库恒为 PG」为前提写的
         // 代理；主库方言由用户可配后它只在一条路径上成立。理由见上方「为什么双方言都排除」。
         dialect: None,
@@ -893,29 +893,6 @@ const MULTI_COL_INDEXES: &[IndexDecl] = &[
         method: None,
         where_clause: None,
         dialect: None, // 声明式新增（2026-11-23，P2-b T1''）
-    },
-    // P4 部门运行配额（docs/bot-integration/P4/MODEL-P4 §2）：一个部门至多一行
-    // 配额。UNIQUE 是功能必需（upsert 按 department_id 判存在），单列唯一索引
-    // 同样走本清单 —— 实体语法只有表级内联 UNIQUE，不产生具名索引。
-    IndexDecl {
-        table: "bot_department_quotas",
-        name: "idx_bot_department_quotas_department_uniq",
-        cols: &["department_id"],
-        unique: true,
-        method: None,
-        where_clause: None,
-        dialect: None, // 声明式新增（2026-11-25，P4 A1）
-    },
-    // P4 待答请求（MODEL-P4 §3）：ask_id 与 agent-ask-user 的 askId 一一对应，
-    // UNIQUE 用于答复去重（同一 askId 不得落两行）。
-    IndexDecl {
-        table: "bot_input_requests",
-        name: "idx_bot_input_requests_ask_uniq",
-        cols: &["ask_id"],
-        unique: true,
-        method: None,
-        where_clause: None,
-        dialect: None, // 声明式新增（2026-11-25，P4 B1）
     },
     IndexDecl {
         table: "agent_sessions",
@@ -1369,6 +1346,31 @@ const PARTIAL_INDEXES: &[IndexDecl] = &[
 
 // 静态条目数自证：GIN 6 / MULTI 37 / PARTIAL 7
 
+/// 单列唯一索引（`CREATE UNIQUE INDEX … ON t(col)`）。
+///
+/// P4 部门配额与待答请求都需要功能必需的单列 UNIQUE：实体语法不产生具名索引，
+/// 且不能放入 `MULTI_COL_INDEXES`（那里的形态断言要求 cols.len() >= 2）。
+pub const UNIQUE_INDEXES: &[IndexDecl] = &[
+    IndexDecl {
+        table: "bot_department_quotas",
+        name: "idx_bot_department_quotas_department_uniq",
+        cols: &["department_id"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-25，P4 A1）
+    },
+    IndexDecl {
+        table: "bot_input_requests",
+        name: "idx_bot_input_requests_ask_uniq",
+        cols: &["ask_id"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-25，P4 B1）
+    },
+];
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 汇总视图 —— 引擎（P3+）消费入口
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1377,7 +1379,7 @@ const PARTIAL_INDEXES: &[IndexDecl] = &[
 ///
 /// 合并而非让调用方自己拼，是为了让「新增一类索引」只需改本文件一处。
 pub fn all_indexes() -> impl Iterator<Item = &'static IndexDecl> {
-    GIN_INDEXES.iter().chain(MULTI_COL_INDEXES).chain(PARTIAL_INDEXES)
+    GIN_INDEXES.iter().chain(MULTI_COL_INDEXES).chain(UNIQUE_INDEXES).chain(PARTIAL_INDEXES)
 }
 
 /// L2 声明的条目总数（用于漂移告警与 `#[cfg(test)]` 锁定）。
@@ -1390,6 +1392,7 @@ pub fn total_declarations() -> usize {
         + CHECK_CONSTRAINTS.len()
         + GIN_INDEXES.len()
         + MULTI_COL_INDEXES.len()
+        + UNIQUE_INDEXES.len()
         + PARTIAL_INDEXES.len()
 }
 
@@ -1418,7 +1421,7 @@ mod counts {
     ///
     /// `2` = ① `index.db` 族（`ast_*` + `file_index`）② `l2_cache.db` 族（`l2_*`）。
     const EXPECT_NON_MAIN_DB_RULES: usize = 2;
-    /// `NON_MAIN_DB` 覆盖的表数（细则见 `axagent-core/crates/entities/src/lib.rs:286-293`）。
+    /// `NON_MAIN_DB` 覆盖的表数（细则见 `axagent-core/crates/entities/src/lib.rs:292-318`）。
     const EXPECT_NON_MAIN_DB_TABLES: usize = 8;
     /// 表达式默认值声明 —— 不计入 `total_declarations`（它是**既有列的一个属性**，
     /// 不新增任何对象）。
@@ -1428,7 +1431,7 @@ mod counts {
     const EXPECT_FUNCTIONS: usize = 1;
     const EXPECT_CHECKS: usize = 11;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 40;
+    const EXPECT_MULTI: usize = 38;
     /// partial 索引条目数。
     ///
     /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条
@@ -1438,6 +1441,10 @@ mod counts {
     /// PG-only 是 `idx_retrieval_hits_feedback`（`v111` 的模板给 PG 分支加了 WHERE、
     /// SQLite 分支却是**普通索引**，两侧不同形，故一条声明表达不了）。
     const EXPECT_PARTIAL: usize = 7;
+    /// 单列唯一索引条目数（`UNIQUE_INDEXES`）—— P4 为配额/待答请求新增的功能必需
+    /// 唯一键。与 `MULTI_COL_INDEXES` 分清：本清单只收单列，不被 `index_decls_have_matching_shape`
+    /// 的「多列 >= 2」断言命中。
+    const EXPECT_UNIQUE_INDEXES: usize = 2;
 
     #[test]
     fn l2_item_counts_are_frozen() {
@@ -1470,11 +1477,12 @@ mod counts {
         assert_eq!(CHECK_CONSTRAINTS.len(), EXPECT_CHECKS, "CHECK 约束条目数变了");
         assert_eq!(GIN_INDEXES.len(), EXPECT_GIN, "GIN 索引条目数变了");
         assert_eq!(MULTI_COL_INDEXES.len(), EXPECT_MULTI, "多列索引条目数变了");
+        assert_eq!(UNIQUE_INDEXES.len(), EXPECT_UNIQUE_INDEXES, "单列唯一索引条目数变了");
         assert_eq!(PARTIAL_INDEXES.len(), EXPECT_PARTIAL, "partial 索引条目数变了");
     }
 
     #[test]
-    fn l2_total_is_seventy_five() {
+    fn l2_total_is_eighty_three() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1483,8 +1491,9 @@ mod counts {
             + EXPECT_CHECKS
             + EXPECT_GIN
             + EXPECT_MULTI
+            + EXPECT_UNIQUE_INDEXES
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 75, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 83, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 
@@ -1569,6 +1578,12 @@ mod counts {
             );
             assert!(d.method.is_none(), "{} 多列索引不应指定访问方法", d.name);
             assert!(d.where_clause.is_none(), "{} 多列索引不应带 WHERE", d.name);
+        }
+        for d in UNIQUE_INDEXES {
+            assert!(d.unique, "{} 落在单列唯一索引清单却 unique=false", d.name);
+            assert_eq!(d.cols.len(), 1, "{} 落在单列唯一索引清单却有 {} 列", d.name, d.cols.len());
+            assert!(d.method.is_none(), "{} 单列唯一索引不应指定访问方法", d.name);
+            assert!(d.where_clause.is_none(), "{} 单列唯一索引不应带 WHERE", d.name);
         }
         for d in PARTIAL_INDEXES {
             assert!(d.where_clause.is_some(), "{} 落在 partial 清单却没有 WHERE", d.name);

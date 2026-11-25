@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 
-use axagent_runtime_core::{CronJob, CronJobStore, CronJobStatus};
+use axagent_runtime_core::{CronJob, CronJobStatus, CronJobStore};
 
 /// 与 `commands::bot::delete_bot` 级联段同口径的复演：list → 过滤 botId → 逐个 remove。
 ///
@@ -101,11 +101,7 @@ async fn routine_turn_outcome_lands_in_history_and_disables_one_shot() {
         partial: false,
     };
     assert!(store.record_run("one-shot-bot-routine", ok_result).await);
-    assert!(
-        store
-            .set_status("one-shot-bot-routine", CronJobStatus::Disabled)
-            .await
-    );
+    assert!(store.set_status("one-shot-bot-routine", CronJobStatus::Disabled).await);
     let job = store.get("one-shot-bot-routine").await.expect("job 仍在");
     assert_eq!(job.status, CronJobStatus::Disabled);
     assert_eq!(job.run_count, 1);
@@ -131,10 +127,7 @@ async fn routine_turn_outcome_lands_in_history_and_disables_one_shot() {
     let res = job.last_result.expect("失败轮也落 last_result");
     assert!(!res.success);
     assert!(
-        res.error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("写工具被自动拒绝"),
+        res.error.as_deref().unwrap_or_default().contains("写工具被自动拒绝"),
         "history.error 必须可读：{:?}",
         res.error
     );

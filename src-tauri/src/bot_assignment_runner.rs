@@ -26,8 +26,8 @@ use axagent_tools::tools::bot_delegate::{
 };
 use tauri::{AppHandle, Emitter};
 
-use axagent_dao::repo::bot_assignment as asmt_repo;
 use axagent_dao::DatabaseConnection;
+use axagent_dao::repo::bot_assignment as asmt_repo;
 
 /// dispatch 超时预算（IPC-P2B §3，Q5 冻结值）。常量集中在本文件头部。
 /// P4 起同时是「无部门配额」时的默认值：生效值由 `bot_quota::QuotaLimits` 经
@@ -67,11 +67,10 @@ impl RoutineTurnExecutor {
         assignment: &BotAssignment,
         task_text: &str,
     ) -> Result<String, String> {
-        let bot = axagent_dao::repo::bot::get_bot(
-            self.ctx.harness.db(), &assignment.assignee_bot_id,
-        )
-        .await
-        .map_err(|e| format!("assignee Bot 不存在: {e}"))?;
+        let bot =
+            axagent_dao::repo::bot::get_bot(self.ctx.harness.db(), &assignment.assignee_bot_id)
+                .await
+                .map_err(|e| format!("assignee Bot 不存在: {e}"))?;
         if !bot.is_enabled {
             return Err(format!("assignee Bot {} 已禁用", bot.id));
         }
@@ -181,7 +180,7 @@ pub async fn run_assignment_inner(
         Err(e) => {
             tracing::warn!(assignment_id, error = %e, "委派单无法进入 running（可能已取消/非 queued）");
             return;
-        }
+        },
     };
     sink(&running);
     completion(&running);
@@ -210,26 +209,21 @@ pub async fn run_assignment_inner(
     };
     let task_card = format!(
         "发起方：{}\n任务：{}",
-        running
-            .requester_bot_id
-            .clone()
-            .unwrap_or_else(|| "用户(person)".to_string()),
+        running.requester_bot_id.clone().unwrap_or_else(|| "用户(person)".to_string()),
         running.task_text
     );
 
-    let outcome = match tokio::time::timeout(
-        timeout,
-        executor.execute_with_context(&running, &task_card),
-    )
-    .await
-    {
-        Ok(Ok(text)) => Ok(text),
-        Ok(Err(e)) => Err((None, e)),
-        Err(_) => Err((
-            Some(crate::commands::error_code::bot::DELEGATE_TIMEOUT),
-            format!("委派超过 {} 秒", timeout.as_secs()),
-        )),
-    };
+    let outcome =
+        match tokio::time::timeout(timeout, executor.execute_with_context(&running, &task_card))
+            .await
+        {
+            Ok(Ok(text)) => Ok(text),
+            Ok(Err(e)) => Err((None, e)),
+            Err(_) => Err((
+                Some(crate::commands::error_code::bot::DELEGATE_TIMEOUT),
+                format!("委派超过 {} 秒", timeout.as_secs()),
+            )),
+        };
 
     match outcome {
         Ok(text) => {
@@ -251,7 +245,7 @@ pub async fn run_assignment_inner(
                 sink(&done);
                 completion(&done);
             }
-        }
+        },
         Err((code, detail)) => {
             if let Ok(failed) = asmt_repo::transition(
                 db,
@@ -269,7 +263,7 @@ pub async fn run_assignment_inner(
                 sink(&failed);
                 completion(&failed);
             }
-        }
+        },
     }
 }
 
@@ -327,11 +321,7 @@ pub fn install_dispatch_scheduler(
     ctx: Arc<crate::bot_routine_runner::BotRoutineContext>,
     app: Option<AppHandle>,
 ) {
-    crate::bot_workflow_runner::install_runner(
-        ctx.harness.db().clone(),
-        ctx.clone(),
-        app.clone(),
-    );
+    crate::bot_workflow_runner::install_runner(ctx.harness.db().clone(), ctx.clone(), app.clone());
     crate::commands::bot_assignment::set_dispatch_scheduler(move |id| {
         let ctx = ctx.clone();
         let app = app.clone();
@@ -388,7 +378,9 @@ impl BotDelegateRunner for ConsultRunner {
             requester_bot_id: input.requester_bot_id.clone(),
             ..Default::default()
         };
-        if let Err(e) = crate::commands::bot_assignment::check_chain_constraints(db, &chain_input).await {
+        if let Err(e) =
+            crate::commands::bot_assignment::check_chain_constraints(db, &chain_input).await
+        {
             let code = extract_error_code(&e);
             let row = asmt_repo::record_consult_assignment_with_code(
                 db,
@@ -452,9 +444,10 @@ impl BotDelegateRunner for ConsultRunner {
         if !assignee.is_enabled {
             return Err("BOT_NOT_FOUND: assignee 已禁用".to_string());
         }
-        let requester = input.requester_bot_id.clone().ok_or_else(|| {
-            "ERR_VALIDATION: dispatch 需要 requesterBotId".to_string()
-        })?;
+        let requester = input
+            .requester_bot_id
+            .clone()
+            .ok_or_else(|| "ERR_VALIDATION: dispatch 需要 requesterBotId".to_string())?;
         let child = crate::commands::bot_assignment::create_step_assignment(
             db,
             &axagent_harness::types::CreateBotAssignment {
@@ -485,9 +478,7 @@ impl BotDelegateRunner for ConsultRunner {
         );
         Ok(BotDelegateOutcome {
             assignment_id: child.id.clone(),
-            result_text: format!(
-                "{{\"assignmentId\":\"{}\",\"status\":\"queued\"}}", child.id
-            ),
+            result_text: format!("{{\"assignmentId\":\"{}\",\"status\":\"queued\"}}", child.id),
             status: child.status,
         })
     }
@@ -498,5 +489,8 @@ pub fn install_consult_runner(
     ctx: Arc<crate::bot_routine_runner::BotRoutineContext>,
     app: Option<AppHandle>,
 ) {
-    axagent_tools::tools::bot_delegate::set_bot_delegate_runner(Arc::new(ConsultRunner { ctx, app }));
+    axagent_tools::tools::bot_delegate::set_bot_delegate_runner(Arc::new(ConsultRunner {
+        ctx,
+        app,
+    }));
 }

@@ -6,17 +6,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::bot as bot_repo;
 use axagent_dao::repo::bot_assignment as asmt_repo;
 use axagent_dao::repo::bot_workflow as workflow_repo;
 use axagent_dao::repo::bot_workflow_run as run_repo;
-use axagent_dao::DatabaseConnection;
 use axagent_harness::types::{
     BotAssignment, BotWorkflowStep, CreateBotAssignment, CreateBotWorkflow, CreateBotWorkflowRun,
 };
-use axagent_lib::bot_assignment_runner::{run_assignment_inner, AssignmentTurnExecutor};
+use axagent_lib::bot_assignment_runner::{AssignmentTurnExecutor, run_assignment_inner};
+use axagent_lib::bot_routine_runner::{TurnKind, build_turn_tool_registry};
 use axagent_lib::bot_workflow_runner::{on_assignment_completed, start_run};
-use axagent_lib::bot_routine_runner::{build_turn_tool_registry, TurnKind};
 use axagent_lib::create_step_assignment;
 
 struct Scripted {
@@ -144,9 +144,8 @@ async fn make_run(db: &DatabaseConnection, bot: &str) -> String {
 
 async fn wait_run_step(db: &DatabaseConnection, run_id: &str) -> BotAssignment {
     for _ in 0..200 {
-        let rows = asmt_repo::list_by_workflow_run(db, run_id, |_| String::new())
-            .await
-            .expect("run 步骤");
+        let rows =
+            asmt_repo::list_by_workflow_run(db, run_id, |_| String::new()).await.expect("run 步骤");
         if let Some(row) = rows.into_iter().find(|a| a.step_key.as_deref() == Some("a")) {
             return row;
         }
@@ -176,24 +175,17 @@ async fn test_11_three_level_chain_keeps_root_parent_and_inherited_edges() {
     let b = make_bot(db, "B").await;
     let c = make_bot(db, "C").await;
     let root = root_input(db, &a).await;
-    let mid = create_step_assignment(db, &child_input(&b, &root, "A 派 B"))
-        .await
-        .expect("L2");
-    let leaf = create_step_assignment(db, &child_input(&c, &mid, "B 派 C"))
-        .await
-        .expect("L3");
-    for (row, depth, parent) in [
-        (&root, 1, None),
-        (&mid, 2, Some(root.id.as_str())),
-        (&leaf, 3, Some(mid.id.as_str())),
-    ] {
+    let mid = create_step_assignment(db, &child_input(&b, &root, "A 派 B")).await.expect("L2");
+    let leaf = create_step_assignment(db, &child_input(&c, &mid, "B 派 C")).await.expect("L3");
+    for (row, depth, parent) in
+        [(&root, 1, None), (&mid, 2, Some(root.id.as_str())), (&leaf, 3, Some(mid.id.as_str()))]
+    {
         assert_eq!(row.depth, depth);
         assert_eq!(row.root_id, root.id);
         assert_eq!(row.parent_id.as_deref(), parent);
     }
-    let rows = asmt_repo::list_by_root(db, &root.id, |_| String::new())
-        .await
-        .expect("按 root 列表");
+    let rows =
+        asmt_repo::list_by_root(db, &root.id, |_| String::new()).await.expect("按 root 列表");
     assert_eq!(rows.len(), 3);
 }
 
@@ -206,13 +198,10 @@ async fn test_12_cycle_and_max_depth_errors_are_auditable() {
     let c = make_bot(db, "C").await;
     let d = make_bot(db, "D").await;
     let root = root_input(db, &a).await;
-    let mid = create_step_assignment(db, &child_input(&b, &root, "A 派 B"))
-        .await
-        .expect("L2");
+    let mid = create_step_assignment(db, &child_input(&b, &root, "A 派 B")).await.expect("L2");
 
-    let cycle = create_step_assignment(db, &child_input(&a, &mid, "B 派回 A"))
-        .await
-        .expect_err("环应被拒");
+    let cycle =
+        create_step_assignment(db, &child_input(&a, &mid, "B 派回 A")).await.expect_err("环应被拒");
     assert!(cycle.contains("BOT_DELEGATE_CYCLE"), "{cycle}");
     let audited = asmt_repo::record_consult_assignment_with_code(
         db,
@@ -227,9 +216,7 @@ async fn test_12_cycle_and_max_depth_errors_are_auditable() {
     .expect("审计行");
     assert_eq!(audited.error_code.as_deref(), Some("BOT_DELEGATE_CYCLE"));
 
-    let leaf = create_step_assignment(db, &child_input(&c, &mid, "B 派 C"))
-        .await
-        .expect("L3");
+    let leaf = create_step_assignment(db, &child_input(&c, &mid, "B 派 C")).await.expect("L3");
     let too_deep = create_step_assignment(db, &child_input(&d, &leaf, "C 派 D"))
         .await
         .expect_err("depth=4 应被拒");
@@ -245,12 +232,8 @@ async fn test_13_layer_and_global_in_flight_budgets() {
     let c = make_bot(db, "C").await;
     let d = make_bot(db, "D").await;
     let root = root_input(db, &a).await;
-    create_step_assignment(db, &child_input(&b, &root, "L2-B"))
-        .await
-        .expect("depth2 第一单");
-    create_step_assignment(db, &child_input(&c, &root, "L2-C"))
-        .await
-        .expect("depth2 第二单");
+    create_step_assignment(db, &child_input(&b, &root, "L2-B")).await.expect("depth2 第一单");
+    create_step_assignment(db, &child_input(&c, &root, "L2-C")).await.expect("depth2 第二单");
     let busy = create_step_assignment(db, &child_input(&d, &root, "L2-D"))
         .await
         .expect_err("同层第 3 单应被拒");
@@ -301,9 +284,8 @@ async fn test_14_root_completed_while_child_in_flight_keeps_run_open() {
     let b = make_bot(db, "B").await;
     let run_id = make_run(db, &a).await;
     let root = wait_run_step(db, &run_id).await;
-    let child = create_step_assignment(db, &child_input(&b, &root, "A 派 B"))
-        .await
-        .expect("L2 子单");
+    let child =
+        create_step_assignment(db, &child_input(&b, &root, "A 派 B")).await.expect("L2 子单");
 
     let events = drive(db, &root.id, Ok("根完成".into())).await;
     assert_eq!(events, vec!["running", "completed"]);
@@ -322,10 +304,7 @@ async fn test_14_root_completed_while_child_in_flight_keeps_run_open() {
     );
     assert_eq!(run.context.outputs["a"].result_text, "根完成");
     assert_eq!(
-        asmt_repo::get_assignment(db, &child.id, |_| String::new())
-            .await
-            .expect("子单")
-            .status,
+        asmt_repo::get_assignment(db, &child.id, |_| String::new()).await.expect("子单").status,
         asmt_repo::status::QUEUED
     );
 }
@@ -337,17 +316,12 @@ async fn test_15_cancel_covers_whole_root_subtree() {
     let a = make_bot(db, "A").await;
     let b = make_bot(db, "B").await;
     let root = root_input(db, &a).await;
-    let child = create_step_assignment(db, &child_input(&b, &root, "A 派 B"))
-        .await
-        .expect("L2 子单");
-    let cancelled = asmt_repo::cancel_assignment(db, &root.id)
-        .await
-        .expect("取消根单");
+    let child =
+        create_step_assignment(db, &child_input(&b, &root, "A 派 B")).await.expect("L2 子单");
+    let cancelled = asmt_repo::cancel_assignment(db, &root.id).await.expect("取消根单");
     assert_eq!(cancelled.status, asmt_repo::status::CANCELLED);
     // run 级 cancel 在 test_6 已验证按 root_id 遍历子树；此处锁定 root_id 索引覆盖。
-    let rows = asmt_repo::list_by_root(db, &root.id, |_| String::new())
-        .await
-        .expect("子树");
+    let rows = asmt_repo::list_by_root(db, &root.id, |_| String::new()).await.expect("子树");
     assert!(rows.iter().any(|r| r.id == child.id && r.root_id == root.id));
 }
 

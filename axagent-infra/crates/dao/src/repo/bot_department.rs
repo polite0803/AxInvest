@@ -10,7 +10,9 @@
 use sea_orm::prelude::Expr;
 use sea_orm::*;
 
-use axagent_entities::{bot_department_members, bot_department_quotas, bot_departments, bot_workflows};
+use axagent_entities::{
+    bot_department_members, bot_department_quotas, bot_departments, bot_workflows,
+};
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::types::{BotDepartment, UpdateBotDepartmentPatch};
 use axagent_harness::util_fns::{gen_id, now_ts};
@@ -105,8 +107,7 @@ pub async fn update_department(
         am.name = Set(name.clone());
     }
     if let Some(description) = &patch.description {
-        am.description =
-            Set(description.clone().unwrap_or_else(|| String::new()));
+        am.description = Set(description.clone().unwrap_or_else(|| String::new()));
     }
     if let Some(chief) = &patch.chief_bot_id {
         am.chief_bot_id = Set(chief.clone());
@@ -162,7 +163,10 @@ pub async fn delete_department_cascade(
 }
 
 /// 清空部门的全部成员行（删部门级联，ADR-P2B-6）。返回清掉的行数。
-pub async fn delete_department_members(db: &DatabaseConnection, department_id: &str) -> Result<u64> {
+pub async fn delete_department_members(
+    db: &DatabaseConnection,
+    department_id: &str,
+) -> Result<u64> {
     let res = bot_department_members::Entity::delete_many()
         .filter(bot_department_members::Column::DepartmentId.eq(department_id))
         .exec(db)
@@ -288,7 +292,10 @@ mod tests {
         // 「一个 Bot 只属一个部门」的跨部门语义由命令层查 department_of_bot 把关
         // （repo 层保持数据访问原语）。
         let dup = add_bot_to_department(db, &dept.id, "bot-1").await;
-        assert!(matches!(dup, Err(AxAgentError::Validation(_))), "同部门重复应报 Validation: {dup:?}");
+        assert!(
+            matches!(dup, Err(AxAgentError::Validation(_))),
+            "同部门重复应报 Validation: {dup:?}"
+        );
 
         // 移出后可再加入（同部门：复合 UNIQUE 只约束行重复，不约束归属流）。
         remove_bot_from_department(db, &dept.id, "bot-1").await.expect("移出");

@@ -350,9 +350,9 @@ fn calculate_next_run(schedule: &str, now_ms: i64, tz: Option<Tz>) -> Option<i64
             use chrono::TimeZone as _;
             tz.timestamp_millis_opt(now_ms).single()?.fixed_offset()
         },
-        None => chrono::TimeZone::timestamp_millis_opt(&chrono::Local, now_ms)
-            .single()?
-            .fixed_offset(),
+        None => {
+            chrono::TimeZone::timestamp_millis_opt(&chrono::Local, now_ms).single()?.fixed_offset()
+        },
     };
     // 秒/纳秒归零后推进到下一分钟，保证结果严格晚于本次触发
     let mut cursor = now_local
@@ -1232,7 +1232,7 @@ impl axagent_harness::tool_service::CronJobStore for CronJobStore {
 
 #[cfg(test)]
 mod calculate_next_run_tests {
-    use super::{calculate_next_run, resumed_next_run, CronJob};
+    use super::{CronJob, calculate_next_run, resumed_next_run};
     use chrono::{Datelike, Local, TimeZone, Timelike};
 
     /// 构造本地时区的毫秒时间戳
@@ -1447,8 +1447,7 @@ mod calculate_next_run_tests {
             .single()
             .expect("测试时刻必须唯一")
             .timestamp_millis();
-        let got = calculate_next_run("0 9 * * *", shanghai_0800, Some(tz))
-            .expect("应算出下次档期");
+        let got = calculate_next_run("0 9 * * *", shanghai_0800, Some(tz)).expect("应算出下次档期");
         // 期望：上海时区当天 09:00 = UTC 01:00
         let expected = tz
             .with_ymd_and_hms(2026, 10, 12, 9, 0, 0)
@@ -1457,9 +1456,7 @@ mod calculate_next_run_tests {
             .timestamp_millis();
         assert_eq!(got, expected, "上海时区 0 9 * * * 应产出上海 09:00 的时间戳");
         // 反向验证：该时间戳在 UTC 下是 01:00
-        let utc = chrono::TimeZone::timestamp_millis_opt(&chrono::Utc, got)
-            .single()
-            .unwrap();
+        let utc = chrono::TimeZone::timestamp_millis_opt(&chrono::Utc, got).single().unwrap();
         assert_eq!((utc.hour(), utc.minute()), (1, 0), "UTC 侧应为 01:00");
     }
 

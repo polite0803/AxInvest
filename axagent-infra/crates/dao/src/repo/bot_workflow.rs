@@ -152,13 +152,16 @@ mod tests {
             timeout_secs: 30,
             on_failure: "abort".into(),
         }];
-        let wf = create_workflow(db, &axagent_harness::types::CreateBotWorkflow {
-            name: "盘前汇总".into(),
-            owner_scope: "department".into(),
-            department_id: Some(Some("dept-1".into())),
-            steps: steps.clone(),
-            ..Default::default()
-        })
+        let wf = create_workflow(
+            db,
+            &axagent_harness::types::CreateBotWorkflow {
+                name: "盘前汇总".into(),
+                owner_scope: "department".into(),
+                department_id: Some(Some("dept-1".into())),
+                steps: steps.clone(),
+                ..Default::default()
+            },
+        )
         .await
         .expect("建编排");
         assert_eq!(wf.steps, steps, "steps_json round-trip");

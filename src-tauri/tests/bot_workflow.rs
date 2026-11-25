@@ -9,16 +9,16 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::bot as bot_repo;
 use axagent_dao::repo::bot_assignment as asmt_repo;
 use axagent_dao::repo::bot_department as dept_repo;
 use axagent_dao::repo::bot_workflow as workflow_repo;
 use axagent_dao::repo::bot_workflow_run as run_repo;
-use axagent_dao::DatabaseConnection;
 use axagent_harness::types::{
     BotAssignment, BotWorkflowStep, CreateBotWorkflow, CreateBotWorkflowRun,
 };
-use axagent_lib::bot_assignment_runner::{run_assignment_inner, AssignmentTurnExecutor};
+use axagent_lib::bot_assignment_runner::{AssignmentTurnExecutor, run_assignment_inner};
 use axagent_lib::bot_workflow_runner::{cancel_run, on_assignment_completed, start_run};
 
 type Script = Arc<Mutex<HashMap<String, Result<String, String>>>>;
@@ -62,10 +62,7 @@ fn step(key: &str, bot: &str, deps: &[&str], on_failure: &str) -> BotWorkflowSte
         bot_id: bot.into(),
         prompt_template: format!(
             "分析 {{inputs.topic}} {}",
-            deps.iter()
-                .map(|d| format!("{{{{steps.{d}.output}}}}"))
-                .collect::<Vec<_>>()
-                .join(" ")
+            deps.iter().map(|d| format!("{{{{steps.{d}.output}}}}")).collect::<Vec<_>>().join(" ")
         ),
         depends_on: deps.iter().map(|s| s.to_string()).collect(),
         timeout_secs: 30,
@@ -85,7 +82,12 @@ async fn make_run(
         db,
         &CreateBotWorkflow {
             name: "测试编排".into(),
-            owner_scope: if dept.is_some() { "department" } else { "instance" }.into(),
+            owner_scope: if dept.is_some() {
+                "department"
+            } else {
+                "instance"
+            }
+            .into(),
             department_id: Some(dept.map(str::to_string)),
             steps,
             max_concurrency,
@@ -124,9 +126,7 @@ async fn make_run(
 }
 
 async fn list_step_rows(db: &DatabaseConnection, run_id: &str) -> Vec<BotAssignment> {
-    asmt_repo::list_by_workflow_run(db, run_id, |_| String::new())
-        .await
-        .expect("列出 run 步骤")
+    asmt_repo::list_by_workflow_run(db, run_id, |_| String::new()).await.expect("列出 run 步骤")
 }
 
 async fn wait_assignment_count(
@@ -172,26 +172,12 @@ async fn drive_queued(
     )
     .await
     .expect("queued assignments");
-    let queued: Vec<BotAssignment> = rows
-        .into_iter()
-        .filter(|a| a.workflow_run_id.is_some())
-        .collect();
+    let queued: Vec<BotAssignment> =
+        rows.into_iter().filter(|a| a.workflow_run_id.is_some()).collect();
     for row in &queued {
-        let executor = ScriptedExecutor {
-            script: script.clone(),
-            prompts: prompts.clone(),
-            delay,
-        };
+        let executor = ScriptedExecutor { script: script.clone(), prompts: prompts.clone(), delay };
         let sink = |_: &BotAssignment| {};
-        run_assignment_inner(
-            db,
-            &sink,
-            &row.id,
-            &executor,
-            timeout,
-            &complete_hook(db),
-        )
-        .await;
+        run_assignment_inner(db, &sink, &row.id, &executor, timeout, &complete_hook(db)).await;
     }
     queued.len()
 }
@@ -259,23 +245,15 @@ async fn test_1_three_step_chain_substitutes_outputs_and_anchor_receipts() {
     assert_eq!(run.completed_steps, 3);
     assert_eq!(run.context.outputs["b"].result_text, "B 的结论");
     let texts = prompts.lock().expect("prompts").clone();
-    assert!(
-        texts.iter().any(|t| t.contains("A 的结论")),
-        "B 应收到 A 的输出替换: {texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t.contains("B 的结论")),
-        "C 应收到 B 的输出替换: {texts:?}"
-    );
+    assert!(texts.iter().any(|t| t.contains("A 的结论")), "B 应收到 A 的输出替换: {texts:?}");
+    assert!(texts.iter().any(|t| t.contains("B 的结论")), "C 应收到 B 的输出替换: {texts:?}");
 
     let anchor = run.anchor_message_id.expect("anchor");
     let messages = axagent_dao::repo::message::list_messages(db, &run.requester_conversation_id)
         .await
         .expect("消息");
-    let receipts: Vec<_> = messages
-        .iter()
-        .filter(|m| m.parent_message_id.as_deref() == Some(&anchor))
-        .collect();
+    let receipts: Vec<_> =
+        messages.iter().filter(|m| m.parent_message_id.as_deref() == Some(&anchor)).collect();
     assert_eq!(receipts.len(), 3, "三条回执同线程且 parent=anchor");
     assert!(receipts.iter().all(|m| m.content.starts_with("[步骤 ")));
 }
@@ -289,11 +267,7 @@ async fn test_2_independent_steps_respect_max_concurrency() {
     let c = make_bot(db, "C").await;
     let (run_id, _) = make_run(
         db,
-        vec![
-            step("a", &a, &[], "abort"),
-            step("b", &b, &[], "abort"),
-            step("c", &c, &[], "abort"),
-        ],
+        vec![step("a", &a, &[], "abort"), step("b", &b, &[], "abort"), step("c", &c, &[], "abort")],
         None,
         60,
         2,
@@ -331,19 +305,14 @@ async fn test_3_cycle_definition_and_runtime_bot_checks() {
     let (_, wf_id) = make_run(db, vec![step("a", &a, &[], "abort")], None, 60, 2).await;
     let cyclic = vec![step("a", &a, &["b"], "abort"), step("b", &a, &["a"], "abort")];
     assert_eq!(
-        axagent_lib::bot_workflow_steps::validate_dag(&cyclic)
-            .unwrap_err()
-            .code,
+        axagent_lib::bot_workflow_steps::validate_dag(&cyclic).unwrap_err().code,
         "BOT_WORKFLOW_CYCLE"
     );
 
     bot_repo::update_bot(
         db,
         &a,
-        &axagent_harness::types::UpdateBotPatch {
-            is_enabled: Some(false),
-            ..Default::default()
-        },
+        &axagent_harness::types::UpdateBotPatch { is_enabled: Some(false), ..Default::default() },
     )
     .await
     .expect("禁用 Bot");
@@ -375,10 +344,7 @@ async fn test_3_cycle_definition_and_runtime_bot_checks() {
     start_run(db, None, &run.id).await.expect("start 返回 DTO");
     let failed = wait_run_terminal(db, &run.id).await;
     assert_eq!(failed.status, run_repo::status::FAILED);
-    assert_eq!(
-        failed.error_code.as_deref(),
-        Some("BOT_WORKFLOW_STEP_BOT_MISSING")
-    );
+    assert_eq!(failed.error_code.as_deref(), Some("BOT_WORKFLOW_STEP_BOT_MISSING"));
 }
 
 #[tokio::test]
@@ -389,10 +355,7 @@ async fn test_4_abort_cancels_in_flight_and_inherits_error_code() {
     let b = make_bot(db, "B").await;
     let (run_id, _) = make_run(
         db,
-        vec![
-            step("a", &a, &[], "abort"),
-            step("b", &b, &["a"], "abort"),
-        ],
+        vec![step("a", &a, &[], "abort"), step("b", &b, &["a"], "abort")],
         None,
         60,
         2,
@@ -403,14 +366,7 @@ async fn test_4_abort_cancels_in_flight_and_inherits_error_code() {
     // 用执行超时制造带语义码的步骤失败（executor 返回裸 Err 不带码）。
     let script = script_one(&a, Ok("never".into()));
     let prompts = Arc::new(Mutex::new(Vec::new()));
-    drive_queued(
-        db,
-        &script,
-        &prompts,
-        Duration::from_millis(60),
-        Duration::from_millis(5),
-    )
-    .await;
+    drive_queued(db, &script, &prompts, Duration::from_millis(60), Duration::from_millis(5)).await;
     for _ in 0..100 {
         tokio::time::sleep(Duration::from_millis(20)).await;
         if run_repo::status::is_terminal(
@@ -423,7 +379,9 @@ async fn test_4_abort_cancels_in_flight_and_inherits_error_code() {
     assert_eq!(run.status, run_repo::status::FAILED);
     assert_eq!(run.error_code.as_deref(), Some("BOT_DELEGATE_TIMEOUT"));
     assert!(run.context.skipped.contains(&"b".to_string()), "下游应 skipped");
-    assert!(list_step_rows(db, &run_id).await.iter().all(|a| a.status != asmt_repo::status::RUNNING));
+    assert!(
+        list_step_rows(db, &run_id).await.iter().all(|a| a.status != asmt_repo::status::RUNNING)
+    );
 }
 
 #[tokio::test]
@@ -449,14 +407,8 @@ async fn test_5_continue_skips_downstream_but_finishes_independent_branch() {
     let script = script_one(&a, Ok("A done".into()));
     let prompts = Arc::new(Mutex::new(Vec::new()));
     for _ in 0..100 {
-        drive_queued(
-            db,
-            &script,
-            &prompts,
-            Duration::from_millis(30),
-            Duration::from_millis(5),
-        )
-        .await;
+        drive_queued(db, &script, &prompts, Duration::from_millis(30), Duration::from_millis(5))
+            .await;
         tokio::time::sleep(Duration::from_millis(20)).await;
         if run_repo::status::is_terminal(
             &run_repo::get_run(db, &run_id).await.expect("读 run").status,
@@ -475,7 +427,9 @@ async fn test_5_continue_skips_downstream_but_finishes_independent_branch() {
         run.error_code,
         run.error_detail,
         run.context,
-        rows.iter().map(|a| (a.step_key.clone(), a.status.clone(), a.error_code.clone())).collect::<Vec<_>>()
+        rows.iter()
+            .map(|a| (a.step_key.clone(), a.status.clone(), a.error_code.clone()))
+            .collect::<Vec<_>>()
     );
     assert!(run.context.skipped.contains(&"b".to_string()));
 }
@@ -496,9 +450,8 @@ async fn test_6_total_timeout_and_cancel_cover_run() {
     let rows = wait_assignment_count(db, &run_id2, 1).await;
     let cancelled = cancel_run(db, None, &run_id2).await.expect("取消");
     assert_eq!(cancelled.status, run_repo::status::CANCELLED);
-    let row = asmt_repo::get_assignment(db, &rows[0].id, |_| String::new())
-        .await
-        .expect("assignment");
+    let row =
+        asmt_repo::get_assignment(db, &rows[0].id, |_| String::new()).await.expect("assignment");
     assert_eq!(row.status, asmt_repo::status::CANCELLED);
     assert!(cancel_run(db, None, &run_id2).await.is_err(), "终态取消非法");
 }
@@ -508,23 +461,10 @@ async fn test_7_member_change_is_detected_at_run_start() {
     let h = pool().await;
     let db = &h.conn;
     let a = make_bot(db, "A").await;
-    let dept = dept_repo::create_department(db, "研究部", "", None)
-        .await
-        .expect("部门");
-    dept_repo::add_bot_to_department(db, &dept.id, &a)
-        .await
-        .expect("入部");
-    let (run_id, _) = make_run(
-        db,
-        vec![step("a", &a, &[], "abort")],
-        Some(&dept.id),
-        60,
-        2,
-    )
-    .await;
-    dept_repo::remove_bot_from_department(db, &dept.id, &a)
-        .await
-        .expect("出部");
+    let dept = dept_repo::create_department(db, "研究部", "", None).await.expect("部门");
+    dept_repo::add_bot_to_department(db, &dept.id, &a).await.expect("入部");
+    let (run_id, _) = make_run(db, vec![step("a", &a, &[], "abort")], Some(&dept.id), 60, 2).await;
+    dept_repo::remove_bot_from_department(db, &dept.id, &a).await.expect("出部");
     start_run(db, None, &run_id).await.expect("返回 run DTO");
     let run = wait_run_terminal(db, &run_id).await;
     assert_eq!(run.status, run_repo::status::FAILED);
@@ -579,10 +519,7 @@ mod p4_scheduled_cron {
     async fn over_quota_cron_trigger_fails_history_and_creates_no_run() {
         let h = pool().await;
         let db = &h.conn;
-        let dept = dept_repo::create_department(db, "配额部门", "", None)
-            .await
-            .expect("建部门")
-            .id;
+        let dept = dept_repo::create_department(db, "配额部门", "", None).await.expect("建部门").id;
         let bot = make_bot(db, "配额 Bot").await;
         quota_repo::upsert(
             db,
@@ -629,9 +566,7 @@ mod p4_scheduled_cron {
             "history.error 应带错误码: {recorded_err}"
         );
 
-        let runs = run_repo::list_runs(db, Some(&workflow_id), None)
-            .await
-            .expect("列出 run");
+        let runs = run_repo::list_runs(db, Some(&workflow_id), None).await.expect("列出 run");
         assert!(runs.is_empty(), "超配额不得创建 run 行，实际 {} 行", runs.len());
     }
 
@@ -640,15 +575,10 @@ mod p4_scheduled_cron {
     async fn under_quota_cron_trigger_creates_run_and_records_success() {
         let h = pool().await;
         let db = &h.conn;
-        let dept = dept_repo::create_department(db, "放行部门", "", None)
-            .await
-            .expect("建部门")
-            .id;
+        let dept = dept_repo::create_department(db, "放行部门", "", None).await.expect("建部门").id;
         let bot = make_bot(db, "执行 Bot").await;
         // 部门编排在 start_run 会校验成员快照：Bot 必须在部门内（否则 MEMBER_CHANGED）。
-        dept_repo::add_bot_to_department(db, &dept, &bot)
-            .await
-            .expect("入部");
+        dept_repo::add_bot_to_department(db, &dept, &bot).await.expect("入部");
         quota_repo::upsert(
             db,
             &BotDepartmentQuotaInput {
@@ -663,7 +593,8 @@ mod p4_scheduled_cron {
         )
         .await
         .expect("写部门配额");
-        let workflow_id = make_department_workflow(db, &dept, vec![step("a", &bot, &[], "abort")]).await;
+        let workflow_id =
+            make_department_workflow(db, &dept, vec![step("a", &bot, &[], "abort")]).await;
 
         let job = cron_job("cron-under-quota", &workflow_id);
         let store = Arc::new(CronJobStore::new_ephemeral());
@@ -674,9 +605,8 @@ mod p4_scheduled_cron {
         let driver_workflow_id = workflow_id.clone();
         let script = script_one(&bot, Ok("定时结论".to_string()));
         let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let (outcome, _) = tokio::join!(
-            run_scheduled_bot_workflow(db.clone(), None, store.clone(), job),
-            async {
+        let (outcome, _) =
+            tokio::join!(run_scheduled_bot_workflow(db.clone(), None, store.clone(), job), async {
                 for _ in 0..200 {
                     drive_queued(
                         &driver_db,
@@ -694,13 +624,10 @@ mod p4_scheduled_cron {
                     }
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
-            }
-        );
+            });
         outcome.expect("未超配额应成功");
 
-        let runs = run_repo::list_runs(db, Some(&workflow_id), None)
-            .await
-            .expect("列出 run");
+        let runs = run_repo::list_runs(db, Some(&workflow_id), None).await.expect("列出 run");
         assert_eq!(runs.len(), 1, "未超配额须创建 1 个 run");
         assert_eq!(runs[0].origin, "routine", "定时触发 origin=routine");
         assert_eq!(runs[0].status, run_repo::status::COMPLETED, "单步编排应完成");

@@ -117,10 +117,9 @@ pub async fn check_chain_constraints(
         .await
         .map_err(map_asmt_error)?;
     // P4：部门配额可把每层在途上限收紧到 1..4；无配额（纯委派/实例级）沿用 P3 的 2。
-    let depth_cap = crate::bot_quota::AssignmentContext::limits_for_run(
-        input.workflow_run_id.as_deref(),
-    )
-    .max_in_flight_per_depth;
+    let depth_cap =
+        crate::bot_quota::AssignmentContext::limits_for_run(input.workflow_run_id.as_deref())
+            .max_in_flight_per_depth;
     if in_flight >= depth_cap as i64 {
         return Err(validation_error(
             bot_err::DELEGATE_BUSY,
@@ -159,7 +158,11 @@ async fn create_inner(
 ) -> std::result::Result<BotAssignment, String> {
     if input.mode != "dispatch" {
         // IPC-P2B §2.3：consult 是 assignee 轮工具语义，person 不直接发起。
-        return Err(validation_error("ERR_VALIDATION", "mode", "consult cannot be created via IPC"));
+        return Err(validation_error(
+            "ERR_VALIDATION",
+            "mode",
+            "consult cannot be created via IPC",
+        ));
     }
     let len = input.task_text.chars().count();
     if len < MIN_TASK_CHARS || len > MAX_TASK_CHARS {
@@ -237,7 +240,14 @@ pub async fn list_bot_assignments(
     root_id: Option<String>,
 ) -> Result<Vec<BotAssignment>, String> {
     let db = state.harness.db();
-    let filter = AssignmentFilter { requester_bot_id, assignee_bot_id, bot_id, status, root_id, ..Default::default() };
+    let filter = AssignmentFilter {
+        requester_bot_id,
+        assignee_bot_id,
+        bot_id,
+        status,
+        root_id,
+        ..Default::default()
+    };
     let rows = asmt_repo::list_assignments(db, &filter, |_| String::new())
         .await
         .map_err(map_asmt_error)?;

@@ -45,6 +45,7 @@ pub mod knowledge;
 pub mod lsp;
 pub mod market_mainline;
 // 阶段 2「候选池改趋势→全关联股票」：行业→全成分股确定性查询工具
+pub mod bot_delegate;
 pub mod industry_constituents;
 pub mod marketplace_scanner;
 pub mod media;
@@ -53,7 +54,6 @@ pub mod messaging;
 pub mod migration_tool;
 pub mod misc;
 pub mod monitor;
-pub mod bot_delegate;
 pub mod multi_agent;
 pub mod narrative_structure;
 pub mod network;

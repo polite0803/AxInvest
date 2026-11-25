@@ -20,7 +20,9 @@ pub mod status {
     pub const CANCELLED: &str = "cancelled";
     pub const TERMINAL: &[&str] = &[COMPLETED, FAILED, CANCELLED];
 
-    pub fn is_terminal(s: &str) -> bool { TERMINAL.contains(&s) }
+    pub fn is_terminal(s: &str) -> bool {
+        TERMINAL.contains(&s)
+    }
     pub fn is_valid(s: &str) -> bool {
         matches!(s, QUEUED | RUNNING | WAITING | COMPLETED | FAILED | CANCELLED)
     }
@@ -222,15 +224,18 @@ mod tests {
         .insert(db)
         .await
         .expect("建定义");
-        let run = create_run(db, &CreateBotWorkflowRun {
-            workflow_id: wf_id.into(),
-            workflow_name: "测试编排".into(),
-            origin: "person".into(),
-            requester_bot_id: None,
-            requester_conversation_id: "conv-1".into(),
-            total_steps: 2,
-            inputs: [("topic".into(), "盘面".into())].into_iter().collect(),
-        })
+        let run = create_run(
+            db,
+            &CreateBotWorkflowRun {
+                workflow_id: wf_id.into(),
+                workflow_name: "测试编排".into(),
+                origin: "person".into(),
+                requester_bot_id: None,
+                requester_conversation_id: "conv-1".into(),
+                total_steps: 2,
+                inputs: [("topic".into(), "盘面".into())].into_iter().collect(),
+            },
+        )
         .await
         .expect("建 run");
         assert_eq!(run.status, status::QUEUED);
@@ -239,25 +244,33 @@ mod tests {
         assert!(has_active_runs(db, wf_id).await.expect("在途查询"));
 
         let mut ctx = run.context.clone();
-        ctx.outputs.insert("a".into(), axagent_harness::types::BotWorkflowStepOutput {
-            assignment_id: "as-1".into(),
-            result_text: "结论".into(),
-        });
-        let updated = patch_run(db, &run.id, BotWorkflowRunPatch {
-            status: Some(status::WAITING.into()),
-            context: Some(ctx),
-            anchor_message_id: Some("msg-anchor".into()),
-            ..Default::default()
-        })
+        ctx.outputs.insert(
+            "a".into(),
+            axagent_harness::types::BotWorkflowStepOutput {
+                assignment_id: "as-1".into(),
+                result_text: "结论".into(),
+            },
+        );
+        let updated = patch_run(
+            db,
+            &run.id,
+            BotWorkflowRunPatch {
+                status: Some(status::WAITING.into()),
+                context: Some(ctx),
+                anchor_message_id: Some("msg-anchor".into()),
+                ..Default::default()
+            },
+        )
         .await
         .expect("patch");
         assert_eq!(updated.status, status::WAITING);
         assert_eq!(updated.context.outputs["a"].result_text, "结论");
         assert_eq!(updated.anchor_message_id.as_deref(), Some("msg-anchor"));
-        patch_run(db, &run.id, BotWorkflowRunPatch {
-            status: Some(status::COMPLETED.into()),
-            ..Default::default()
-        })
+        patch_run(
+            db,
+            &run.id,
+            BotWorkflowRunPatch { status: Some(status::COMPLETED.into()), ..Default::default() },
+        )
         .await
         .expect("终态");
         assert!(!has_active_runs(db, wf_id).await.expect("在途查询"));

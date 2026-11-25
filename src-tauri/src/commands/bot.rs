@@ -446,17 +446,17 @@ pub async fn delete_bot(
     // 主操作已成功，不因级联回滚（与 P2-a 例程级联同口径）。
     match axagent_dao::repo::bot_department::delete_memberships_of_bot(db, &bot_id).await {
         Ok(n) if n > 0 => tracing::info!(bot_id = %bot_id, count = n, "已清理该 Bot 的部门归属"),
-        Ok(_) => {}
+        Ok(_) => {},
         Err(err) => tracing::warn!(bot_id = %bot_id, error = %err, "清理部门归属失败"),
     }
     match axagent_dao::repo::bot_department::clear_chief_for_bot(db, &bot_id).await {
         Ok(n) if n > 0 => tracing::info!(bot_id = %bot_id, count = n, "已置空相关部门的 Chief"),
-        Ok(_) => {}
+        Ok(_) => {},
         Err(err) => tracing::warn!(bot_id = %bot_id, error = %err, "置空 Chief 失败"),
     }
     match axagent_dao::repo::bot_assignment::cancel_in_flight_of_bot(db, &bot_id).await {
         Ok(n) if n > 0 => tracing::info!(bot_id = %bot_id, count = n, "已取消该 Bot 在途委派"),
-        Ok(_) => {}
+        Ok(_) => {},
         Err(err) => tracing::warn!(bot_id = %bot_id, error = %err, "取消在途委派失败"),
     }
 

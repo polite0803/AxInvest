@@ -6,17 +6,17 @@
 //! 事件三态发射点、回执落线程、取消与超时。 consult 工具层测试在
 //! `axagent-tools::tools::bot_delegate`（`cargo test -p axagent-tools bot_delegate`）。
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::bot as bot_repo;
 use axagent_dao::repo::bot_assignment as asmt_repo;
-use axagent_dao::DatabaseConnection;
 use axagent_harness::types::{BotAssignment, CreateBotAssignment, MessageRole};
 use axagent_lib::bot_assignment_runner::{
-    run_assignment_with_timeout, AssignmentTurnExecutor, DISPATCH_TIMEOUT_SECS,
+    AssignmentTurnExecutor, DISPATCH_TIMEOUT_SECS, run_assignment_with_timeout,
 };
 
 struct FakeExecutor {
@@ -50,7 +50,11 @@ async fn make_bot(db: &DatabaseConnection, name: &str) -> String {
     .id
 }
 
-async fn make_assignment(db: &DatabaseConnection, assignee: &str, conversation: Option<&str>) -> String {
+async fn make_assignment(
+    db: &DatabaseConnection,
+    assignee: &str,
+    conversation: Option<&str>,
+) -> String {
     asmt_repo::create_assignment(
         db,
         &CreateBotAssignment {
@@ -59,7 +63,7 @@ async fn make_assignment(db: &DatabaseConnection, assignee: &str, conversation: 
             mode: "dispatch".to_string(),
             requester_conversation_id: conversation.map(str::to_string),
             requester_bot_id: None,
-        ..Default::default()
+            ..Default::default()
         },
     )
     .await
@@ -118,7 +122,9 @@ async fn dispatch_happy_path_completes_emits_and_appends_receipt() {
 
     let messages = axagent_dao::repo::message::list_messages(db, &conv.id).await.expect("读消息");
     assert!(
-        messages.iter().any(|m| m.role == MessageRole::Assistant && m.content.contains("结论：震荡")),
+        messages
+            .iter()
+            .any(|m| m.role == MessageRole::Assistant && m.content.contains("结论：震荡")),
         "completed 结果应落回执线程的普通 assistant 消息"
     );
 }

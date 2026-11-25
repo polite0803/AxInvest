@@ -93,10 +93,7 @@ mod tests {
     #[test]
     fn session_override_bidirectional() {
         // 会话档位非 default 时覆盖 Bot 级别：升
-        assert_eq!(
-            resolve_bot_approval_level("ask", Some("full_access")),
-            PermissionMode::Allow
-        );
+        assert_eq!(resolve_bot_approval_level("ask", Some("full_access")), PermissionMode::Allow);
         // 降
         assert_eq!(
             resolve_bot_approval_level("full", Some("accept_edits")),

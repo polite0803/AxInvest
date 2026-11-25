@@ -9,9 +9,7 @@
 use axagent_dao::repo::bot as bot_repo;
 use axagent_dao::repo::bot_department as dept_repo;
 use axagent_harness::core_error::AxAgentError;
-use axagent_harness::types::{
-    BotDepartment, CreateBotDepartment, UpdateBotDepartmentPatch,
-};
+use axagent_harness::types::{BotDepartment, CreateBotDepartment, UpdateBotDepartmentPatch};
 use tauri::State;
 
 use crate::AppState;
@@ -40,7 +38,7 @@ fn map_dept_error(err: AxAgentError) -> String {
                 .with_category(ErrorCategory::Validation)
                 .with_detail(detail)
                 .to_string()
-        }
+        },
         other => ErrorResponse::from_error(other, ErrorCategory::Unrecoverable).to_string(),
     }
 }
@@ -71,7 +69,10 @@ fn validate_description(description: Option<&str>) -> Result<String, String> {
 }
 
 /// 校验 Chief：存在且 enabled。None = 摘除 Chief（合法）。
-async fn validate_chief(db: &axagent_dao::DatabaseConnection, chief: Option<&str>) -> Result<(), String> {
+async fn validate_chief(
+    db: &axagent_dao::DatabaseConnection,
+    chief: Option<&str>,
+) -> Result<(), String> {
     if let Some(id) = chief {
         let bot = bot_repo::get_bot(db, id)
             .await
@@ -95,7 +96,9 @@ async fn validate_member(db: &axagent_dao::DatabaseConnection, bot_id: &str) -> 
 }
 
 #[tauri::command]
-pub async fn list_bot_departments(state: State<'_, AppState>) -> Result<Vec<BotDepartment>, String> {
+pub async fn list_bot_departments(
+    state: State<'_, AppState>,
+) -> Result<Vec<BotDepartment>, String> {
     dept_repo::list_departments(state.harness.db()).await.map_err(map_dept_error)
 }
 
@@ -160,7 +163,9 @@ pub async fn add_bot_to_department(
     let db = state.harness.db();
     // Q2：一个 Bot 只属一个部门 —— 复合 UNIQUE 只挡同部门重复行，
     // 跨部门约束在命令层显式查（IPC-P2B §1 / MODEL-P2B §2.2）。
-    if let Some(existing) = dept_repo::department_of_bot(db, &bot_id).await.map_err(map_dept_error)? {
+    if let Some(existing) =
+        dept_repo::department_of_bot(db, &bot_id).await.map_err(map_dept_error)?
+    {
         if existing != department_id {
             return Err(validation_error(
                 bot_err::DEPARTMENT_MEMBER_EXISTS,
@@ -177,9 +182,7 @@ pub async fn add_bot_to_department(
     validate_member(db, &bot_id).await?;
     // 部门存在性由 add 时的 FK 语义兜底：先查一次给前端明确错误码。
     dept_repo::get_department(db, &department_id).await.map_err(map_dept_error)?;
-    dept_repo::add_bot_to_department(db, &department_id, &bot_id)
-        .await
-        .map_err(map_dept_error)?;
+    dept_repo::add_bot_to_department(db, &department_id, &bot_id).await.map_err(map_dept_error)?;
     dept_repo::get_department(db, &department_id).await.map_err(map_dept_error)
 }
 
@@ -226,9 +229,8 @@ mod tests {
         )
         .await
         .expect("建 Chief");
-        let dept = dept_repo::create_department(db, "投研部", "", Some(&chief.id))
-            .await
-            .expect("建部门");
+        let dept =
+            dept_repo::create_department(db, "投研部", "", Some(&chief.id)).await.expect("建部门");
         dept_repo::add_bot_to_department(db, &dept.id, &bot.id).await.expect("加入部门");
 
         let members = dept_repo::delete_department_members(db, &dept.id).await.expect("清成员");
@@ -251,9 +253,8 @@ mod tests {
         )
         .await
         .expect("建 Bot");
-        let dept = dept_repo::create_department(db, "部门", "", Some(&chief.id))
-            .await
-            .expect("建部门");
+        let dept =
+            dept_repo::create_department(db, "部门", "", Some(&chief.id)).await.expect("建部门");
         dept_repo::add_bot_to_department(db, &dept.id, &chief.id).await.expect("加入");
 
         let cleared = dept_repo::clear_chief_for_bot(db, &chief.id).await.expect("清 Chief");
@@ -270,9 +271,8 @@ mod tests {
     /// 重复 add 的错误码映射：repo 冲突 → BOT_DEPARTMENT_MEMBER_EXISTS。
     #[test]
     fn duplicate_error_maps_to_member_exists() {
-        let err = map_dept_error(AxAgentError::Validation(
-            "bot already belongs to a department".into(),
-        ));
+        let err =
+            map_dept_error(AxAgentError::Validation("bot already belongs to a department".into()));
         assert!(err.contains(bot_err::DEPARTMENT_MEMBER_EXISTS), "{err}");
     }
 }

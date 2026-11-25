@@ -368,9 +368,8 @@ async fn cron_gate_rejects_before_run_creation_across_workflows() {
 
     // cron 目标的预检：定义合规，但部门容量已满 → 在 create_run 之前就被拒。
     let cron_target = make_workflow(db, &dept, vec![step("a", &bot, 30)], 2, 900).await;
-    let err = check_run_allowed(db, &cron_target, None)
-        .await
-        .expect_err("部门容量 1 已被兄弟编排占用");
+    let err =
+        check_run_allowed(db, &cron_target, None).await.expect_err("部门容量 1 已被兄弟编排占用");
     assert!(err.contains("BOT_QUOTA_EXCEEDED"), "{err}");
     assert!(err.contains("maxConcurrentRuns"), "{err}");
 

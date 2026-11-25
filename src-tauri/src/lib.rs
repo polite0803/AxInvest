@@ -15,14 +15,17 @@ mod capability_embedding;
 mod capability_vector_search;
 // P6.0-⑥ 批 E：工作流节点外部 IO 接缝的宿主实现（HTTP / 文件 / SMTP）。
 mod bot_approval;
-pub mod bot_routine_runner;
 pub mod bot_assignment_runner;
+pub mod bot_input_request;
+pub mod bot_quota;
+pub mod bot_routine_runner;
 pub mod bot_workflow_runner;
 pub mod bot_workflow_steps;
-pub mod bot_quota;
-pub mod bot_input_request;
 // P4-b 命令层内部实现（集成测试直接驱动，避免为测试复制 Tauri State）。
-pub use commands::bot_input::{answer_inner as answer_bot_input_request_inner, cancel_inner as cancel_bot_input_request_inner, list_inner as list_bot_input_requests_inner};
+pub use commands::bot_input::{
+    answer_inner as answer_bot_input_request_inner, cancel_inner as cancel_bot_input_request_inner,
+    list_inner as list_bot_input_requests_inner,
+};
 mod bot_context;
 mod capability_workflow_io;
 mod commands;
@@ -163,11 +166,9 @@ pub use init::stock_domain_state::{
 // P2-a T2'：Bot 例程执行分支（`tests/bot_routine.rs` 集成测试入口）。
 // `bot_approval` 仍是私有模块；`bot_routine_runner` 因 P3 链测试需公开模块路径。
 // 两者都在 lib 层再导出，不改调用面的解析方式。
+pub use bot_approval::{level_supported, resolve_bot_approval_level, resolve_bot_routine_level};
 pub use bot_routine_runner::run_bot_routine_turn;
 pub use commands::bot_assignment::create_step_assignment;
-pub use bot_approval::{
-    level_supported, resolve_bot_approval_level, resolve_bot_routine_level,
-};
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。
 ///

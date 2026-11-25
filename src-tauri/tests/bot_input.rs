@@ -89,10 +89,7 @@ async fn create_pending_row_and_dual_lookup() {
     let by_id = input_repo::get_by_id(db, &created.id).await.expect("读行").expect("存在");
     assert_eq!(by_id, created, "DTO round-trip 不丢字段");
 
-    let by_ask = input_repo::get_by_ask_id(db, "ask-dual")
-        .await
-        .expect("按 ask 读")
-        .expect("存在");
+    let by_ask = input_repo::get_by_ask_id(db, "ask-dual").await.expect("按 ask 读").expect("存在");
     assert_eq!(by_ask.id, created.id, "ask_id 必须唯一定位同一行");
     assert!(input_repo::get_by_id(db, "input-ghost").await.expect("读空").is_none());
 }
@@ -126,11 +123,9 @@ async fn answer_only_from_pending() {
 
     let answered_at = now + 10_000;
     assert!(
-        input_repo::transition(
-            db, &row.id, "pending", "answered", Some("沪深300"), answered_at
-        )
-        .await
-        .expect("迁移"),
+        input_repo::transition(db, &row.id, "pending", "answered", Some("沪深300"), answered_at)
+            .await
+            .expect("迁移"),
         "pending → answered 必须命中"
     );
     let answered = input_repo::get_by_id(db, &row.id).await.expect("读行").expect("存在");
@@ -207,10 +202,8 @@ async fn list_filters_and_created_at_desc() {
     let run_row = input_repo::create(db, &run_req).await.expect("落行");
     assert!(old.created_at <= mid.created_at && mid.created_at <= run_row.created_at);
 
-    let filter = BotInputRequestFilter {
-        conversation_id: Some("conv-1".into()),
-        ..Default::default()
-    };
+    let filter =
+        BotInputRequestFilter { conversation_id: Some("conv-1".into()), ..Default::default() };
     let listed = input_repo::list(db, &filter).await.expect("列表");
     assert_eq!(
         listed.iter().map(|r| r.ask_id.as_str()).collect::<Vec<_>>(),
@@ -218,10 +211,8 @@ async fn list_filters_and_created_at_desc() {
         "同线程按 created_at DESC"
     );
 
-    let by_run = BotInputRequestFilter {
-        workflow_run_id: Some("run-1".into()),
-        ..Default::default()
-    };
+    let by_run =
+        BotInputRequestFilter { workflow_run_id: Some("run-1".into()), ..Default::default() };
     let listed = input_repo::list(db, &by_run).await.expect("按 run 列表");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].ask_id, "ask-run");
@@ -240,11 +231,9 @@ async fn count_pending_by_bot_for_badge() {
     let h = pool().await;
     let db = &h.conn;
     let now = 1_700_000_000_000;
-    for (ask, bot, conv) in [
-        ("ask-1", "bot-1", "conv-1"),
-        ("ask-2", "bot-1", "conv-1"),
-        ("ask-3", "bot-2", "conv-2"),
-    ] {
+    for (ask, bot, conv) in
+        [("ask-1", "bot-1", "conv-1"), ("ask-2", "bot-1", "conv-1"), ("ask-3", "bot-2", "conv-2")]
+    {
         input_repo::create(db, &make_req(ask, conv, Some(bot), now)).await.expect("落行");
     }
     let answered = input_repo::create(db, &make_req("ask-4", "conv-1", Some("bot-1"), now))
@@ -264,9 +253,12 @@ async fn count_pending_by_bot_for_badge() {
 async fn reserved_columns_stay_null_in_interactive_mode() {
     let h = pool().await;
     let db = &h.conn;
-    let row = input_repo::create(db, &make_req("ask-reserved", "conv-1", Some("bot-1"), 1_700_000_000_000))
-        .await
-        .expect("落行");
+    let row = input_repo::create(
+        db,
+        &make_req("ask-reserved", "conv-1", Some("bot-1"), 1_700_000_000_000),
+    )
+    .await
+    .expect("落行");
     assert_eq!(row.workflow_run_id, None);
     assert_eq!(row.assignment_id, None);
     assert_eq!(row.origin, "person");
@@ -282,8 +274,8 @@ async fn reserved_columns_stay_null_in_interactive_mode() {
 // ─────────────────────────────────────────────────────────────────────────────
 mod bridge_lifecycle {
     use super::*;
-    use axagent_lib::bot_input_request as lifecycle;
     use axagent_harness::types::bot::input_status;
+    use axagent_lib::bot_input_request as lifecycle;
 
     fn ask_row(ask: &str, conv: &str) -> BotInputRequest {
         BotInputRequest {
@@ -342,19 +334,17 @@ mod bridge_lifecycle {
             .await
             .expect("persist");
 
-        let answered = lifecycle::settle_by_ask_id(
-            db, None, "ask-a", input_status::ANSWERED, Some("继续"),
-        )
-        .await
-        .expect("answer");
+        let answered =
+            lifecycle::settle_by_ask_id(db, None, "ask-a", input_status::ANSWERED, Some("继续"))
+                .await
+                .expect("answer");
         assert_eq!(answered.status, input_status::ANSWERED);
         assert_eq!(answered.answer.as_deref(), Some("继续"));
         assert!(answered.answered_at.is_some());
 
-        let again = lifecycle::settle_by_ask_id(
-            db, None, "ask-a", input_status::ANSWERED, Some("停止"),
-        )
-        .await;
+        let again =
+            lifecycle::settle_by_ask_id(db, None, "ask-a", input_status::ANSWERED, Some("停止"))
+                .await;
         assert!(again.is_none(), "terminal row must not re-settle");
         let fresh = input_repo::get_by_ask_id(db, "ask-a").await.expect("read").expect("row");
         assert_eq!(fresh.answer.as_deref(), Some("继续"));
@@ -371,9 +361,8 @@ mod bridge_lifecycle {
 
         let status = lifecycle::terminal_status_for("AGENT_INPUT_WAIT_REPLY_TIMEOUT");
         assert_eq!(status, input_status::EXPIRED);
-        let row = lifecycle::settle_by_ask_id(db, None, "ask-t", status, None)
-            .await
-            .expect("expire");
+        let row =
+            lifecycle::settle_by_ask_id(db, None, "ask-t", status, None).await.expect("expire");
         assert_eq!(row.status, input_status::EXPIRED);
         assert_eq!(row.answer, None);
         assert_eq!(row.answered_at, None);
@@ -390,9 +379,15 @@ mod bridge_lifecycle {
     async fn startup_sweep_expires_only_leftovers() {
         let h = pool().await;
         let db = &h.conn;
-        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), "ask-1", "q1", vec![]).await.expect("p1");
-        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), "ask-2", "q2", vec![]).await.expect("p2");
-        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), "ask-3", "q3", vec![]).await.expect("p3");
+        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), "ask-1", "q1", vec![])
+            .await
+            .expect("p1");
+        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), "ask-2", "q2", vec![])
+            .await
+            .expect("p2");
+        lifecycle::persist_pending(db, None, "conv-1", Some("bot-1"), "ask-3", "q3", vec![])
+            .await
+            .expect("p3");
         lifecycle::settle_by_ask_id(db, None, "ask-3", input_status::ANSWERED, Some("好"))
             .await
             .expect("answer");
@@ -412,7 +407,9 @@ mod bridge_lifecycle {
     async fn generic_chat_writes_nothing() {
         let h = pool().await;
         let db = &h.conn;
-        let row = lifecycle::persist_pending(db, None, "conv-chat", None, "ask-chat", "继续吗？", vec![]).await;
+        let row =
+            lifecycle::persist_pending(db, None, "conv-chat", None, "ask-chat", "继续吗？", vec![])
+                .await;
         assert!(row.is_none(), "non-Bot thread must not persist");
         assert!(
             input_repo::list(db, &BotInputRequestFilter::default()).await.expect("list").is_empty(),

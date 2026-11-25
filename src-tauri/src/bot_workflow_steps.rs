@@ -73,11 +73,21 @@ pub fn find_refs(prompt: &str) -> Result<Vec<TemplateRef>, StepError> {
         let token = prompt[i + 2..i + 2 + end].trim();
         let parts: Vec<&str> = token.split('.').collect();
         let reference = match parts.as_slice() {
-            ["steps", key, "output"] if is_step_key(key) => TemplateRef::StepOutput((*key).to_string()),
-            ["inputs", key] if !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') => {
+            ["steps", key, "output"] if is_step_key(key) => {
+                TemplateRef::StepOutput((*key).to_string())
+            },
+            ["inputs", key]
+                if !key.is_empty()
+                    && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') =>
+            {
                 TemplateRef::Input((*key).to_string())
-            }
-            _ => return Err(invalid("promptTemplate", format!("不支持的模板引用: {{{{{token}}}}}"))),
+            },
+            _ => {
+                return Err(invalid(
+                    "promptTemplate",
+                    format!("不支持的模板引用: {{{{{token}}}}}"),
+                ));
+            },
         };
         out.push(reference);
         i += 2 + end + 2;
@@ -109,7 +119,10 @@ pub fn validate_dag(steps: &[BotWorkflowStep]) -> Result<Vec<String>, StepError>
         }
         let chars = step.prompt_template.chars().count();
         if chars < 1 || chars > MAX_PROMPT_CHARS {
-            return Err(invalid("promptTemplate", format!("promptTemplate 必须为 1..={MAX_PROMPT_CHARS} 字符")));
+            return Err(invalid(
+                "promptTemplate",
+                format!("promptTemplate 必须为 1..={MAX_PROMPT_CHARS} 字符"),
+            ));
         }
         if step.timeout_secs < 1 || step.timeout_secs > 300 {
             return Err(invalid("timeoutSecs", "timeoutSecs 必须为 1..=300"));
@@ -122,7 +135,11 @@ pub fn validate_dag(steps: &[BotWorkflowStep]) -> Result<Vec<String>, StepError>
         }
         for dep in &step.depends_on {
             if dep == &step.step_key {
-                return Err(StepError::new(bot_err::WORKFLOW_CYCLE, "dependsOn", format!("自引用: {dep}")));
+                return Err(StepError::new(
+                    bot_err::WORKFLOW_CYCLE,
+                    "dependsOn",
+                    format!("自引用: {dep}"),
+                ));
             }
             if !keys.contains(dep) {
                 // keys 可能尚未收齐，循环结束后再统一校验未知依赖。
@@ -132,7 +149,11 @@ pub fn validate_dag(steps: &[BotWorkflowStep]) -> Result<Vec<String>, StepError>
         for reference in find_refs(&step.prompt_template)? {
             if let TemplateRef::StepOutput(ref key) = reference {
                 if key == &step.step_key {
-                    return Err(StepError::new(bot_err::WORKFLOW_CYCLE, "promptTemplate", format!("自引用输出: {key}")));
+                    return Err(StepError::new(
+                        bot_err::WORKFLOW_CYCLE,
+                        "promptTemplate",
+                        format!("自引用输出: {key}"),
+                    ));
                 }
             }
         }
@@ -154,7 +175,8 @@ pub fn validate_dag(steps: &[BotWorkflowStep]) -> Result<Vec<String>, StepError>
 
     // Kahn 拓扑：同层按定义顺序，保证 runner 的调度可复现。
     let mut indegree: Vec<usize> = steps.iter().map(|s| s.depends_on.len()).collect();
-    let mut queue: std::collections::VecDeque<usize> = (0..steps.len()).filter(|i| indegree[*i] == 0).collect();
+    let mut queue: std::collections::VecDeque<usize> =
+        (0..steps.len()).filter(|i| indegree[*i] == 0).collect();
     let mut order = Vec::with_capacity(steps.len());
     while let Some(i) = queue.pop_front() {
         order.push(steps[i].step_key.clone());
@@ -220,12 +242,15 @@ pub fn substitute_prompt(
         let (token, value) = match reference {
             TemplateRef::StepOutput(key) => {
                 let token = format!("{{{{steps.{key}.output}}}}");
-                let text = outputs.get(&key).map(|o| o.result_text.chars().take(MAX_OUTPUT_CHARS).collect::<String>()).unwrap_or_default();
+                let text = outputs
+                    .get(&key)
+                    .map(|o| o.result_text.chars().take(MAX_OUTPUT_CHARS).collect::<String>())
+                    .unwrap_or_default();
                 (token, text)
-            }
+            },
             TemplateRef::Input(key) => {
                 (format!("{{{{inputs.{key}}}}}"), inputs.get(&key).cloned().unwrap_or_default())
-            }
+            },
         };
         out = out.replace(&token, &value);
     }
@@ -254,7 +279,8 @@ mod tests {
             step("c", &["b"], "C {{steps.b.output}}"),
             step("a", &[], "A {{inputs.topic}}"),
             step("b", &["a"], "B"),
-        ]).unwrap();
+        ])
+        .unwrap();
         let steps = parse_steps(&raw).unwrap();
         let order = validate_dag(&steps).unwrap();
         assert_eq!(order, vec!["a", "b", "c"]);
@@ -276,28 +302,52 @@ mod tests {
 
     #[test]
     fn template_refs_and_substitution() {
-        assert_eq!(find_refs("{{steps.a.output}} / {{inputs.topic}}").unwrap(), vec![
-            TemplateRef::StepOutput("a".into()), TemplateRef::Input("topic".into())
-        ]);
+        assert_eq!(
+            find_refs("{{steps.a.output}} / {{inputs.topic}}").unwrap(),
+            vec![TemplateRef::StepOutput("a".into()), TemplateRef::Input("topic".into())]
+        );
         assert_eq!(find_refs("{{steps.a.text}}").unwrap_err().code, e::WORKFLOW_STEP_INVALID);
         assert_eq!(find_refs("{{ steps.a.output }}").unwrap().len(), 1);
         let prompt = "{{inputs.topic}}→{{steps.a.output}}";
         let inputs = [("topic".into(), "盘面".into())].into_iter().collect();
-        let outputs = [("a".into(), BotWorkflowStepOutput {
-            assignment_id: "x".into(), result_text: "结论".into(),
-        })].into_iter().collect();
+        let outputs = [(
+            "a".into(),
+            BotWorkflowStepOutput { assignment_id: "x".into(), result_text: "结论".into() },
+        )]
+        .into_iter()
+        .collect();
         assert_eq!(substitute_prompt(prompt, &inputs, &outputs), "盘面→结论");
     }
 
     #[test]
     fn definition_validation_codes() {
         let steps = vec![step("a", &[], "A")];
-        assert_eq!(validate_definition("", "", "instance", None, &steps, 2, 900).unwrap_err().code, e::WORKFLOW_STEP_INVALID);
-        assert_eq!(validate_definition("wf", "", "department", None, &steps, 2, 900).unwrap_err().code, e::WORKFLOW_DEPARTMENT_REQUIRED);
-        assert_eq!(validate_definition("wf", "", "instance", None, &steps, 5, 900).unwrap_err().code, e::WORKFLOW_STEP_INVALID);
-        assert_eq!(validate_definition("wf", "", "instance", None, &steps, 2, 10).unwrap_err().code, e::WORKFLOW_STEP_INVALID);
-        assert_eq!(validate_definition("wf", "", "department", Some("dept"), &steps, 2, 900).unwrap().len(), 1);
+        assert_eq!(
+            validate_definition("", "", "instance", None, &steps, 2, 900).unwrap_err().code,
+            e::WORKFLOW_STEP_INVALID
+        );
+        assert_eq!(
+            validate_definition("wf", "", "department", None, &steps, 2, 900).unwrap_err().code,
+            e::WORKFLOW_DEPARTMENT_REQUIRED
+        );
+        assert_eq!(
+            validate_definition("wf", "", "instance", None, &steps, 5, 900).unwrap_err().code,
+            e::WORKFLOW_STEP_INVALID
+        );
+        assert_eq!(
+            validate_definition("wf", "", "instance", None, &steps, 2, 10).unwrap_err().code,
+            e::WORKFLOW_STEP_INVALID
+        );
+        assert_eq!(
+            validate_definition("wf", "", "department", Some("dept"), &steps, 2, 900)
+                .unwrap()
+                .len(),
+            1
+        );
         let bad = vec![step("a", &[], "{{steps.missing.output}}")];
-        assert_eq!(validate_definition("wf", "", "instance", None, &bad, 2, 900).unwrap_err().code, e::WORKFLOW_STEP_INVALID);
+        assert_eq!(
+            validate_definition("wf", "", "instance", None, &bad, 2, 900).unwrap_err().code,
+            e::WORKFLOW_STEP_INVALID
+        );
     }
 }

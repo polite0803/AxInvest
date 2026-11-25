@@ -34,17 +34,11 @@ fn bot_error(code: &str, detail: impl Into<String>) -> String {
 }
 
 fn not_found(id: &str) -> String {
-    bot_error(
-        bot_err::INPUT_REQUEST_NOT_FOUND,
-        format!("待答请求 {id} 不存在"),
-    )
+    bot_error(bot_err::INPUT_REQUEST_NOT_FOUND, format!("待答请求 {id} 不存在"))
 }
 
 fn not_pending(id: &str) -> String {
-    bot_error(
-        bot_err::INPUT_REQUEST_NOT_PENDING,
-        format!("待答请求 {id} 已回答或已失效"),
-    )
+    bot_error(bot_err::INPUT_REQUEST_NOT_PENDING, format!("待答请求 {id} 已回答或已失效"))
 }
 
 fn validate_status(status: Option<&str>) -> Result<(), String> {
@@ -156,14 +150,8 @@ pub async fn answer_bot_input_request(
     request_id: String,
     answer: String,
 ) -> Result<BotInputRequest, String> {
-    answer_inner(
-        state.harness.db(),
-        &state.agent_ask_senders,
-        Some(&app),
-        &request_id,
-        &answer,
-    )
-    .await
+    answer_inner(state.harness.db(), &state.agent_ask_senders, Some(&app), &request_id, &answer)
+        .await
 }
 
 /// 取消一条待答请求：唤醒等待方为「已取消」→ cancelled + 事件。

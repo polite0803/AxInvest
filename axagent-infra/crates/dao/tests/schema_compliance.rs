@@ -178,12 +178,7 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "bot_department_members",
-        &[
-            ("id", "TEXT"),
-            ("department_id", "TEXT"),
-            ("bot_id", "TEXT"),
-            ("joined_at", "BIGINT"),
-        ],
+        &[("id", "TEXT"), ("department_id", "TEXT"), ("bot_id", "TEXT"), ("joined_at", "BIGINT")],
     ),
     (
         "bot_departments",

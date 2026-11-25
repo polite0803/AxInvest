@@ -12,8 +12,8 @@
 //! 事件进入前端通知管线（ADR-P2-3，零新增管线）。
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use axagent_agent::{AxAgentApiClient, ChannelPermissionPrompter, SessionManager};
 use axagent_harness::resolve_base_url_for_type;
@@ -27,7 +27,7 @@ use axagent_runtime_core::{
 };
 use axagent_tools::registry::UnifiedToolRegistry;
 use axagent_tools::tools::bot_delegate::{
-    with_delegate_context, DelegateContext, DELEGATE_CONTEXT, MAX_DELEGATE_DEPTH,
+    DELEGATE_CONTEXT, DelegateContext, MAX_DELEGATE_DEPTH, with_delegate_context,
 };
 use tokio::sync::Mutex;
 
@@ -53,9 +53,7 @@ async fn build_bot_system_prompt(harness: &RuntimeHarness, bot_id: &str) -> Stri
     }
     if parts.is_empty() {
         // 无 SOUL/MEMORY 的 Bot 也给出身份边界，避免例程输出失去归属语义。
-        format!(
-            "<bot-soul>\n（Bot {bot_id} 未配置 SOUL，按通用助手身份执行本例程。）\n</bot-soul>"
-        )
+        format!("<bot-soul>\n（Bot {bot_id} 未配置 SOUL，按通用助手身份执行本例程。）\n</bot-soul>")
     } else {
         parts.join("\n\n")
     }
@@ -77,9 +75,8 @@ async fn resolve_routine_provider(
     String,
 > {
     let db = harness.db();
-    let providers = axagent_dao::repo::provider::list_providers(db)
-        .await
-        .map_err(|e| e.to_string())?;
+    let providers =
+        axagent_dao::repo::provider::list_providers(db).await.map_err(|e| e.to_string())?;
 
     let prov = match bot_provider_id {
         Some(pid) => providers
@@ -109,10 +106,7 @@ async fn resolve_routine_provider(
         base_url: Some(resolve_base_url_for_type(&prov.api_host, &prov.provider_type)),
         api_path: prov.api_path.clone(),
         proxy_config: resolve_provider_proxy(&prov.proxy_config, &settings),
-        custom_headers: prov
-            .custom_headers
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok()),
+        custom_headers: prov.custom_headers.as_ref().and_then(|s| serde_json::from_str(s).ok()),
         api_mode: None,
         conversation: None,
         previous_response_id: None,
@@ -128,11 +122,7 @@ async fn resolve_routine_provider(
 
     let model = match bot_model_id {
         Some(m) if !m.is_empty() => m.to_string(),
-        _ => prov
-            .models
-            .first()
-            .map(|m| m.model_id.clone())
-            .unwrap_or_default(),
+        _ => prov.models.first().map(|m| m.model_id.clone()).unwrap_or_default(),
     };
 
     Ok((prov, adapter, ctx, model))
@@ -202,7 +192,14 @@ pub async fn run_bot_non_interactive_turn(
 ) -> Result<String, String> {
     let chain = DELEGATE_CONTEXT.try_with(|v| v.clone()).unwrap_or_default();
     run_bot_non_interactive_turn_with_context(
-        ctx, bot_id, bot_approval_mode, bot_provider_id, bot_model_id, prompt, task_card, chain,
+        ctx,
+        bot_id,
+        bot_approval_mode,
+        bot_provider_id,
+        bot_model_id,
+        prompt,
+        task_card,
+        chain,
     )
     .await
 }
@@ -220,24 +217,25 @@ pub async fn run_bot_non_interactive_turn_with_context(
     chain: DelegateContext,
 ) -> Result<String, String> {
     // 存在性校验（executor 已验过，此处兜底：Bot 被并发删除时不产生幽灵轮）。
-    axagent_dao::repo::bot::get_bot(ctx.harness.db(), bot_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    axagent_dao::repo::bot::get_bot(ctx.harness.db(), bot_id).await.map_err(|e| e.to_string())?;
 
     // ADR-P2-1 第 2 条：非交互源只取 Bot 档（custom -> Prompt 由映射表兜底）。
     let permission_mode = crate::bot_approval::resolve_bot_routine_level(bot_approval_mode);
 
     let mut system_prompt = build_bot_system_prompt(&ctx.harness, bot_id).await;
     if let Some(card) = task_card.filter(|c| !c.trim().is_empty()) {
-        system_prompt.push_str(&format!(
-            "\n\n<bot-delegation-task>\n{card}\n</bot-delegation-task>"
-        ));
+        system_prompt
+            .push_str(&format!("\n\n<bot-delegation-task>\n{card}\n</bot-delegation-task>"));
     }
     let (prov, adapter, mut req_ctx, model) =
         resolve_routine_provider(&ctx.harness, bot_provider_id, bot_model_id).await?;
 
     // 工具装配：例程轮恒保留；assignee 轮按 task-local 深度放行（depth=3 禁用）。
-    let round_kind = if task_card.is_some() { TurnKind::Assignee } else { TurnKind::Routine };
+    let round_kind = if task_card.is_some() {
+        TurnKind::Assignee
+    } else {
+        TurnKind::Routine
+    };
     let tool_registry = build_turn_tool_registry(round_kind, chain.depth);
 
     // 每轮新建的临时会话：execution_id 兼作 conversation_id（headless 先例同构）。
@@ -250,9 +248,8 @@ pub async fn run_bot_non_interactive_turn_with_context(
     let session_id = session.session().session_id.clone();
     req_ctx.conversation = Some(session_id.clone());
 
-    let api_client: Box<dyn ApiClient + Send> = Box::new(
-        AxAgentApiClient::new(adapter.clone(), req_ctx.clone()).with_model(model.clone()),
-    );
+    let api_client: Box<dyn ApiClient + Send> =
+        Box::new(AxAgentApiClient::new(adapter.clone(), req_ctx.clone()).with_model(model.clone()));
     let tool_executor: Box<dyn axagent_harness::runtime_types::conversation::ToolExecutor + Send> =
         Box::new(tool_registry);
 
@@ -330,10 +327,7 @@ pub async fn finish_bot_routine(
         result.duration_ms
     );
     store.record_run(job_id, result).await;
-    if !recurring
-        && !store
-            .set_status(job_id, axagent_runtime_core::CronJobStatus::Disabled)
-            .await
+    if !recurring && !store.set_status(job_id, axagent_runtime_core::CronJobStatus::Disabled).await
     {
         tracing::warn!(
             "[CronScheduler] 一次性 Bot 例程 '{job_id}' 置为 Disabled 失败\
@@ -350,18 +344,26 @@ mod p2_bot_routine_tests {
     fn delegate_tool_respects_depth_cap() {
         use super::TurnKind;
         let routine = super::build_turn_tool_registry(TurnKind::Routine, 1);
-        assert!(routine.list_tools().iter().any(|n| n == "delegate_to_bot"),
-            "例程/根轮恒可发起委派");
+        assert!(
+            routine.list_tools().iter().any(|n| n == "delegate_to_bot"),
+            "例程/根轮恒可发起委派"
+        );
         for depth in [1u8, 2] {
             let assignee = super::build_turn_tool_registry(TurnKind::Assignee, depth);
-            assert!(assignee.list_tools().iter().any(|n| n == "delegate_to_bot"),
-                "depth={depth} 应可继续委派");
-            assert!(!assignee.list_tools().iter().any(|n| n == "Agent" || n == "RemoteTrigger"),
-                "P2-a 既有的防递归工具禁用不得回归");
+            assert!(
+                assignee.list_tools().iter().any(|n| n == "delegate_to_bot"),
+                "depth={depth} 应可继续委派"
+            );
+            assert!(
+                !assignee.list_tools().iter().any(|n| n == "Agent" || n == "RemoteTrigger"),
+                "P2-a 既有的防递归工具禁用不得回归"
+            );
         }
         let capped = super::build_turn_tool_registry(TurnKind::Assignee, super::MAX_DELEGATE_DEPTH);
-        assert!(!capped.list_tools().iter().any(|n| n == "delegate_to_bot"),
-            "depth=3 不得再注册委派工具");
+        assert!(
+            !capped.list_tools().iter().any(|n| n == "delegate_to_bot"),
+            "depth=3 不得再注册委派工具"
+        );
     }
 
     // ADR-P2-4：Bot 五档映射在例程路径的落点 —— 例程函数无会话参数本身就是
@@ -395,10 +397,8 @@ mod p2_bot_routine_tests {
     #[tokio::test]
     async fn finish_bot_routine_disables_one_shot_only() {
         let store = std::sync::Arc::new(axagent_runtime_core::CronJobStore::new_ephemeral());
-        let mut one_shot =
-            axagent_runtime_core::CronJob::new("一次性例程", "0 9 * * *", "p", "d");
-        let recurring_job =
-            axagent_runtime_core::CronJob::new("循环例程", "0 9 * * *", "p", "d");
+        let mut one_shot = axagent_runtime_core::CronJob::new("一次性例程", "0 9 * * *", "p", "d");
+        let recurring_job = axagent_runtime_core::CronJob::new("循环例程", "0 9 * * *", "p", "d");
         one_shot.recurring = false;
         assert!(recurring_job.recurring);
         store.add(one_shot.clone()).await;

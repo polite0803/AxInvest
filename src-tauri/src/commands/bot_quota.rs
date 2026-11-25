@@ -47,16 +47,16 @@ fn validate_input(input: &BotDepartmentQuotaInput) -> Result<(), String> {
     ];
     for (field, value, min, max) in checks {
         if value < min || value > max {
-            return Err(invalid(
-                field,
-                format!("{field} 必须在 {min}..{max} 之间，实得 {value}"),
-            ));
+            return Err(invalid(field, format!("{field} 必须在 {min}..{max} 之间，实得 {value}")));
         }
     }
     Ok(())
 }
 
-async fn ensure_department(db: &axagent_dao::DatabaseConnection, department_id: &str) -> Result<(), String> {
+async fn ensure_department(
+    db: &axagent_dao::DatabaseConnection,
+    department_id: &str,
+) -> Result<(), String> {
     dept_repo::get_department(db, department_id).await.map(|_| ()).map_err(map_error)
 }
 

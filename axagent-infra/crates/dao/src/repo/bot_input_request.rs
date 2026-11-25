@@ -57,7 +57,11 @@ pub async fn create(db: &DatabaseConnection, req: &BotInputRequest) -> Result<Bo
         .map_err(|e| AxAgentError::Validation(format!("input options 序列化失败: {e}")))?;
     let now = now_ms();
     let am = bot_input_requests::ActiveModel {
-        id: Set(if req.id.is_empty() { gen_id() } else { req.id.clone() }),
+        id: Set(if req.id.is_empty() {
+            gen_id()
+        } else {
+            req.id.clone()
+        }),
         ask_id: Set(req.ask_id.clone()),
         conversation_id: Set(req.conversation_id.clone()),
         bot_id: Set(req.bot_id.clone()),
@@ -77,9 +81,7 @@ pub async fn create(db: &DatabaseConnection, req: &BotInputRequest) -> Result<Bo
         created_at: Set(now),
         updated_at: Set(now),
     };
-    let inserted = bot_input_requests::Entity::insert(am)
-        .exec_with_returning(db)
-        .await?;
+    let inserted = bot_input_requests::Entity::insert(am).exec_with_returning(db).await?;
     to_dto(inserted)
 }
 
@@ -90,7 +92,10 @@ pub async fn get_by_id(db: &DatabaseConnection, id: &str) -> Result<Option<BotIn
 }
 
 /// 按 `ask_id` 读一行（答复投递与去重的主路径）。
-pub async fn get_by_ask_id(db: &DatabaseConnection, ask_id: &str) -> Result<Option<BotInputRequest>> {
+pub async fn get_by_ask_id(
+    db: &DatabaseConnection,
+    ask_id: &str,
+) -> Result<Option<BotInputRequest>> {
     let row = bot_input_requests::Entity::find()
         .filter(bot_input_requests::Column::AskId.eq(ask_id))
         .one(db)
@@ -99,7 +104,10 @@ pub async fn get_by_ask_id(db: &DatabaseConnection, ask_id: &str) -> Result<Opti
 }
 
 /// 过滤查询：四项全可选，按 `created_at DESC`、`id DESC` 稳定排序。
-pub async fn list(db: &DatabaseConnection, filter: &BotInputRequestFilter) -> Result<Vec<BotInputRequest>> {
+pub async fn list(
+    db: &DatabaseConnection,
+    filter: &BotInputRequestFilter,
+) -> Result<Vec<BotInputRequest>> {
     let mut query = bot_input_requests::Entity::find();
     if let Some(v) = filter.conversation_id.as_deref() {
         query = query.filter(bot_input_requests::Column::ConversationId.eq(v));
@@ -134,22 +142,14 @@ pub async fn transition(
     now: i64,
 ) -> Result<bool> {
     if !input_status::is_terminal(to_status) {
-        return Err(AxAgentError::Validation(format!(
-            "待答请求只能迁移到终态，收到 {to_status}"
-        )));
+        return Err(AxAgentError::Validation(format!("待答请求只能迁移到终态，收到 {to_status}")));
     }
     let mut update = bot_input_requests::Entity::update_many()
-        .col_expr(
-            bot_input_requests::Column::Status,
-            Expr::value(to_status.to_string()),
-        )
+        .col_expr(bot_input_requests::Column::Status, Expr::value(to_status.to_string()))
         .col_expr(bot_input_requests::Column::UpdatedAt, Expr::value(now));
     if let Some(text) = answer {
         update = update
-            .col_expr(
-                bot_input_requests::Column::Answer,
-                Expr::value(text.to_string()),
-            )
+            .col_expr(bot_input_requests::Column::Answer, Expr::value(text.to_string()))
             .col_expr(bot_input_requests::Column::AnsweredAt, Expr::value(now));
     }
     let res = update
@@ -224,9 +224,7 @@ mod tests {
     async fn create_persists_pending_and_roundtrips_options() {
         let h = pool().await;
         let db = &h.conn;
-        let created = create(db, &row("ask-1", "conv-1", Some("bot-1")))
-            .await
-            .expect("create");
+        let created = create(db, &row("ask-1", "conv-1", Some("bot-1"))).await.expect("create");
         assert!(!created.id.is_empty());
         assert_eq!(created.status, input_status::PENDING);
         assert_eq!(created.options, vec!["A".to_string(), "B".to_string()]);
@@ -291,23 +289,36 @@ mod tests {
         let r = create(db, &row("ask-t", "conv-1", Some("bot-1"))).await.expect("create");
         let now = now_ms();
 
-        assert!(transition(db, &r.id, input_status::PENDING, input_status::ANSWERED, Some("A"), now)
-            .await
-            .expect("answer"));
+        assert!(
+            transition(db, &r.id, input_status::PENDING, input_status::ANSWERED, Some("A"), now)
+                .await
+                .expect("answer")
+        );
         let answered = get_by_id(db, &r.id).await.expect("read").expect("row");
         assert_eq!(answered.status, input_status::ANSWERED);
         assert_eq!(answered.answer.as_deref(), Some("A"));
         assert_eq!(answered.answered_at, Some(now));
 
-        let again = transition(db, &r.id, input_status::PENDING, input_status::ANSWERED, Some("B"), now + 1)
-            .await
-            .expect("second answer");
+        let again = transition(
+            db,
+            &r.id,
+            input_status::PENDING,
+            input_status::ANSWERED,
+            Some("B"),
+            now + 1,
+        )
+        .await
+        .expect("second answer");
         assert!(!again, "terminal row must not transition again");
         let still = get_by_id(db, &r.id).await.expect("read").expect("row");
         assert_eq!(still.answer.as_deref(), Some("A"), "first answer wins");
 
         // 非终态目标被拒绝（终态不可回退的入口校验）。
-        assert!(transition(db, &r.id, input_status::ANSWERED, input_status::PENDING, None, now).await.is_err());
+        assert!(
+            transition(db, &r.id, input_status::ANSWERED, input_status::PENDING, None, now)
+                .await
+                .is_err()
+        );
     }
 
     /// 重启清扫只动 pending：answered/cancelled 保持原样。
@@ -318,9 +329,16 @@ mod tests {
         let p1 = create(db, &row("p1", "conv-1", Some("bot-1"))).await.expect("p1");
         let p2 = create(db, &row("p2", "conv-1", Some("bot-1"))).await.expect("p2");
         let done = create(db, &row("done", "conv-1", Some("bot-1"))).await.expect("done");
-        transition(db, &done.id, input_status::PENDING, input_status::ANSWERED, Some("ok"), now_ms())
-            .await
-            .expect("answer done");
+        transition(
+            db,
+            &done.id,
+            input_status::PENDING,
+            input_status::ANSWERED,
+            Some("ok"),
+            now_ms(),
+        )
+        .await
+        .expect("answer done");
 
         let swept = expire_stale(db, now_ms() + 1).await.expect("sweep");
         assert_eq!(swept, 2, "two pending rows swept");
@@ -346,9 +364,16 @@ mod tests {
         create(db, &row("x2", "conv-1", Some("bot-1"))).await.expect("x2");
         create(db, &row("y1", "conv-1", Some("bot-2"))).await.expect("y1");
         let answered = create(db, &row("x3", "conv-1", Some("bot-1"))).await.expect("x3");
-        transition(db, &answered.id, input_status::PENDING, input_status::ANSWERED, Some("v"), now_ms())
-            .await
-            .expect("answer");
+        transition(
+            db,
+            &answered.id,
+            input_status::PENDING,
+            input_status::ANSWERED,
+            Some("v"),
+            now_ms(),
+        )
+        .await
+        .expect("answer");
 
         assert_eq!(count_pending_by_bot(db, "bot-1").await.expect("bot1"), 2);
         assert_eq!(count_pending_by_bot(db, "bot-2").await.expect("bot2"), 1);

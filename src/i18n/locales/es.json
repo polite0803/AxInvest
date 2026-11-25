@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "Tiempo de espera agotado en la ejecución del flujo de trabajo",
     "BOT_WORKFLOW_CANCEL_INVALID": "La ejecución ya ha terminado y no se puede cancelar",
     "BOT_DELEGATE_CYCLE": "La cadena de delegación contiene un ciclo",
-    "BOT_DELEGATE_MAX_DEPTH": "Se alcanzó la profundidad máxima de la cadena de delegación"
+    "BOT_DELEGATE_MAX_DEPTH": "Se alcanzó la profundidad máxima de la cadena de delegación",
+    "BOT_QUOTA_INVALID": "Valor de cuota de departamento de bot no válido",
+    "BOT_QUOTA_EXCEEDED": "Se superó la cuota de ejecución del departamento"
   },
   "errorBoundary": {
     "copied": "Copiado",

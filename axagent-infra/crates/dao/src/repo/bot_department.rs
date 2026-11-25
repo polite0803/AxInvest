@@ -10,7 +10,7 @@
 use sea_orm::prelude::Expr;
 use sea_orm::*;
 
-use axagent_entities::{bot_department_members, bot_departments};
+use axagent_entities::{bot_department_members, bot_department_quotas, bot_departments, bot_workflows};
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::types::{BotDepartment, UpdateBotDepartmentPatch};
 use axagent_harness::util_fns::{gen_id, now_ts};
@@ -124,6 +124,41 @@ pub async fn delete_department(db: &DatabaseConnection, id: &str) -> Result<()> 
         return Err(AxAgentError::NotFound(format!("BotDepartment {}", id)));
     }
     Ok(())
+}
+
+/// P4：删部门整事务（ADR-P4-1「删除部门时同事务删配额行」）。
+///
+/// 事务内依次：编排转实例归属（ADR-P3-3，定义不删）→ 清成员行 → 删配额行 →
+/// 删部门行。任一步失败整事务回滚，不会留下「部门已删、配额还在」的半截状态。
+/// 返回清掉的成员行数（命令层 IPC 契约不变）。
+pub async fn delete_department_cascade(
+    db: &DatabaseConnection,
+    department_id: &str,
+) -> Result<u64> {
+    let txn = db.begin().await?;
+    let exists = bot_departments::Entity::find_by_id(department_id).one(&txn).await?;
+    if exists.is_none() {
+        return Err(AxAgentError::NotFound(format!("BotDepartment {department_id}")));
+    }
+    bot_workflows::Entity::update_many()
+        .col_expr(bot_workflows::Column::OwnerScope, Expr::value("instance"))
+        .col_expr(bot_workflows::Column::DepartmentId, Expr::value(Option::<String>::None))
+        .col_expr(bot_workflows::Column::UpdatedAt, Expr::value(now_ts()))
+        .filter(bot_workflows::Column::DepartmentId.eq(department_id))
+        .exec(&txn)
+        .await?;
+    let members = bot_department_members::Entity::delete_many()
+        .filter(bot_department_members::Column::DepartmentId.eq(department_id))
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    bot_department_quotas::Entity::delete_many()
+        .filter(bot_department_quotas::Column::DepartmentId.eq(department_id))
+        .exec(&txn)
+        .await?;
+    bot_departments::Entity::delete_by_id(department_id).exec(&txn).await?;
+    txn.commit().await?;
+    Ok(members)
 }
 
 /// 清空部门的全部成员行（删部门级联，ADR-P2B-6）。返回清掉的行数。

@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "बॉट वर्कफ़्लो रन का समय समाप्त हो गया",
     "BOT_WORKFLOW_CANCEL_INVALID": "रन पहले ही समाप्त हो चुका है, इसे रद्द नहीं किया जा सकता",
     "BOT_DELEGATE_CYCLE": "प्रत्यायोजन श्रृंखला में चक्र है",
-    "BOT_DELEGATE_MAX_DEPTH": "प्रत्यायोजन श्रृंखला की अधिकतम गहराई तक पहुँच गई"
+    "BOT_DELEGATE_MAX_DEPTH": "प्रत्यायोजन श्रृंखला की अधिकतम गहराई तक पहुँच गई",
+    "BOT_QUOTA_INVALID": "बॉट विभाग कोटा मान अमान्य है",
+    "BOT_QUOTA_EXCEEDED": "विभाग निष्पादन कोटा पार हो गया"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",

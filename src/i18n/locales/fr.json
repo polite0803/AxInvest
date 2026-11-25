@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "Délai dépassé pour l’exécution du workflow de bot",
     "BOT_WORKFLOW_CANCEL_INVALID": "L’exécution est terminée et ne peut plus être annulée",
     "BOT_DELEGATE_CYCLE": "La chaîne de délégation contient un cycle",
-    "BOT_DELEGATE_MAX_DEPTH": "Profondeur maximale de la chaîne de délégation atteinte"
+    "BOT_DELEGATE_MAX_DEPTH": "Profondeur maximale de la chaîne de délégation atteinte",
+    "BOT_QUOTA_INVALID": "Valeur de quota de département de bot invalide",
+    "BOT_QUOTA_EXCEEDED": "Quota d’exécution du département dépassé"
   },
   "errorBoundary": {
     "copied": "Copié",

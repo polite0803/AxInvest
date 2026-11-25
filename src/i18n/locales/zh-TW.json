@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "編排執行逾時",
     "BOT_WORKFLOW_CANCEL_INVALID": "編排執行已結束，無法取消",
     "BOT_DELEGATE_CYCLE": "委派鏈出現循環",
-    "BOT_DELEGATE_MAX_DEPTH": "委派鏈深度已達上限"
+    "BOT_DELEGATE_MAX_DEPTH": "委派鏈深度已達上限",
+    "BOT_QUOTA_INVALID": "Bot 部門配額取值不合法",
+    "BOT_QUOTA_EXCEEDED": "超出部門執行配額"
   },
   "errorBoundary": {
     "copied": "已複製",

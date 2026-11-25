@@ -30,8 +30,11 @@ use axagent_dao::repo::bot_assignment as asmt_repo;
 use axagent_dao::DatabaseConnection;
 
 /// dispatch 超时预算（IPC-P2B §3，Q5 冻结值）。常量集中在本文件头部。
+/// P4 起同时是「无部门配额」时的默认值：生效值由 `bot_quota::QuotaLimits` 经
+/// `AssignmentContext` 注入（`run_assignment_inner` 按 run 封顶）。
 pub const DISPATCH_TIMEOUT_SECS: u64 = 300;
 /// ADR-P3-2 ④：同一 root 链每层在途 dispatch 上限（编排并发预算另算）。
+/// P4 起同时是默认值：部门配额可把它收紧，见 `bot_quota::AssignmentContext`。
 pub const MAX_IN_FLIGHT_PER_DEPTH: i64 = 2;
 
 /// 事件出口：生产接 AppHandle::emit；测试传闭包收状态序列，避免 Tauri 测试壳。
@@ -182,6 +185,9 @@ pub async fn run_assignment_inner(
     };
     sink(&running);
     completion(&running);
+
+    // P4：workflow 子树内按 run 配额封顶单轮超时（无登记的纯委派链原样不变）。
+    let timeout = crate::bot_quota::cap_turn_timeout(running.workflow_run_id.as_deref(), timeout);
 
     let bot_name = axagent_dao::repo::bot::get_bot(db, &running.assignee_bot_id)
         .await

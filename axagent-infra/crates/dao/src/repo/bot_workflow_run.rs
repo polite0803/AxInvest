@@ -4,7 +4,7 @@
 
 use sea_orm::*;
 
-use axagent_entities::bot_workflow_runs;
+use axagent_entities::{bot_workflow_runs, bot_workflows};
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::types::{
     BotWorkflowRun, BotWorkflowRunContext, BotWorkflowRunPatch, CreateBotWorkflowRun,
@@ -101,6 +101,32 @@ pub async fn list_runs(
 }
 
 /// 检查定义是否存在未结束的 run（改/删定义前置校验）。
+/// 部门同时在跑的编排数（P4 配额 `max_concurrent_runs`）：该部门名下所有编排的
+/// 非终态 run。`exclude_run_id` 供 start_run 复核时排除本 run 自身。
+pub async fn count_active_runs_by_department(
+    db: &DatabaseConnection,
+    department_id: &str,
+    exclude_run_id: Option<&str>,
+) -> Result<u64> {
+    let workflow_ids: Vec<String> = bot_workflows::Entity::find()
+        .filter(bot_workflows::Column::DepartmentId.eq(department_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|w| w.id)
+        .collect();
+    if workflow_ids.is_empty() {
+        return Ok(0);
+    }
+    let mut query = bot_workflow_runs::Entity::find()
+        .filter(bot_workflow_runs::Column::WorkflowId.is_in(workflow_ids))
+        .filter(bot_workflow_runs::Column::Status.is_not_in(status::TERMINAL.iter().copied()));
+    if let Some(run_id) = exclude_run_id {
+        query = query.filter(bot_workflow_runs::Column::Id.ne(run_id));
+    }
+    Ok(query.count(db).await?)
+}
+
 pub async fn has_active_runs(db: &DatabaseConnection, workflow_id: &str) -> Result<bool> {
     let n = bot_workflow_runs::Entity::find()
         .filter(bot_workflow_runs::Column::WorkflowId.eq(workflow_id))

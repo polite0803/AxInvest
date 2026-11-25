@@ -116,11 +116,16 @@ pub async fn check_chain_constraints(
     let in_flight = asmt_repo::count_in_flight_dispatch_at_depth(db, &parent.root_id, depth)
         .await
         .map_err(map_asmt_error)?;
-    if in_flight >= 2 {
+    // P4：部门配额可把每层在途上限收紧到 1..4；无配额（纯委派/实例级）沿用 P3 的 2。
+    let depth_cap = crate::bot_quota::AssignmentContext::limits_for_run(
+        input.workflow_run_id.as_deref(),
+    )
+    .max_in_flight_per_depth;
+    if in_flight >= depth_cap as i64 {
         return Err(validation_error(
             bot_err::DELEGATE_BUSY,
             "assigneeBotId",
-            format!("root {} depth {depth} 在途已达 2", parent.root_id),
+            format!("root {} depth {depth} 在途已达 {depth_cap}", parent.root_id),
         ));
     }
     // 链总预算从根开始计，不逐层重置。

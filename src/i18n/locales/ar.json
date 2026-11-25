@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "انتهت مهلة تشغيل سير عمل الروبوت",
     "BOT_WORKFLOW_CANCEL_INVALID": "لقد انتهى التشغيل ولا يمكن إلغاؤه",
     "BOT_DELEGATE_CYCLE": "توجد دورة في سلسلة التفويض",
-    "BOT_DELEGATE_MAX_DEPTH": "تم الوصول إلى الحد الأقصى لعمق سلسلة التفويض"
+    "BOT_DELEGATE_MAX_DEPTH": "تم الوصول إلى الحد الأقصى لعمق سلسلة التفويض",
+    "BOT_QUOTA_INVALID": "قيمة حصة قسم البوت غير صالحة",
+    "BOT_QUOTA_EXCEEDED": "تم تجاوز حصة تشغيل القسم"
   },
   "errorBoundary": {
     "copied": "تم النسخ",

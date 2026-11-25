@@ -2467,6 +2467,8 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                     let workflow = axagent_dao::repo::bot_workflow::get_workflow(&db, &workflow_id)
                         .await
                         .map_err(|e| e.to_string())?;
+                    // P4 配额（ADR-P4-2）：超限时本次触发直接失败入 history，不创建 run。
+                    crate::bot_quota::check_run_allowed(&db, &workflow, None).await?;
                     let conv = crate::commands::scheduled_task::create_bot_workflow_persistent_conversation(&db, &workflow)
                         .await?;
                     let queued = axagent_dao::repo::bot_workflow_run::create_run(

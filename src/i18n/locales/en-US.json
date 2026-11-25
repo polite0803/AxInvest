@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "Bot workflow run timed out",
     "BOT_WORKFLOW_CANCEL_INVALID": "Bot workflow run has finished and cannot be cancelled",
     "BOT_DELEGATE_CYCLE": "Delegation chain contains a cycle",
-    "BOT_DELEGATE_MAX_DEPTH": "Delegation chain depth limit reached"
+    "BOT_DELEGATE_MAX_DEPTH": "Delegation chain depth limit reached",
+    "BOT_QUOTA_INVALID": "Invalid bot department quota value",
+    "BOT_QUOTA_EXCEEDED": "Exceeds the department run quota"
   },
   "errorBoundary": {
     "copied": "Copied",

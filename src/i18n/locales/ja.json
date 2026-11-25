@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "Bot ワークフローの実行がタイムアウトしました",
     "BOT_WORKFLOW_CANCEL_INVALID": "実行はすでに終了しており、キャンセルできません",
     "BOT_DELEGATE_CYCLE": "委任チェーンに循環があります",
-    "BOT_DELEGATE_MAX_DEPTH": "委任チェーンの深さが上限に達しました"
+    "BOT_DELEGATE_MAX_DEPTH": "委任チェーンの深さが上限に達しました",
+    "BOT_QUOTA_INVALID": "Bot 部門クォータの値が不正です",
+    "BOT_QUOTA_EXCEEDED": "部門の実行クォータを超えています"
   },
   "errorBoundary": {
     "copied": "コピーしました",

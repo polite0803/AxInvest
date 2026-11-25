@@ -63,6 +63,7 @@ fn emit_run(app: Option<&AppHandle>, run: &BotWorkflowRun) {
 
 fn code_in(raw: &str) -> Option<&'static str> {
     const CODES: &[&str] = &[
+        bot_err::QUOTA_EXCEEDED,
         bot_err::WORKFLOW_STEP_BOT_MISSING,
         bot_err::WORKFLOW_MEMBER_CHANGED,
         bot_err::WORKFLOW_TIMEOUT,
@@ -191,6 +192,24 @@ pub async fn start_run(
         .await?;
         return Ok(run_repo::get_run(db, run_id).await.map_err(|e| e.to_string())?);
     }
+    // P4 配额（ADR-P4-8）：run 创建时解析一次，登记到 AssignmentContext；
+    // 排除本 run 自身后复核部门同时在跑数（手工触发已在命令层查过一次，
+    // 这里覆盖 cron/其他入口）。实例级编排/纯委派零 DB 读。
+    let limits = match crate::bot_quota::check_run_allowed(db, &workflow, Some(&run.id)).await {
+        Ok(limits) => limits,
+        Err(e) => {
+            fail_run(
+                db,
+                app.as_ref(),
+                &run,
+                code_in(&e).unwrap_or(bot_err::QUOTA_EXCEEDED),
+                &e,
+            )
+            .await?;
+            return Ok(run_repo::get_run(db, run_id).await.map_err(|e| e.to_string())?);
+        },
+    };
+    crate::bot_quota::AssignmentContext::install(&run.id, limits);
 
     let anchor = axagent_dao::repo::message::create_message(
         db,
@@ -376,7 +395,12 @@ pub async fn on_assignment_completed(
     )
     .await
     {
-        Ok(updated) => emit_run(app, &updated),
+        Ok(updated) => {
+            emit_run(app, &updated);
+            if run_repo::status::is_terminal(next_status) {
+                crate::bot_quota::AssignmentContext::remove(run_id);
+            }
+        },
         Err(e) => tracing::warn!(run_id, error = %e, "run 上下文更新失败"),
     }
     // 通知复用 P2-a 桌面管线；run 级不另发通知。
@@ -458,6 +482,7 @@ pub async fn fail_run(
     .map_err(|e| e.to_string())?;
     emit_run(app, &patched);
     notifier(&run.id).notify_one();
+    crate::bot_quota::AssignmentContext::remove(&run.id);
     Ok(patched)
 }
 
@@ -509,6 +534,7 @@ pub async fn cancel_run(
     .map_err(|e| e.to_string())?;
     emit_run(app, &patched);
     notifier(run_id).notify_one();
+    crate::bot_quota::AssignmentContext::remove(run_id);
     Ok(patched)
 }
 
@@ -521,8 +547,9 @@ async fn orchestrate(
 ) {
     let run_id = run.id.clone();
     let notify = notifier(&run_id);
+    let limits = crate::bot_quota::AssignmentContext::limits_for_run(Some(&run_id));
     let deadline = tokio::time::Instant::now()
-        + Duration::from_secs(workflow.total_timeout_secs.max(1) as u64);
+        + Duration::from_secs(limits.total_timeout_secs.max(1) as u64);
     let mut launched: HashSet<String> = HashSet::new();
 
     loop {
@@ -530,6 +557,7 @@ async fn orchestrate(
             return;
         };
         if run_repo::status::is_terminal(&current.status) {
+            crate::bot_quota::AssignmentContext::remove(&run_id);
             return;
         }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -540,7 +568,7 @@ async fn orchestrate(
                 app.as_ref(),
                 &current,
                 bot_err::WORKFLOW_TIMEOUT,
-                &format!("编排总时长超过 {} 秒", workflow.total_timeout_secs),
+                &format!("编排总时长超过 {} 秒", limits.total_timeout_secs),
             )
             .await
             {
@@ -564,7 +592,7 @@ async fn orchestrate(
             .filter(|s| !settled(&s.step_key) && !launched.contains(&s.step_key))
             .filter(|s| s.depends_on.iter().all(|dep| settled(dep)))
             .collect();
-        let capacity = (workflow.max_concurrency as usize).saturating_sub(in_flight);
+        let capacity = (limits.max_concurrency as usize).saturating_sub(in_flight);
         for step in ready.into_iter().take(capacity) {
             let prompt = crate::bot_workflow_steps::substitute_prompt(
                 &step.prompt_template,
@@ -627,6 +655,7 @@ async fn orchestrate(
             } else if let Ok(final_run) = run_repo::get_run(&db, &run_id).await {
                 emit_run(app.as_ref(), &final_run);
             }
+            crate::bot_quota::AssignmentContext::remove(&run_id);
             return;
         }
 

@@ -125,6 +125,17 @@ pub async fn create_inner(
     } else {
         None
     };
+    // P4 配额（ADR-P4-2）：部门作用域且存在配额行时，定义值超限直接拒绝。
+    if let Some(dept_id) = dept {
+        crate::bot_quota::check_definition_allowed(
+            db,
+            dept_id,
+            input.max_concurrency,
+            input.total_timeout_secs,
+            &input.steps,
+        )
+        .await?;
+    }
     validate_bot_refs(db, &input.steps, dept).await?;
     workflow_repo::create_workflow(db, input)
         .await
@@ -187,6 +198,18 @@ pub async fn update_inner(
         max_concurrency,
         total_timeout_secs,
     )?;
+    if owner_scope == "department" {
+        if let Some(dept_id) = department_id.as_deref() {
+            crate::bot_quota::check_definition_allowed(
+                db,
+                dept_id,
+                max_concurrency,
+                total_timeout_secs,
+                &steps,
+            )
+            .await?;
+        }
+    }
     validate_bot_refs(db, &steps, department_id.as_deref()).await?;
 
     workflow_repo::update_workflow(
@@ -310,6 +333,8 @@ pub async fn run_bot_workflow(
     let Some(conversation_id) = requester_conversation_id.filter(|v| !v.trim().is_empty()) else {
         return Err(response("ERR_VALIDATION", "requesterConversationId", "手工触发必须指定线程"));
     };
+    // P4 配额（ADR-P4-2）：定义不超配额 + 部门同时在跑编排数未达上限。
+    crate::bot_quota::check_run_allowed(db, &workflow, None).await?;
     let queued = run_repo::create_run(
         db,
         &CreateBotWorkflowRun {

@@ -3125,7 +3125,9 @@
     "BOT_WORKFLOW_TIMEOUT": "Zeitüberschreitung des Bot-Workflow-Laufs",
     "BOT_WORKFLOW_CANCEL_INVALID": "Der Bot-Workflow-Lauf ist bereits beendet und kann nicht abgebrochen werden",
     "BOT_DELEGATE_CYCLE": "Delegationskette enthält einen Zyklus",
-    "BOT_DELEGATE_MAX_DEPTH": "Maximale Tiefe der Delegationskette erreicht"
+    "BOT_DELEGATE_MAX_DEPTH": "Maximale Tiefe der Delegationskette erreicht",
+    "BOT_QUOTA_INVALID": "Ungültiger Wert für das Bot-Abteilungskontingent",
+    "BOT_QUOTA_EXCEEDED": "Abteilungslaufkontingent überschritten"
   },
   "errorBoundary": {
     "copied": "Kopiert",

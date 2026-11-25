@@ -19,6 +19,7 @@ pub mod bot_routine_runner;
 pub mod bot_assignment_runner;
 pub mod bot_workflow_runner;
 pub mod bot_workflow_steps;
+pub mod bot_quota;
 mod bot_context;
 mod capability_workflow_io;
 mod commands;

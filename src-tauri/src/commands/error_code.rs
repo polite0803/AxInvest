@@ -105,6 +105,10 @@ pub mod bot {
     pub const WORKFLOW_TIMEOUT: &str = "BOT_WORKFLOW_TIMEOUT";
     /// 终态 run 取消非法（P3）
     pub const WORKFLOW_CANCEL_INVALID: &str = "BOT_WORKFLOW_CANCEL_INVALID";
+    /// 部门配额取值不合法（P4 A3）
+    pub const QUOTA_INVALID: &str = "BOT_QUOTA_INVALID";
+    /// 超出部门运行配额（P4 A2）
+    pub const QUOTA_EXCEEDED: &str = "BOT_QUOTA_EXCEEDED";
 }
 
 /// 微调训练相关错误码

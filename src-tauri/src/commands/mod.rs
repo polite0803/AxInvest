@@ -25,6 +25,7 @@ pub mod backup;
 pub mod bot;
 pub mod bot_assignment;
 pub mod bot_department;
+pub mod bot_quota;
 pub mod bot_workflow;
 pub mod branches;
 #[cfg(not(mobile))]

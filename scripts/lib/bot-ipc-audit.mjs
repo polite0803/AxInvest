@@ -17,6 +17,7 @@
  */
 
 import { decorateWithP3 } from "./bot-ipc-audit-p3-fixture.mjs";
+import { decorateWithP4 } from "./bot-ipc-audit-p4-fixture.mjs";
 
 /** P1 契约清单。顺序与 IPC.md §1 一致；任何字段变更都应先改文档再改这里。 */
 export const BOT_IPC = {
@@ -230,6 +231,9 @@ export const BOT_IPC = {
     "BOT_WORKFLOW_STEP_BOT_MISSING",
     "BOT_WORKFLOW_TIMEOUT",
     "BOT_WORKFLOW_CANCEL_INVALID",
+    // P4（IPC-P4 §4）：配额错误码 ×2（待答错误码 ×3 由 B3 追加）
+    "BOT_QUOTA_INVALID",
+    "BOT_QUOTA_EXCEEDED",
   ],
   /** IPC.md §6：P1 不新增事件；P2-b / P3 冻结事件为例外（见下方白名单）。 */
   forbiddenEventPrefix: "bot-",
@@ -602,10 +606,12 @@ export function auditBotIpc(sources) {
   const ALLOWED_BOT_EVENTS = new Set([
     "bot-assignment-updated", // IPC-P2B §5
     "bot-workflow-run-updated", // IPC-P3 §3
+    "bot-input-request-updated", // IPC-P4 §3（P4-b）
   ]);
   const ALLOWED_BOT_VARIANTS = new Set([
     "BotAssignmentUpdated", // IPC-P2B §5
     "BotWorkflowRunUpdated", // IPC-P3 §3
+    "BotInputRequestUpdated", // IPC-P4 §3（P4-b）
   ]);
   const eventSources = [
     ["event_names.rs", sources.eventsEnum ?? ""],
@@ -859,6 +865,139 @@ export function auditBotIpc(sources) {
     }
   }
 
+  // ── P4 段（IPC-P4 §1/§2/§3）：配额 3 命令 + DTO + 超限出口 + agent_respond_ask ──
+  // 待答切片（list/answer/cancel 3 命令 + 事件 + DTO）随 B3 卡接入：`p4.inputRs`
+  // 缺省即跳过，保证 P4-a / P4-b 两条切片能独立收口（ADR-P4-7）。
+  const p4 = sources.p4;
+  if (p4) {
+    const P4_QUOTA_COMMANDS = [
+      ["get_bot_department_quota", "bot_quota"],
+      ["set_bot_department_quota", "bot_quota"],
+      ["reset_bot_department_quota", "bot_quota"],
+    ];
+    for (const [name] of P4_QUOTA_COMMANDS) {
+      if (!(p4.quotaRs ?? "").includes("pub async fn " + name + "(")) {
+        errors.push("[P4] 缺命令 " + name + "（commands/bot_quota.rs 中无 fn 定义）");
+      }
+      if (!(sources.registerRs ?? "").includes("commands::bot_quota::" + name + ",")) {
+        errors.push("[P4] " + name + " 未出现在 register_commands.rs（两步注册缺一步）");
+      }
+    }
+
+    const p4StructBody = (src, header) => {
+      const start = src.indexOf(header);
+      if (start < 0) return null;
+      const end = src.indexOf("\n}", start);
+      return end < 0 ? null : src.slice(start, end);
+    };
+    const P4_QUOTA_FIELDS = [
+      "department_id", "max_concurrency", "total_timeout_secs", "max_steps",
+      "max_in_flight_per_depth", "step_timeout_secs", "max_concurrent_runs",
+      "is_default", "updated_at",
+    ];
+    const P4_QUOTA_INPUT_FIELDS = P4_QUOTA_FIELDS
+      .filter((f) => f !== "is_default" && f !== "updated_at");
+    for (const [dto, fields] of [
+      ["BotDepartmentQuota", P4_QUOTA_FIELDS],
+      ["BotDepartmentQuotaInput", P4_QUOTA_INPUT_FIELDS],
+    ]) {
+      const rust = p4StructBody(sources.typesRs ?? "", "pub struct " + dto + " {");
+      if (!rust) {
+        errors.push("[P4] harness types/bot.rs 缺 " + dto + " 结构（IPC-P4 §2）");
+      } else {
+        const missing = fields.filter((f) => !rust.includes(f + ":"));
+        if (missing.length) {
+          errors.push("[P4] " + dto + " 缺字段: " + missing.join(", "));
+        }
+      }
+      // TS 镜像由前端负责（本仓其余线并发写 src/types/bot.ts）：缺失只告警，
+      // 一旦存在就按 camelCase 字段核对。
+      const tsNames = [dto + "Dto", dto];
+      const ts = tsNames
+        .map((n) => p4StructBody(sources.typesTs ?? "", "export interface " + n + " {"))
+        .find(Boolean);
+      if (!ts) {
+        warnings.push("[P4] src/types/bot.ts 尚无 " + dto + " 镜像（前端负责，落地后自动核对）");
+      } else {
+        const camel = fields.map((f) => f.replace(/_([a-z])/g, (_, c) => c.toUpperCase()));
+        const tsMissing = camel.filter((f) => !ts.includes(f + ":"));
+        if (tsMissing.length) {
+          errors.push("[P4] 前端 " + dto + " 缺 camelCase 字段: " + tsMissing.join(", "));
+        }
+      }
+    }
+
+    if (!(p4.quotaRs ?? "").includes("BOT_QUOTA_INVALID")) {
+      errors.push("[P4] set_bot_department_quota 缺 BOT_QUOTA_INVALID 范围校验（IPC-P4 §1）");
+    }
+    if (!(p4.quotaEnforceRs ?? "").includes("BOT_QUOTA_EXCEEDED")) {
+      errors.push("[P4] 缺 BOT_QUOTA_EXCEEDED 出口（定义/触发超限必须可见拒绝，ADR-P4-2）");
+    }
+
+    // IPC-P4 §1：agent_respond_ask 签名与返回类型不变（通用聊天零回归）。
+    const askFn = parseFns(p4.agentRs ?? "").find((f) => f.name === "agent_respond_ask");
+    if (!askFn) {
+      errors.push("[P4] agent_respond_ask 不存在（IPC-P4 §1 修改项，不得误删）");
+    } else {
+      const names = askFn.params.map((p) => p.name);
+      const flat = names.includes("ask_id") && names.includes("answer");
+      const boxed = names.includes("request");
+      if (!flat && !boxed) {
+        errors.push("[P4] agent_respond_ask 入参丢了 askId/answer（签名不得变更）");
+      }
+      if (!askFn.returns || normalizeType(askFn.returns) !== "Result<(),String>") {
+        errors.push("[P4] agent_respond_ask 返回类型变了（必须是 Result<(), String>）");
+      }
+    }
+
+    if (p4.inputRs !== undefined) {
+      const P4_INPUT_COMMANDS = [
+        "list_bot_input_requests",
+        "answer_bot_input_request",
+        "cancel_bot_input_request",
+      ];
+      for (const name of P4_INPUT_COMMANDS) {
+        if (!(p4.inputRs ?? "").includes("pub async fn " + name + "(")) {
+          errors.push("[P4-b] 缺命令 " + name + "（commands/bot_input.rs 中无 fn 定义）");
+        }
+        if (!(sources.registerRs ?? "").includes("commands::bot_input::" + name + ",")) {
+          errors.push("[P4-b] " + name + " 未出现在 register_commands.rs（两步注册缺一步）");
+        }
+      }
+      const P4_INPUT_FIELDS = [
+        "id", "ask_id", "conversation_id", "bot_id", "workflow_run_id", "assignment_id",
+        "origin", "question", "options", "status", "answer", "answered_at", "expires_at",
+        "created_at", "updated_at",
+      ];
+      const rust = p4StructBody(sources.typesRs ?? "", "pub struct BotInputRequest {");
+      if (!rust) {
+        errors.push("[P4-b] harness types/bot.rs 缺 BotInputRequest 结构（IPC-P4 §2）");
+      } else {
+        const missing = P4_INPUT_FIELDS.filter((f) => !rust.includes(f + ":"));
+        if (missing.length) {
+          errors.push("[P4-b] BotInputRequest 缺字段: " + missing.join(", "));
+        }
+      }
+      const helper = p4.inputHelperRs ?? "";
+      for (const status of ["pending", "answered", "expired", "cancelled"]) {
+        if (!helper.includes('"' + status + '"')) {
+          errors.push('[P4-b] 待答状态机缺 "' + status + '"（IPC-P4 §2 值域）');
+        }
+      }
+      if (!(sources.eventsEnum ?? "").includes("BotInputRequestUpdated")) {
+        errors.push("[P4-b] IpcEventName 缺 BotInputRequestUpdated（IPC-P4 §3）");
+      }
+      if (!(sources.eventsTs ?? "").includes('"bot-input-request-updated"')) {
+        errors.push('[P4-b] 生成物 events.ts 缺 "bot-input-request-updated"');
+      }
+      const emitters = [p4.inputRs, p4.inputHelperRs, p4.agentRs]
+        .map((v) => v ?? "").join("\n");
+      if (!emitters.includes("BotInputRequestUpdated.as_str()")) {
+        errors.push('[P4-b] 无 "bot-input-request-updated" 发射点（落库/答复/超时/取消至少一处）');
+      }
+    }
+  }
+
   return { errors, warnings };
 }
 
@@ -950,7 +1089,7 @@ function generateValidSources() {
 export function botSelftest() {
   const cases = [];
   const add = (name, mutate, expectedPattern, kind = "errors") => {
-    const sources = decorateWithP3(generateValidSources());
+    const sources = decorateWithP4(decorateWithP3(generateValidSources()));
     mutate(sources);
     const { errors, warnings } = auditBotIpc(sources);
     const pool = kind === "warnings" ? warnings : errors;
@@ -964,7 +1103,7 @@ export function botSelftest() {
 
   // 正控：未破坏时必须 0 错（否则所有破坏都「命中」= 假绿）
   {
-    const { errors } = auditBotIpc(decorateWithP3(generateValidSources()));
+    const { errors } = auditBotIpc(decorateWithP4(decorateWithP3(generateValidSources())));
     cases.push({
       name: "正控：完整契约 ⇒ 0 错",
       pass: errors.length === 0,
@@ -1055,6 +1194,26 @@ export function botSelftest() {
   add("P3 事件变体缺失", (s) => {
     s.eventsEnum = s.eventsEnum.replace("BotWorkflowRunUpdated,", "");
   }, /IpcEventName 缺 BotWorkflowRunUpdated/);
+
+  add("P4 缺命令 get_bot_department_quota", (s) => {
+    s.p4.quotaRs = s.p4.quotaRs.replace("pub async fn get_bot_department_quota", "pub async fn removed_quota_get");
+  }, /\[P4\] 缺命令 get_bot_department_quota/);
+
+  add("P4 配额命令漏注册 set_bot_department_quota", (s) => {
+    s.registerRs = s.registerRs.replace(/\s*commands::bot_quota::set_bot_department_quota,/, "");
+  }, /\[P4\] set_bot_department_quota 未出现在 register_commands/);
+
+  add("P4 配额 DTO 缺字段 max_steps", (s) => {
+    s.typesRs = s.typesRs.replace("    pub max_steps: String,\n", "    pub max_steps_v2: String,\n");
+  }, /\[P4\] BotDepartmentQuota 缺字段: max_steps/);
+
+  add("P4 agent_respond_ask 返回类型漂移", (s) => {
+    s.p4.agentRs = s.p4.agentRs.replace("-> Result<(), String>", "-> Result<bool, String>");
+  }, /\[P4\] agent_respond_ask 返回类型变了/);
+
+  add("P4 超限出口丢失（静默夹紧）", (s) => {
+    s.p4.quotaEnforceRs = s.p4.quotaEnforceRs.replace("BOT_QUOTA_EXCEEDED", "BOT_QUOTA_SOFT_CAP");
+  }, /\[P4\] 缺 BOT_QUOTA_EXCEEDED 出口/);
 
   const failed = cases.filter((c) => !c.pass);
   return { cases, failed };

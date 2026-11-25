@@ -812,6 +812,20 @@ function checkBotContracts() {
       delegateRs: existsSync(join(ROOT, "axagent-runtime", "crates", "tools", "src", "tools", "bot_delegate.rs"))
         ? read(join(ROOT, "axagent-runtime", "crates", "tools", "src", "tools", "bot_delegate.rs")) : "",
     },
+    // P4-a（IPC-P4 §1/§2）：3 配额命令 + 2 DTO + 超限出口 + agent_respond_ask 签名不变。
+    // P4-b 输入请求命令随 B3 卡接入（p4.inputRs / p4.inputHelperRs），未接入时自动跳过。
+    p4: {
+      quotaRs: existsSync(join(SRC_TAURI, "src", "commands", "bot_quota.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "bot_quota.rs")) : "",
+      quotaEnforceRs: existsSync(join(SRC_TAURI, "src", "bot_quota.rs"))
+        ? read(join(SRC_TAURI, "src", "bot_quota.rs")) : "",
+      agentRs: existsSync(join(SRC_TAURI, "src", "commands", "agent", "mod.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "agent", "mod.rs")) : "",
+      inputRs: existsSync(join(SRC_TAURI, "src", "commands", "bot_input.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "bot_input.rs")) : undefined,
+      inputHelperRs: existsSync(join(SRC_TAURI, "src", "bot_input_request.rs"))
+        ? read(join(SRC_TAURI, "src", "bot_input_request.rs")) : undefined,
+    },
   });
   console.log(`
 [BOT] Bot P1 IPC 契约：errors=${result.errors.length} warnings=${result.warnings.length}`);

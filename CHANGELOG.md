@@ -1,6 +1,85 @@
 # Changelog
 
 All notable changes to AxAgent will be documented in this file.
+## [v3.1.0] - 2026-11-25
+
+### ✨ New Features
+- 插件源码迁出主仓（独立仓钉版取源 + 删除 18 个副本 + 门禁转硬）
+- 新增 Bot 侧栏、编辑器、SOUL/记忆面板与按 Bot 归属的线程
+- Bot 归属层 P1 后端（实体 / DAO / 9 命令 / SOUL·MEMORY 注入）
+- 启停事件广播、插件页一等路由与 stock 命令外迁（§215/T3 切片）
+- T1' CronJob 加 botId/timezone JSON 字段 + 时区化档期计算
+- P2-a T4' Bot 例程 UI 与通知 botId 维度
+- P2-a T5' IPC 命令层（Bot 例程命令 + botId/timezone 透传 + 新错误码）
+- P2-a T2' Bot 例程执行分支（cron executor botId 路由 + headless 轮 + 删除级联）
+- P2-b T1'' 三实体 + DAO + SCHEMA 登记（bot_departments / members / assignments）
+- P2-b T5'' 前端部门管理与委派区（i18n 11 语言 + mock + 事件刷新）
+- P2-b T2'' 部门命令层 + delete_bot 级联（5 命令 + 错误码 ×2）
+- P2-b T4'' IPC 委派命令层（3 命令 + 错误码 ×4 + 事件枚举 + 审计扩展）
+- P2-b T3'' 委派执行器 + consult 工具（dispatch 全链 + 一层防环）
+- T1 P3 编排实体与多层委派树列落库
+- P3 编排 DTO、DAG 预校验与 workflow slice
+- P3 编排编辑器、运行面板与多层链视图
+- P3 编排页与 /bots/workflows 路由入口
+- T2 P3 编排定义/DAG 校验与命令层（12 错误码 + 删部门转实例）
+- P3 T2 编排命令层补齐 update_bot_workflow 与运行控制命令
+- P3 T3 编排 runner 与多层委派链落地
+- P3 T4 编排定时命令与 cron 执行分支
+- P3 T5 IPC 审计、事件枚举与生成物对齐
+- A1 部门运行配额实体/DAO/SCHEMA
+- A2 配额解析器 + runner 接入 + 定义/触发校验
+- A3 配额 Tauri 命令 + P4 契约审计段 + 破坏自检
+- B1 待答请求实体/DAO + UNIQUE(ask_id) + SCHEMA 登记
+- B2 交互桥落库/终态迁移 + 启动清扫 + 事件枚举
+- B3 待答请求命令 + 3 错误码 ×11 语言 + 契约审计点亮 P4-b
+- A4/B4 前端——配额面板、持久提问卡与同 askId 去重
+
+
+### 🎨 Styling
+- 格式化打包脚本修复 dprint 门禁
+
+
+### 🐛 Bug Fixes
+- 版本校验按引号边界取值，规避 version.workspace 误读
+- 资源限制验证改到子进程，避免污染父测试进程 rlimit
+- 页面数据生成器指向独立仓并按 JSON 语义校验
+- align P3 frontend IPC and stabilize workflow page test
+
+
+### 📝 Documentation
+- 指路插件独立仓位置
+- 新增 Bot 集成五份规格文档并登记索引
+- P2-a spec package (GAP/MODEL/IPC/PLAN/ADR) + INDEX registration
+- P2-b spec package (GAP/ADR/MODEL/IPC/PLAN/I18N-KEYS) + INDEX registration
+- P2-b T7 验收台账与索引登记（15 项门禁实测）
+- P3 多 Bot 协作/例程编排规格冻结（GAP/MODEL/IPC/PLAN/ADR/I18N + INDEX）
+- P3 验收台账 ACCEPTANCE-P3 与 INDEX 登记
+- P3 规格修订——Q1 翻案放开多层委派 depth<=3
+- P4 规格冻结——部门运行配额 + needs_input 待答
+- P4 基线读数——clean HEAD cfaa35473 的 18 条门禁台账
+- 修正 P4 门禁命令——vitest-run.mjs 不支持 --grep-invert
+- 清理 bot-quota spec 头部过期的 fixme 说明
+
+
+### 📦 Miscellaneous
+- 移除 Cargo.lock 中过期的 [[patch.unused]] 段
+- P3 locale 12 错误码与 49 UI 键落齐 11 语言
+- bump version to v3.1.0
+
+
+### 🧪 Testing
+- stock 卸载隔离测试自行定位 dist/plugins 产物
+- 补 P1 门禁（e2e 过滤 / 契约 / i18n / 一条命令验收）
+- P2-a T6' 例程 e2e 收口（browserMock 例程命令 + 纵向/负路径 spec）
+- P2-b T6 委派 e2e 收口（部门归属/dispatch/取消/删 Bot 级联）
+- P3 T7''' e2e 骨架落盘（可达 + 空态，不覆盖纵向场景）
+- P3 纵向与多层链 e2e 收口（IPC 替身 + 8 命令审计 fixture）
+- A5/B5 骨架——配额与待答的 Rust 测试缺口 + e2e 契约自检
+- B1 落盘后点亮 bot_input——8 条 DAO 生命周期用例
+- 调度器 bot_workflow 闭包抽成可测函数 + cron 超限失败落 history 用例
+- 点亮 8 条 P4 e2e fixme 并落收口台账 ACCEPTANCE-P4
+- 点亮最后 1 条 e2e fixme——越界口径裁定与后端 detail 映射
+
 ## [v3.0.2] - 2026-11-22
 
 ### ✨ New Features

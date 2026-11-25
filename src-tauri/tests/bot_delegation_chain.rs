@@ -3,8 +3,8 @@
 //! P3 T3'''（PLAN-P3 §3.1 测试⑩–⑰ / ADR-P3-2 ①–⑤）：多层委派链集成测试。
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 use async_trait::async_trait;
 use axagent_dao::DatabaseConnection;

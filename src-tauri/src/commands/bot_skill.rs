@@ -18,7 +18,7 @@ fn map_err(err: axagent_harness::core_error::AxAgentError) -> String {
                 .with_category(ErrorCategory::Validation)
                 .with_detail(detail)
                 .to_string()
-        }
+        },
         other => ErrorResponse::from_error(other, ErrorCategory::Unrecoverable).to_string(),
     }
 }
@@ -46,9 +46,8 @@ pub async fn set_bot_skill_enabled(
 ) -> Result<BotSkill, String> {
     let db = state.harness.db();
     ensure_bot(db, &bot_id).await?;
-    let affected = binding_repo::set_enabled(db, &bot_id, &skill_name, enabled)
-        .await
-        .map_err(map_err)?;
+    let affected =
+        binding_repo::set_enabled(db, &bot_id, &skill_name, enabled).await.map_err(map_err)?;
     if !affected {
         return Err(ErrorResponse::new(bot_err::SKILL_NOT_FOUND)
             .with_category(ErrorCategory::Validation)
@@ -58,15 +57,12 @@ pub async fn set_bot_skill_enabled(
             .to_string());
     }
     let skills = crate::bot_skill_service::list_bot_skills(db, &bot_id).await?;
-    skills
-        .into_iter()
-        .find(|s| s.name == skill_name)
-        .ok_or_else(|| {
-            ErrorResponse::new(bot_err::SKILL_NOT_FOUND)
-                .with_category(ErrorCategory::Validation)
-                .with_detail("技能已更新但未能读取视图")
-                .to_string()
-        })
+    skills.into_iter().find(|s| s.name == skill_name).ok_or_else(|| {
+        ErrorResponse::new(bot_err::SKILL_NOT_FOUND)
+            .with_category(ErrorCategory::Validation)
+            .with_detail("技能已更新但未能读取视图")
+            .to_string()
+    })
 }
 
 #[tauri::command]

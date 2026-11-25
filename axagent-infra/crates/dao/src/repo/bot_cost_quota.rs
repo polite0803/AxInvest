@@ -37,10 +37,7 @@ pub async fn get_by_scope(
     Ok(row.map(|m| to_dto(m, false)))
 }
 
-pub async fn upsert(
-    db: &DatabaseConnection,
-    input: &BotCostQuotaInput,
-) -> Result<BotCostQuota> {
+pub async fn upsert(db: &DatabaseConnection, input: &BotCostQuotaInput) -> Result<BotCostQuota> {
     let now = now_ms();
     let scope = input.scope.as_str();
     let existing = bot_cost_quotas::Entity::find()
@@ -71,16 +68,12 @@ pub async fn upsert(
             am.insert(db).await.map_err(unique_conflict)?;
         },
     }
-    get_by_scope(db, scope, &input.scope_id).await?.ok_or_else(|| {
-        AxAgentError::NotFound(format!("BotCostQuota {}:{}", scope, input.scope_id))
-    })
+    get_by_scope(db, scope, &input.scope_id)
+        .await?
+        .ok_or_else(|| AxAgentError::NotFound(format!("BotCostQuota {}:{}", scope, input.scope_id)))
 }
 
-pub async fn delete_by_scope(
-    db: &DatabaseConnection,
-    scope: &str,
-    scope_id: &str,
-) -> Result<u64> {
+pub async fn delete_by_scope(db: &DatabaseConnection, scope: &str, scope_id: &str) -> Result<u64> {
     let res = bot_cost_quotas::Entity::delete_many()
         .filter(bot_cost_quotas::Column::Scope.eq(scope))
         .filter(bot_cost_quotas::Column::ScopeId.eq(scope_id))

@@ -159,10 +159,7 @@ pub async fn list_bot_skills(
 ///
 /// 只列当前 Bot 可见且启用的技能名与一行描述，不注入 SKILL.md 全文；
 /// 无可见技能时返回 `None`，调用方不得追加空段（保持非 Bot/无技能行为不变）。
-pub async fn bot_skills_prompt_segment(
-    db: &DatabaseConnection,
-    bot_id: &str,
-) -> Option<String> {
+pub async fn bot_skills_prompt_segment(db: &DatabaseConnection, bot_id: &str) -> Option<String> {
     let skills = match list_bot_skills(db, bot_id).await {
         Ok(v) => v,
         Err(e) => {
@@ -196,10 +193,7 @@ pub async fn bot_skills_prompt_segment(
 /// preset 结构校验（整包校验；任一不合法 ⇒ 整包失败，ADR-P5-6）。
 fn validate_preset(preset: &BotSkillPreset) -> Result<(), String> {
     if preset.version != "bot-skill-preset.v1" {
-        return Err(preset_invalid(format!(
-            "不支持的 preset version: {}",
-            preset.version
-        )));
+        return Err(preset_invalid(format!("不支持的 preset version: {}", preset.version)));
     }
     if preset.name.trim().is_empty() {
         return Err(preset_invalid("preset.name 不能为空"));
@@ -212,10 +206,7 @@ fn validate_preset(preset: &BotSkillPreset) -> Result<(), String> {
             return Err(preset_invalid(format!("非法技能名: {}", item.name)));
         }
         if item.content.trim().is_empty() {
-            return Err(preset_invalid(format!(
-                "技能 {} 的 content 不能为空",
-                item.name
-            )));
+            return Err(preset_invalid(format!("技能 {} 的 content 不能为空", item.name)));
         }
         if item.content.len() > 256 * 1024 {
             return Err(preset_invalid(format!("技能 {} 的 content 过大", item.name)));
@@ -226,9 +217,7 @@ fn validate_preset(preset: &BotSkillPreset) -> Result<(), String> {
 
 /// 原子写入技能目录：先写 tmp，再 rename；已有目录先备份后替换（失败回滚）。
 fn write_skill_dir_atomically(target_dir: &Path, content: &str) -> Result<(), String> {
-    let parent = target_dir
-        .parent()
-        .ok_or_else(|| preset_invalid("无效的技能目录"))?;
+    let parent = target_dir.parent().ok_or_else(|| preset_invalid("无效的技能目录"))?;
     std::fs::create_dir_all(parent)
         .map_err(|e| preset_invalid(format!("创建技能目录失败: {e}")))?;
     let stem = target_dir
@@ -242,8 +231,7 @@ fn write_skill_dir_atomically(target_dir: &Path, content: &str) -> Result<(), St
         return Err(preset_invalid(format!("写入 SKILL.md 失败: {e}")));
     }
     if target_dir.exists() {
-        let backup =
-            parent.join(format!(".bak-{stem}-{}", uuid::Uuid::new_v4()));
+        let backup = parent.join(format!(".bak-{stem}-{}", uuid::Uuid::new_v4()));
         std::fs::rename(target_dir, &backup)
             .map_err(|e| preset_invalid(format!("备份旧技能目录失败: {e}")))?;
         if let Err(e) = std::fs::rename(&tmp, target_dir) {
@@ -286,16 +274,9 @@ pub async fn import_preset(
             continue;
         }
         write_skill_dir_atomically(&bot_dir.join(&item.name), &item.content)?;
-        binding_repo::upsert(
-            db,
-            bot_id,
-            &item.name,
-            "bot",
-            Some(&preset_id),
-            true,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        binding_repo::upsert(db, bot_id, &item.name, "bot", Some(&preset_id), true)
+            .await
+            .map_err(|e| e.to_string())?;
         imported.push(item.name.clone());
     }
 

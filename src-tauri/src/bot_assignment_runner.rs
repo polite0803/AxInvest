@@ -229,10 +229,7 @@ pub async fn run_assignment_inner(
     };
     let task_card = format!(
         "发起方：{}\n任务：{}",
-        running
-            .requester_bot_id
-            .clone()
-            .unwrap_or_else(|| "用户(person)".to_string()),
+        running.requester_bot_id.clone().unwrap_or_else(|| "用户(person)".to_string()),
         running.task_text
     );
 

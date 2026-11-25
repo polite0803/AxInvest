@@ -23,7 +23,7 @@ fn map_err(err: axagent_harness::core_error::AxAgentError) -> String {
                 .with_category(ErrorCategory::Validation)
                 .with_detail(detail)
                 .to_string()
-        }
+        },
         other => ErrorResponse::from_error(other, ErrorCategory::Unrecoverable).to_string(),
     }
 }
@@ -52,20 +52,20 @@ async fn ensure_scope_target(
                     .with_category(ErrorCategory::Validation)
                     .with_detail(detail)
                     .to_string()
-            }
+            },
             other => map_err(other),
         }),
-        "department" => dept_repo::get_department(db, scope_id).await.map(|_| ()).map_err(|e| {
-            match e {
+        "department" => {
+            dept_repo::get_department(db, scope_id).await.map(|_| ()).map_err(|e| match e {
                 axagent_harness::core_error::AxAgentError::NotFound(detail) => {
                     ErrorResponse::new(bot_err::DEPARTMENT_NOT_FOUND)
                         .with_category(ErrorCategory::Validation)
                         .with_detail(detail)
                         .to_string()
-                }
+                },
                 other => map_err(other),
-            }
-        }),
+            })
+        },
         _ => Err(ErrorResponse::new(bot_err::COST_QUOTA_INVALID)
             .with_category(ErrorCategory::Validation)
             .with_param("field", "scope")

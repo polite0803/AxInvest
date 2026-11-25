@@ -936,24 +936,24 @@ mod tests {
     fn bot_soul_precedes_profile_and_memory_sits_between_rag_and_working_memory() {
         let rag = [String::from("rag-item")];
         let prompts = build_agent_system_prompt(
-            None,                 // persona（Bot 有 SOUL 时由调用方置 None）
-            Some("SOUL-BODY"),    // bot_soul
-            Some("MEMORY-BODY"),  // bot_memory
+            None,                                     // persona（Bot 有 SOUL 时由调用方置 None）
+            Some("SOUL-BODY"),                        // bot_soul
+            Some("MEMORY-BODY"),                      // bot_memory
             Some("<bot-skills>\n- s\n</bot-skills>"), // bot_skills
-            Some("PROFILE-BODY"), // profile
-            None,                 // user_custom
-            Some(&rag),           // rag
-            &[],                  // skills
-            Some("WM-BODY"),      // working_memory
-            None,                 // nudge
-            None,                 // insight
-            None,                 // pattern
-            None,                 // user_profile
-            None,                 // adaptation_hint
-            None,                 // workspace_root
-            None,                 // output_language
-            None,                 // steer
-            None,                 // agent_context
+            Some("PROFILE-BODY"),                     // profile
+            None,                                     // user_custom
+            Some(&rag),                               // rag
+            &[],                                      // skills
+            Some("WM-BODY"),                          // working_memory
+            None,                                     // nudge
+            None,                                     // insight
+            None,                                     // pattern
+            None,                                     // user_profile
+            None,                                     // adaptation_hint
+            None,                                     // workspace_root
+            None,                                     // output_language
+            None,                                     // steer
+            None,                                     // agent_context
         );
 
         let pos = |prefix: &str| {

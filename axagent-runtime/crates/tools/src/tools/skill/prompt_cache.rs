@@ -167,7 +167,10 @@ impl SkillPromptCache {
                     if !skill_dir.is_dir() {
                         continue;
                     }
-                    let name = skill_dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    let name = skill_dir
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
                     if name.is_empty() {
                         continue;
                     }

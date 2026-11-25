@@ -40,8 +40,16 @@ fn to_dto(m: bot_usage_ledger::Model) -> BotUsageEntry {
 
 /// 追加一条账本记录（只 INSERT）。
 pub async fn append(db: &DatabaseConnection, entry: &BotUsageEntry) -> Result<()> {
-    let id = if entry.id.is_empty() { gen_id() } else { entry.id.clone() };
-    let created_at = if entry.created_at > 0 { entry.created_at } else { now_ms() };
+    let id = if entry.id.is_empty() {
+        gen_id()
+    } else {
+        entry.id.clone()
+    };
+    let created_at = if entry.created_at > 0 {
+        entry.created_at
+    } else {
+        now_ms()
+    };
     let am = bot_usage_ledger::ActiveModel {
         id: Set(id),
         bot_id: Set(entry.bot_id.clone()),
@@ -94,19 +102,13 @@ fn apply_filter(
 }
 
 /// 过滤查询，按 `created_at DESC`。
-pub async fn list(
-    db: &DatabaseConnection,
-    filter: &BotUsageFilter,
-) -> Result<Vec<BotUsageEntry>> {
+pub async fn list(db: &DatabaseConnection, filter: &BotUsageFilter) -> Result<Vec<BotUsageEntry>> {
     let q = bot_usage_ledger::Entity::find().order_by_desc(bot_usage_ledger::Column::CreatedAt);
     let rows = apply_filter(q, filter).all(db).await?;
     Ok(rows.into_iter().map(to_dto).collect())
 }
 
-async fn sum_filtered(
-    db: &DatabaseConnection,
-    filter: &BotUsageFilter,
-) -> Result<BotUsageTotals> {
+async fn sum_filtered(db: &DatabaseConnection, filter: &BotUsageFilter) -> Result<BotUsageTotals> {
     let rows: Vec<bot_usage_ledger::Model> =
         apply_filter(bot_usage_ledger::Entity::find(), filter).all(db).await?;
     let mut t = BotUsageTotals::default();

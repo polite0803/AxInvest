@@ -211,9 +211,9 @@ pub async fn start_run(
         workflow.steps.iter().map(|s| s.bot_id.as_str()).filter(|id| !id.is_empty()).collect();
     if distinct_bots.len() == 1 {
         let target_bot = *distinct_bots.iter().next().unwrap_or(&"");
-        if let Err(cost_err) = crate::bot_cost_quota::ensure_bot_cost_quota_ok(db, target_bot).await {
-            let code =
-                code_in(&cost_err).unwrap_or(bot_err::COST_QUOTA_EXCEEDED);
+        if let Err(cost_err) = crate::bot_cost_quota::ensure_bot_cost_quota_ok(db, target_bot).await
+        {
+            let code = code_in(&cost_err).unwrap_or(bot_err::COST_QUOTA_EXCEEDED);
             fail_run(db, app.as_ref(), &run, code, &cost_err).await?;
             return run_repo::get_run(db, run_id).await.map_err(|e| e.to_string());
         }

@@ -13,11 +13,11 @@ use axagent_dao::repo::bot as bot_repo;
 use axagent_dao::repo::bot_cost_quota as quota_repo;
 use axagent_dao::repo::bot_department as dept_repo;
 use axagent_dao::repo::bot_usage_ledger as ledger_repo;
-use axagent_harness::core_error::AxAgentError;
 use axagent_harness::conversation_model::TokenUsage;
+use axagent_harness::core_error::AxAgentError;
 use axagent_harness::types::{
-    BotCostQuotaInput, BotCostQuotaScope, BotUsageEntry, BotUsageFilter, BotUsageOrigin,
-    BotUsageSummary, BotPricingSource,
+    BotCostQuotaInput, BotCostQuotaScope, BotPricingSource, BotUsageEntry, BotUsageFilter,
+    BotUsageOrigin, BotUsageSummary,
 };
 use axagent_harness::usage_pricing::{ModelPricing, pricing_for_model};
 
@@ -90,10 +90,7 @@ pub fn quota_breached_response(check: &CostQuotaCheck) -> String {
 pub fn validate_scope(scope: &str) -> Result<(), String> {
     match scope {
         "bot" | "department" => Ok(()),
-        other => Err(quota_invalid(
-            "scope",
-            format!("scope 必须是 bot/department，实得 {other}"),
-        )),
+        other => Err(quota_invalid("scope", format!("scope 必须是 bot/department，实得 {other}"))),
     }
 }
 
@@ -169,9 +166,9 @@ pub async fn check_bot_cost_quota(
 
 /// 熔断检查（命令/runner 入口用）：超限返回 `BOT_COST_QUOTA_EXCEEDED`。
 pub async fn ensure_bot_cost_quota_ok(db: &DatabaseConnection, bot_id: &str) -> Result<(), String> {
-    let check = check_bot_cost_quota(db, bot_id).await.map_err(|e| {
-        ErrorResponse::from_error(e, ErrorCategory::Unrecoverable).to_string()
-    })?;
+    let check = check_bot_cost_quota(db, bot_id)
+        .await
+        .map_err(|e| ErrorResponse::from_error(e, ErrorCategory::Unrecoverable).to_string())?;
     if check.breached {
         return Err(quota_breached_response(&check));
     }
@@ -237,13 +234,9 @@ pub async fn usage_summary(
     window_hours: Option<i64>,
 ) -> Result<BotUsageSummary, String> {
     validate_scope(scope)?;
-    let quota =
-        quota_repo::get_by_scope(db, scope, scope_id).await.map_err(|e| e.to_string())?;
+    let quota = quota_repo::get_by_scope(db, scope, scope_id).await.map_err(|e| e.to_string())?;
     let wh = window_hours.unwrap_or_else(|| {
-        quota
-            .as_ref()
-            .map(|q| q.window_hours as i64)
-            .unwrap_or(DEFAULT_WINDOW_HOURS)
+        quota.as_ref().map(|q| q.window_hours as i64).unwrap_or(DEFAULT_WINDOW_HOURS)
     });
     let since = window_since_ms(wh);
     let filter = match scope {
@@ -270,10 +263,8 @@ pub async fn usage_summary(
     }
     totals.entry_count = rows.len() as i64;
 
-    let (max_tokens, max_cost) = quota
-        .as_ref()
-        .map(|q| (q.max_total_tokens, q.max_cost_usd))
-        .unwrap_or((0, 0.0));
+    let (max_tokens, max_cost) =
+        quota.as_ref().map(|q| (q.max_total_tokens, q.max_cost_usd)).unwrap_or((0, 0.0));
     let breached = (max_tokens > 0 && totals.total_tokens >= max_tokens)
         || (max_cost > 0.0 && totals.estimated_cost_usd >= max_cost);
 

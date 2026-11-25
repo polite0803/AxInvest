@@ -223,10 +223,8 @@ impl SkillIndex {
         // P5 C1-2：扫描 ~/.axagent/bots/<botId>/skills/。
         // 索引全局共享，不按当前 bot 过滤；同一 bot 内同名去重，跨 bot 同名各自保留（互斥不串味）。
         // 消费端（list_bot_skills / 提示词段 / 按 bot_id 过滤的工具查询）负责“Bot 内优先覆盖全局”。
-        let bots_root = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".axagent")
-            .join("bots");
+        let bots_root =
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".axagent").join("bots");
         if let Ok(bot_dirs) = std::fs::read_dir(&bots_root) {
             for bot_entry in bot_dirs.filter_map(|e| e.ok()) {
                 let bot_path = bot_entry.path();
@@ -246,7 +244,10 @@ impl SkillIndex {
                     if !skill_dir.is_dir() {
                         continue;
                     }
-                    let name = skill_dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    let name = skill_dir
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
                     if name.is_empty() || seen_bot.contains(&name) {
                         continue;
                     }
@@ -530,7 +531,11 @@ impl SkillIndex {
         serde_yaml::from_str(yaml_str).ok()
     }
 
-    fn list_skills(&mut self, category_filter: Option<&str>, bot_id: Option<&str>) -> Vec<SkillSummary> {
+    fn list_skills(
+        &mut self,
+        category_filter: Option<&str>,
+        bot_id: Option<&str>,
+    ) -> Vec<SkillSummary> {
         self.ensure_built();
         let visible = Self::visible_entries(&self.entries, bot_id);
         visible

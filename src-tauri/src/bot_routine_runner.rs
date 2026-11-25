@@ -330,8 +330,7 @@ pub async fn run_bot_non_interactive_turn_with_usage(
     };
     let mut tool_registry = build_turn_tool_registry(round_kind, chain.depth);
     // P5 C1-2：Bot 会话把 bot_id 注入 tool extra，SkillIndex/SkillView 按此过滤可见性。
-    tool_registry =
-        tool_registry.with_tool_extra(axagent_tools::context_keys::BOT_ID, bot_id);
+    tool_registry = tool_registry.with_tool_extra(axagent_tools::context_keys::BOT_ID, bot_id);
 
     // 每轮新建的临时会话：execution_id 兼作 conversation_id（headless 先例同构）。
     let execution_id = format!("bot-routine-{}", uuid::Uuid::new_v4());
@@ -398,11 +397,7 @@ pub async fn run_bot_non_interactive_turn_with_usage(
     }
     Ok(BotTurnOutcome {
         text: content,
-        usage: Some(BotTurnUsage {
-            model_id: model,
-            execution_id,
-            usage: summary.usage,
-        }),
+        usage: Some(BotTurnUsage { model_id: model, execution_id, usage: summary.usage }),
     })
 }
 

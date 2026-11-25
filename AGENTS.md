@@ -443,3 +443,13 @@ Conventional Commits + 中文描述。类型映射：
 | `check-i18n-exemption-budget.mjs` | 豁免口子的预算：文件级 `i18n-exempt` 必须带 until、行级 allowlist 的 reason 不得是默认措辞、总量只减不增 | 基线 142 条 |
 | `check-jsx-text-i18n.mjs` | JSX children 里的未翻译字面量（CJK 即违规；英文词须匹配某 locale 值） | 基线 51 条 |
 | `check-i18n-orphan-diff.mjs` | 增量孤儿 key：删 `src/**` 代码后遗留的 locale key（只扫 `git diff --name-status HEAD`，变更面过大时显式降级 report-only） | 无（判据机械，零基线） |
+
+<!-- codex-obsidian-kb:start -->
+## Obsidian 知识库引用
+
+在本仓库工作时，如 Obsidian connector 可用，请读取以下笔记作为补充项目约定：
+
+- [[02 项目/Codex工作区/AxInvest-1bb0c688/00 AGENTS]]
+- [[00 索引/Codex 项目工作区]]
+
+<!-- codex-obsidian-kb:end -->

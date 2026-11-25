@@ -2176,6 +2176,96 @@ fn build_lease_holder_id() -> String {
     format!("pid-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis())
 }
 
+/// 执行一次 `task_type == "bot_workflow"` 的定时触发（P3 §2.4 / P4 收口）。
+///
+/// 从调度器闭包里抽出：闭包体本身不可测，而 P4 验收要求「cron 触发超限 ⇒ history 记
+/// failed 且不建 run」有实测证据。**行为与原闭包逐字节等价**：
+/// · 校验/配额失败 ⇒ 返回 `Err`，同一条消息进 history.error（含 `BOT_QUOTA_EXCEEDED`
+///   等错误码），且**不创建** `bot_workflow_runs` 行；
+/// · 正常路径 ⇒ 建 run、等终态，history 记本次结果；一次性任务跑完置 Disabled。
+///
+/// 可见性取 `pub` 而非 `pub(crate)`：`src-tauri/tests/*` 是独立 crate，`pub(crate)`
+/// 到不了；生产调用面仍只有本模块的调度器闭包。
+pub async fn run_scheduled_bot_workflow(
+    db: axagent_dao::DatabaseConnection,
+    app: Option<tauri::AppHandle>,
+    store: Arc<axagent_runtime_core::CronJobStore>,
+    job: axagent_runtime_core::CronJob,
+) -> Result<(), String> {
+    let job_id = job.id.clone();
+    let recurring = job.recurring;
+    let workflow_id = crate::commands::scheduled_task::bot_workflow_id_from_job(&job);
+    let started = axagent_runtime_core::cron_job::now_millis();
+    let outcome: Result<String, String> = async {
+        let workflow_id = workflow_id.ok_or_else(|| "bot_workflow 任务缺少 params.workflowId".to_string())?;
+        let workflow = axagent_dao::repo::bot_workflow::get_workflow(&db, &workflow_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        // P4 配额（ADR-P4-2）：超限时本次触发直接失败入 history，不创建 run。
+        crate::bot_quota::check_run_allowed(&db, &workflow, None).await?;
+        let conv = crate::commands::scheduled_task::create_bot_workflow_persistent_conversation(&db, &workflow)
+            .await?;
+        let queued = axagent_dao::repo::bot_workflow_run::create_run(
+            &db,
+            &axagent_harness::types::CreateBotWorkflowRun {
+                workflow_id: workflow.id.clone(),
+                workflow_name: workflow.name.clone(),
+                origin: "routine".to_string(),
+                requester_bot_id: None,
+                requester_conversation_id: conv.id,
+                total_steps: workflow.steps.len() as i32,
+                inputs: std::collections::HashMap::new(),
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        if let Some(app) = app.as_ref() {
+            let _ = tauri::Emitter::emit(app, axagent_harness::event_names::IpcEventName::BotWorkflowRunUpdated.as_str(), &queued);
+        }
+        let started_run = crate::bot_workflow_runner::start_run(&db, app.clone(), &queued.id).await?;
+        let terminal = loop {
+            let run = axagent_dao::repo::bot_workflow_run::get_run(&db, &started_run.id)
+                .await
+                .map_err(|e| e.to_string())?;
+            if axagent_dao::repo::bot_workflow_run::status::is_terminal(&run.status) {
+                break run;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        };
+        if terminal.status == axagent_dao::repo::bot_workflow_run::status::COMPLETED {
+            Ok(format!("workflow run {} completed", terminal.id))
+        } else {
+            Err(format!(
+                "workflow run {} {}: {}",
+                terminal.id,
+                terminal.status,
+                terminal.error_code.unwrap_or_else(|| "ERR_UNKNOWN".to_string())
+            ))
+        }
+    }
+    .await;
+    let result = axagent_runtime_core::TaskRunResult {
+        success: outcome.is_ok(),
+        output: outcome.as_ref().ok().cloned(),
+        error: outcome.as_ref().err().cloned(),
+        duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+        executed_at: started,
+        skipped: false,
+        partial: false,
+    };
+    store.record_run(&job_id, result).await;
+    if !recurring
+        && !store
+            .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+            .await
+    {
+        tracing::warn!(
+            "[CronScheduler] 一次性 bot_workflow 任务 '{job_id}' 置为 Disabled 失败"
+        );
+    }
+    outcome.map(|_| ())
+}
+
 /// 启动 cron 调度器（`app` 可选 ⇒ 桌面 / 无头共用一份实现）。
 ///
 /// ⚠ **C 方案（2026-10-26）**：`app` 改为 `Option<tauri::AppHandle>` ——
@@ -2460,82 +2550,13 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                     "bot_workflow 定时任务同时带 bot_id，以 task_type=bot_workflow 为准"
                 );
             }
-            let store = cron_store.clone();
-            let db = sync_db.clone();
-            let app = app_handle.clone();
-            let job_id = job.id.clone();
-            let recurring = job.recurring;
-            let workflow_id = crate::commands::scheduled_task::bot_workflow_id_from_job(&job);
-            tokio::task::spawn(async move {
-                let started = axagent_runtime_core::cron_job::now_millis();
-                let outcome: Result<String, String> = async {
-                    let workflow_id = workflow_id.ok_or_else(|| "bot_workflow 任务缺少 params.workflowId".to_string())?;
-                    let workflow = axagent_dao::repo::bot_workflow::get_workflow(&db, &workflow_id)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    // P4 配额（ADR-P4-2）：超限时本次触发直接失败入 history，不创建 run。
-                    crate::bot_quota::check_run_allowed(&db, &workflow, None).await?;
-                    let conv = crate::commands::scheduled_task::create_bot_workflow_persistent_conversation(&db, &workflow)
-                        .await?;
-                    let queued = axagent_dao::repo::bot_workflow_run::create_run(
-                        &db,
-                        &axagent_harness::types::CreateBotWorkflowRun {
-                            workflow_id: workflow.id.clone(),
-                            workflow_name: workflow.name.clone(),
-                            origin: "routine".to_string(),
-                            requester_bot_id: None,
-                            requester_conversation_id: conv.id,
-                            total_steps: workflow.steps.len() as i32,
-                            inputs: std::collections::HashMap::new(),
-                        },
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
-                    if let Some(app) = app.as_ref() {
-                        let _ = tauri::Emitter::emit(app, axagent_harness::event_names::IpcEventName::BotWorkflowRunUpdated.as_str(), &queued);
-                    }
-                    let started_run = crate::bot_workflow_runner::start_run(&db, app.clone(), &queued.id).await?;
-                    let terminal = loop {
-                        let run = axagent_dao::repo::bot_workflow_run::get_run(&db, &started_run.id)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        if axagent_dao::repo::bot_workflow_run::status::is_terminal(&run.status) {
-                            break run;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                    };
-                    if terminal.status == axagent_dao::repo::bot_workflow_run::status::COMPLETED {
-                        Ok(format!("workflow run {} completed", terminal.id))
-                    } else {
-                        Err(format!(
-                            "workflow run {} {}: {}",
-                            terminal.id,
-                            terminal.status,
-                            terminal.error_code.unwrap_or_else(|| "ERR_UNKNOWN".to_string())
-                        ))
-                    }
-                }
-                .await;
-                let result = axagent_runtime_core::TaskRunResult {
-                    success: outcome.is_ok(),
-                    output: outcome.as_ref().ok().cloned(),
-                    error: outcome.as_ref().err().cloned(),
-                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
-                    executed_at: started,
-                    skipped: false,
-                    partial: false,
-                };
-                store.record_run(&job_id, result).await;
-                if !recurring
-                    && !store
-                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await
-                {
-                    tracing::warn!(
-                        "[CronScheduler] 一次性 bot_workflow 任务 '{job_id}' 置为 Disabled 失败"
-                    );
-                }
-            });
+            // P4 收口：整段闭包体抽成 `run_scheduled_bot_workflow`（可测、行为不变）。
+            tokio::task::spawn(run_scheduled_bot_workflow(
+                sync_db.clone(),
+                app_handle.clone(),
+                cron_store.clone(),
+                job.clone(),
+            ));
             return;
         }
         // ── Bot 例程分支（P2 / ADR-P2-2）──

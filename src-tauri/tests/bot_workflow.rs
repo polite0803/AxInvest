@@ -530,3 +530,188 @@ async fn test_7_member_change_is_detected_at_run_start() {
     assert_eq!(run.status, run_repo::status::FAILED);
     assert_eq!(run.error_code.as_deref(), Some("BOT_WORKFLOW_MEMBER_CHANGED"));
 }
+
+/// P4 收口（验收条件④）：cron 触发超配额时，失败必须**落 history 且不建 run 行**。
+///
+/// 这条链路此前只在 `bot_quota.rs` 注释里写着「history 记 failed 属调度器闭包内既有
+/// 错误路径，本文件无法驱动」——本模块直接驱动抽出来的 `run_scheduled_bot_workflow`
+/// （闭包体，行为不变），把「校验拒绝」与「失败落历史」两半一次覆盖。
+mod p4_scheduled_cron {
+    use super::*;
+    use axagent_dao::repo::bot_department_quota as quota_repo;
+    use axagent_harness::types::BotDepartmentQuotaInput;
+    use axagent_lib::init::services::run_scheduled_bot_workflow;
+    use axagent_runtime_core::{CronJob, CronJobStore};
+
+    fn cron_job(id: &str, workflow_id: &str) -> CronJob {
+        let mut job = CronJob::new("编排定时", "0 9 * * *", "编排定时", "编排定时");
+        job.id = id.to_string();
+        job.task_type = Some("bot_workflow".to_string());
+        job.params = Some(serde_json::json!({ "workflowId": workflow_id }));
+        job
+    }
+
+    async fn make_department_workflow(
+        db: &DatabaseConnection,
+        dept: &str,
+        steps: Vec<BotWorkflowStep>,
+    ) -> String {
+        workflow_repo::create_workflow(
+            db,
+            &CreateBotWorkflow {
+                name: "定时编排".into(),
+                owner_scope: "department".into(),
+                department_id: Some(Some(dept.to_string())),
+                steps,
+                max_concurrency: 2,
+                total_timeout_secs: 900,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("建编排")
+        .id
+    }
+
+    /// ① 部门上限 1 步、cron job 的定义是 3 步 ⇒ 触发函数返回 Err（BOT_QUOTA_EXCEEDED，
+    /// detail 带 maxSteps），history 记 failed，run 表零新增。
+    #[tokio::test]
+    async fn over_quota_cron_trigger_fails_history_and_creates_no_run() {
+        let h = pool().await;
+        let db = &h.conn;
+        let dept = dept_repo::create_department(db, "配额部门", "", None)
+            .await
+            .expect("建部门")
+            .id;
+        let bot = make_bot(db, "配额 Bot").await;
+        quota_repo::upsert(
+            db,
+            &BotDepartmentQuotaInput {
+                department_id: dept.clone(),
+                max_concurrency: 2,
+                total_timeout_secs: 900,
+                max_steps: 1,
+                max_in_flight_per_depth: 2,
+                step_timeout_secs: 300,
+                max_concurrent_runs: 4,
+            },
+        )
+        .await
+        .expect("写部门配额");
+        let workflow_id = make_department_workflow(
+            db,
+            &dept,
+            vec![
+                step("a", &bot, &[], "abort"),
+                step("b", &bot, &[], "abort"),
+                step("c", &bot, &[], "abort"),
+            ],
+        )
+        .await;
+
+        let job = cron_job("cron-over-quota", &workflow_id);
+        let store = Arc::new(CronJobStore::new_ephemeral());
+        store.add(job.clone()).await;
+
+        let err = run_scheduled_bot_workflow(db.clone(), None, store.clone(), job)
+            .await
+            .expect_err("超配额必须返回 Err");
+        assert!(err.contains("BOT_QUOTA_EXCEEDED"), "错误码应可读: {err}");
+        assert!(err.contains("maxSteps"), "detail 应带越界字段: {err}");
+
+        let after = store.get("cron-over-quota").await.expect("job 仍在 store");
+        assert_eq!(after.run_count, 1, "失败轮也推进 run_count");
+        let recorded = after.last_result.expect("history 必须记下失败轮");
+        assert!(!recorded.success, "history 应记 failed");
+        let recorded_err = recorded.error.unwrap_or_default();
+        assert!(
+            recorded_err.contains("BOT_QUOTA_EXCEEDED"),
+            "history.error 应带错误码: {recorded_err}"
+        );
+
+        let runs = run_repo::list_runs(db, Some(&workflow_id), None)
+            .await
+            .expect("列出 run");
+        assert!(runs.is_empty(), "超配额不得创建 run 行，实际 {} 行", runs.len());
+    }
+
+    /// ② 未超配额 ⇒ 正常创建 run 并跑到终态，history 记 success（配额只拦超限）。
+    #[tokio::test]
+    async fn under_quota_cron_trigger_creates_run_and_records_success() {
+        let h = pool().await;
+        let db = &h.conn;
+        let dept = dept_repo::create_department(db, "放行部门", "", None)
+            .await
+            .expect("建部门")
+            .id;
+        let bot = make_bot(db, "执行 Bot").await;
+        // 部门编排在 start_run 会校验成员快照：Bot 必须在部门内（否则 MEMBER_CHANGED）。
+        dept_repo::add_bot_to_department(db, &dept, &bot)
+            .await
+            .expect("入部");
+        quota_repo::upsert(
+            db,
+            &BotDepartmentQuotaInput {
+                department_id: dept.clone(),
+                max_concurrency: 2,
+                total_timeout_secs: 900,
+                max_steps: 3,
+                max_in_flight_per_depth: 2,
+                step_timeout_secs: 300,
+                max_concurrent_runs: 4,
+            },
+        )
+        .await
+        .expect("写部门配额");
+        let workflow_id = make_department_workflow(db, &dept, vec![step("a", &bot, &[], "abort")]).await;
+
+        let job = cron_job("cron-under-quota", &workflow_id);
+        let store = Arc::new(CronJobStore::new_ephemeral());
+        store.add(job.clone()).await;
+
+        // 无窗口 + 无模型：用脚本执行器驱动 assignment（与既有用例同一套 drive_queued）。
+        let driver_db = db.clone();
+        let driver_workflow_id = workflow_id.clone();
+        let script = script_one(&bot, Ok("定时结论".to_string()));
+        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let (outcome, _) = tokio::join!(
+            run_scheduled_bot_workflow(db.clone(), None, store.clone(), job),
+            async {
+                for _ in 0..200 {
+                    drive_queued(
+                        &driver_db,
+                        &script,
+                        &prompts,
+                        Duration::ZERO,
+                        Duration::from_secs(10),
+                    )
+                    .await;
+                    let runs = run_repo::list_runs(&driver_db, Some(&driver_workflow_id), None)
+                        .await
+                        .expect("列出 run");
+                    if runs.iter().any(|r| run_repo::status::is_terminal(&r.status)) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        );
+        outcome.expect("未超配额应成功");
+
+        let runs = run_repo::list_runs(db, Some(&workflow_id), None)
+            .await
+            .expect("列出 run");
+        assert_eq!(runs.len(), 1, "未超配额须创建 1 个 run");
+        assert_eq!(runs[0].origin, "routine", "定时触发 origin=routine");
+        assert_eq!(runs[0].status, run_repo::status::COMPLETED, "单步编排应完成");
+
+        let after = store.get("cron-under-quota").await.expect("job 仍在 store");
+        assert_eq!(after.run_count, 1);
+        let recorded = after.last_result.expect("history 必须记下本轮");
+        assert!(recorded.success, "history 应记成功: {:?}", recorded.error);
+        assert!(
+            recorded.output.unwrap_or_default().contains("completed"),
+            "output 应带 run 完成说明"
+        );
+    }
+}

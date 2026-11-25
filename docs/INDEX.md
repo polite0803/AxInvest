@@ -333,7 +333,7 @@
 | `P4/IPC-P4.md` | 参考 | P4 IPC 冻结稿：6 新命令 + 改 agent_respond_ask（签名不变）、bot-input-request-updated 事件、5 码、DTO、审计扩展与门禁原文。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P4/I18N-KEYS-P4.md` | 参考 | P4 权威 i18n 键清单：5 码 + bot.quota.* 20 键 + bot.input.* 14 键 = 429 条 11 语言译文，落盘顺序与文案约束。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `P4/BASELINE-P4.md` | 参考 | P4 启动前 18 条门禁基线读数：clean HEAD 13 绿 / 5 红、存量红归因、主检出并行 WIP 对照与「不新增红」阈值。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 本地原创 |
-| `P4/ACCEPTANCE-P4.md` | 参考 | P4 门禁实测台账：9 条 fixme 处置（8 点亮绿 / 1 保留并说明）、PLAN-P4 §9.2 全量命令 exit 与读数、§9.1 七条 PASS 判定与「P4 可收口」结论。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 本地原创 |
+| `P4/ACCEPTANCE-P4.md` | 参考 | P4 门禁实测台账：9 条 fixme 全部点亮跑绿（0 skipped）、PLAN-P4 §9.2 全量命令 exit 与读数、§9.1 七条 PASS 判定与「P4 可收口」结论。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -759,7 +759,7 @@
 | `P4/IPC-P4.md` | Bot P4 IPC 契约（冻结稿） | 6 新命令 + 改 agent_respond_ask（签名不变）；bot-input-request-updated 事件；5 码（配额 2 + 待答 3）；2 DTO + 过滤 DTO；审计扩展与门禁原文。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P4/MODEL-P4.md` `P4/PLAN-P4.md` |
 | `P4/I18N-KEYS-P4.md` | Bot P4 i18n 权威键清单 | 错误码 ×5 + 前端 34 键 = 429 条译文（11 语言）；BOT_I18N_KEYS 151→185；落盘顺序与文案约束。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P4/IPC-P4.md` |
 | `P4/BASELINE-P4.md` | Bot P4 门禁基线读数（clean HEAD） | 18 条 §9.2 命令逐条 exit/摘要；③⑧⑮⑯⑰ 五项归因；主检出 WIP 对照；收口比对阈值表。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P4/PLAN-P4.md` `P4/IPC-P4.md` |
-| `P4/ACCEPTANCE-P4.md` | Bot 集成 P4 门禁验收台账 | 9 条 fixme 处置（8 点亮 / 1 保留附缺口）、18+1 条门禁 exit/读数、PLAN-P4 §9.1 七条逐项 PASS 与收口结论、未验证边界。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P4/PLAN-P4.md` `P4/IPC-P4.md` |
+| `P4/ACCEPTANCE-P4.md` | Bot 集成 P4 门禁验收台账 | 9 条 fixme 处置（全部点亮，越界文案口径已裁定）、18+1 条门禁 exit/读数、PLAN-P4 §9.1 七条逐项 PASS 与收口结论、未验证边界。 | active | 2026-11-25 | v3.0.0+（未定版，待确认） | 运行时与智能体 | 本地原创 | `P4/PLAN-P4.md` `P4/IPC-P4.md` |
 | `dependency-graph.md` | AxAgent 仓库依赖图与拆分分析 | 仓库依赖图与按技术层拆分可行性分析（参考） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `dependency-matrix.md` | AxAgent Crate 精确依赖矩阵（实测） | 逐 crate 读取 Cargo.toml 得到的精确依赖矩阵（2026-10-31 实测） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `gate-coverage-ledger.md` | 门禁覆盖台账（gate-coverage-ledger） | CI / 本地门禁覆盖面台账与补齐进度 | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 | `PLAN-declarative-schema-sync.md` |

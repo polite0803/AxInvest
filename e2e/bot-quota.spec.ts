@@ -302,13 +302,10 @@ test.describe("P4-a 配额 · 部门弹窗面板", () => {
     await expect(page.getByTestId("bot-quota-default-hint")).toBeVisible();
   });
 
-  // 保留 fixme（2026-11-25 复核，未迁就改断言）：
-  //   1) BotQuotaPanel.onSave 的越界文案是 `${bot.quota.invalidRange}: ${本地化字段标签}`
-  //      → 页面出现「取值超出允许范围: 单编排并发上限」，不含 maxConcurrency/maxSteps 原文；
-  //   2) 用例第二段想绕过预校验把后端 BOT_QUOTA_INVALID:maxSteps 映射到 bot-quota-error，
-  //      但先 fill(0) 再点保存会再次被同一预校验拦下，后端码永远到不了该错误位。
-  // 缺口：错误文案带 param（字段原名）此前端可见，或契约改写「字段名 = 本地化标签」。
-  test.fixme("UI：越界前端预校验 + 后端码映射到 bot-quota-error（带字段名）", async ({ page }) => {
+  // 2026-11-25 裁定（架构线）：前端预校验对用户展示**本地化字段标签**，不断言内部键名；
+  // 且面板结构上不会把越界值提交给后端（预校验先拦），后端 `BOT_QUOTA_INVALID` 的
+  // detail 透传改由组件测试钉住（BotP4Panels「后端码映射」用例），不在 e2e 里伪造旁路。
+  test("UI：越界被前端预校验拦下，错误位显示本地化字段名且不提交", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
       bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
     });
@@ -318,20 +315,11 @@ test.describe("P4-a 配额 · 部门弹窗面板", () => {
 
     await page.getByTestId("bot-quota-max-concurrency").fill("5");
     await page.getByTestId("bot-quota-save").click();
-    await expect(page.getByTestId("bot-quota-error")).toContainText("maxConcurrency");
-
-    // 绕过前端预校验直打后端：码 → 文案映射仍须落到同一错误位
-    await page.evaluate(async () => {
-      const t = (window as any).__P3_TEST__;
-      try {
-        await t.invoke("set_bot_department_quota", {
-          input: { departmentId: "dept-alpha", maxSteps: 0 },
-        });
-      } catch { /* 期望抛 BOT_QUOTA_INVALID:maxSteps */ }
-    });
-    await page.getByTestId("bot-quota-max-steps").fill("0");
-    await page.getByTestId("bot-quota-save").click();
-    await expect(page.getByTestId("bot-quota-error")).toContainText("maxSteps");
+    const err = page.getByTestId("bot-quota-error");
+    await expect(err).toContainText("取值超出允许范围");
+    await expect(err).toContainText("单编排并发上限");
+    // 预校验拦截：未发出 set_bot_department_quota
+    expect(await countCalls(page, "set_bot_department_quota")).toBe(0);
   });
 
   test("UI：保存后回显 + 恢复默认二次确认后回到 isDefault 读数", async ({ page }) => {

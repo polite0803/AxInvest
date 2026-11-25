@@ -122,6 +122,24 @@ describe("BotQuotaPanel", () => {
     });
   });
 
+  it("后端 BOT_QUOTA_INVALID 的 detail 字段名透传到错误位", async () => {
+    useBotStore.setState({
+      setDepartmentQuota: vi.fn().mockRejectedValue({
+        code: "BOT_QUOTA_INVALID",
+        category: "validation",
+        detail: "maxSteps=0 (range 1..=12)",
+      }) as never,
+    });
+    const user = userEvent.setup();
+    renderInApp(<BotQuotaPanel departmentId="dep-1" />);
+    await screen.findByTestId("bot-quota-save");
+    await user.click(screen.getByTestId("bot-quota-save"));
+    const err = await screen.findByTestId("bot-quota-error");
+    // 本地化码文案 + 后端 detail（含字段名）同时可见
+    expect(err.textContent).toContain("Bot 部门配额取值不合法");
+    expect(err.textContent).toContain("maxSteps");
+  });
+
   it("恢复默认需二次确认后才调用 reset", async () => {
     const user = userEvent.setup();
     renderInApp(<BotQuotaPanel departmentId="dep-1" />);

@@ -28,12 +28,12 @@ d47a766bf feat(bot-p4): A2 配额解析器 + runner 接入 + 定义/触发校验
 
 ## 1. 9 条 `test.fixme` 处置结论
 
-处置原则：A4/B4 已落盘且 testid 齐备 → 点亮为 `test` 并以真实页面跑绿；当前实现下断言**不成立** → 保留 `test.fixme` 并写明缺口，不迁就改断言。
+处置原则：A4/B4 已落盘且 testid 齐备 → 点亮为 `test` 并以真实页面跑绿；当前实现下断言**不成立** → 先由架构线裁定口径，再按裁定改写断言（不静默放宽）。2026-11-25 架构线裁定后，9 条全部以 `test` 跑绿。
 
 | # | 文件 / 用例 | 处置 | 证据 |
 |---|---|---|---|
 | 1 | `bot-quota.spec.ts` UI：打开部门配额面板，6 项默认值 + isDefault 提示 | ✅ 点亮 | 点击 `bot-department-quota-open` → 弹窗配额页；六项读数 2/900/12/2/300/2 全对，`bot-quota-default-hint` 可见（用例绿） |
-| 2 | `bot-quota.spec.ts` UI：越界前端预校验 + 后端码映射（带字段名） | ⛔ 保留 fixme | 见下方缺口说明 |
+| 2 | `bot-quota.spec.ts` UI：越界前端预校验（本地化字段名）+ 不提交 | ✅ 点亮（口径已裁定） | `fill(5)` → 错误位含「取值超出允许范围」「单编排并发上限」，`set_bot_department_quota` 调用数 0 |
 | 3 | `bot-quota.spec.ts` UI：保存后回显 + 恢复默认二次确认 | ✅ 点亮 | 保存 3 → 回显 3、hint 隐藏；Popconfirm 确认（`.ant-popconfirm-buttons .ant-btn-primary`）→ 回 12、hint 复现 |
 | 4 | `bot-needs-input.spec.ts` AC-B5-UI-1 提问卡 → 选项作答 → 已答 | ✅ 点亮 | 卡片/问题/选项渲染，选「沪深300」→ 提交 → 状态「已回答」 |
 | 5 | `bot-needs-input.spec.ts` AC-B5-UI-2 刷新后 pending 卡恢复 | ✅ 点亮 | `reload()` 后卡片仍在、问题文本一致（shim `sessionStorage` + `list_bot_input_requests` 双路径） |
@@ -42,12 +42,10 @@ d47a766bf feat(bot-p4): A2 配额解析器 + runner 接入 + 定义/触发校验
 | 8 | `bot-needs-input.spec.ts` AC-B5-UI-5 非 Bot 聊天零变化 | ✅ 点亮 | `/chat` 下无持久卡，`list_bot_input_requests` 返回 0 行 |
 | 9 | `bot-needs-input.spec.ts` AC-B5-UI-6 `/bots` 待答徽章随事件增减 | ✅ 点亮 | seed → 徽章含 1；直调 `answer_bot_input_request` → 徽章卸载（count 0） |
 
-**#2 保留 fixme 的缺口（不迁就改断言）**：
+**#2 口径裁定（2026-11-25，架构线）**：
 
-1. `BotQuotaPanel.onSave` 的越界文案是 `${t("bot.quota.invalidRange")}: ${labels[invalid].label}` → 页面出现「取值超出允许范围: 单编排并发上限」，**不含**断言要求的原始字段名 `maxConcurrency` / `maxSteps`；
-2. 用例第二段想绕过前端预校验、把后端 `BOT_QUOTA_INVALID:maxSteps` 映射到 `bot-quota-error`，但先 `fill("0")` 再点保存仍会被同一预校验拦下，后端码**永远到不了**该错误位（UI 无直连后端的入口）。
-
-缺口归属：前端/契约。修复选项二选一——面板错误文案带上 `param`（字段原名），或由 `IPC-P4` 明确「字段名 = 本地化标签」并同步改断言口径。在该裁决落地前保留 `test.fixme`。
+1. 面向用户的预校验文案保留**本地化字段标签**（「单编排并发上限」），不把内部键名 `maxConcurrency` 暴露给用户；原断言要求 UI 出现内部键名，属口径错误，已按裁定改写。
+2. 面板在结构上不会把越界值提交给后端（预校验先拦），后端 `BOT_QUOTA_INVALID` 的 detail 透传改由组件测试钉住：`BotP4Panels.test.tsx`「后端 BOT_QUOTA_INVALID 的 detail 字段名透传到错误位」断言错误位同时含本地化码文案与 `maxSteps`。e2e 不再伪造直连后端的旁路。
 
 **为点亮做的三处测试管道修正（不改产品语义、不放宽断言）**：
 
@@ -61,10 +59,10 @@ d47a766bf feat(bot-p4): A2 配额解析器 + runner 接入 + 定义/触发校验
 $ npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 EXIT=0
   1 skipped
-  24 passed (24.5s)
+  25 passed (25.0s)
 ```
 
-（1 skipped 即 #2 保留的 fixme；其余 8 条点亮用例 + 15 条契约自检全绿。）
+（25 条全绿、0 skipped：9 条页面用例 + 15 条契约自检 + 1 条 IPC 拒绝路径。）
 
 ## 2. PLAN-P4 §9.2 门禁逐条实测
 
@@ -111,7 +109,7 @@ EXIT=0
 | # | 命令原文 | exit | 关键输出 |
 |---|---|---|---|
 | 16 | `node scripts/vitest-run.mjs run` | 0 | `Test Files 327 passed (327)`；`Tests 3421 passed (3421)`（含 `BotP4Panels.test.tsx` 10 条） |
-| 17 | `npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list` | 0 | `24 passed` + `1 skipped`（= §1 #2 保留 fixme） |
+| 17 | `npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list` | 0 | `25 passed`（0 skipped） |
 | 18 | `npx playwright test e2e/bot-workflow.spec.ts e2e/bot-delegation-chain.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list` | 0 | `6 passed`（13.4s） |
 
 ## 3. PLAN-P4 §9.1 七条判定
@@ -128,7 +126,7 @@ EXIT=0
 
 ## 4. 收口结论
 
-**P4 可收口（PASS）**：§9.1 ①–⑦ 全部满足；9 条 `test.fixme` 中 8 条点亮并绿、1 条保留并附缺口与责任线（§1 #2，属错误文案口径问题，不阻断 ④ 的实质行为证据）。INDEX 的 `P4/ACCEPTANCE-P4.md` 行按 2026-11-25 登记。
+**P4 可收口（PASS）**：§9.1 ①–⑦ 全部满足；9 条 `test.fixme` 全部点亮并以真实页面跑绿（0 skipped），#2 的错误文案口径已裁定并落断言（§1）。INDEX 的 `P4/ACCEPTANCE-P4.md` 行按 2026-11-25 登记。
 
 ## 5. 未验证 / 边界（如实记录）
 

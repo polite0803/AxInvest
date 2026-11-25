@@ -126,14 +126,14 @@ FAIL src/pages/__tests__/BotsPage.test.tsx (7 tests | 7 failed)
 
 落盘内容（本轮，独立提交于本文件之后）：
 
-- 新增 `src-tauri/tests/bot_input.rs`：B5 骨架，当前仅 1 个可运行守卫，`mod p4b` 由 `#[cfg(any())]` 屏蔽，点亮步骤写在文件头；
+- `src-tauri/tests/bot_input.rs`：骨架落盘时 B1 未提交（`#[cfg(any())]` 屏蔽）；B1 提交 `a6b4d11ff` 落盘后**当场点亮**，现为 8 条 DAO 生命周期用例（双路查询 / `UNIQUE(ask_id)` / 只从 pending 作答 / 终态不可回退 / 清扫 / 过滤排序 / 待答计数 / 预留列恒 NULL）；B2·B3 归属的场景写在文件头归属表；
 - 追加 `src-tauri/tests/bot_quota.rs` 2 个用例（A2 原有 7 个用例由后端随 A2 落盘，本轮只补齐 A5 缺口）；
 - 扩展 `e2e/helpers/p3-tauri-shim.ts`：6 条 P4 命令 + `bot-input-request-updated` + `agent_respond_ask` P4 分支 + 配额只收紧；
 - 新增 `e2e/bot-quota.spec.ts`、`e2e/bot-needs-input.spec.ts`：契约自检 16 条可跑，A4/B4 页面证据 9 条 `test.fixme`。
 
 | # | 命令原文 | exit | 关键输出 |
 |---|---|---|---|
-| ③ | `__TAURI_WORKSPACE__=true cargo test --manifest-path src-tauri/Cargo.toml --test bot_quota --test bot_input` | 0 | `bot_input`: `1 passed`（`frozen_expiry_matches_p3_dispatch_cap`）；`bot_quota`: `9 passed`（后端 A2 的 7 条 + 本轮 2 条：`step_timeout_violation_names_the_offending_step`、`cron_gate_rejects_before_run_creation_across_workflows`），`0 failed` |
+| ③ | `__TAURI_WORKSPACE__=true cargo test --manifest-path src-tauri/Cargo.toml --test bot_quota --test bot_input` | 0 | `bot_input`: `8 passed`（1 条 300s 冻结守卫 + 7 条 DAO 生命周期）；`bot_quota`: `9 passed`（后端 A2 的 7 条 + 本轮 2 条：`step_timeout_violation_names_the_offending_step`、`cron_gate_rejects_before_run_creation_across_workflows`），`0 failed` |
 | ⑰ | `npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert '@heavy' --timeout=120000 --reporter=list` | 0 | `16 passed; 9 skipped`（skipped 全部是 `test.fixme`：A4 面板 3 条、B4 卡片/徽章 6 条） |
 | ⑥ | `npm run typecheck` | 0 | 无错（`src` 1599 文件） |
 
@@ -147,4 +147,5 @@ FAIL src/pages/__tests__/BotsPage.test.tsx (7 tests | 7 failed)
 尚未有证据的项（不得计入已覆盖）：
 - A5「cron 触发超限 → history 失败」只有**门禁之前**的可观测部分（`cron_gate_rejects_before_run_creation_across_workflows`）；history 记 `failed` 走 `init/services.rs` 调度器闭包内的既有错误路径，需后端抽出 seam 或端到端启动调度器才能断言。
 - B5 ①③⑤ 与 ⑥ 的「无活 sender」分支分别依赖 B2 交互桥与 B3 命令层，待其落盘后由各自测试锁定，`bot_input.rs` 文件头已列归属表。
+- 复测窗口内后端 B2 正在落盘（`src-tauri/src/bot_input_request.rs` 等为未提交改动），首次 `cargo test --test bot_input` 因 `IpcEventName::BotInputRequestUpdated` 尚未加入枚举而 `exit 101`（后端 WIP 的瞬时红，非本轮产物）；待其枚举补齐后原样重跑即 `exit 0`。此类并行线瞬时红不作为基线。
 

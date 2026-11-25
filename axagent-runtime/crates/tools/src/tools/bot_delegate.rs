@@ -84,7 +84,7 @@ pub trait BotDelegateRunner: Send + Sync {
 
 /// 注入真实执行器（进程启动时一次，见 `bot_assignment_runner::install_consult_runner`）。
 pub fn set_bot_delegate_runner(runner: Arc<dyn BotDelegateRunner>) {
-    let _ = BOT_DELEGATE_RUNNER.set(runner);
+    BOT_DELEGATE_RUNNER.set(runner).ok();
 }
 
 fn turn_key(ctx: &ToolContext) -> String {
@@ -253,7 +253,7 @@ mod tests {
     }
 
     fn init_runner() {
-        let _ = set_bot_delegate_runner(Arc::new(FakeRunner));
+        set_bot_delegate_runner(Arc::new(FakeRunner));
     }
 
     fn ctx(turn: &str) -> ToolContext {

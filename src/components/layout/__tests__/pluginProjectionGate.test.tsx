@@ -122,12 +122,18 @@ describe("插件投影首帧 gate", () => {
           path: "/plugins/opc-security-bundled/opc-security",
           navKey: "plugin-page:opc-security@bundled:opc-security",
           navLabel: "安全合规",
+          navLabelIsI18nKey: false,
+          navGroup: "packs",
+          icon: null,
+          navOrder: 0,
+          hidden: false,
           pluginName: "security",
-          Page: () => <div data-testid="plugin-page" />,
+          pluginSlug: "opc-security-bundled",
+          pageId: "opc-security",
         }],
       });
     });
-    expect(await screen.findByTestId("plugin-page")).toBeInTheDocument();
+    expect(await screen.findByTestId("plugin-page-host")).toBeInTheDocument();
   });
 
   it("旧链在 ready 前不跳 /opc；映射缺失时停在明确 404", async () => {
@@ -166,7 +172,7 @@ describe("插件投影首帧 gate", () => {
       projection.set({ ready: true });
     });
     expect(screen.getByTestId("result")).toHaveTextContent("404");
-    expect(screen.queryByTestId("plugin-page")).toBeNull();
+    expect(screen.queryByTestId("plugin-page-host")).toBeNull();
   });
 
   it("普通 404 不被插件投影卡住", async () => {

@@ -2581,16 +2581,51 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 // 时刻为准（Bot 编辑后无需重创建例程，GAP G-11 的取值口径）。
                 let outcome = match axagent_dao::repo::bot::get_bot(&db, &bot_id).await {
                     Ok(bot) => {
-                        crate::bot_routine_runner::run_bot_routine_turn(
-                            &ctx,
-                            &bot.id,
-                            &bot.approval_mode,
-                            bot.provider_id.as_deref(),
-                            bot.model_id.as_deref(),
-                            &prompt,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())
+                        // P5-b B3：新建例程轮前熔断（ADR-P5-3），只拦新建、已启动跑完。
+                        if let Err(cost_err) =
+                            crate::bot_cost_quota::ensure_bot_cost_quota_ok(&db, &bot.id).await
+                        {
+                            Err(cost_err)
+                        } else {
+                            match crate::bot_routine_runner::run_bot_routine_turn_with_usage(
+                                &ctx,
+                                &bot.id,
+                                &bot.approval_mode,
+                                bot.provider_id.as_deref(),
+                                bot.model_id.as_deref(),
+                                &prompt,
+                            )
+                            .await
+                            {
+                                Ok(outcome) => {
+                                    // P5-b B2：usage=None 不写行；写账本失败只 warn 不阻塞（ADR-P5-3/8）。
+                                    if let Some(u) = outcome.usage.as_ref() {
+                                        if let Err(e) = crate::bot_cost_quota::record_usage(
+                                            &db,
+                                            &bot.id,
+                                            None,
+                                            Some(&u.execution_id),
+                                            None,
+                                            None,
+                                            axagent_harness::types::BotUsageOrigin::Routine,
+                                            &u.model_id,
+                                            &u.usage,
+                                        )
+                                        .await
+                                        {
+                                            tracing::warn!(
+                                                bot_id = %bot.id,
+                                                job_id = %job_id,
+                                                error = %e,
+                                                "Bot 例程轮用量记账失败（不阻塞）"
+                                            );
+                                        }
+                                    }
+                                    Ok(outcome.text)
+                                },
+                                Err(e) => Err(e.to_string()),
+                            }
+                        }
                     },
                     Err(e) => Err(format!("Bot 例程触发时 Bot 已不存在（{bot_id}）: {e}")),
                 };

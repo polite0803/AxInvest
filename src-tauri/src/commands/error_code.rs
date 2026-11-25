@@ -116,6 +116,18 @@ pub mod bot {
     pub const INPUT_REQUEST_NOT_PENDING: &str = "BOT_INPUT_REQUEST_NOT_PENDING";
     /// 答复内容不能为空（P4 B3）
     pub const INPUT_ANSWER_EMPTY: &str = "BOT_INPUT_ANSWER_EMPTY";
+
+    // ── P5-b 费用/Token 配额 ──
+    /// Bot 费用配额取值不合法（scope 非法 / 上限为负 / windowHours 越界）。
+    pub const COST_QUOTA_INVALID: &str = "BOT_COST_QUOTA_INVALID";
+    /// 超出费用或 Token 配额（新建 run / 新建轮前检查）。
+    pub const COST_QUOTA_EXCEEDED: &str = "BOT_COST_QUOTA_EXCEEDED";
+
+    // ── P5-c1 每 Bot 技能归属 ──
+    /// 未找到该 Bot 的技能归属。
+    pub const SKILL_NOT_FOUND: &str = "BOT_SKILL_NOT_FOUND";
+    /// 技能预设格式不合法。
+    pub const SKILL_PRESET_INVALID: &str = "BOT_SKILL_PRESET_INVALID";
 }
 
 /// 微调训练相关错误码

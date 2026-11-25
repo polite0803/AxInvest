@@ -24,9 +24,11 @@ pub mod backtest_validation;
 pub mod backup;
 pub mod bot;
 pub mod bot_assignment;
+pub mod bot_cost;
 pub mod bot_department;
 pub mod bot_input;
 pub mod bot_quota;
+pub mod bot_skill;
 pub mod bot_workflow;
 pub mod branches;
 #[cfg(not(mobile))]

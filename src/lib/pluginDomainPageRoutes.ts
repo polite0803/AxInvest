@@ -35,11 +35,33 @@ export interface PluginDomainPageRoute {
   readonly legacyPath?: string;
   readonly pluginSlug: string;
   readonly navKey: string;
+  /**
+   * 侧栏/命令面板显示名。`labelKey` 有值时是 i18n key，消费端必须 `t(navLabel)`；
+   * 否则是插件声明的纯文本标题（消费端直接渲染）。判据见 `navLabelIsI18nKey`。
+   */
   readonly navLabel: string;
+  /** `true` ⇒ `navLabel` 是 i18n key（消费端应 `t()`）；`false` ⇒ 纯文本。 */
+  readonly navLabelIsI18nKey: boolean;
+  /** 宿主侧栏归属组 key（NAV_GROUPS[].key）；缺省 "packs" 兼容旧清单。 */
+  readonly navGroup: string;
+  /** lucide 图标标识；缺省 null ⇒ 前端用 Puzzle。 */
+  readonly icon: string | null;
+  /** 组内排序（升序）。 */
+  readonly navOrder: number;
+  /** 为 true 时不在侧栏/命令面板显示入口（路由仍注册）。 */
+  readonly hidden: boolean;
 }
 
 const URL_SEGMENT = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const PLUGIN_DOMAIN_PAGE_PATH = /^\/opc\/domain\/[a-z0-9][a-z0-9-]{0,63}$/i;
+
+/** 宿主侧栏已知分组（与 `navGroups.ts` / Rust `VALID_PAGE_NAV_GROUPS` 同源）。 */
+const KNOWN_NAV_GROUPS = new Set(["chat", "invest", "knowledge", "opc", "packs", "tasks", "system"]);
+
+function resolveNavGroup(raw: string | null | undefined): string {
+  const value = raw?.trim();
+  return value && KNOWN_NAV_GROUPS.has(value) ? value : "packs";
+}
 
 /** 取域包 logical manifest 的 `page.path`；形状不对时直接判为不可映射。 */
 function domainPackPagePath(pack: PluginDomainPackDto): string | undefined {
@@ -95,6 +117,8 @@ export function resolvePluginDomainPageRoutes(
           break;
         }
       }
+      const labelKey = page.labelKey?.trim();
+      const navLabelIsI18nKey = Boolean(labelKey);
       out.push({
         id: `plugin-page:${info.id}:${page.id}`,
         pluginId: info.id,
@@ -105,7 +129,12 @@ export function resolvePluginDomainPageRoutes(
         legacyPath,
         pluginSlug: slug,
         navKey: `plugin-page:${info.id}:${page.id}`,
-        navLabel: page.title || page.id,
+        navLabel: navLabelIsI18nKey ? labelKey! : (page.title || page.id),
+        navLabelIsI18nKey,
+        navGroup: resolveNavGroup(page.navGroup),
+        icon: page.icon?.trim() || null,
+        navOrder: typeof page.navOrder === "number" ? page.navOrder : 0,
+        hidden: page.hidden === true,
       });
     }
   }

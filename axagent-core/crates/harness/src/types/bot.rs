@@ -491,3 +491,340 @@ pub mod input_origin {
     pub const ROUTINE: &str = "routine";
     pub const WORKFLOW: &str = "workflow";
 }
+
+// ─────────────────────────── P5：费用 / Token 配额 ───────────────────────────
+
+/// 配额作用域：Bot 自身 / 部门合计。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BotCostQuotaScope {
+    #[default]
+    Bot,
+    Department,
+}
+
+impl BotCostQuotaScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Bot => "bot",
+            Self::Department => "department",
+        }
+    }
+}
+
+impl std::fmt::Display for BotCostQuotaScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for BotCostQuotaScope {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "bot" => Ok(Self::Bot),
+            "department" => Ok(Self::Department),
+            _ => Err(format!("invalid BotCostQuotaScope: {s}")),
+        }
+    }
+}
+
+/// 费用/Token 配额 DTO。`is_default = true` 表示无配额行，值为“不限”。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotCostQuota {
+    pub scope: BotCostQuotaScope,
+    pub scope_id: String,
+    pub max_total_tokens: i64,
+    pub max_cost_usd: f64,
+    pub window_hours: i32,
+    pub is_default: bool,
+    pub updated_at: Option<i64>,
+}
+
+impl BotCostQuota {
+    /// 无配额行时的默认值：不限（0 = 不限）。
+    pub fn defaults(scope: BotCostQuotaScope, scope_id: &str) -> Self {
+        Self {
+            scope,
+            scope_id: scope_id.to_string(),
+            max_total_tokens: 0,
+            max_cost_usd: 0.0,
+            window_hours: 168,
+            is_default: true,
+            updated_at: None,
+        }
+    }
+}
+
+/// 写配额入参（全量 upsert）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotCostQuotaInput {
+    pub scope: BotCostQuotaScope,
+    pub scope_id: String,
+    pub max_total_tokens: i64,
+    pub max_cost_usd: f64,
+    pub window_hours: i32,
+}
+
+/// 账本行来源分类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BotUsageOrigin {
+    Interactive,
+    #[default]
+    Routine,
+    Assignment,
+}
+
+impl BotUsageOrigin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Interactive => "interactive",
+            Self::Routine => "routine",
+            Self::Assignment => "assignment",
+        }
+    }
+}
+
+impl std::fmt::Display for BotUsageOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for BotUsageOrigin {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "interactive" => Ok(Self::Interactive),
+            "routine" => Ok(Self::Routine),
+            "assignment" => Ok(Self::Assignment),
+            _ => Err(format!("invalid BotUsageOrigin: {s}")),
+        }
+    }
+}
+
+/// 计价来源档位（ADR-P5-4）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BotPricingSource {
+    Model,
+    Config,
+    #[default]
+    Heuristic,
+    Builtin,
+}
+
+impl BotPricingSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Config => "config",
+            Self::Heuristic => "heuristic",
+            Self::Builtin => "builtin",
+        }
+    }
+}
+
+impl std::fmt::Display for BotPricingSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for BotPricingSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "model" => Ok(Self::Model),
+            "config" => Ok(Self::Config),
+            "heuristic" => Ok(Self::Heuristic),
+            "builtin" => Ok(Self::Builtin),
+            _ => Err(format!("invalid BotPricingSource: {s}")),
+        }
+    }
+}
+
+/// 用量账本行 DTO。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotUsageEntry {
+    pub id: String,
+    pub bot_id: String,
+    pub department_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub execution_id: Option<String>,
+    pub workflow_run_id: Option<String>,
+    pub assignment_id: Option<String>,
+    pub model_id: String,
+    pub origin: BotUsageOrigin,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub total_tokens: i64,
+    pub estimated_cost_usd: f64,
+    pub pricing_source: BotPricingSource,
+    pub created_at: i64,
+}
+
+/// 用量过滤入参（全可选）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotUsageFilter {
+    #[serde(default)]
+    pub bot_id: Option<String>,
+    #[serde(default)]
+    pub department_id: Option<String>,
+    #[serde(default)]
+    pub origin: Option<BotUsageOrigin>,
+    #[serde(default)]
+    pub workflow_run_id: Option<String>,
+    #[serde(default)]
+    pub assignment_id: Option<String>,
+    #[serde(default)]
+    pub since: Option<i64>,
+    #[serde(default)]
+    pub until: Option<i64>,
+}
+
+/// 汇总结果（窗口内）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotUsageTotals {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub total_tokens: i64,
+    pub estimated_cost_usd: f64,
+    pub entry_count: i64,
+}
+
+/// 用量汇总 DTO（带 breached 判定）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotUsageSummary {
+    pub scope: BotCostQuotaScope,
+    pub scope_id: String,
+    pub window_hours: i32,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub total_tokens: i64,
+    pub estimated_cost_usd: f64,
+    pub entry_count: i64,
+    pub breached: bool,
+    pub pricing_note: String,
+}
+
+// ─────────────────────────── P5：每 Bot 技能归属 ───────────────────────────
+
+/// 技能来源：全局库 / 本 Bot 目录。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BotSkillSource {
+    Global,
+    #[default]
+    Bot,
+}
+
+impl BotSkillSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Bot => "bot",
+        }
+    }
+}
+
+impl std::fmt::Display for BotSkillSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for BotSkillSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "global" => Ok(Self::Global),
+            "bot" => Ok(Self::Bot),
+            _ => Err(format!("invalid BotSkillSource: {s}")),
+        }
+    }
+}
+
+/// Bot 技能绑定行（DAO/内部）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSkillBinding {
+    pub id: String,
+    pub bot_id: String,
+    pub skill_name: String,
+    pub source: String,
+    pub preset_id: Option<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Bot 技能列表项 DTO（带全局/遮蔽/missing 展示信息）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSkill {
+    pub name: String,
+    pub description: String,
+    pub source: BotSkillSource,
+    pub enabled: bool,
+    pub shadowed_global: bool,
+    pub missing: bool,
+    pub preset_id: Option<String>,
+    pub updated_at: Option<i64>,
+}
+
+/// preset 导入格式 v1（ADR-P5-6）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSkillPreset {
+    pub version: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub skills: Vec<BotSkillPresetItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSkillPresetItem {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub content: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub requires_toolsets: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSkillPresetSkipped {
+    pub name: String,
+    pub reason: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSkillPresetResult {
+    pub preset_id: String,
+    pub imported: Vec<String>,
+    pub skipped: Vec<BotSkillPresetSkipped>,
+}

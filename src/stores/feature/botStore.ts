@@ -14,13 +14,22 @@ import { invoke, listen, type UnlistenFn } from "@/lib/invoke";
 import type {
   Bot,
   BotAssignment,
+  BotCostQuota,
+  BotCostQuotaInput,
+  BotCostQuotaScope,
   BotDepartment,
   BotDepartmentQuota,
   BotDepartmentQuotaInput,
   BotInputRequest,
   BotInputRequestFilter,
   BotMemory,
+  BotSkill,
+  BotSkillPreset,
+  BotSkillPresetResult,
   BotSoul,
+  BotUsageEntry,
+  BotUsageFilter,
+  BotUsageSummary,
   BotWorkflow,
   BotWorkflowRun,
   Conversation,
@@ -59,6 +68,21 @@ export interface BotStoreState {
   inputRequests: BotInputRequest[];
   inputRequestLoading: boolean;
   inputRequestError: string | null;
+
+  // P5：费用 / Token 配额与用量（用量低频，页面打开时主动拉取，不新增事件）
+  costQuota: BotCostQuota | null;
+  costQuotaLoading: boolean;
+  costQuotaSaving: boolean;
+  costQuotaError: string | null;
+  usageSummary: BotUsageSummary | null;
+  usageEntries: BotUsageEntry[];
+  usageLoading: boolean;
+  usageError: string | null;
+  // P5-c1：每 Bot 技能列表
+  botSkills: BotSkill[];
+  botSkillsLoading: boolean;
+  botSkillsError: string | null;
+  botSkillsSaving: boolean;
 
   // P3：编排工作流（workflow slice，扁平挂在 botStore 上，不另起 store）
   workflows: BotWorkflow[];
@@ -125,6 +149,22 @@ export interface BotStoreState {
   upsertInputRequest: (request: BotInputRequest) => void;
   answerInputRequest: (requestId: string, answer: string) => Promise<BotInputRequest>;
   cancelInputRequest: (requestId: string) => Promise<BotInputRequest>;
+
+  // ── P5-b：费用 / Token 配额与用量（IPC-P5 §1.1 五命令）──
+  getBotCostQuota: (scope: BotCostQuotaScope, scopeId: string) => Promise<BotCostQuota>;
+  setBotCostQuota: (input: BotCostQuotaInput) => Promise<BotCostQuota>;
+  resetBotCostQuota: (scope: BotCostQuotaScope, scopeId: string) => Promise<void>;
+  listBotUsage: (filter: BotUsageFilter) => Promise<BotUsageEntry[]>;
+  getBotUsageSummary: (
+    scope: BotCostQuotaScope,
+    scopeId: string,
+    windowHours?: number | null,
+  ) => Promise<BotUsageSummary>;
+
+  // ── P5-c1：每 Bot 技能归属（IPC-P5 §1.2 三命令）──
+  listBotSkills: (botId: string) => Promise<BotSkill[]>;
+  setBotSkillEnabled: (botId: string, skillName: string, enabled: boolean) => Promise<BotSkill>;
+  importBotSkillPreset: (botId: string, preset: BotSkillPreset) => Promise<BotSkillPresetResult>;
 }
 
 /** IPC-P2B §2 `list_bot_assignments` 过滤参数（皆可选）。 */
@@ -169,6 +209,18 @@ export const useBotStore = create<BotStoreState>((set, get) => ({
   inputRequests: [],
   inputRequestLoading: false,
   inputRequestError: null,
+  costQuota: null,
+  costQuotaLoading: false,
+  costQuotaSaving: false,
+  costQuotaError: null,
+  usageSummary: null,
+  usageEntries: [],
+  usageLoading: false,
+  usageError: null,
+  botSkills: [],
+  botSkillsLoading: false,
+  botSkillsError: null,
+  botSkillsSaving: false,
   workflows: [],
   workflowRuns: [],
   workflowLoading: false,
@@ -593,7 +645,7 @@ export const useBotStore = create<BotStoreState>((set, get) => ({
       // 按 id 合并：/bots 的 pending 全量拉取与单会话拉取会先后写入同一 slice，
       // 直接覆盖会让另一处的待答数凭空消失。终态由事件 upsert 就地更新。
       const merged = new Map(get().inputRequests.map((r) => [r.id, r] as const));
-      for (const row of rows) merged.set(row.id, row);
+      for (const row of rows) { merged.set(row.id, row); }
       set({ inputRequests: Array.from(merged.values()), inputRequestLoading: false });
       return rows;
     } catch (e) {
@@ -636,6 +688,114 @@ export const useBotStore = create<BotStoreState>((set, get) => ({
       return row;
     } catch (e) {
       set({ inputRequestError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  // ── P5-b：费用 / Token 配额与用量（IPC-P5 §1.1）──
+
+  getBotCostQuota: async (scope, scopeId) => {
+    set({ costQuotaLoading: true, costQuotaError: null });
+    try {
+      const quota = await invoke<BotCostQuota>("get_bot_cost_quota", { scope, scopeId });
+      set({ costQuota: quota, costQuotaLoading: false });
+      return quota;
+    } catch (e) {
+      set({ costQuotaLoading: false, costQuotaError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  setBotCostQuota: async (input) => {
+    set({ costQuotaSaving: true, costQuotaError: null });
+    try {
+      const quota = await invoke<BotCostQuota>("set_bot_cost_quota", { input });
+      set({ costQuota: quota, costQuotaSaving: false });
+      return quota;
+    } catch (e) {
+      set({ costQuotaSaving: false, costQuotaError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  resetBotCostQuota: async (scope, scopeId) => {
+    set({ costQuotaSaving: true, costQuotaError: null });
+    try {
+      await invoke("reset_bot_cost_quota", { scope, scopeId });
+      set({ costQuota: null, costQuotaSaving: false });
+    } catch (e) {
+      set({ costQuotaSaving: false, costQuotaError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  listBotUsage: async (filter) => {
+    set({ usageLoading: true, usageError: null });
+    try {
+      const entries = await invoke<BotUsageEntry[]>("list_bot_usage", { filter });
+      const rows = Array.isArray(entries) ? entries : [];
+      set({ usageEntries: rows, usageLoading: false });
+      return rows;
+    } catch (e) {
+      set({ usageLoading: false, usageError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  getBotUsageSummary: async (scope, scopeId, windowHours) => {
+    set({ usageLoading: true, usageError: null });
+    try {
+      const summary = await invoke<BotUsageSummary>("get_bot_usage_summary", {
+        scope,
+        scopeId,
+        windowHours: windowHours ?? null,
+      });
+      set({ usageSummary: summary, usageLoading: false });
+      return summary;
+    } catch (e) {
+      set({ usageLoading: false, usageError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  // ── P5-c1：每 Bot 技能归属（IPC-P5 §1.2）──
+
+  listBotSkills: async (botId) => {
+    set({ botSkillsLoading: true, botSkillsError: null });
+    try {
+      const skills = await invoke<BotSkill[]>("list_bot_skills", { botId });
+      const rows = Array.isArray(skills) ? skills : [];
+      set({ botSkills: rows, botSkillsLoading: false });
+      return rows;
+    } catch (e) {
+      set({ botSkillsLoading: false, botSkillsError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  setBotSkillEnabled: async (botId, skillName, enabled) => {
+    set({ botSkillsSaving: true, botSkillsError: null });
+    try {
+      const row = await invoke<BotSkill>("set_bot_skill_enabled", { botId, skillName, enabled });
+      set((s) => ({
+        botSkills: s.botSkills.map((skill) => (skill.name === row.name ? row : skill)),
+        botSkillsSaving: false,
+      }));
+      return row;
+    } catch (e) {
+      set({ botSkillsSaving: false, botSkillsError: backendErrorText(e) });
+      throw e;
+    }
+  },
+
+  importBotSkillPreset: async (botId, preset) => {
+    set({ botSkillsSaving: true, botSkillsError: null });
+    try {
+      const result = await invoke<BotSkillPresetResult>("import_bot_skill_preset", { botId, preset });
+      set({ botSkillsSaving: false });
+      return result;
+    } catch (e) {
+      set({ botSkillsSaving: false, botSkillsError: backendErrorText(e) });
       throw e;
     }
   },

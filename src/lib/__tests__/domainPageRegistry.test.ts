@@ -47,9 +47,9 @@ describe("domainPageRegistry", () => {
     const routes = getDomainPageRoutes();
     expect(routes).toHaveLength(6);
     expect(routes.filter((r) => r.id.startsWith("domain:"))).toHaveLength(0);
-    // 带侧栏入口的 4 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口。
-    // 投资域两条入口已随插件门槛迁进 invest/routes.tsx 的 nav 声明。
-    expect(routes.filter((r) => r.nav)).toHaveLength(4);
+    // 带侧栏入口的 3 条；`/opc/:tab` 与 `/opc/domains/:domainId` 是同页子路由，无入口。
+    // 投资域只剩「回放工作台」一条入口 —— 股票本体的入口已交给插件页投影。
+    expect(routes.filter((r) => r.nav)).toHaveLength(3);
   });
 
   it("path 由域模块字面量声明，宿主 BUILTIN_PAGE_PATH 已不再登记域页面", () => {
@@ -66,14 +66,12 @@ describe("domainPageRegistry", () => {
     expect(BUILTIN_PAGE_PATH.chat).toBe("/chat");
   });
 
-  it("侧栏入口随路由声明：4 项，组归属与组内次序不变", () => {
+  it("侧栏入口随路由声明：3 项，组归属与组内次序不变", () => {
     const nav = getContributedNavItems();
-    expect(nav).toHaveLength(4);
-    expect(nav.find((n) => n.key === "finance-investment")).toMatchObject({
-      path: "/invest",
-      group: "invest",
-      domain: "finance",
-    });
+    expect(nav).toHaveLength(3);
+    // T3 完整外迁：股票本体入口改由 `pluginRouteRegistry` 的插件页投影提供，
+    // 宿主注册表不再贡献 `finance-investment`（避免启用后侧栏出现两个投资入口）。
+    expect(nav.find((n) => n.key === "finance-investment")).toBeUndefined();
     expect(nav.find((n) => n.key === "invest-replay")).toMatchObject({
       path: "/invest/replay",
       group: "invest",
@@ -91,12 +89,12 @@ describe("domainPageRegistry", () => {
     }
   });
 
-  it("迁移后的股票入口在宿主骨架与域贡献里各只出现一次", () => {
-    // 宿主 navGroups.itemKeys 若还点名这两个 key，Sidebar 会把它们同时当宿主项与域项渲染。
+  it("迁移后的入口在宿主骨架与域贡献里各只出现一次", () => {
+    // 宿主 navGroups.itemKeys 若还点名回放工作台的 key，Sidebar 会把它同时当宿主项与域项渲染；
+    // 股票本体则不应再出现在宿主导航（其入口归插件页投影）。
     const keys = getNavItems().map((n) => n.key);
-    for (const key of ["finance-investment", "invest-replay"]) {
-      expect(keys.filter((k) => k === key)).toHaveLength(1);
-    }
+    expect(keys.filter((k) => k === "invest-replay")).toHaveLength(1);
+    expect(keys).not.toContain("finance-investment");
   });
 
   it("pathname → pageKey 反查覆盖精确 / 参数段 / L1 兜底", () => {
@@ -110,26 +108,30 @@ describe("domainPageRegistry", () => {
     expect(resolveContributedPageKey("/knowledge")).toBeUndefined();
   });
 
-  it("requiresPlugin：stock 未启用时股票路由与侧栏入口一起消失，其它域页不受影响", () => {
-    const hasInvest = () =>
-      ["invest:index", "invest:replay"].every((id) => getDomainPageRoutes().some((r) => r.id === id));
-    const hasInvestNav = () =>
-      ["finance-investment", "invest-replay"].every((key) => getContributedNavItems().some((n) => n.key === key));
-    expect(hasInvest() && hasInvestNav()).toBe(true);
+  it("requiresPlugin：stock 未启用时回放路由与入口消失；/invest 兼容桥始终可达", () => {
+    const hasIndex = () => getDomainPageRoutes().some((r) => r.id === "invest:index");
+    const hasReplay = () => getDomainPageRoutes().some((r) => r.id === "invest:replay");
+    const hasReplayNav = () => getContributedNavItems().some((n) => n.key === "invest-replay");
+    expect(hasIndex() && hasReplay() && hasReplayNav()).toBe(true);
 
     setEnabledPlugins(["other@bundled", "other"]);
-    expect(hasInvest()).toBe(false);
-    expect(hasInvestNav()).toBe(false);
-    expect(resolveContributedPageKey("/invest")).toBeUndefined();
-    expect(resolveContributedPageKey("/invest/replay")).toBeUndefined();
+    // `/invest` 只是零业务代码的兼容跳转桥：插件禁用时仍要可达并显示降级提示，
+    // 否则历史收藏/旧调用方会直接落到 404（用户报告过的导航失效形态）。
+    expect(hasIndex()).toBe(true);
+    expect(resolveContributedPageKey("/invest")).toBe("finance-investment");
+    expect(hasReplay()).toBe(false);
+    expect(hasReplayNav()).toBe(false);
+    // 路由本身已消失；pageKey 反查仍按 L1 前缀落到 `/invest` 兼容桥 —— 反查只影响
+    // 标题/页面上下文，不会把不可达路径变回可达，故这里断言兜底值而不是 undefined。
+    expect(resolveContributedPageKey("/invest/replay")).toBe("finance-investment");
     expect(getDomainPageRoutes().some((r) => r.id === "opc:index")).toBe(true);
 
     setEnabledPlugins(["stock@bundled", "stock"]);
-    expect(hasInvest() && hasInvestNav()).toBe(true);
+    expect(hasReplay() && hasReplayNav()).toBe(true);
 
     // 插件列表尚未投影 / 投影失败 ⇒ 门槛整体失效，不能把域页整片抹掉。
     setEnabledPlugins(null);
-    expect(hasInvest() && hasInvestNav()).toBe(true);
+    expect(hasReplay() && hasReplayNav()).toBe(true);
   });
 
   it("同 id 重复注册 = 覆盖，不追加（域模块被二次求值也不会长出重复路由）", () => {

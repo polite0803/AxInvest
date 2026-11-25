@@ -28,6 +28,10 @@ pub const SEARCH_SAFE_SEARCH: &str = "search.safe_search";
 /// 会话 ID
 pub const CONVERSATION_ID: &str = "core.conversation_id";
 
+/// P5 C1-2：当前 Bot ID（仅 Bot 会话注入）。SkillIndex 全局共享，
+/// 工具查询与提示词段据此过滤/优先 Bot 自身技能。
+pub const BOT_ID: &str = "core.bot_id";
+
 /// 数据库路径（替代 global_state 的 set_db_path）
 pub const SEA_DB_PATH: &str = "core.sea_db_path";
 

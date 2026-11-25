@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "部門の実行クォータを超えています",
     "BOT_INPUT_REQUEST_NOT_FOUND": "回答待ちリクエストが見つかりません",
     "BOT_INPUT_REQUEST_NOT_PENDING": "回答待ちリクエストは回答済みか失効しています",
-    "BOT_INPUT_ANSWER_EMPTY": "回答内容を空にできません"
+    "BOT_INPUT_ANSWER_EMPTY": "回答内容を空にできません",
+    "BOT_COST_QUOTA_INVALID": "Botのコストクォータの値が不正です",
+    "BOT_COST_QUOTA_EXCEEDED": "コストまたはトークンクォータを超過しました",
+    "BOT_SKILL_NOT_FOUND": "このBotのスキル割り当てが見つかりません",
+    "BOT_SKILL_PRESET_INVALID": "スキルプリセットの形式が不正です"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "投資センター",
     "tab": {
-      "marketMainline": "市場メインライン",
-      "screener": "スクリーナー",
-      "workspace": "ワークスペース",
-      "screenshotDiagnosis": "スクリーンショット診断",
-      "paperPortfolio": "ペーパーポートフォリオ",
-      "quant": "クオンツ"
+      "marketMainline": "市場メインライン"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "使用量とコスト",
+      "subtitle": "最近のトークン使用量と推定コスト",
+      "estimated": "推定",
+      "estimatedHint": "ローカル価格表に基づく推定であり、プロバイダーの請求額と異なる場合があります",
+      "pricingSource": "価格ソース",
+      "inputTokens": "入力トークン",
+      "outputTokens": "出力トークン",
+      "cacheCreationTokens": "キャッシュ作成トークン",
+      "cacheReadTokens": "キャッシュ読み取りトークン",
+      "totalTokens": "トークン合計",
+      "totalCost": "推定コスト",
+      "quotaTitle": "コストクォータ",
+      "quotaHint": "上限超過時は新規実行のみブロックされ、開始済みの実行は完了します",
+      "breached": "上限超過",
+      "window": "集計期間",
+      "empty": "まだ使用量記録がありません",
+      "refresh": "更新"
+    },
+    "skills": {
+      "title": "スキル",
+      "subtitle": "このBotが利用できるスキル。グローバルスキルはすべてのBotから参照できます",
+      "globalSource": "グローバル",
+      "botSource": "このBot",
+      "shadowedGlobal": "同名の場合、このBotのスキルが優先されます",
+      "missing": "スキルファイルが見つかりません",
+      "enabled": "有効",
+      "disabled": "無効",
+      "empty": "このBotにはまだスキルが設定されていません",
+      "importPreset": "プリセットをインポート",
+      "presetName": "プリセット名",
+      "presetImported": "{count} 件のスキルをインポートしました",
+      "presetSkipped": "{count} 件のスキルをスキップしました",
+      "presetInvalid": "プリセット形式が不正です",
+      "whitelist": "ホワイトリスト"
     }
   }
 }

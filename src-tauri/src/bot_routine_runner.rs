@@ -37,26 +37,65 @@ pub struct BotRoutineContext {
     pub session_manager: Arc<SessionManager>,
 }
 
-/// 组装 Bot 例程的 system prompt：SOUL/MEMORY 注入（复用 `bot_context`，
-/// 与 `agent_query` 同一真相源；ADR-P2-2）。
+/// P5-b B2：一轮非交互 Bot 执行回传的用量（ADR-P5-8）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct BotTurnUsage {
+    /// 本轮实际使用的模型 id（四类分价查表用，ADR-P5-4）。
+    pub model_id: String,
+    /// 本轮执行 id（账本 execution_id 快照）。
+    pub execution_id: String,
+    pub usage: axagent_harness::conversation_model::TokenUsage,
+}
+
+/// P5-b B2：带回传的结果。`usage=None` 表示本路径不产生用量（Fake/无模型），账本不写行。
+#[derive(Debug, Clone, PartialEq)]
+pub struct BotTurnOutcome {
+    pub text: String,
+    pub usage: Option<BotTurnUsage>,
+}
+
+/// 组装 Bot 例程的 system prompt：SOUL/MEMORY/技能注入（复用 `bot_context`，
+/// 与 `agent_query` 同一真相源；ADR-P2-2 / P5 C1-2）。
 async fn build_bot_system_prompt(harness: &RuntimeHarness, bot_id: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
+    let mut has_soul = false;
     if let Some(ctx) =
         crate::bot_context::resolve_bot_context_for_bot(harness.db(), Some(bot_id)).await
     {
         if let Some(seg) = ctx.soul_segment() {
+            has_soul = true;
             parts.push(seg);
         }
         if let Some(seg) = ctx.memory_segment() {
             parts.push(seg);
         }
     }
-    if parts.is_empty() {
-        // 无 SOUL/MEMORY 的 Bot 也给出身份边界，避免例程输出失去归属语义。
-        format!("<bot-soul>\n（Bot {bot_id} 未配置 SOUL，按通用助手身份执行本例程。）\n</bot-soul>")
-    } else {
-        parts.join("\n\n")
+    // P5 C1-2：仅列名字+一行描述，不注入全文；无技能时不追加段。
+    if let Some(seg) =
+        crate::bot_skill_service::bot_skills_prompt_segment(harness.db(), bot_id).await
+    {
+        parts.push(seg);
     }
+    if !has_soul {
+        let has_memory = parts.iter().any(|p| p.starts_with("<bot-memory>"));
+        let has_skills = parts.iter().any(|p| p.starts_with("<bot-skills>"));
+        if parts.is_empty() {
+            // 无 SOUL/MEMORY/技能：保持既有兜底。
+            parts.push(format!(
+                "<bot-soul>\n（Bot {bot_id} 未配置 SOUL，按通用助手身份执行本例程。）\n</bot-soul>"
+            ));
+        } else if has_skills && !has_memory {
+            // 有技能但无 SOUL/MEMORY：补身份边界，避免失去归属语义。
+            parts.insert(
+                0,
+                format!(
+                    "<bot-soul>\n（Bot {bot_id} 未配置 SOUL，按通用助手身份执行本例程。）\n</bot-soul>"
+                ),
+            );
+        }
+        // memory-only（±skills）：保持原行为，不强插 fallback。
+    }
+    parts.join("\n\n")
 }
 
 /// 解析例程轮的 provider/model：Bot 自带（`bots.provider_id`/`model_id`）优先，
@@ -164,7 +203,7 @@ pub async fn run_bot_routine_turn(
     bot_model_id: Option<&str>,
     prompt: &str,
 ) -> Result<String, String> {
-    run_bot_non_interactive_turn(
+    run_bot_non_interactive_turn_with_usage(
         ctx,
         bot_id,
         bot_approval_mode,
@@ -172,6 +211,31 @@ pub async fn run_bot_routine_turn(
         bot_model_id,
         prompt,
         None,
+        DelegateContext::default(),
+    )
+    .await
+    .map(|o| o.text)
+}
+
+/// 带用量回传的例程入口（P5-b B2）：行为与 `run_bot_routine_turn` 一致，
+/// 仅多回传本轮 TokenUsage（ADR-P5-8）。
+pub async fn run_bot_routine_turn_with_usage(
+    ctx: &BotRoutineContext,
+    bot_id: &str,
+    bot_approval_mode: &str,
+    bot_provider_id: Option<&str>,
+    bot_model_id: Option<&str>,
+    prompt: &str,
+) -> Result<BotTurnOutcome, String> {
+    run_bot_non_interactive_turn_with_usage(
+        ctx,
+        bot_id,
+        bot_approval_mode,
+        bot_provider_id,
+        bot_model_id,
+        prompt,
+        None,
+        DelegateContext::default(),
     )
     .await
 }
@@ -206,6 +270,7 @@ pub async fn run_bot_non_interactive_turn(
 
 /// 带链上下文的非交互轮（P3）。内部链字段经 task-local 在工具调用期注入，
 /// 不进工具 JSON schema；例程入口仍走上面的无上下文包装，行为与 P2-a 一致。
+#[allow(clippy::too_many_arguments)]
 pub async fn run_bot_non_interactive_turn_with_context(
     ctx: &BotRoutineContext,
     bot_id: &str,
@@ -216,6 +281,33 @@ pub async fn run_bot_non_interactive_turn_with_context(
     task_card: Option<&str>,
     chain: DelegateContext,
 ) -> Result<String, String> {
+    run_bot_non_interactive_turn_with_usage(
+        ctx,
+        bot_id,
+        bot_approval_mode,
+        bot_provider_id,
+        bot_model_id,
+        prompt,
+        task_card,
+        chain,
+    )
+    .await
+    .map(|o| o.text)
+}
+
+/// P5-b B2：`with_context` 的用量回传变体，唯一改动既有执行路径（ADR-P5-8）。
+/// 除了多回传 `BotTurnOutcome.usage`，行为与 `run_bot_non_interactive_turn_with_context` 逐字节一致。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_bot_non_interactive_turn_with_usage(
+    ctx: &BotRoutineContext,
+    bot_id: &str,
+    bot_approval_mode: &str,
+    bot_provider_id: Option<&str>,
+    bot_model_id: Option<&str>,
+    prompt: &str,
+    task_card: Option<&str>,
+    chain: DelegateContext,
+) -> Result<BotTurnOutcome, String> {
     // 存在性校验（executor 已验过，此处兜底：Bot 被并发删除时不产生幽灵轮）。
     axagent_dao::repo::bot::get_bot(ctx.harness.db(), bot_id).await.map_err(|e| e.to_string())?;
 
@@ -236,7 +328,10 @@ pub async fn run_bot_non_interactive_turn_with_context(
     } else {
         TurnKind::Routine
     };
-    let tool_registry = build_turn_tool_registry(round_kind, chain.depth);
+    let mut tool_registry = build_turn_tool_registry(round_kind, chain.depth);
+    // P5 C1-2：Bot 会话把 bot_id 注入 tool extra，SkillIndex/SkillView 按此过滤可见性。
+    tool_registry =
+        tool_registry.with_tool_extra(axagent_tools::context_keys::BOT_ID, bot_id);
 
     // 每轮新建的临时会话：execution_id 兼作 conversation_id（headless 先例同构）。
     let execution_id = format!("bot-routine-{}", uuid::Uuid::new_v4());
@@ -301,7 +396,14 @@ pub async fn run_bot_non_interactive_turn_with_context(
             }
         }
     }
-    Ok(content)
+    Ok(BotTurnOutcome {
+        text: content,
+        usage: Some(BotTurnUsage {
+            model_id: model,
+            execution_id,
+            usage: summary.usage,
+        }),
+    })
 }
 
 /// 例程轮结果的统一收尾：`record_run` + 一次性置 Disabled（G-7 三态沿用）。

@@ -280,7 +280,7 @@ mod tests {
         let h = pool().await;
         let db = &h.conn;
         let dept = create_department(db, "部门A", "", None).await.expect("建部门");
-        let other = create_department(db, "部门B", "", None).await.expect("建部门");
+        let _other = create_department(db, "部门B", "", None).await.expect("建部门");
 
         add_bot_to_department(db, &dept.id, "bot-1").await.expect("首次加入");
         assert_eq!(

@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "विभाग निष्पादन कोटा पार हो गया",
     "BOT_INPUT_REQUEST_NOT_FOUND": "इनपुट अनुरोध नहीं मिला",
     "BOT_INPUT_REQUEST_NOT_PENDING": "इनपुट अनुरोध का उत्तर पहले ही दिया जा चुका है या समाप्त हो गया है",
-    "BOT_INPUT_ANSWER_EMPTY": "उत्तर खाली नहीं हो सकता"
+    "BOT_INPUT_ANSWER_EMPTY": "उत्तर खाली नहीं हो सकता",
+    "BOT_COST_QUOTA_INVALID": "बॉट लागत कोटा मान अमान्य है",
+    "BOT_COST_QUOTA_EXCEEDED": "लागत या टोकन कोटा पार हो गया",
+    "BOT_SKILL_NOT_FOUND": "बॉट कौशल बाइंडिंग नहीं मिली",
+    "BOT_SKILL_PRESET_INVALID": "कौशल प्रीसेट प्रारूप अमान्य है"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "निवेश केंद्र",
     "tab": {
-      "marketMainline": "बाज़ार मेनलाइन",
-      "screener": "स्क्रीनर",
-      "workspace": "कार्यक्षेत्र",
-      "screenshotDiagnosis": "स्क्रीनशॉट निदान",
-      "paperPortfolio": "पेपर पोर्टफोलियो",
-      "quant": "क्वांट"
+      "marketMainline": "बाज़ार मेनलाइन"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "उपयोग और लागत",
+      "subtitle": "हाल का टोकन उपयोग और अनुमानित लागत",
+      "estimated": "अनुमानित",
+      "estimatedHint": "स्थानीय मूल्य निर्धारण के अनुसार अनुमानित; प्रदाता बिलिंग से भिन्न हो सकता है",
+      "pricingSource": "मूल्य निर्धारण स्रोत",
+      "inputTokens": "इनपुट टोकन",
+      "outputTokens": "आउटपुट टोकन",
+      "cacheCreationTokens": "कैश निर्माण टोकन",
+      "cacheReadTokens": "कैश रीड टोकन",
+      "totalTokens": "कुल टोकन",
+      "totalCost": "अनुमानित लागत",
+      "quotaTitle": "लागत कोटा",
+      "quotaHint": "सीमा पार होने पर केवल नए रन अवरुद्ध होते हैं; पहले से शुरू हुए रन पूरे होंगे",
+      "breached": "कोटा पार हो गया",
+      "window": "विंडो",
+      "empty": "अभी कोई उपयोग रिकॉर्ड नहीं",
+      "refresh": "रीफ्रेश"
+    },
+    "skills": {
+      "title": "कौशल",
+      "subtitle": "इस बॉट के लिए उपलब्ध कौशल; वैश्विक कौशल सभी बॉट्स को दिखाई देते हैं",
+      "globalSource": "वैश्विक",
+      "botSource": "यह बॉट",
+      "shadowedGlobal": "समान नाम होने पर बॉट कौशल वैश्विक कौशल पर प्राथमिकता लेता है",
+      "missing": "कौशल फ़ाइल गायब है",
+      "enabled": "सक्षम",
+      "disabled": "अक्षम",
+      "empty": "इस बॉट के लिए कोई कौशल कॉन्फ़िगर नहीं है",
+      "importPreset": "प्रीसेट आयात करें",
+      "presetName": "प्रीसेट नाम",
+      "presetImported": "{count} कौशल आयात किए गए",
+      "presetSkipped": "{count} कौशल छोड़े गए",
+      "presetInvalid": "प्रीसेट प्रारूप अमान्य है",
+      "whitelist": "अनुमति सूची"
     }
   }
 }

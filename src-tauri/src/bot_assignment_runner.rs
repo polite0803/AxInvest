@@ -54,6 +54,17 @@ pub trait AssignmentTurnExecutor: Send + Sync {
     ) -> Result<String, String> {
         self.execute(&assignment.assignee_bot_id, task_text).await
     }
+
+    /// P5-b B2（ADR-P5-8）：带用量回传的委派执行。默认实现保持旧行为（usage=None，
+    /// 账本不写行），P2-b Fake/无模型实现零改动；真实执行器覆写以回传 TokenUsage。
+    async fn execute_with_usage(
+        &self,
+        assignment: &BotAssignment,
+        task_text: &str,
+    ) -> Result<crate::bot_routine_runner::BotTurnOutcome, String> {
+        let text = self.execute_with_context(assignment, task_text).await?;
+        Ok(crate::bot_routine_runner::BotTurnOutcome { text, usage: None })
+    }
 }
 
 /// 真实执行器：与例程共用 `run_bot_non_interactive_turn`。
@@ -66,7 +77,7 @@ impl RoutineTurnExecutor {
         &self,
         assignment: &BotAssignment,
         task_text: &str,
-    ) -> Result<String, String> {
+    ) -> Result<crate::bot_routine_runner::BotTurnOutcome, String> {
         let bot =
             axagent_dao::repo::bot::get_bot(self.ctx.harness.db(), &assignment.assignee_bot_id)
                 .await
@@ -91,7 +102,7 @@ impl RoutineTurnExecutor {
             step_key: assignment.step_key.clone(),
             requester_conversation_id: assignment.requester_conversation_id.clone(),
         };
-        crate::bot_routine_runner::run_bot_non_interactive_turn_with_context(
+        crate::bot_routine_runner::run_bot_non_interactive_turn_with_usage(
             &self.ctx,
             &bot.id,
             &bot.approval_mode,
@@ -113,6 +124,7 @@ impl AssignmentTurnExecutor for RoutineTurnExecutor {
             task_text,
         )
         .await
+        .map(|o| o.text)
     }
 
     async fn execute_with_context(
@@ -120,6 +132,14 @@ impl AssignmentTurnExecutor for RoutineTurnExecutor {
         assignment: &BotAssignment,
         task_text: &str,
     ) -> Result<String, String> {
+        self.execute_with_context_impl(assignment, task_text).await.map(|o| o.text)
+    }
+
+    async fn execute_with_usage(
+        &self,
+        assignment: &BotAssignment,
+        task_text: &str,
+    ) -> Result<crate::bot_routine_runner::BotTurnOutcome, String> {
         self.execute_with_context_impl(assignment, task_text).await
     }
 }
@@ -209,24 +229,81 @@ pub async fn run_assignment_inner(
     };
     let task_card = format!(
         "发起方：{}\n任务：{}",
-        running.requester_bot_id.clone().unwrap_or_else(|| "用户(person)".to_string()),
+        running
+            .requester_bot_id
+            .clone()
+            .unwrap_or_else(|| "用户(person)".to_string()),
         running.task_text
     );
 
-    let outcome =
-        match tokio::time::timeout(timeout, executor.execute_with_context(&running, &task_card))
-            .await
-        {
-            Ok(Ok(text)) => Ok(text),
-            Ok(Err(e)) => Err((None, e)),
-            Err(_) => Err((
-                Some(crate::commands::error_code::bot::DELEGATE_TIMEOUT),
-                format!("委派超过 {} 秒", timeout.as_secs()),
-            )),
+    // P5-b B3：事后熔断（ADR-P5-3）—— 仅拦新建委派轮，已启动的跑完。
+    if let Err(cost_err) =
+        crate::bot_cost_quota::ensure_bot_cost_quota_ok(db, &running.assignee_bot_id).await
+    {
+        let code = if cost_err.contains(crate::commands::error_code::bot::COST_QUOTA_EXCEEDED) {
+            Some(crate::commands::error_code::bot::COST_QUOTA_EXCEEDED)
+        } else {
+            Some("ERR_PERMISSION")
         };
+        if let Ok(failed) = asmt_repo::transition(
+            db,
+            assignment_id,
+            asmt_repo::status::FAILED,
+            asmt_repo::TransitionPatch {
+                error_code: code.map(str::to_string),
+                error_detail: Some(cost_err),
+                finished_at: Some(axagent_harness::util_fns::now_ts()),
+                ..Default::default()
+            },
+        )
+        .await
+        {
+            sink(&failed);
+            completion(&failed);
+        }
+        return;
+    }
+
+    let outcome = match tokio::time::timeout(
+        timeout,
+        executor.execute_with_usage(&running, &task_card),
+    )
+    .await
+    {
+        Ok(Ok(turn_outcome)) => Ok(turn_outcome),
+        Ok(Err(e)) => Err((None, e)),
+        Err(_) => Err((
+            Some(crate::commands::error_code::bot::DELEGATE_TIMEOUT),
+            format!("委派超过 {} 秒", timeout.as_secs()),
+        )),
+    };
 
     match outcome {
-        Ok(text) => {
+        Ok(turn_outcome) => {
+            // P5-b B2（ADR-P5-3/8）：用量写入失败只 warn，不阻塞终态与回执。
+            if let Some(u) = turn_outcome.usage.as_ref() {
+                if let Err(e) = crate::bot_cost_quota::record_usage(
+                    db,
+                    &running.assignee_bot_id,
+                    None,
+                    Some(&u.execution_id),
+                    running.workflow_run_id.as_deref(),
+                    Some(&running.id),
+                    axagent_harness::types::BotUsageOrigin::Assignment,
+                    &u.model_id,
+                    &u.usage,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        assignment_id = %running.id,
+                        bot_id = %running.assignee_bot_id,
+                        error = %e,
+                        "委派轮用量记账失败（不阻塞）"
+                    );
+                }
+            }
+            let text = turn_outcome.text;
             if let Ok(done) = asmt_repo::transition(
                 db,
                 assignment_id,
@@ -413,7 +490,40 @@ impl BotDelegateRunner for ConsultRunner {
             input.question
         );
         let executor = RoutineTurnExecutor { ctx: self.ctx.clone() };
-        let outcome = executor.execute(&assignee.id, &prompt).await;
+        // P5-b B3：consult 也是新建委派轮前熔断（ADR-P5-3）。
+        crate::bot_cost_quota::ensure_bot_cost_quota_ok(db, &assignee.id).await?;
+
+        let turn_outcome = executor
+            .execute_with_usage(
+                &BotAssignment { assignee_bot_id: assignee.id.clone(), ..Default::default() },
+                &prompt,
+            )
+            .await;
+        // P5-b B2：记账失败只 warn，不阻塞 consult 结果。
+        if let Ok(ref o) = turn_outcome {
+            if let Some(u) = o.usage.as_ref() {
+                if let Err(e) = crate::bot_cost_quota::record_usage(
+                    db,
+                    &assignee.id,
+                    None,
+                    Some(&u.execution_id),
+                    input.workflow_run_id.as_deref(),
+                    None, // consult 审计行 id 在 record_consult_assignment 后才有；先不绑 assignment_id
+                    axagent_harness::types::BotUsageOrigin::Assignment,
+                    &u.model_id,
+                    &u.usage,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        bot_id = %assignee.id,
+                        error = %e,
+                        "consult 轮用量记账失败（不阻塞）"
+                    );
+                }
+            }
+        }
+        let outcome = turn_outcome.map(|o| o.text);
         let row = asmt_repo::record_consult_assignment(
             db,
             &input.origin,

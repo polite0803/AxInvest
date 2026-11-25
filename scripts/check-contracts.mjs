@@ -826,6 +826,17 @@ function checkBotContracts() {
       inputHelperRs: existsSync(join(SRC_TAURI, "src", "bot_input_request.rs"))
         ? read(join(SRC_TAURI, "src", "bot_input_request.rs")) : undefined,
     },
+    // P5（IPC-P5 §1/§2/§5）：8 命令 + DTO + 熔断出口。
+    p5: {
+      costRs: existsSync(join(SRC_TAURI, "src", "commands", "bot_cost.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "bot_cost.rs")) : "",
+      skillRs: existsSync(join(SRC_TAURI, "src", "commands", "bot_skill.rs"))
+        ? read(join(SRC_TAURI, "src", "commands", "bot_skill.rs")) : "",
+      skillServiceRs: existsSync(join(SRC_TAURI, "src", "bot_skill_service.rs"))
+        ? read(join(SRC_TAURI, "src", "bot_skill_service.rs")) : "",
+      quotaEnforceRs: existsSync(join(SRC_TAURI, "src", "bot_cost_quota.rs"))
+        ? read(join(SRC_TAURI, "src", "bot_cost_quota.rs")) : "",
+    },
   });
   console.log(`
 [BOT] Bot P1 IPC 契约：errors=${result.errors.length} warnings=${result.warnings.length}`);

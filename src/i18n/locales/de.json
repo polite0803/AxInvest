@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "Abteilungslaufkontingent überschritten",
     "BOT_INPUT_REQUEST_NOT_FOUND": "Eingabeanforderung nicht gefunden",
     "BOT_INPUT_REQUEST_NOT_PENDING": "Eingabeanforderung bereits beantwortet oder abgelaufen",
-    "BOT_INPUT_ANSWER_EMPTY": "Antwort darf nicht leer sein"
+    "BOT_INPUT_ANSWER_EMPTY": "Antwort darf nicht leer sein",
+    "BOT_COST_QUOTA_INVALID": "Ungültiger Wert für Bot-Kostenkontingent",
+    "BOT_COST_QUOTA_EXCEEDED": "Kosten- oder Token-Kontingent überschritten",
+    "BOT_SKILL_NOT_FOUND": "Bot-Skill-Zuordnung nicht gefunden",
+    "BOT_SKILL_PRESET_INVALID": "Ungültiges Skill-Preset-Format"
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "Investitionszentrum",
     "tab": {
-      "marketMainline": "Markt-Hauptlinie",
-      "screener": "Screener",
-      "workspace": "Arbeitsbereich",
-      "screenshotDiagnosis": "Screenshot-Diagnose",
-      "paperPortfolio": "Paper Portfolio",
-      "quant": "Quant"
+      "marketMainline": "Markt-Hauptlinie"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "Nutzung & Kosten",
+      "subtitle": "Aktuelle Token-Nutzung und geschätzte Kosten",
+      "estimated": "Geschätzt",
+      "estimatedHint": "Nach lokaler Preisliste geschätzt; kann von der Anbieterabrechnung abweichen",
+      "pricingSource": "Preisquelle",
+      "inputTokens": "Eingabe-Tokens",
+      "outputTokens": "Ausgabe-Tokens",
+      "cacheCreationTokens": "Cache-Erstellungs-Tokens",
+      "cacheReadTokens": "Cache-Lese-Tokens",
+      "totalTokens": "Tokens gesamt",
+      "totalCost": "Geschätzte Kosten",
+      "quotaTitle": "Kostenkontingent",
+      "quotaHint": "Bei Überschreitung werden nur neue Läufe blockiert; bereits gestartete Läufe werden abgeschlossen",
+      "breached": "Kontingent überschritten",
+      "window": "Zeitfenster",
+      "empty": "Noch keine Nutzungsdaten",
+      "refresh": "Aktualisieren"
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Für diesen Bot verfügbare Skills; globale Skills sind für alle Bots sichtbar",
+      "globalSource": "Global",
+      "botSource": "Dieser Bot",
+      "shadowedGlobal": "Bei gleichem Namen hat der Bot-Skill Vorrang vor dem globalen Skill",
+      "missing": "Skill-Datei fehlt",
+      "enabled": "Aktiviert",
+      "disabled": "Deaktiviert",
+      "empty": "Für diesen Bot sind keine Skills konfiguriert",
+      "importPreset": "Preset importieren",
+      "presetName": "Preset-Name",
+      "presetImported": "{count} Skills importiert",
+      "presetSkipped": "{count} Skills übersprungen",
+      "presetInvalid": "Ungültiges Preset-Format",
+      "whitelist": "Allowlist"
     }
   }
 }

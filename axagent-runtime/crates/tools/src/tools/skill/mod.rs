@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{Tool, ToolCategory, ToolContext, ToolDomain, ToolError, ToolResult};
 use async_trait::async_trait;
@@ -57,6 +57,10 @@ struct SkillIndexEntry {
     fallback_for_toolsets: Vec<String>,
     skill_dir: PathBuf,
     source_kind: String,
+    /// P5 C1-2: "global" | "bot"。全局技能对所有 Bot 可见；Bot 技能仅属主 Bot 可见。
+    scope: String,
+    /// P5 C1-2: scope=="bot" 时的属主 Bot ID；global 为 None。
+    owner_bot_id: Option<String>,
     domain: ToolDomain,
     required_environment_variables: Vec<RequiredEnvVar>,
     config_settings: Vec<SkillConfigSetting>,
@@ -122,10 +126,38 @@ impl SkillIndex {
         true
     }
 
+    /// P5 C1-2：按当前 bot 可见性过滤索引条目。
+    /// - global：所有 Bot/非 Bot 会话可见。
+    /// - bot：仅 owner_bot_id == bot_id 可见。
+    ///   同名时 Bot 自身条目覆盖全局条目；不同 Bot 的同名私有技能互不串味。
+    fn visible_entries<'a>(
+        entries: &'a [SkillIndexEntry],
+        bot_id: Option<&str>,
+    ) -> Vec<&'a SkillIndexEntry> {
+        let mut by_name: HashMap<String, &'a SkillIndexEntry> = HashMap::new();
+        // 先放全局
+        for e in entries.iter().filter(|e| e.scope == "global") {
+            by_name.insert(e.name.clone(), e);
+        }
+        // 再放当前 bot 的私有技能（同名覆盖全局）
+        if let Some(bid) = bot_id {
+            for e in entries
+                .iter()
+                .filter(|e| e.scope == "bot" && e.owner_bot_id.as_deref() == Some(bid))
+            {
+                by_name.insert(e.name.clone(), e);
+            }
+        }
+        let mut out: Vec<&'a SkillIndexEntry> = by_name.into_values().collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
     fn rebuild(&mut self) {
         let dirs = axagent_kit::skill_dirs::skill_dirs();
         let mut entries = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        // 全局技能同名按目录优先级取首个（与既有行为一致）。
+        let mut seen_global: HashSet<String> = HashSet::new();
 
         for (source_kind, dir) in &dirs {
             if let Ok(dir_entries) = std::fs::read_dir(dir) {
@@ -134,10 +166,10 @@ impl SkillIndex {
                         continue;
                     }
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if seen.contains(&name) {
+                    if seen_global.contains(&name) {
                         continue;
                     }
-                    seen.insert(name.clone());
+                    seen_global.insert(name.clone());
 
                     let skill_dir = entry.path();
                     let (
@@ -174,6 +206,89 @@ impl SkillIndex {
                         fallback_for_toolsets,
                         skill_dir,
                         source_kind: source_kind.to_string(),
+                        scope: "global".to_string(),
+                        owner_bot_id: None,
+                        domain: domain_enum,
+                        required_environment_variables: required_env_vars,
+                        config_settings,
+                    };
+
+                    if Self::should_include_entry(&candidate) {
+                        entries.push(candidate);
+                    }
+                }
+            }
+        }
+
+        // P5 C1-2：扫描 ~/.axagent/bots/<botId>/skills/。
+        // 索引全局共享，不按当前 bot 过滤；同一 bot 内同名去重，跨 bot 同名各自保留（互斥不串味）。
+        // 消费端（list_bot_skills / 提示词段 / 按 bot_id 过滤的工具查询）负责“Bot 内优先覆盖全局”。
+        let bots_root = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".axagent")
+            .join("bots");
+        if let Ok(bot_dirs) = std::fs::read_dir(&bots_root) {
+            for bot_entry in bot_dirs.filter_map(|e| e.ok()) {
+                let bot_path = bot_entry.path();
+                if !bot_path.is_dir() {
+                    continue;
+                }
+                let Some(bot_id) = bot_path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let skills_dir = bot_path.join("skills");
+                let Ok(skill_entries) = std::fs::read_dir(&skills_dir) else {
+                    continue;
+                };
+                let mut seen_bot: HashSet<String> = HashSet::new();
+                for skill_entry in skill_entries.filter_map(|e| e.ok()) {
+                    let skill_dir = skill_entry.path();
+                    if !skill_dir.is_dir() {
+                        continue;
+                    }
+                    let name = skill_dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    if name.is_empty() || seen_bot.contains(&name) {
+                        continue;
+                    }
+                    // Bot 技能名安全校验：与 bot_skill_service 同口径，防目录穿越/异常名污染索引。
+                    if !is_safe_bot_skill_name(&name) {
+                        continue;
+                    }
+                    seen_bot.insert(name.clone());
+
+                    let (
+                        description,
+                        category,
+                        mut version,
+                        platforms,
+                        tags,
+                        requires_toolsets,
+                        fallback_for_toolsets,
+                        required_env_vars,
+                        config_settings,
+                        domain,
+                    ) = Self::extract_metadata(&skill_dir);
+
+                    if axagent_kit::skill_dirs::self_source_kind() != "axagent" {
+                        // 保持与全局分支一致的版本处理惯例；bot 技能默认视作本地内容。
+                    }
+                    // Bot 目录技能按本地内容处理，不做外部来源版本抑制以外的特殊化。
+                    let _ = &mut version;
+
+                    let domain_enum = domain.parse().unwrap_or(ToolDomain::General);
+                    let candidate = SkillIndexEntry {
+                        name,
+                        description,
+                        category,
+                        version,
+                        platforms,
+                        tags,
+                        requires_toolsets,
+                        fallback_for_toolsets,
+                        skill_dir,
+                        source_kind: format!("bot:{bot_id}"),
+                        scope: "bot".to_string(),
+                        owner_bot_id: Some(bot_id.to_string()),
                         domain: domain_enum,
                         required_environment_variables: required_env_vars,
                         config_settings,
@@ -415,10 +530,11 @@ impl SkillIndex {
         serde_yaml::from_str(yaml_str).ok()
     }
 
-    fn list_skills(&mut self, category_filter: Option<&str>) -> Vec<SkillSummary> {
+    fn list_skills(&mut self, category_filter: Option<&str>, bot_id: Option<&str>) -> Vec<SkillSummary> {
         self.ensure_built();
-        self.entries
-            .iter()
+        let visible = Self::visible_entries(&self.entries, bot_id);
+        visible
+            .into_iter()
             .filter(|e| category_filter.is_none_or(|cf| e.category == cf))
             .map(|e| SkillSummary {
                 name: e.name.clone(),
@@ -430,27 +546,31 @@ impl SkillIndex {
             .collect()
     }
 
-    fn find_skill(&mut self, name: &str) -> Option<(String, PathBuf)> {
+    fn find_skill(&mut self, name: &str, bot_id: Option<&str>) -> Option<(String, PathBuf)> {
         self.ensure_built();
-        self.entries
-            .iter()
+        let visible = Self::visible_entries(&self.entries, bot_id);
+        visible
+            .into_iter()
             .find(|e| e.name == name)
             .map(|e| (e.source_kind.clone(), e.skill_dir.clone()))
     }
 
-    fn find_skill_entry(&mut self, name: &str) -> Option<&SkillIndexEntry> {
+    fn find_skill_entry(&mut self, name: &str, bot_id: Option<&str>) -> Option<SkillIndexEntry> {
         self.ensure_built();
-        self.entries.iter().find(|e| e.name == name)
+        let visible = Self::visible_entries(&self.entries, bot_id);
+        visible.into_iter().find(|e| e.name == name).cloned()
     }
 
-    fn all_entries(&mut self) -> &[SkillIndexEntry] {
+    /// P5 C1-2：按 bot 可见性返回条目快照（供工具/发现使用）。
+    fn visible_entries_snapshot(&mut self, bot_id: Option<&str>) -> Vec<SkillIndexEntry> {
         self.ensure_built();
-        &self.entries
+        Self::visible_entries(&self.entries, bot_id).into_iter().cloned().collect()
     }
 
-    fn list_reference_files(&mut self, skill_name: &str) -> Vec<String> {
+    fn list_reference_files(&mut self, skill_name: &str, bot_id: Option<&str>) -> Vec<String> {
         self.ensure_built();
-        let Some(entry) = self.entries.iter().find(|e| e.name == skill_name) else {
+        let visible = Self::visible_entries(&self.entries, bot_id);
+        let Some(entry) = visible.into_iter().find(|e| e.name == skill_name) else {
             return Vec::new();
         };
         let refs_dir = entry.skill_dir.join("references");
@@ -515,10 +635,11 @@ impl Tool for SkillsListTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let category_filter = input["category"].as_str();
+        let bot_id = ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
         let mut index = SKILL_INDEX.lock();
-        let skills = index.list_skills(category_filter);
+        let skills = index.list_skills(category_filter, bot_id);
 
         if skills.is_empty() {
             let msg = if let Some(cat) = category_filter {
@@ -549,6 +670,7 @@ impl Tool for SkillsListTool {
                 "level": 0,
                 "total_skills": skills.len(),
                 "category_filter": category_filter,
+                "bot_id": bot_id,
             })),
             duration_ms: None,
             progress: Vec::new(),
@@ -600,9 +722,10 @@ impl Tool for SkillViewTool {
         &["Skill"]
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let skill_name = input["skill"].as_str().unwrap_or("");
         let args = input["args"].as_str().unwrap_or("");
+        let bot_id = ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
 
         if skill_name.is_empty() {
             return Err(ToolError::invalid_input("Skill name is required"));
@@ -611,9 +734,9 @@ impl Tool for SkillViewTool {
         let (source_kind, skill_dir) = {
             let mut index = SKILL_INDEX.lock();
 
-            let Some((source_kind, skill_dir)) = index.find_skill(skill_name) else {
+            let Some((source_kind, skill_dir)) = index.find_skill(skill_name, bot_id) else {
                 let available: Vec<String> =
-                    index.list_skills(None).iter().map(|s| s.name.clone()).collect();
+                    index.list_skills(None, bot_id).iter().map(|s| s.name.clone()).collect();
                 return Err(ToolError::execution_failed(format!(
                     "Skill '{}' 未找到。可用的 skills: {}",
                     skill_name,
@@ -629,12 +752,12 @@ impl Tool for SkillViewTool {
 
         let refs = {
             let mut index = SKILL_INDEX.lock();
-            index.list_reference_files(skill_name)
+            index.list_reference_files(skill_name, bot_id)
         };
 
         let entry = {
             let mut index = SKILL_INDEX.lock();
-            index.find_skill_entry(skill_name).cloned()
+            index.find_skill_entry(skill_name, bot_id)
         };
 
         let skill_md = skill_dir.join("SKILL.md");
@@ -778,9 +901,10 @@ impl Tool for SkillReferenceTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let skill_name = input["skill"].as_str().unwrap_or("");
         let path = input["path"].as_str().unwrap_or("");
+        let bot_id = ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
 
         if skill_name.is_empty() || path.is_empty() {
             return Err(ToolError::invalid_input("Both skill name and path are required"));
@@ -788,7 +912,7 @@ impl Tool for SkillReferenceTool {
 
         let mut index = SKILL_INDEX.lock();
 
-        let Some((_source_kind, skill_dir)) = index.find_skill(skill_name) else {
+        let Some((_source_kind, skill_dir)) = index.find_skill(skill_name, bot_id) else {
             return Err(ToolError::execution_failed(format!("Skill '{}' 未找到", skill_name)));
         };
 
@@ -917,13 +1041,16 @@ async fn discover_from_passports(
 }
 
 /// 检索文件系统技能（SKILL.md 目录 —— 护照未覆盖的部分）。
-fn discover_from_skill_index(terms: &[String], domain_filter: Option<&str>) -> Vec<DiscoverHit> {
+fn discover_from_skill_index(
+    terms: &[String],
+    domain_filter: Option<&str>,
+    bot_id: Option<&str>,
+) -> Vec<DiscoverHit> {
     let mut index = SKILL_INDEX.lock();
-    index.ensure_built();
+    let entries = index.visible_entries_snapshot(bot_id);
 
-    index
-        .entries
-        .iter()
+    entries
+        .into_iter()
         .filter(|e| domain_filter.is_none_or(|d| e.domain.as_str() == d))
         .filter_map(|e| {
             let score = score_text(terms, &e.name, &e.tags, &e.description);
@@ -984,17 +1111,18 @@ impl Tool for DiscoverSkillsTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let query = input["query"].as_str().unwrap_or("").trim().to_string();
         if query.is_empty() {
             return Err(ToolError::invalid_input("Query is required"));
         }
         let top_k = input["top_k"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
         let domain_filter = input["domain"].as_str().filter(|d| !d.trim().is_empty());
+        let bot_id = ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
         let terms = split_query_terms(&query);
 
         let mut hits = discover_from_passports(&terms, domain_filter).await;
-        hits.extend(discover_from_skill_index(&terms, domain_filter));
+        hits.extend(discover_from_skill_index(&terms, domain_filter, bot_id));
         hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         let total_matches = hits.len();
@@ -1332,8 +1460,9 @@ impl Tool for SkillBundleLoadTool {
         let mut loaded = Vec::new();
         let mut skipped = Vec::new();
 
+        let bot_id = _ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
         for skill_name in &bundle.skills {
-            let Some((_source_kind, skill_dir)) = index.find_skill(skill_name) else {
+            let Some((_source_kind, skill_dir)) = index.find_skill(skill_name, bot_id) else {
                 skipped.push(skill_name.clone());
                 continue;
             };
@@ -1763,7 +1892,18 @@ fn set_env_var(name: &str, value: &str) -> Result<(), ToolError> {
     }
 }
 
-pub(crate) fn is_env_var_set(name: &str) -> bool {
+/// P5 C1-2：Bot 技能名安全校验（与 bot_skill_service 同口径）。
+pub(crate) fn is_safe_bot_skill_name(name: &str) -> bool {
+    let n = name.trim();
+    !n.is_empty()
+        && n.len() <= 64
+        && !n.contains('/')
+        && !n.contains('\\')
+        && !n.contains("..")
+        && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn is_env_var_set(name: &str) -> bool {
     if std::env::var(name).is_ok() {
         return true;
     }

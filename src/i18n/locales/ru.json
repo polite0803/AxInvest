@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "Превышена квота выполнения отдела",
     "BOT_INPUT_REQUEST_NOT_FOUND": "Запрос ввода не найден",
     "BOT_INPUT_REQUEST_NOT_PENDING": "Запрос уже отвечен или истёк",
-    "BOT_INPUT_ANSWER_EMPTY": "Ответ не может быть пустым"
+    "BOT_INPUT_ANSWER_EMPTY": "Ответ не может быть пустым",
+    "BOT_COST_QUOTA_INVALID": "Недопустимое значение квоты расходов бота",
+    "BOT_COST_QUOTA_EXCEEDED": "Превышена квота расходов или токенов",
+    "BOT_SKILL_NOT_FOUND": "Привязка навыка бота не найдена",
+    "BOT_SKILL_PRESET_INVALID": "Недопустимый формат пресета навыков"
   },
   "errorBoundary": {
     "copied": "Скопировано",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "Инвестиционный центр",
     "tab": {
-      "marketMainline": "Главная линия рынка",
-      "screener": "Скринер",
-      "workspace": "Рабочая область",
-      "screenshotDiagnosis": "Диагностика скриншота",
-      "paperPortfolio": "Бумажный портфель",
-      "quant": "Квант"
+      "marketMainline": "Главная линия рынка"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "Использование и стоимость",
+      "subtitle": "Недавнее использование токенов и ориентировочная стоимость",
+      "estimated": "Оценка",
+      "estimatedHint": "Оценка по локальной таблице цен; может отличаться от счета поставщика",
+      "pricingSource": "Источник цены",
+      "inputTokens": "Входные токены",
+      "outputTokens": "Выходные токены",
+      "cacheCreationTokens": "Токены создания кэша",
+      "cacheReadTokens": "Токены чтения кэша",
+      "totalTokens": "Всего токенов",
+      "totalCost": "Ориентировочная стоимость",
+      "quotaTitle": "Квота расходов",
+      "quotaHint": "При превышении блокируются только новые запуски; уже начатые завершатся",
+      "breached": "Квота превышена",
+      "window": "Окно",
+      "empty": "Записей использования пока нет",
+      "refresh": "Обновить"
+    },
+    "skills": {
+      "title": "Навыки",
+      "subtitle": "Навыки, доступные этому боту; глобальные навыки видны всем ботам",
+      "globalSource": "Глобальный",
+      "botSource": "Этот бот",
+      "shadowedGlobal": "Навык бота имеет приоритет над глобальным навыком с тем же именем",
+      "missing": "Файл навыка отсутствует",
+      "enabled": "Включено",
+      "disabled": "Отключено",
+      "empty": "Для этого бота навыки не настроены",
+      "importPreset": "Импортировать пресет",
+      "presetName": "Имя пресета",
+      "presetImported": "Импортировано навыков: {count}",
+      "presetSkipped": "Пропущено навыков: {count}",
+      "presetInvalid": "Недопустимый формат пресета",
+      "whitelist": "Белый список"
     }
   }
 }

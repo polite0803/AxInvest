@@ -110,7 +110,12 @@ impl SkillPromptCache {
         }
     }
 
-    /// 全量重建缓存：扫描所有 skill 目录，读取 SKILL.md 内容
+    /// 全量重建缓存：扫描全局 skill 目录与各 Bot 私有 skill 目录。
+    ///
+    /// P5 C1-2：Bot 私有技能同名覆盖全局技能（与 SkillIndex 可见性口径一致），
+    /// 避免 prompt_cache 在 bot 会话中回到全局同名内容。不同 Bot 的同名私有技能
+    /// 互不串味：这里按“Bot 同名覆盖全局”的合并仅用于无 bot 上下文的读取场景；
+    /// 如需严格按 bot 隔离，调用方应走 SkillIndex/SkillView 按 bot_id 解析。
     fn rebuild(&mut self) {
         self.entries.clear();
 
@@ -130,6 +135,43 @@ impl SkillPromptCache {
                     seen.insert(name.clone());
 
                     let skill_md = entry.path().join("SKILL.md");
+                    if let Ok(content) = std::fs::read_to_string(&skill_md) {
+                        self.entries.insert(name, CacheEntry { content });
+                    }
+                }
+            }
+        }
+
+        // P5 C1-2：追加扫描 ~/.axagent/bots/<botId>/skills/。
+        // 同名时 Bot 技能覆盖全局条目（覆盖而非跳过），与索引“Bot 内优先”一致。
+        // 注意：prompt_cache 是全局 key-value，无 bot 维度；这里的覆盖意味着
+        // 全局无 bot 上下文读取时拿到的是“某个 bot 覆盖后的版本”。这是可接受的保守
+        // 行为，因为 prompt_cache 仅用于系统提示词注入的通用场景；按 bot 精确解析
+        // 走 SkillIndex/SkillView。
+        let bots_root = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".axagent")
+            .join("bots");
+        if let Ok(bot_dirs) = std::fs::read_dir(&bots_root) {
+            for bot_entry in bot_dirs.filter_map(|e| e.ok()) {
+                let bot_path = bot_entry.path();
+                if !bot_path.is_dir() {
+                    continue;
+                }
+                let skills_dir = bot_path.join("skills");
+                let Ok(skill_entries) = std::fs::read_dir(&skills_dir) else {
+                    continue;
+                };
+                for skill_entry in skill_entries.filter_map(|e| e.ok()) {
+                    let skill_dir = skill_entry.path();
+                    if !skill_dir.is_dir() {
+                        continue;
+                    }
+                    let name = skill_dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let skill_md = skill_dir.join("SKILL.md");
                     if let Ok(content) = std::fs::read_to_string(&skill_md) {
                         self.entries.insert(name, CacheEntry { content });
                     }

@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "Exceeds the department run quota",
     "BOT_INPUT_REQUEST_NOT_FOUND": "Input request not found",
     "BOT_INPUT_REQUEST_NOT_PENDING": "Input request already answered or expired",
-    "BOT_INPUT_ANSWER_EMPTY": "Answer cannot be empty"
+    "BOT_INPUT_ANSWER_EMPTY": "Answer cannot be empty",
+    "BOT_COST_QUOTA_INVALID": "Invalid bot cost quota value",
+    "BOT_COST_QUOTA_EXCEEDED": "Cost or token quota exceeded",
+    "BOT_SKILL_NOT_FOUND": "Bot skill binding not found",
+    "BOT_SKILL_PRESET_INVALID": "Invalid skill preset format"
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -11801,12 +11805,7 @@
   "invest": {
     "title": "Investment Center",
     "tab": {
-      "marketMainline": "Market Mainline",
-      "screener": "Screener",
-      "workspace": "Workspace",
-      "screenshotDiagnosis": "Screenshot Diagnosis",
-      "paperPortfolio": "Paper Portfolio",
-      "quant": "Quant"
+      "marketMainline": "Market Mainline"
     }
   },
   "paperPortfolio": {
@@ -19432,6 +19431,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "Usage & Cost",
+      "subtitle": "Recent token usage and estimated cost",
+      "estimated": "Estimated",
+      "estimatedHint": "Estimated from local pricing; may differ from provider billing",
+      "pricingSource": "Pricing source",
+      "inputTokens": "Input tokens",
+      "outputTokens": "Output tokens",
+      "cacheCreationTokens": "Cache creation tokens",
+      "cacheReadTokens": "Cache read tokens",
+      "totalTokens": "Total tokens",
+      "totalCost": "Estimated cost",
+      "quotaTitle": "Cost quota",
+      "quotaHint": "When exceeded, only new runs are blocked; runs already started will finish",
+      "breached": "Quota exceeded",
+      "window": "Window",
+      "empty": "No usage records yet",
+      "refresh": "Refresh"
+    },
+    "skills": {
+      "title": "Skills",
+      "subtitle": "Skills available to this bot; global skills are visible to all bots",
+      "globalSource": "Global",
+      "botSource": "This bot",
+      "shadowedGlobal": "Bot skill takes priority over a global skill with the same name",
+      "missing": "Skill file missing",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "empty": "No skills configured for this bot",
+      "importPreset": "Import preset",
+      "presetName": "Preset name",
+      "presetImported": "Imported {count} skills",
+      "presetSkipped": "Skipped {count} skills",
+      "presetInvalid": "Invalid preset format",
+      "whitelist": "Allowlist"
     }
   }
 }

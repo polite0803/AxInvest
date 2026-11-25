@@ -39,6 +39,12 @@ export interface NavItem {
   path: string;
   isPlugin: boolean;
   pluginName?: string;
+  /** 插件项：labelKey 为 i18n key 时为 true（消费端应 t()）；宿主项与旧插件项为 false/undefined。 */
+  labelIsI18nKey?: boolean;
+  /** 插件项：宿主侧栏归属组 key（NAV_GROUPS[].key）。 */
+  navGroup?: string;
+  /** 插件项：组内排序（升序）。 */
+  navOrder?: number;
 }
 
 /** 宿主内置导航项（域页面项由域模块贡献，见 `getNavItems`） */
@@ -63,6 +69,14 @@ export const builtinNavItems: NavItem[] = [
     path: BUILTIN_PAGE_PATH.bots,
     isPlugin: false,
   },
+  // ── 通用域（general）：P3 Bot 编排（定义 / 运行 / 委派链 / 定时） ──
+  {
+    key: "bot-workflows",
+    icon: navIcon(ApartmentOutlined),
+    labelKey: "bot.workflow.title",
+    path: BUILTIN_PAGE_PATH.botWorkflows,
+    isPlugin: false,
+  },
   // ── 通用域（general）：系统级任务中心（定时任务 / 手动作业统一入口） ──
   {
     key: "tasks-center",
@@ -71,9 +85,10 @@ export const builtinNavItems: NavItem[] = [
     path: BUILTIN_PAGE_PATH["tasks-center"],
     isPlugin: false,
   },
-  // ── 金融域（finance）：投资总览 / 回放工作台 ──
-  // 两项已随股票页插件门槛迁入域自身 `src/pages/invest/routes.tsx` 的 `nav` 声明：
-  // 宿主项无法感知插件启停，会在 stock 未装/禁用时留下点开即 404 的侧栏入口。
+  // ── 金融域（finance）：回放工作台 ──
+  // 回放工作台已随 stock 插件门槛迁入域自身 `src/pages/invest/routes.tsx` 的 `nav`
+  // 声明：宿主项无法感知插件启停，会在 stock 未装/禁用时留下点开即 404 的侧栏入口。
+  // 股票本体的侧栏入口不在宿主 —— 由插件页投影（`pluginRouteRegistry`）提供。
   // ── 金融域（finance）：OPC 投顾经营域包 / 财务会计行业包，自动化、运维、数据分析、
   // 内容创作、AI 媒体域的全部行业包，以及 OPC 经营面板与需求发现页 ——
   // 一律由 `src/pages/opc/routes.tsx` 的 `NAV_PAGE_DECLARATIONS` 贡献（#36 导航声明权半），

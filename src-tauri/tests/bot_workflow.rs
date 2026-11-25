@@ -5,8 +5,9 @@
 //! `on_assignment_completed`；锁 DB 状态 / context / 回执 parent / run 终态与错误码。
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 use async_trait::async_trait;
 use axagent_dao::DatabaseConnection;
@@ -32,9 +33,9 @@ struct ScriptedExecutor {
 #[async_trait]
 impl AssignmentTurnExecutor for ScriptedExecutor {
     async fn execute(&self, bot_id: &str, task_text: &str) -> Result<String, String> {
-        self.prompts.lock().expect("prompts").push(task_text.to_string());
+        self.prompts.lock().await.push(task_text.to_string());
         // 延迟只作用于显式脚本化的 Bot；未脚本化的独立分支瞬时完成。
-        let scripted = self.script.lock().expect("script").get(bot_id).cloned();
+        let scripted = self.script.lock().await.get(bot_id).cloned();
         if scripted.is_some() && !self.delay.is_zero() {
             tokio::time::sleep(self.delay).await;
         }
@@ -196,9 +197,9 @@ async fn wait_run_terminal(
     panic!("run 未进入终态");
 }
 
-fn script_one(bot: &str, result: Result<String, String>) -> Script {
+async fn script_one(bot: &str, result: Result<String, String>) -> Script {
     let script: Script = Arc::new(Mutex::new(HashMap::new()));
-    script.lock().expect("script").insert(bot.to_string(), result);
+    script.lock().await.insert(bot.to_string(), result);
     script
 }
 
@@ -225,7 +226,7 @@ async fn test_1_three_step_chain_substitutes_outputs_and_anchor_receipts() {
 
     let script: Script = Arc::new(Mutex::new(HashMap::new()));
     {
-        let mut guard = script.lock().expect("script");
+        let mut guard = script.lock().await;
         guard.insert(a.clone(), Ok("A 的结论".into()));
         guard.insert(b.clone(), Ok("B 的结论".into()));
         guard.insert(c.clone(), Ok("C 的结论".into()));
@@ -244,7 +245,7 @@ async fn test_1_three_step_chain_substitutes_outputs_and_anchor_receipts() {
     assert_eq!(run.status, run_repo::status::COMPLETED);
     assert_eq!(run.completed_steps, 3);
     assert_eq!(run.context.outputs["b"].result_text, "B 的结论");
-    let texts = prompts.lock().expect("prompts").clone();
+    let texts = prompts.lock().await.clone();
     assert!(texts.iter().any(|t| t.contains("A 的结论")), "B 应收到 A 的输出替换: {texts:?}");
     assert!(texts.iter().any(|t| t.contains("B 的结论")), "C 应收到 B 的输出替换: {texts:?}");
 
@@ -278,7 +279,7 @@ async fn test_2_independent_steps_respect_max_concurrency() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(list_step_rows(db, &run_id).await.len(), 2, "maxConcurrency=2 时只放两单");
 
-    let script = script_one(&a, Ok("done".into()));
+    let script = script_one(&a, Ok("done".into())).await;
     let prompts = Arc::new(Mutex::new(Vec::new()));
     drive_queued(db, &script, &prompts, Duration::ZERO, Duration::from_secs(10)).await;
     let rows = wait_assignment_count(db, &run_id, 3).await;
@@ -364,7 +365,7 @@ async fn test_4_abort_cancels_in_flight_and_inherits_error_code() {
     start_run(db, None, &run_id).await.expect("启动");
     wait_assignment_count(db, &run_id, 1).await;
     // 用执行超时制造带语义码的步骤失败（executor 返回裸 Err 不带码）。
-    let script = script_one(&a, Ok("never".into()));
+    let script = script_one(&a, Ok("never".into())).await;
     let prompts = Arc::new(Mutex::new(Vec::new()));
     drive_queued(db, &script, &prompts, Duration::from_millis(60), Duration::from_millis(5)).await;
     for _ in 0..100 {
@@ -404,7 +405,7 @@ async fn test_5_continue_skips_downstream_but_finishes_independent_branch() {
     )
     .await;
     start_run(db, None, &run_id).await.expect("启动");
-    let script = script_one(&a, Ok("A done".into()));
+    let script = script_one(&a, Ok("A done".into())).await;
     let prompts = Arc::new(Mutex::new(Vec::new()));
     for _ in 0..100 {
         drive_queued(db, &script, &prompts, Duration::from_millis(30), Duration::from_millis(5))
@@ -603,7 +604,7 @@ mod p4_scheduled_cron {
         // 无窗口 + 无模型：用脚本执行器驱动 assignment（与既有用例同一套 drive_queued）。
         let driver_db = db.clone();
         let driver_workflow_id = workflow_id.clone();
-        let script = script_one(&bot, Ok("定时结论".to_string()));
+        let script = script_one(&bot, Ok("定时结论".to_string())).await;
         let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let (outcome, _) =
             tokio::join!(run_scheduled_bot_workflow(db.clone(), None, store.clone(), job), async {

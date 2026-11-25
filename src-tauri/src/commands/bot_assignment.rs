@@ -165,7 +165,7 @@ async fn create_inner(
         ));
     }
     let len = input.task_text.chars().count();
-    if len < MIN_TASK_CHARS || len > MAX_TASK_CHARS {
+    if !(MIN_TASK_CHARS..=MAX_TASK_CHARS).contains(&len) {
         return Err(validation_error(
             "ERR_VALIDATION",
             "taskText",

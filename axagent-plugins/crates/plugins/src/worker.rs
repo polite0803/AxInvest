@@ -566,6 +566,24 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "stock.analysis",
             "set_vendor_status" | "set_primary_market_vendor" | "cancel_stock_analysis",
         ) => Some(PluginPermission::Write),
+        // G2 模拟组合：六条写 op 落 `paper_portfolios` / `paper_positions` 表 ⇒ `Write`。
+        // 三条读（list / get / list_active_details）**不登记**，保持 `None` —— 读缝加闸
+        // 会让只读插件连列表都打不开（同 #336 三条 quant 读的判据）。
+        (
+            "stock.analysis",
+            "paper_portfolio_create" | "paper_portfolio_close" | "paper_portfolio_archive" | "paper_portfolio_add_position" | "paper_portfolio_close_position" | "paper_portfolio_close_all_positions",
+        ) => Some(PluginPermission::Write),
+        // G6 截图诊断：五条写 op（create_from_image / create / archive / update /
+        // to_paper_portfolio）落 `screenshot_diagnoses` / `paper_portfolios` 表 ⇒ `Write`。
+        // 三条读（get / list_recent / list_by_status）**不登记**，保持 `None`。
+        (
+            "stock.analysis",
+            "screenshot_diagnosis_create_from_image"
+            | "screenshot_diagnosis_create"
+            | "screenshot_diagnosis_archive"
+            | "screenshot_diagnosis_update"
+            | "screenshot_diagnosis_to_paper_portfolio",
+        ) => Some(PluginPermission::Write),
         // #346 批 B20：七条写 op ⇒ `Write`。
         (
             "stock.analysis",
@@ -4120,6 +4138,246 @@ impl HostPeer {
                 };
                 let request = args.get("request").cloned().unwrap_or(Value::Null);
                 let Some(result) = self.block_on(provider.cancel_stock_analysis(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            // G2 模拟组合九条：原宿主 `paper_portfolio_*` Tauri 命令的业务体已下沉到
+            // 接缝 provider（analysis-engine 权威函数），这里只做转发，不再改写字段。
+            "stock.analysis" if op == "paper_portfolio_create" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_create(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_list" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_list(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_get" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_get(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_close" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_close(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_archive" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_archive(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_add_position" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_add_position(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_close_position" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.paper_portfolio_close_position(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_close_all_positions" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.paper_portfolio_close_all_positions(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "paper_portfolio_list_active_details" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.paper_portfolio_list_active_details(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_create_from_image" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.screenshot_diagnosis_create_from_image(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_create" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.screenshot_diagnosis_create(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_get" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.screenshot_diagnosis_get(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_list_recent" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.screenshot_diagnosis_list_recent(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_list_by_status" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.screenshot_diagnosis_list_by_status(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_archive" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.screenshot_diagnosis_archive(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_update" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) = self.block_on(provider.screenshot_diagnosis_update(request))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(view) => FrameResponse::success(view),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
+            "stock.analysis" if op == "screenshot_diagnosis_to_paper_portfolio" => {
+                let Some(provider) = self.registry.get_stock_analysis() else {
+                    return self.unavailable(seam);
+                };
+                let request = args.get("request").cloned().unwrap_or(Value::Null);
+                let Some(result) =
+                    self.block_on(provider.screenshot_diagnosis_to_paper_portfolio(request))
+                else {
                     return no_runtime(seam);
                 };
                 match result {
@@ -15871,6 +16129,79 @@ mod tests {
         assert_eq!(verdict.0, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.1, Some(PluginPermission::Write), "写 op 必须要求 write");
         assert_eq!(verdict.2, Some(PluginPermission::Write), "写 op 必须要求 write");
+    }
+
+    /// G2 模拟组合九条：六条写 op 要求 `write`；三条读 op 必须仍是 `None` ——
+    /// 读缝登记写闸会让只读插件连组合列表都打不开（同 #336 quant 读的判据）。
+    #[test]
+    fn stock_analysis_g2_paper_portfolio_permissions() {
+        let verdict = with_watchdog(Duration::from_secs(2), "stock.analysis G2 权限表", || {
+            (
+                required_permission_for("stock.analysis", "paper_portfolio_create"),
+                required_permission_for("stock.analysis", "paper_portfolio_close"),
+                required_permission_for("stock.analysis", "paper_portfolio_archive"),
+                required_permission_for("stock.analysis", "paper_portfolio_add_position"),
+                required_permission_for("stock.analysis", "paper_portfolio_close_position"),
+                required_permission_for("stock.analysis", "paper_portfolio_close_all_positions"),
+                required_permission_for("stock.analysis", "paper_portfolio_list"),
+                required_permission_for("stock.analysis", "paper_portfolio_get"),
+                required_permission_for("stock.analysis", "paper_portfolio_list_active_details"),
+            )
+        });
+        for (op, actual) in [
+            ("paper_portfolio_create", verdict.0),
+            ("paper_portfolio_close", verdict.1),
+            ("paper_portfolio_archive", verdict.2),
+            ("paper_portfolio_add_position", verdict.3),
+            ("paper_portfolio_close_position", verdict.4),
+            ("paper_portfolio_close_all_positions", verdict.5),
+        ] {
+            assert_eq!(actual, Some(PluginPermission::Write), "写 op {op} 必须要求 write");
+        }
+        for (op, actual) in [
+            ("paper_portfolio_list", verdict.6),
+            ("paper_portfolio_get", verdict.7),
+            ("paper_portfolio_list_active_details", verdict.8),
+        ] {
+            assert_eq!(actual, None, "读 op {op} 不得设权限闸");
+        }
+    }
+
+    /// G6 截图诊断八条：五条写 op 要求 `write`；三条读 op 必须仍是 `None` ——
+    /// 读缝登记写闸会让只读插件连诊断列表都打不开（同 G2 组合三读的判据）。
+    #[test]
+    fn stock_analysis_g6_screenshot_diagnosis_permissions() {
+        let verdict = with_watchdog(Duration::from_secs(2), "stock.analysis G6 权限表", || {
+            (
+                required_permission_for("stock.analysis", "screenshot_diagnosis_create_from_image"),
+                required_permission_for("stock.analysis", "screenshot_diagnosis_create"),
+                required_permission_for("stock.analysis", "screenshot_diagnosis_archive"),
+                required_permission_for("stock.analysis", "screenshot_diagnosis_update"),
+                required_permission_for(
+                    "stock.analysis",
+                    "screenshot_diagnosis_to_paper_portfolio",
+                ),
+                required_permission_for("stock.analysis", "screenshot_diagnosis_get"),
+                required_permission_for("stock.analysis", "screenshot_diagnosis_list_recent"),
+                required_permission_for("stock.analysis", "screenshot_diagnosis_list_by_status"),
+            )
+        });
+        for (op, actual) in [
+            ("screenshot_diagnosis_create_from_image", verdict.0),
+            ("screenshot_diagnosis_create", verdict.1),
+            ("screenshot_diagnosis_archive", verdict.2),
+            ("screenshot_diagnosis_update", verdict.3),
+            ("screenshot_diagnosis_to_paper_portfolio", verdict.4),
+        ] {
+            assert_eq!(actual, Some(PluginPermission::Write), "写 op {op} 必须要求 write");
+        }
+        for (op, actual) in [
+            ("screenshot_diagnosis_get", verdict.5),
+            ("screenshot_diagnosis_list_recent", verdict.6),
+            ("screenshot_diagnosis_list_by_status", verdict.7),
+        ] {
+            assert_eq!(actual, None, "读 op {op} 不得设权限闸");
+        }
     }
 
     /// #338 mover_recall_analysis 三条：`run_mover_recall_analysis` 落批次起点并后台

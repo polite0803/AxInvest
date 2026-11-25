@@ -75,6 +75,7 @@ async fn make_workflow(
     .expect("建编排")
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn set_quota(
     db: &DatabaseConnection,
     dept: &str,

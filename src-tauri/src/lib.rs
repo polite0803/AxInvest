@@ -16,9 +16,11 @@ mod capability_vector_search;
 // P6.0-⑥ 批 E：工作流节点外部 IO 接缝的宿主实现（HTTP / 文件 / SMTP）。
 mod bot_approval;
 pub mod bot_assignment_runner;
+pub mod bot_cost_quota;
 pub mod bot_input_request;
 pub mod bot_quota;
 pub mod bot_routine_runner;
+pub mod bot_skill_service;
 pub mod bot_workflow_runner;
 pub mod bot_workflow_steps;
 // P4-b 命令层内部实现（集成测试直接驱动，避免为测试复制 Tauri State）。

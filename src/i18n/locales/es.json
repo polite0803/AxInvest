@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "Se superó la cuota de ejecución del departamento",
     "BOT_INPUT_REQUEST_NOT_FOUND": "Solicitud de entrada no encontrada",
     "BOT_INPUT_REQUEST_NOT_PENDING": "La solicitud ya fue respondida o ha caducado",
-    "BOT_INPUT_ANSWER_EMPTY": "La respuesta no puede estar vacía"
+    "BOT_INPUT_ANSWER_EMPTY": "La respuesta no puede estar vacía",
+    "BOT_COST_QUOTA_INVALID": "Valor de cuota de costo del bot no válido",
+    "BOT_COST_QUOTA_EXCEEDED": "Se excedió la cuota de costo o tokens",
+    "BOT_SKILL_NOT_FOUND": "No se encontró la vinculación de habilidad del bot",
+    "BOT_SKILL_PRESET_INVALID": "Formato de preajuste de habilidad no válido"
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "Centro de inversión",
     "tab": {
-      "marketMainline": "Línea Principal del Mercado",
-      "screener": "Screener",
-      "workspace": "Espacio de Trabajo",
-      "screenshotDiagnosis": "Diagnóstico de Captura",
-      "paperPortfolio": "Portafolio Papel",
-      "quant": "Quant"
+      "marketMainline": "Línea Principal del Mercado"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "Uso y costo",
+      "subtitle": "Uso reciente de tokens y costo estimado",
+      "estimated": "Estimado",
+      "estimatedHint": "Estimado según precios locales; puede diferir de la factura del proveedor",
+      "pricingSource": "Fuente de precios",
+      "inputTokens": "Tokens de entrada",
+      "outputTokens": "Tokens de salida",
+      "cacheCreationTokens": "Tokens de creación de caché",
+      "cacheReadTokens": "Tokens de lectura de caché",
+      "totalTokens": "Total de tokens",
+      "totalCost": "Costo estimado",
+      "quotaTitle": "Cuota de costo",
+      "quotaHint": "Al exceder, solo se bloquean nuevas ejecuciones; las ya iniciadas terminarán",
+      "breached": "Cuota excedida",
+      "window": "Ventana",
+      "empty": "Aún no hay registros de uso",
+      "refresh": "Actualizar"
+    },
+    "skills": {
+      "title": "Habilidades",
+      "subtitle": "Habilidades disponibles para este bot; las habilidades globales son visibles para todos los bots",
+      "globalSource": "Global",
+      "botSource": "Este bot",
+      "shadowedGlobal": "La habilidad del bot tiene prioridad sobre una habilidad global con el mismo nombre",
+      "missing": "Falta el archivo de habilidad",
+      "enabled": "Habilitado",
+      "disabled": "Deshabilitado",
+      "empty": "No hay habilidades configuradas para este bot",
+      "importPreset": "Importar preajuste",
+      "presetName": "Nombre del preajuste",
+      "presetImported": "{count} habilidades importadas",
+      "presetSkipped": "{count} habilidades omitidas",
+      "presetInvalid": "Formato de preajuste no válido",
+      "whitelist": "Lista de permitidos"
     }
   }
 }

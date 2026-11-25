@@ -12,12 +12,9 @@ import { invoke } from "@/lib/invoke";
 import { type PluginDomainPageRoute, resolvePluginDomainPageRoutes } from "@/lib/pluginDomainPageRoutes";
 import { usePluginStore } from "@/stores";
 import type { PluginDomainPacksInfoDto, PluginPagesInfoDto } from "@/types";
-import type { ComponentType, LazyExoticComponent } from "react";
-import { lazy, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
-export interface PluginPageRouteEntry extends PluginDomainPageRoute {
-  readonly Page: LazyExoticComponent<ComponentType>;
-}
+export type PluginPageRouteEntry = PluginDomainPageRoute;
 
 /** 旧 `/opc/domain/:pageId` → 插件页 `{pluginSlug, pageId}` 的兼容映射。 */
 export interface PluginDomainRouteMapping {
@@ -26,6 +23,15 @@ export interface PluginDomainRouteMapping {
   readonly pageId: string;
   /** 页面上下文键，与侧栏/标题/路由三方同源。 */
   readonly navKey: string;
+}
+
+/** 侧栏可见插件页：去掉 hidden 项，供 Sidebar / CommandPalette 直接消费。 */
+export function getVisiblePluginPageRoutes(): readonly PluginPageRouteEntry[] {
+  return snapshot.filter((entry) => !entry.hidden);
+}
+
+export function useVisiblePluginPageRoutes(): readonly PluginPageRouteEntry[] {
+  return useSyncExternalStore(subscribePluginPageRoutes, getVisiblePluginPageRoutes, getVisiblePluginPageRoutes);
 }
 
 let snapshot: readonly PluginPageRouteEntry[] = [];
@@ -68,23 +74,6 @@ function publish(next: readonly PluginPageRouteEntry[]): void {
   for (const listener of listeners) { listener(); }
 }
 
-/**
- * 页面组件延迟加载到 `PluginPageHost`，路由只需拿到稳定的 lazy 引用。
- *
- * 同一 plugin/page 复用同一个 lazy 组件，避免每次刷新生成新的 Suspense 类型导致卸载重建。
- */
-const pageComponents = new Map<string, LazyExoticComponent<ComponentType>>();
-function pageComponent(key: string): LazyExoticComponent<ComponentType> {
-  const cached = pageComponents.get(key);
-  if (cached) { return cached; }
-  const component = lazy(async () => {
-    const mod = await import("@/components/plugin/PluginPageRouteHost");
-    return { default: mod.PluginPageRouteHost };
-  });
-  pageComponents.set(key, component);
-  return component;
-}
-
 async function fetchPluginPageRoutes(): Promise<readonly PluginPageRouteEntry[]> {
   const [pages, packs] = await Promise.all([
     invoke<PluginPagesInfoDto[]>("plugin_list_pages"),
@@ -95,7 +84,7 @@ async function fetchPluginPageRoutes(): Promise<readonly PluginPageRouteEntry[]>
   return resolvePluginDomainPageRoutes(
     Array.isArray(pages) ? pages : [],
     Array.isArray(packs) ? packs : [],
-  ).map((route) => ({ ...route, Page: pageComponent(route.id) }));
+  );
 }
 
 /**
@@ -148,13 +137,23 @@ export function pluginPageNavLabel(entry: PluginPageRouteEntry): string {
   return entry.navLabel;
 }
 
-/** 插件页 → 宿主 `NavItem` 的纯映射；`labelKey` 在插件项里承载纯文本标题。 */
+/** 插件页 → 宿主 `NavItem` 的纯映射；`labelKey` 在插件项里承载纯文本标题或 i18n key。 */
 export function pluginPageNavItem(entry: PluginPageRouteEntry): {
   key: string;
   labelKey: string;
   path: string;
   isPlugin: true;
   pluginName: string;
+  /** `true` ⇒ `labelKey` 是 i18n key，消费端应 `t()`；否则直接渲染。 */
+  labelIsI18nKey: boolean;
+  /** lucide 图标标识；null ⇒ 消费端兜底 Puzzle。 */
+  icon: string | null;
+  /** 宿主侧栏归属组 key。 */
+  navGroup: string;
+  /** 组内排序（升序）。 */
+  navOrder: number;
+  /** 隐藏侧栏/命令面板入口。 */
+  hidden: boolean;
 } {
   return {
     key: entry.navKey,
@@ -162,6 +161,11 @@ export function pluginPageNavItem(entry: PluginPageRouteEntry): {
     path: entry.path,
     isPlugin: true,
     pluginName: entry.pluginName,
+    labelIsI18nKey: entry.navLabelIsI18nKey,
+    icon: entry.icon,
+    navGroup: entry.navGroup,
+    navOrder: entry.navOrder,
+    hidden: entry.hidden,
   };
 }
 

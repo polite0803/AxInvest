@@ -614,9 +614,10 @@ pub(super) fn execute_skill_sync(
 /// (ChatRequest.tools) to avoid double token consumption.
 pub(super) fn build_agent_system_prompt(
     persona_prompt: Option<&str>,
-    // Bot 会话专用：SOUL（DB 真相源）与已截断的记忆（文件真相源）。
+    // Bot 会话专用：SOUL（DB 真相源）、已截断记忆、技能摘要段（P5 C1-2）。
     bot_soul: Option<&str>,
     bot_memory: Option<&str>,
+    bot_skills: Option<&str>,
     profile_prompt: Option<&str>,
     user_custom_prompt: Option<&str>,
     rag_context: Option<&[String]>,
@@ -716,6 +717,14 @@ pub(super) fn build_agent_system_prompt(
 </bot-memory>",
                 memory
             ));
+        }
+    }
+
+    // P5 C1-2：Bot 技能摘要段（名字+一行描述，不注入全文）。
+    // 放在 bot-memory 之后、working-memory 之前，与 Bot 上下文边界保持连续。
+    if let Some(skills_seg) = bot_skills {
+        if !skills_seg.is_empty() {
+            prompts.push(skills_seg.to_string());
         }
     }
 
@@ -905,6 +914,7 @@ mod tests {
             None, // persona
             None, // bot_soul
             None, // bot_memory
+            None, // bot_skills
             None, // profile
             None, // user_custom
             None, // rag
@@ -929,6 +939,7 @@ mod tests {
             None,                 // persona（Bot 有 SOUL 时由调用方置 None）
             Some("SOUL-BODY"),    // bot_soul
             Some("MEMORY-BODY"),  // bot_memory
+            Some("<bot-skills>\n- s\n</bot-skills>"), // bot_skills
             Some("PROFILE-BODY"), // profile
             None,                 // user_custom
             Some(&rag),           // rag
@@ -951,17 +962,22 @@ mod tests {
                 .position(|p| p.starts_with(prefix))
                 .unwrap_or_else(|| panic!("缺少 {prefix} 段，实际段：{prompts:?}"))
         };
-        let (soul, profile, rag_pos, mem, wm) = (
+        let (soul, profile, rag_pos, mem, skills_seg, wm) = (
             pos("<bot-soul>"),
             pos("<agent-profile>"),
             pos("<retrieved-context>"),
             pos("<bot-memory>"),
+            pos("<bot-skills>"),
             pos("<working-memory>"),
         );
         assert!(soul < profile, "<bot-soul> 必须在 <agent-profile> 之前");
-        assert!(rag_pos < mem && mem < wm, "<bot-memory> 必须夹在 RAG 与 working-memory 之间");
+        assert!(
+            rag_pos < mem && mem < skills_seg && skills_seg < wm,
+            "<bot-memory>/<bot-skills> 必须夹在 RAG 与 working-memory 之间且保持顺序"
+        );
         assert_eq!(prompts[soul], "<bot-soul>\nSOUL-BODY\n</bot-soul>");
         assert_eq!(prompts[mem], "<bot-memory>\nMEMORY-BODY\n</bot-memory>");
+        assert_eq!(prompts[skills_seg], "<bot-skills>\n- s\n</bot-skills>");
     }
 
     #[test]
@@ -969,12 +985,14 @@ mod tests {
         let prompts = prompt_with(&[], None);
         assert!(!prompts.iter().any(|p| p.contains("<bot-soul>")));
         assert!(!prompts.iter().any(|p| p.contains("<bot-memory>")));
+        assert!(!prompts.iter().any(|p| p.contains("<bot-skills>")));
     }
 
     #[test]
     fn empty_bot_slots_are_skipped() {
         let prompts = build_agent_system_prompt(
             Some("PERSONA-BODY"),
+            Some(""),
             Some(""),
             Some(""),
             None,
@@ -994,6 +1012,7 @@ mod tests {
         );
         assert!(!prompts.iter().any(|p| p.contains("<bot-soul>")));
         assert!(!prompts.iter().any(|p| p.contains("<bot-memory>")));
+        assert!(!prompts.iter().any(|p| p.contains("<bot-skills>")));
         assert!(prompts.iter().any(|p| p.contains("<persona>\nPERSONA-BODY")));
     }
 

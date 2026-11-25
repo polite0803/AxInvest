@@ -478,7 +478,7 @@ mod tests {
         let err = create_inner(db, &dept).await.unwrap_err();
         assert!(err.contains(bot_err::WORKFLOW_DEPARTMENT_REQUIRED), "{err}");
 
-        let mut missing_bot = input(&"not-a-bot".to_string());
+        let mut missing_bot = input("not-a-bot");
         missing_bot.steps[0].bot_id = "not-a-bot".into();
         let err = create_inner(db, &missing_bot).await.unwrap_err();
         assert!(err.contains(bot_err::WORKFLOW_STEP_BOT_MISSING), "{err}");

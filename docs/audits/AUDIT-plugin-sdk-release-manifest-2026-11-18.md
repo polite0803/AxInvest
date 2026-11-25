@@ -9,7 +9,7 @@
 | crate | manifest | version | license | publish | package-list sha256 前缀 | 入口 |
 |---|---|---|---|---|---|---|
 | `axagent-plugin-proto` | `axagent-core/crates/plugin-proto/Cargo.toml` | 3.0.0 | AGPL-3.0-only | 未显式声明（Cargo 默认允许发布） | 55bc9d177a860d5c | ✓ |
-| `axagent-harness` | `axagent-core/crates/harness/Cargo.toml` | workspace | AGPL-3.0-only | 未显式声明（Cargo 默认允许发布） | 51cfb8c1f05ea65f | ✓ |
+| `axagent-harness` | `axagent-core/crates/harness/Cargo.toml` | workspace | AGPL-3.0-only | 未显式声明（Cargo 默认允许发布） | d2538f96fd6c0539 | ✓ |
 | `axagent-plugin-opc-core` | `axagent-plugins/crates/plugin-opc-core/Cargo.toml` | workspace | workspace | 未显式声明（Cargo 默认允许发布） | ac641ec9c8955e74 | ✓ |
 | `axagent-plugin-testkit` | `axagent-plugins/crates/plugin-testkit/Cargo.toml` | workspace | workspace | 未显式声明（Cargo 默认允许发布） | 66a638cc28e71b84 | ✓ |
 
@@ -312,6 +312,7 @@
 - `src/trajectory_store.rs`
 - `src/trajectory_types.rs`
 - `src/typed_event.rs`
+- `src/types/bot.rs`
 - `src/types/conversation.rs`
 - `src/types/gateway.rs`
 - `src/types/mod.rs`

@@ -118,13 +118,13 @@ pub fn validate_dag(steps: &[BotWorkflowStep]) -> Result<Vec<String>, StepError>
             return Err(invalid("botId", "botId 不能为空"));
         }
         let chars = step.prompt_template.chars().count();
-        if chars < 1 || chars > MAX_PROMPT_CHARS {
+        if !(1..=MAX_PROMPT_CHARS).contains(&chars) {
             return Err(invalid(
                 "promptTemplate",
                 format!("promptTemplate 必须为 1..={MAX_PROMPT_CHARS} 字符"),
             ));
         }
-        if step.timeout_secs < 1 || step.timeout_secs > 300 {
+        if !(1..=300).contains(&step.timeout_secs) {
             return Err(invalid("timeoutSecs", "timeoutSecs 必须为 1..=300"));
         }
         if step.on_failure != "abort" && step.on_failure != "continue" {
@@ -206,7 +206,7 @@ pub fn validate_definition(
     total_timeout_secs: i32,
 ) -> Result<Vec<String>, StepError> {
     let name_chars = name.trim().chars().count();
-    if name_chars < 1 || name_chars > 100 {
+    if !(1..=100).contains(&name_chars) {
         return Err(invalid("name", "name 必须为 1..100 字符"));
     }
     if description.chars().count() > 1000 {
@@ -222,10 +222,10 @@ pub fn validate_definition(
             "部门编排必须指定部门",
         ));
     }
-    if max_concurrency < 1 || max_concurrency > MAX_CONCURRENCY {
+    if !(1..=MAX_CONCURRENCY).contains(&max_concurrency) {
         return Err(invalid("maxConcurrency", "maxConcurrency 必须为 1..4"));
     }
-    if total_timeout_secs < MIN_TOTAL_TIMEOUT || total_timeout_secs > MAX_TOTAL_TIMEOUT {
+    if !(MIN_TOTAL_TIMEOUT..=MAX_TOTAL_TIMEOUT).contains(&total_timeout_secs) {
         return Err(invalid("totalTimeoutSecs", "totalTimeoutSecs 必须为 60..3600"));
     }
     validate_dag(steps)

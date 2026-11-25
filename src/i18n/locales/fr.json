@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "Quota d’exécution du département dépassé",
     "BOT_INPUT_REQUEST_NOT_FOUND": "Demande de saisie introuvable",
     "BOT_INPUT_REQUEST_NOT_PENDING": "Demande de saisie déjà traitée ou expirée",
-    "BOT_INPUT_ANSWER_EMPTY": "La réponse ne peut pas être vide"
+    "BOT_INPUT_ANSWER_EMPTY": "La réponse ne peut pas être vide",
+    "BOT_COST_QUOTA_INVALID": "Valeur de quota de coût du bot invalide",
+    "BOT_COST_QUOTA_EXCEEDED": "Quota de coût ou de jetons dépassé",
+    "BOT_SKILL_NOT_FOUND": "Liaison de compétence du bot introuvable",
+    "BOT_SKILL_PRESET_INVALID": "Format de préréglage de compétence invalide"
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "Centre d'investissement",
     "tab": {
-      "marketMainline": "Ligne Principale du Marché",
-      "screener": "Screener",
-      "workspace": "Espace de Travail",
-      "screenshotDiagnosis": "Diagnostic Screenshot",
-      "paperPortfolio": "Portefeuille Papier",
-      "quant": "Quant"
+      "marketMainline": "Ligne Principale du Marché"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "Utilisation et coût",
+      "subtitle": "Utilisation récente des jetons et coût estimé",
+      "estimated": "Estimé",
+      "estimatedHint": "Estimé selon la tarification locale ; peut différer de la facturation du fournisseur",
+      "pricingSource": "Source de tarification",
+      "inputTokens": "Jetons d'entrée",
+      "outputTokens": "Jetons de sortie",
+      "cacheCreationTokens": "Jetons de création de cache",
+      "cacheReadTokens": "Jetons de lecture de cache",
+      "totalTokens": "Total des jetons",
+      "totalCost": "Coût estimé",
+      "quotaTitle": "Quota de coût",
+      "quotaHint": "En cas de dépassement, seules les nouvelles exécutions sont bloquées ; celles déjà démarrées se termineront",
+      "breached": "Quota dépassé",
+      "window": "Fenêtre",
+      "empty": "Aucun enregistrement d'utilisation pour le moment",
+      "refresh": "Actualiser"
+    },
+    "skills": {
+      "title": "Compétences",
+      "subtitle": "Compétences disponibles pour ce bot ; les compétences globales sont visibles par tous les bots",
+      "globalSource": "Global",
+      "botSource": "Ce bot",
+      "shadowedGlobal": "La compétence du bot est prioritaire sur une compétence globale du même nom",
+      "missing": "Fichier de compétence manquant",
+      "enabled": "Activé",
+      "disabled": "Désactivé",
+      "empty": "Aucune compétence configurée pour ce bot",
+      "importPreset": "Importer un préréglage",
+      "presetName": "Nom du préréglage",
+      "presetImported": "{count} compétences importées",
+      "presetSkipped": "{count} compétences ignorées",
+      "presetInvalid": "Format de préréglage invalide",
+      "whitelist": "Liste blanche"
     }
   }
 }

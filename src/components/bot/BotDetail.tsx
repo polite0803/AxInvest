@@ -47,6 +47,10 @@ export interface BotDetailProps {
    * P2-b：「委派」Tab 内容（页面层注入，组件中立性同 routinesPanel；未传则不渲染）。
    */
   assignmentsPanel?: React.ReactNode;
+  /** P5-b：用量与费用页签（页面层注入）。 */
+  usagePanel?: React.ReactNode;
+  /** P5-c1：技能页签（页面层注入）。 */
+  skillsPanel?: React.ReactNode;
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
@@ -71,6 +75,8 @@ export function BotDetail({
   onOpenThread,
   routinesPanel,
   assignmentsPanel,
+  usagePanel,
+  skillsPanel,
 }: BotDetailProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -183,48 +189,48 @@ export function BotDetail({
             key: "threads",
             label: `${t("bots.threads")}${threads.length > 0 ? ` (${threads.length})` : ""}`,
             children: (
-      <Card
-        size="small"
-        title={t("bots.threads")}
-        data-testid="bot-threads-panel"
-      >
-        {threadsLoading
-          ? <Spin size="small" />
-          : threadsFailed
-          ? <Alert type="error" showIcon message={t("error.loadFailed")} />
-          : threads.length === 0
-          ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Text type="secondary">{t("bots.threadsEmpty")}</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t("bots.threadsEmptyDescription")}
-              </Text>
-            </div>
-          )
-          : (
-            <List
-              size="small"
-              dataSource={threads}
-              renderItem={(conv) => (
-                <List.Item
-                  style={{ cursor: "pointer", padding: "6px 4px", borderRadius: 6 }}
-                  onClick={() => onOpenThread(conv.id)}
-                  data-testid="bot-thread-item"
-                >
-                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                    <Text ellipsis>{conv.title}</Text>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {new Date(conv.updatedAt * 1000).toLocaleString()}
-                    </Text>
-                  </div>
-                  <Text type="secondary" style={{ fontSize: 12, color: token.colorTextTertiary }}>
-                    {conv.messageCount}
-                  </Text>
-                </List.Item>
-              )}
-            />
-          )}
-      </Card>
+              <Card
+                size="small"
+                title={t("bots.threads")}
+                data-testid="bot-threads-panel"
+              >
+                {threadsLoading
+                  ? <Spin size="small" />
+                  : threadsFailed
+                  ? <Alert type="error" showIcon message={t("error.loadFailed")} />
+                  : threads.length === 0
+                  ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <Text type="secondary">{t("bots.threadsEmpty")}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {t("bots.threadsEmptyDescription")}
+                      </Text>
+                    </div>
+                  )
+                  : (
+                    <List
+                      size="small"
+                      dataSource={threads}
+                      renderItem={(conv) => (
+                        <List.Item
+                          style={{ cursor: "pointer", padding: "6px 4px", borderRadius: 6 }}
+                          onClick={() => onOpenThread(conv.id)}
+                          data-testid="bot-thread-item"
+                        >
+                          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+                            <Text ellipsis>{conv.title}</Text>
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              {new Date(conv.updatedAt * 1000).toLocaleString()}
+                            </Text>
+                          </div>
+                          <Text type="secondary" style={{ fontSize: 12, color: token.colorTextTertiary }}>
+                            {conv.messageCount}
+                          </Text>
+                        </List.Item>
+                      )}
+                    />
+                  )}
+              </Card>
             ),
           },
           ...(routinesPanel
@@ -232,6 +238,12 @@ export function BotDetail({
             : []),
           ...(assignmentsPanel
             ? [{ key: "assignments", label: t("bot.assignment.title"), children: assignmentsPanel }]
+            : []),
+          ...(usagePanel
+            ? [{ key: "usage", label: t("bot.usage.title"), children: usagePanel }]
+            : []),
+          ...(skillsPanel
+            ? [{ key: "skills", label: t("bot.skills.title"), children: skillsPanel }]
             : []),
         ]}
       />

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ContributedPageRoute } from "@/lib/domainPageRegistry";
-import { DollarCircleFilled, HistoryOutlined } from "@ant-design/icons";
+import { HistoryOutlined } from "@ant-design/icons";
 import { type ComponentType, lazy, type LazyExoticComponent } from "react";
 
 /**
@@ -19,40 +19,39 @@ import { type ComponentType, lazy, type LazyExoticComponent } from "react";
  *
  * ⚠ path / pageKey 由本文件**字面量**声明（#260 之后 OPC 的同一口径）：不再从宿主
  * `BUILTIN_PAGE_PATH` 取路径 —— 那等于把命名权留在主壳。（宿主表里 `"finance-investment": "/invest"`
- * 仍保留给 `/invest/replay` 旧模板串消费；侧栏入口本批已随插件门槛迁进本文件的 `nav`。）
+ * 仍保留给 `/invest` 与 `/invest/replay` 的 `pageKey` 反查；回放工作台的侧栏入口
+ * 仍在本文件的 `nav` 里随 stock 门槛出入。）
+ *
+ * T3 完整外迁（2026-11-23）：`invest:index` 不再编译 `InvestPage` / `InvestHub`，
+ * 改由 `LegacyInvestRedirect`（零业务代码）把旧链转到 stock 插件 bundle 页；
+ * 侧栏入口也一并撤下，启用后的入口由 `pluginRouteRegistry` 的插件页投影提供。
  */
 
-const LazyInvestPage: LazyExoticComponent<ComponentType> = lazy(() =>
-  import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage }))
+const LazyInvestLegacyRedirect: LazyExoticComponent<ComponentType> = lazy(() =>
+  import("@/pages/invest/LegacyInvestRedirect").then((m) => ({ default: m.LegacyInvestRedirect }))
 );
 const LazyReplayWorkbenchPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
 );
 
 /**
- * 投资域主页路由：字段结构与 OPC 的路由声明同构。`requiresPlugin` 把页面的**可见性**
- * 绑到 stock 插件状态；侧栏入口由本文件同一条声明的 `nav` 派生，避免出现「路由消失但
- * 入口还在」的 404 按钮（`getNavItems()` 是「宿主内置 + 域贡献」直接拼接，宿主侧
- * `finance-investment` 静态项已同步删除，不能在这里重复贡献同 key）。
+ * 投资域路由：字段结构与 OPC 的路由声明同构。
+ *
+ * `invest:index` 是**兼容跳转桥**，不是股票页面：
+ *   - 不设 `requiresPlugin` —— 插件禁用时也要能把旧链落到明确降级提示，
+ *     而不是 404（禁用 ≠ 页面从宇宙中消失，用户仍可能从历史收藏进来）；
+ *   - 不设 `nav` —— 启用后的侧栏入口由 `pluginRouteRegistry` 的插件页投影
+ *     提供（`/plugins/stock/stock-home`），宿主不再保留第二个「投资」按钮。
+ *
+ * `invest:replay` 仍是宿主内真实页面（时间旅行回放工作台），保留 stock 门槛：
+ * 它依赖 stock 的 as-of 数据面，插件禁用时不应可达。
  */
 export const DOMAIN_PAGES: readonly ContributedPageRoute[] = [
   {
     id: "invest:index",
     path: "/invest",
     pageKey: "finance-investment",
-    Page: LazyInvestPage,
-    // 股票页的**可见性**归 stock 插件：未装/未启用时路由与侧栏入口都不存在。
-    // 页面组件本身仍在宿主编译（完整 bundle 外迁尚待 P6.1 前端移植），但对外契约
-    // 已经与插件生命周期一致 —— 不能让用户看到插件未加载就存在的股票页。
-    requiresPlugin: "stock",
-    // 侧栏入口也走本表投影：宿主 navRegistry 的同 key 静态项已删，禁用后入口一并消失。
-    nav: {
-      key: "finance-investment",
-      labelKey: "nav.financeInvestment",
-      icon: <DollarCircleFilled style={{ fontSize: 17 }} />,
-      domain: "finance",
-      group: "invest",
-    },
+    Page: LazyInvestLegacyRedirect,
   },
   {
     // 回放工作台：与投资主页同一 stock 门槛，禁用插件后旧链也不能进入股票业务页。

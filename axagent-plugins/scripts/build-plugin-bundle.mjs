@@ -988,7 +988,17 @@ function stockManifest({ version, binaryName, sha256 }) {
     // 前端页面声明：`entry` 相对安装目录（扩展名走宿主资产白名单），宿主
     // `PluginManager::resolve_page_asset` 把它解析成安装根内的绝对路径；
     // 前端只传 `(pluginId, pageId)`，不得自己拼路径。
-    pages: [{ id: "stock-home", title: "股票", entry: PAGE_ENTRY, loading: "bundle" }],
+    // 导航元数据（navGroup/labelKey/icon/navOrder）是宿主侧栏唯一声明面：宿主只投影不写死。
+    pages: [{
+      id: "stock-home",
+      title: "股票",
+      entry: PAGE_ENTRY,
+      loading: "bundle",
+      navGroup: "invest",
+      labelKey: "nav.stockAnalysis",
+      icon: "ChartBar",
+      navOrder: 0,
+    }],
     // `command` 用 `worker://<名>` 占位：worker 通道不读它（按 `name` 发帧），但若意外
     // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
     commands: [
@@ -2096,6 +2106,270 @@ function stockManifest({ version, binaryName, sha256 }) {
           properties: {
             asOfDate: { type: "string", description: "时间旅行截止日；省略 = live 叠加实时持仓" },
           },
+        },
+      },
+      // ── G2 模拟组合九条：宿主 `paper_portfolio_*` Tauri 命令退役后的同名插件命令 ──
+      // 字段形状与入参必填口径逐字对齐 analysis-engine 的三个 Input DTO（camelCase）；
+      // 业务体走宿主 `stock.analysis` 接缝，插件侧不重写组合/持仓算法。
+      {
+        name: "paper_portfolio_create",
+        description: "创建模拟组合（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_create",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string", description: "组合名称" },
+            sourceEvent: { type: "string", description: "来源事件描述" },
+            sourceNewsId: { type: ["string", "null"], description: "关联新闻 id" },
+            sourceScreenshotDiagnosisId: { type: ["string", "null"], description: "关联截图诊断 id" },
+          },
+          required: ["name", "sourceEvent"],
+        },
+      },
+      {
+        name: "paper_portfolio_list",
+        description: "列出模拟组合（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_list",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: { type: ["string", "null"], description: "状态过滤；省略/null = 全部" },
+          },
+        },
+      },
+      {
+        name: "paper_portfolio_get",
+        description: "获取组合详情（含持仓 + 实时盈亏，经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_get",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            portfolioId: { type: "string", description: "组合 id" },
+          },
+          required: ["portfolioId"],
+        },
+      },
+      {
+        name: "paper_portfolio_close",
+        description: "关闭模拟组合（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_close",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            portfolioId: { type: "string", description: "组合 id" },
+          },
+          required: ["portfolioId"],
+        },
+      },
+      {
+        name: "paper_portfolio_archive",
+        description: "归档模拟组合（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_archive",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            portfolioId: { type: "string", description: "组合 id" },
+          },
+          required: ["portfolioId"],
+        },
+      },
+      {
+        name: "paper_portfolio_add_position",
+        description: "添加虚拟持仓（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_add_position",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            portfolioId: { type: "string", description: "组合 id" },
+            symbol: { type: "string", description: "标的代码" },
+            market: { type: "string", description: "市场 A / US / HK / ETF；缺省 A" },
+            entryPrice: { type: "number", description: "开仓价" },
+            entryDate: { type: "string", description: "开仓日 YYYY-MM-DD" },
+            quantity: { type: "number", description: "数量" },
+            note: { type: ["string", "null"], description: "备注" },
+          },
+          required: ["portfolioId", "symbol", "entryPrice", "entryDate", "quantity"],
+        },
+      },
+      {
+        name: "paper_portfolio_close_position",
+        description: "平仓单只持仓（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_close_position",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            positionId: { type: "string", description: "持仓 id" },
+            exitPrice: { type: "number", description: "平仓价（必须为正）" },
+            exitDate: { type: "string", description: "平仓日 YYYY-MM-DD" },
+          },
+          required: ["positionId", "exitPrice", "exitDate"],
+        },
+      },
+      {
+        name: "paper_portfolio_close_all_positions",
+        description: "批量平仓所有 open 持仓（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_close_all_positions",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            portfolioId: { type: "string", description: "组合 id" },
+            exitPrice: { type: "number", description: "统一平仓价（必须为正）" },
+            exitDate: { type: "string", description: "统一平仓日 YYYY-MM-DD" },
+          },
+          required: ["portfolioId", "exitPrice", "exitDate"],
+        },
+      },
+      {
+        name: "paper_portfolio_list_active_details",
+        description: "列出所有 active 组合详情（经宿主 stock.analysis 接缝）",
+        command: "worker://paper_portfolio_list_active_details",
+        requiredPermission: "read-only",
+        inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      },
+      // ── G6 截图诊断八条：宿主 `screenshot_diagnosis_*` Tauri 命令退役后的同名插件命令 ──
+      // 入参逐字对齐 analysis-engine DTO（camelCase）；业务体走宿主 `stock.analysis` 接缝，
+      // 插件侧不复制 VLM / LLM / 风险诊断算法。
+      {
+        name: "screenshot_diagnosis_create_from_image",
+        description: "上传截图自动诊断（OCR + 结构化 + 风险诊断，经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_create_from_image",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            imageBase64: { type: "string", description: "截图 base64（可带 data:image 前缀）" },
+            sourceApp: { type: ["string", "null"], description: "截图来源 App" },
+            providerId: { type: "string", description: "视觉模型 provider id" },
+            modelId: { type: "string", description: "视觉模型 model id" },
+          },
+          required: ["imageBase64", "providerId", "modelId"],
+        },
+      },
+      {
+        name: "screenshot_diagnosis_create",
+        description: "直接传入 positions 创建截图诊断（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_create",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            imageHash: { type: ["string", "null"], description: "截图 SHA256（去重）" },
+            imagePath: { type: ["string", "null"], description: "截图本地路径" },
+            imageThumbnailBase64: { type: ["string", "null"], description: "缩略图 base64" },
+            imageWidth: { type: ["integer", "null"], description: "原图宽度" },
+            imageHeight: { type: ["integer", "null"], description: "原图高度" },
+            sourceApp: { type: ["string", "null"], description: "截图来源 App" },
+            ocrText: { type: ["string", "null"], description: "OCR 全文" },
+            positions: { type: "array", items: { type: "object" }, description: "结构化持仓数组" },
+            totalMarketValue: { type: "number", description: "总市值；0 = 由 positions 求和" },
+            diagnosis: { type: ["object", "null"], description: "风险诊断 schema" },
+            narrative: { type: "string", description: "中文诊断说明" },
+            recommendedActions: { type: "array", items: { type: "string" }, description: "建议动作" },
+            sourceWorkflowExecutionId: { type: ["string", "null"], description: "来源工作流执行 id" },
+            providerId: { type: ["string", "null"], description: "provider id" },
+            modelId: { type: ["string", "null"], description: "model id" },
+            status: { type: "string", description: "初始状态，默认 active" },
+          },
+          required: ["positions"],
+        },
+      },
+      {
+        name: "screenshot_diagnosis_get",
+        description: "按 ID 获取截图诊断（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_get",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { diagnosisId: { type: "string", description: "诊断 id" } },
+          required: ["diagnosisId"],
+        },
+      },
+      {
+        name: "screenshot_diagnosis_list_recent",
+        description: "列出最近 N 条截图诊断（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_list_recent",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { limit: { type: ["integer", "null"], description: "条数，默认 20" } },
+        },
+      },
+      {
+        name: "screenshot_diagnosis_list_by_status",
+        description: "按状态过滤截图诊断（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_list_by_status",
+        requiredPermission: "read-only",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { status: { type: "string", description: "active / archived / failed" } },
+          required: ["status"],
+        },
+      },
+      {
+        name: "screenshot_diagnosis_archive",
+        description: "归档截图诊断（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_archive",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { diagnosisId: { type: "string", description: "诊断 id" } },
+          required: ["diagnosisId"],
+        },
+      },
+      {
+        name: "screenshot_diagnosis_update",
+        description: "更新截图诊断字段（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_update",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            diagnosisId: { type: "string", description: "诊断 id" },
+            status: { type: ["string", "null"], description: "新状态" },
+            narrative: { type: ["string", "null"], description: "新诊断说明" },
+            recommendedActions: { type: ["array", "null"], items: { type: "string" }, description: "新建议动作" },
+            errorMessage: { type: ["string", "null"], description: "失败原因" },
+          },
+          required: ["diagnosisId"],
+        },
+      },
+      {
+        name: "screenshot_diagnosis_to_paper_portfolio",
+        description: "截图诊断一键转模拟观察组合（经宿主 stock.analysis 接缝）",
+        command: "worker://screenshot_diagnosis_to_paper_portfolio",
+        requiredPermission: "workspace-write",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            diagnosisId: { type: "string", description: "诊断 id" },
+            name: { type: "string", description: "组合名称" },
+            sourceEvent: { type: "string", description: "来源事件描述" },
+          },
+          required: ["diagnosisId", "name", "sourceEvent"],
         },
       },
       {
@@ -3971,7 +4245,14 @@ function opcManifest({ version, binaryName, sha256 }) {
     // 前端页面声明（#301）：语义与 stock 段上方四行注释逐字相同（entry 相对安装目录、
     // 宿主 resolve_page_asset 解析、前端只传 (pluginId, pageId)）。键序同 stock：pages
     // 插在 worker 与 commands 之间。
-    pages: [{ id: "opc-home", title: "OPC", entry: PAGE_ENTRY, loading: "bundle" }],
+    // 通道探针页：只验证装载通道，不是真实 UI；隐藏侧栏入口（路由仍注册，可直达调试）。
+    pages: [{
+      id: "opc-home",
+      title: "OPC",
+      entry: PAGE_ENTRY,
+      loading: "bundle",
+      hidden: true,
+    }],
     // P6.2：一域一 logical manifest；宿主只读投影，不在此复制 worker/命令实现。
     domainPacks: domainPackManifests,
     // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
@@ -5445,7 +5726,16 @@ function opcAccountingManifest({ version, binaryName, sha256 }) {
     agents: [],
     defaultEnabled: true,
     worker: { program: path.posix.join("bin", binaryName) },
-    pages: [{ id: "opc-accounting", title: "会计", entry: PAGE_ENTRY, loading: "bundle" }],
+    pages: [{
+      id: "opc-accounting",
+      title: "会计",
+      entry: PAGE_ENTRY,
+      loading: "bundle",
+      navGroup: "packs",
+      labelKey: "nav.financeAccounting",
+      icon: "Calculator",
+      navOrder: 1,
+    }],
     domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "accounting.json")],
     commands: [
       {
@@ -5524,6 +5814,39 @@ function opcAccountingManifest({ version, binaryName, sha256 }) {
  * `file_write` / `run_automation_rules`），不为每个域另写一份 —— 11 域共用同一份
  * 工具实现，schema 也必须同源。
  */
+/**
+ * OPC 域包页面的侧栏元数据（唯一声明面）。
+ *
+ * ⚠ 这里的 navGroup / labelKey / icon / navOrder 是宿主侧栏投影的权威来源；
+ * 前端 Sidebar / CommandPalette 只做渲染，不得再按插件名写死分组或图标（禁区 12）。
+ * labelKey 复用既有 `nav.*`（11 语言已齐），不新增文案。
+ *
+ * 映射来源：git 7b43b5f92^:src/pages/opc/routes.tsx（14 个行业包的编译期声明被删前的原形），
+ * 加上 opc-accounting（会计，独立清单工厂）与 opc 公共包（探针页，hidden）。
+ */
+const OPC_DOMAIN_PAGE_NAV = {
+  "opc-finance-invest":     { navGroup: "packs", labelKey: "nav.financeAnalysis",      icon: "TrendingUp",    navOrder: 0 },
+  "opc-accounting":         { navGroup: "packs", labelKey: "nav.financeAccounting",    icon: "Calculator",    navOrder: 1 },
+  "opc-sales-growth":       { navGroup: "packs", labelKey: "nav.automationSales",      icon: "TrendingUp",    navOrder: 2 },
+  "opc-project-management": { navGroup: "packs", labelKey: "nav.automationProjects",   icon: "Layers",        navOrder: 3 },
+  "opc-consulting":         { navGroup: "packs", labelKey: "nav.automationConsulting", icon: "Users",         navOrder: 4 },
+  "opc-ecommerce":          { navGroup: "packs", labelKey: "nav.automationEcommerce",  icon: "ShoppingBag",   navOrder: 5 },
+  "opc-software-dev":       { navGroup: "packs", labelKey: "nav.devopsSoftware",       icon: "Code",          navOrder: 6 },
+  "opc-security":           { navGroup: "packs", labelKey: "nav.devopsSecurity",       icon: "ShieldCheck",   navOrder: 7 },
+  "opc-geospatial":         { navGroup: "packs", labelKey: "nav.dataGeospatial",       icon: "MapPin",        navOrder: 8 },
+  "opc-ai-research":        { navGroup: "packs", labelKey: "nav.dataAiResearch",       icon: "Brain",         navOrder: 9 },
+  "opc-content-media":      { navGroup: "packs", labelKey: "nav.contentMedia",         icon: "Video",         navOrder: 10 },
+  "opc-design":             { navGroup: "packs", labelKey: "nav.contentDesign",        icon: "Palette",       navOrder: 11 },
+  "opc-education":          { navGroup: "packs", labelKey: "nav.contentEducation",     icon: "GraduationCap", navOrder: 12 },
+  "opc-game-dev":           { navGroup: "packs", labelKey: "nav.aiMediaGame",          icon: "Gamepad2",      navOrder: 13 },
+};
+
+function opcDomainPageDecl(name, title) {
+  const nav = OPC_DOMAIN_PAGE_NAV[name];
+  const base = { id: name, title, entry: PAGE_ENTRY, loading: "bundle" };
+  return nav ? { ...base, ...nav } : base;
+}
+
 function opcWorkerDomainManifest(name, title, pack) {
   return ({ version, binaryName, sha256 }) => {
     const commands = (PLUGIN_SPECS[name]?.commands ?? []).map((commandName) => {
@@ -5619,7 +5942,7 @@ function opcWorkerDomainManifest(name, title, pack) {
       agents: [],
       defaultEnabled: true,
       worker: { program: path.posix.join("bin", binaryName) },
-      pages: [{ id: name, title, entry: PAGE_ENTRY, loading: "bundle" }],
+      pages: [opcDomainPageDecl(name, title)],
       domainPacks: [path.posix.join(DOMAIN_PACK_DIR, `${pack}.json`)],
       commands,
       integrity: { algorithm: "sha256", hash: sha256 },
@@ -5638,7 +5961,7 @@ function declarativeOpcManifest(name, title, pack) {
     skills: [],
     agents: [],
     defaultEnabled: true,
-    pages: [{ id: name, title, entry: PAGE_ENTRY, loading: "bundle" }],
+    pages: [opcDomainPageDecl(name, title)],
     domainPacks: [path.posix.join(DOMAIN_PACK_DIR, `${pack}.json`)],
     commands: [],
   });
@@ -5655,7 +5978,16 @@ function opcSecurityManifest({ version }) {
     skills: [],
     agents: [],
     defaultEnabled: true,
-    pages: [{ id: "opc-security", title: "安全合规", entry: PAGE_ENTRY, loading: "bundle" }],
+    pages: [{
+      id: "opc-security",
+      title: "安全合规",
+      entry: PAGE_ENTRY,
+      loading: "bundle",
+      navGroup: "packs",
+      labelKey: "nav.devopsSecurity",
+      icon: "ShieldCheck",
+      navOrder: 7,
+    }],
     domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "security.json")],
     commands: [],
   };
@@ -5673,7 +6005,16 @@ function opcSalesGrowthManifest({ version, binaryName, sha256 }) {
     agents: [],
     defaultEnabled: true,
     worker: { program: path.posix.join("bin", binaryName) },
-    pages: [{ id: "opc-sales-growth", title: "销售增长", entry: PAGE_ENTRY, loading: "bundle" }],
+    pages: [{
+      id: "opc-sales-growth",
+      title: "销售增长",
+      entry: PAGE_ENTRY,
+      loading: "bundle",
+      navGroup: "packs",
+      labelKey: "nav.automationSales",
+      icon: "TrendingUp",
+      navOrder: 2,
+    }],
     domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "sales_growth.json")],
     commands: [
       {
@@ -5753,7 +6094,16 @@ function opcContentMediaManifest({ version, binaryName, sha256 }) {
     agents: [],
     defaultEnabled: true,
     worker: { program: path.posix.join("bin", binaryName) },
-    pages: [{ id: "opc-content-media", title: "内容媒体", entry: PAGE_ENTRY, loading: "bundle" }],
+    pages: [{
+      id: "opc-content-media",
+      title: "内容媒体",
+      entry: PAGE_ENTRY,
+      loading: "bundle",
+      navGroup: "packs",
+      labelKey: "nav.contentMedia",
+      icon: "Video",
+      navOrder: 10,
+    }],
     domainPacks: [path.posix.join(DOMAIN_PACK_DIR, "content_media.json")],
     commands: names.map((name) => ({
       name,

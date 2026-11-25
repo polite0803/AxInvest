@@ -7,13 +7,14 @@
  * - 创建 / 关闭 / 归档 / 添加持仓 / 平仓等操作
  * - loading / error 状态管理
  *
- * 命令清单（与后端 commands/paper_portfolio.rs 对齐）：
+ * 命令清单（宿主 `paper_portfolio_*` Tauri 命令已退役，现由 stock 插件 worker 声明，
+ * 经 `stock.analysis` 接缝调 analysis-engine 的同一份权威实现）：
  * - paper_portfolio_create / list / get / close / archive
  * - paper_portfolio_add_position / close_position / close_all_positions
  * - paper_portfolio_list_active_details
  */
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type {
   AddPositionInput,
   ClosePositionInput,
@@ -80,7 +81,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   fetchActiveDetails: async () => {
     set({ loadingList: true, error: null });
     try {
-      const data = await invoke<PortfolioDetail[]>("paper_portfolio_list_active_details");
+      const data = await invokePluginCommand<PortfolioDetail[]>("paper_portfolio_list_active_details");
       set({ activeDetails: data, loadingList: false });
     } catch (e) {
       set({ loadingList: false, error: String(e) });
@@ -90,7 +91,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   fetchPortfolios: async (status?: string) => {
     set({ loadingList: true, error: null });
     try {
-      const data = await invoke<PaperPortfolio[]>("paper_portfolio_list", {
+      const data = await invokePluginCommand<PaperPortfolio[]>("paper_portfolio_list", {
         status: status ?? null,
       });
       set({ portfolios: data, loadingList: false });
@@ -102,7 +103,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   fetchPortfolioDetail: async (portfolioId: string) => {
     set({ loadingDetail: true, error: null });
     try {
-      const data = await invoke<PortfolioDetail | null>("paper_portfolio_get", {
+      const data = await invokePluginCommand<PortfolioDetail | null>("paper_portfolio_get", {
         portfolioId,
       });
       set({ currentDetail: data, loadingDetail: false });
@@ -114,7 +115,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   createPortfolio: async (input: CreatePortfolioInput) => {
     set({ submitting: true, error: null });
     try {
-      const created = await invoke<PaperPortfolio>("paper_portfolio_create", { input });
+      const created = await invokePluginCommand<PaperPortfolio>("paper_portfolio_create", { input });
       set({ submitting: false });
       // 创建后刷新 active 列表
       await get().fetchActiveDetails();
@@ -128,7 +129,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   closePortfolio: async (portfolioId: string) => {
     set({ submitting: true, error: null });
     try {
-      await invoke<PaperPortfolio>("paper_portfolio_close", { portfolioId });
+      await invokePluginCommand<PaperPortfolio>("paper_portfolio_close", { portfolioId });
       set({ submitting: false });
       await get().fetchActiveDetails();
     } catch (e) {
@@ -140,7 +141,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   archivePortfolio: async (portfolioId: string) => {
     set({ submitting: true, error: null });
     try {
-      await invoke<PaperPortfolio>("paper_portfolio_archive", { portfolioId });
+      await invokePluginCommand<PaperPortfolio>("paper_portfolio_archive", { portfolioId });
       set({ submitting: false });
       await get().fetchActiveDetails();
     } catch (e) {
@@ -152,7 +153,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   addPosition: async (input: AddPositionInput) => {
     set({ submitting: true, error: null });
     try {
-      await invoke("paper_portfolio_add_position", { input });
+      await invokePluginCommand("paper_portfolio_add_position", { input });
       set({ submitting: false });
       // 添加后刷新当前详情
       if (input.portfolioId) {
@@ -168,7 +169,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   closePosition: async (input: ClosePositionInput) => {
     set({ submitting: true, error: null });
     try {
-      await invoke("paper_portfolio_close_position", { input });
+      await invokePluginCommand("paper_portfolio_close_position", { input });
       set({ submitting: false });
       // 平仓后刷新当前详情（如有）
       const cur = get().currentDetail;
@@ -185,7 +186,7 @@ export const usePaperPortfolioStore = create<PaperPortfolioState>((set, get) => 
   closeAllPositions: async (portfolioId: string, exitPrice: number, exitDate: string) => {
     set({ submitting: true, error: null });
     try {
-      const affected = await invoke<number>("paper_portfolio_close_all_positions", {
+      const affected = await invokePluginCommand<number>("paper_portfolio_close_all_positions", {
         portfolioId,
         exitPrice,
         exitDate,

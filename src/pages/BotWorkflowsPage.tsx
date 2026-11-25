@@ -138,6 +138,7 @@ export function BotWorkflowsPage() {
     const saved = id ? await updateWorkflow(id, input) : await createWorkflow(input);
     setEditing(null);
     setSelectedWorkflowId(saved.id);
+    setActiveTab("definitions");
     void loadWorkflows(departmentFilter || undefined);
   };
 
@@ -232,7 +233,32 @@ export function BotWorkflowsPage() {
           </Button>
         </Space>
         {visibleWorkflows.length === 0
-          ? <Empty data-testid="bot-workflow-empty" description={t("bot.workflow.empty")} />
+          ? (
+            /* 空态不许丢（PLAN-P3 §6 DoD）：无编排 / 无 Bot 都停在这里，而不是空白页。 */
+            <Empty
+              data-testid="bot-workflow-empty"
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>{t("bot.workflow.empty")}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("bot.workflow.emptyDescription")}
+                  </Text>
+                </Space>
+              }
+            >
+              <Button
+                type="primary"
+                data-testid="bot-workflow-create-first"
+                disabled={bots.length === 0}
+                onClick={() => {
+                  setEditing(null);
+                  setActiveTab("editor");
+                }}
+              >
+                {t("bot.workflow.createFirst")}
+              </Button>
+            </Empty>
+          )
           : (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {visibleWorkflows.map((workflow) => (

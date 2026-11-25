@@ -1297,6 +1297,180 @@ pub trait StockAnalysisProvider: Send + Sync {
                 .into(),
         ))
     }
+
+    // ── G2 模拟组合九条：宿主 `paper_portfolio_*` Tauri 命令退役后的接缝面 ──────
+    // 权威实现在 `analysis-engine::paper_portfolio`（implementor，持 entities）；harness
+    // 按依赖铁律不上收其 DTO ⇒ 接缝只传 `Value`，JSON → DTO 的唯一转换点在宿主
+    // `init/stock_analysis_service.rs`。读 op 三条不设权限闸，写 op 六条按 `Write`。
+    /// 创建模拟组合（`paper_portfolio_create` op）—— 写 op。
+    ///
+    /// 入参 = `CreatePortfolioInput`（camelCase）；出参 = `paper_portfolios::Model`。
+    async fn paper_portfolio_create(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_create 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列出组合（`paper_portfolio_list` op）—— 读 op。
+    ///
+    /// 入参 `{status?}`（None = 全部）；出参 = `paper_portfolios::Model[]`。
+    async fn paper_portfolio_list(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_list 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 组合详情（`paper_portfolio_get` op）—— 读 op。
+    ///
+    /// 入参 `{portfolioId}`；出参 = `Option<PortfolioDetail>`（含持仓 + 实时盈亏）。
+    async fn paper_portfolio_get(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_get 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 关闭组合（`paper_portfolio_close` op）—— 写 op。
+    ///
+    /// 入参 `{portfolioId}`；出参 = `paper_portfolios::Model`（status=closed）。
+    async fn paper_portfolio_close(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_close 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 归档组合（`paper_portfolio_archive` op）—— 写 op。
+    ///
+    /// 入参 `{portfolioId}`；出参 = `paper_portfolios::Model`（status=archived）。
+    async fn paper_portfolio_archive(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_archive 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 添加虚拟持仓（`paper_portfolio_add_position` op）—— 写 op。
+    ///
+    /// 入参 = `AddPositionInput`（camelCase）；出参 = `paper_positions::Model`。
+    async fn paper_portfolio_add_position(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_add_position 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 平仓单只持仓（`paper_portfolio_close_position` op）—— 写 op。
+    ///
+    /// 入参 = `ClosePositionInput`（camelCase）；出参 = `paper_positions::Model`。
+    async fn paper_portfolio_close_position(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_close_position 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 批量平仓（`paper_portfolio_close_all_positions` op）—— 写 op。
+    ///
+    /// 入参 `{portfolioId, exitPrice, exitDate}`；出参 = 受影响行数 `u64`。
+    async fn paper_portfolio_close_all_positions(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_close_all_positions 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// active 组合详情（`paper_portfolio_list_active_details` op）—— 读 op。
+    ///
+    /// 入参恒 `{}`；出参 = `PortfolioDetail[]`（Dashboard 用，逐票拉最新价）。
+    async fn paper_portfolio_list_active_details(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::paper_portfolio_list_active_details 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    // ── G6 截图诊断八条：宿主 `screenshot_diagnosis_*` Tauri 命令退役后的接缝面 ──────
+    // 权威实现在 `analysis-engine::screenshot_diagnosis` + 宿主 `provider_ctx` 的 VisionContext；
+    // harness 按依赖铁律不上收其 DTO ⇒ 接缝只传 `Value`，JSON → DTO 的唯一转换点仍在宿主
+    // `init/stock_analysis_service.rs`。写 op 五条按 `Write`，读 op 三条不设权限闸。
+    /// 截图上传自动诊断（`screenshot_diagnosis_create_from_image` op）—— 写 op。
+    ///
+    /// 入参 `{imageBase64, sourceApp?, providerId, modelId}`；出参 = `screenshot_diagnoses::Model`。
+    async fn screenshot_diagnosis_create_from_image(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_create_from_image 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 直接传入 positions 创建诊断（`screenshot_diagnosis_create` op）—— 写 op。
+    ///
+    /// 入参 = `CreateScreenshotDiagnosisInput`（camelCase）；出参 = `screenshot_diagnoses::Model`。
+    async fn screenshot_diagnosis_create(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_create 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 按 ID 获取诊断（`screenshot_diagnosis_get` op）—— 读 op。
+    ///
+    /// 入参 `{diagnosisId}`；出参 = `Option<screenshot_diagnoses::Model>`。
+    async fn screenshot_diagnosis_get(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_get 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 最近 N 条诊断（`screenshot_diagnosis_list_recent` op）—— 读 op。
+    ///
+    /// 入参 `{limit?}`（缺省 20）；出参 = `screenshot_diagnoses::Model[]`。
+    async fn screenshot_diagnosis_list_recent(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_list_recent 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 按状态过滤诊断（`screenshot_diagnosis_list_by_status` op）—— 读 op。
+    ///
+    /// 入参 `{status}`；出参 = `screenshot_diagnoses::Model[]`。
+    async fn screenshot_diagnosis_list_by_status(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_list_by_status 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 归档诊断（`screenshot_diagnosis_archive` op）—— 写 op。
+    ///
+    /// 入参 `{diagnosisId}`；出参 = `screenshot_diagnoses::Model`（status=archived）。
+    async fn screenshot_diagnosis_archive(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_archive 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 更新诊断字段（`screenshot_diagnosis_update` op）—— 写 op。
+    ///
+    /// 入参 = `UpdateScreenshotDiagnosisInput`（camelCase）；出参 = `screenshot_diagnoses::Model`。
+    async fn screenshot_diagnosis_update(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_update 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 诊断一键转模拟组合（`screenshot_diagnosis_to_paper_portfolio` op）—— 写 op。
+    ///
+    /// 入参 `{diagnosisId, name, sourceEvent}`；出参 = `paper_portfolios::Model`。
+    async fn screenshot_diagnosis_to_paper_portfolio(&self, _input: Value) -> Result<Value> {
+        Err(AxAgentError::Provider(
+            "StockAnalysisProvider::screenshot_diagnosis_to_paper_portfolio 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1514,6 +1688,82 @@ mod tests {
             (
                 "cancel_stock_analysis",
                 futures::executor::block_on(stub.cancel_stock_analysis(Value::Null)),
+            ),
+            // G2 模拟组合九条：默认实现同样必须显式报错，不能把
+            // 「宿主未装配 provider」读成「组合不存在 / 列表为空」。
+            (
+                "paper_portfolio_create",
+                futures::executor::block_on(stub.paper_portfolio_create(Value::Null)),
+            ),
+            (
+                "paper_portfolio_list",
+                futures::executor::block_on(stub.paper_portfolio_list(Value::Null)),
+            ),
+            (
+                "paper_portfolio_get",
+                futures::executor::block_on(stub.paper_portfolio_get(Value::Null)),
+            ),
+            (
+                "paper_portfolio_close",
+                futures::executor::block_on(stub.paper_portfolio_close(Value::Null)),
+            ),
+            (
+                "paper_portfolio_archive",
+                futures::executor::block_on(stub.paper_portfolio_archive(Value::Null)),
+            ),
+            (
+                "paper_portfolio_add_position",
+                futures::executor::block_on(stub.paper_portfolio_add_position(Value::Null)),
+            ),
+            (
+                "paper_portfolio_close_position",
+                futures::executor::block_on(stub.paper_portfolio_close_position(Value::Null)),
+            ),
+            (
+                "paper_portfolio_close_all_positions",
+                futures::executor::block_on(stub.paper_portfolio_close_all_positions(Value::Null)),
+            ),
+            (
+                "paper_portfolio_list_active_details",
+                futures::executor::block_on(stub.paper_portfolio_list_active_details(Value::Null)),
+            ),
+            // G6 截图诊断八条：默认实现同样必须显式报错，不能把
+            // 「宿主未装配 provider」读成「诊断不存在 / 列表为空」。
+            (
+                "screenshot_diagnosis_create_from_image",
+                futures::executor::block_on(
+                    stub.screenshot_diagnosis_create_from_image(Value::Null),
+                ),
+            ),
+            (
+                "screenshot_diagnosis_create",
+                futures::executor::block_on(stub.screenshot_diagnosis_create(Value::Null)),
+            ),
+            (
+                "screenshot_diagnosis_get",
+                futures::executor::block_on(stub.screenshot_diagnosis_get(Value::Null)),
+            ),
+            (
+                "screenshot_diagnosis_list_recent",
+                futures::executor::block_on(stub.screenshot_diagnosis_list_recent(Value::Null)),
+            ),
+            (
+                "screenshot_diagnosis_list_by_status",
+                futures::executor::block_on(stub.screenshot_diagnosis_list_by_status(Value::Null)),
+            ),
+            (
+                "screenshot_diagnosis_archive",
+                futures::executor::block_on(stub.screenshot_diagnosis_archive(Value::Null)),
+            ),
+            (
+                "screenshot_diagnosis_update",
+                futures::executor::block_on(stub.screenshot_diagnosis_update(Value::Null)),
+            ),
+            (
+                "screenshot_diagnosis_to_paper_portfolio",
+                futures::executor::block_on(
+                    stub.screenshot_diagnosis_to_paper_portfolio(Value::Null),
+                ),
             ),
             ("parse_trades_csv", futures::executor::block_on(stub.parse_trades_csv(Value::Null))),
             (

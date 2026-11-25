@@ -371,6 +371,10 @@ pub(crate) async fn resolve_system_prompt(
     if let Some(memory) = bot.memory_segment() {
         parts.push(memory);
     }
+    // P5 C1-2：Bot 技能摘要段（仅名字+一行描述），无技能时不追加。
+    if let Some(skills) = bot.skills_segment() {
+        parts.push(skills);
+    }
     if parts.is_empty() {
         None
     } else {

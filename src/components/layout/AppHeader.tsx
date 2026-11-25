@@ -55,11 +55,14 @@ export function AppHeader() {
 
   const isChatPage = location.pathname === "/chat" || location.pathname === "/" || location.pathname === "";
   const labelKey = resolvePageLabel(location.pathname);
-  // 插件页标题是清单自带的纯文本（不是 i18n key），与侧栏 navRegistry 同源同一张投影。
+  // 插件页标题由 manifest 声明：labelKey 存在时 navLabel 是 i18n key（需 t()），否则是纯文本。
   const pluginRoutes = usePluginPageRoutes();
-  const pluginLabel = pluginRoutes.find(
+  const pluginRoute = pluginRoutes.find(
     (entry) => location.pathname === entry.path || location.pathname.startsWith(`${entry.path}/`),
-  )?.navLabel;
+  );
+  const pluginLabel = pluginRoute
+    ? (pluginRoute.navLabelIsI18nKey ? t(pluginRoute.navLabel) : pluginRoute.navLabel)
+    : undefined;
   const contextSummary = getPageContext(location.pathname, t);
 
   // 对话页不显示 AppHeader（对话页有自己的 TabBar）

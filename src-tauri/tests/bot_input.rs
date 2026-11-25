@@ -533,12 +533,10 @@ mod commands {
         let all = list_inner(db, BotInputRequestFilter::default()).await.expect("all");
         assert_eq!(all.len(), 2);
 
-        let mut f = BotInputRequestFilter::default();
-        f.status = Some("pending".into());
+        let f = BotInputRequestFilter { status: Some("pending".into()), ..Default::default() };
         assert_eq!(list_inner(db, f).await.expect("pending").len(), 2);
 
-        let mut bad = BotInputRequestFilter::default();
-        bad.status = Some("waiting".into());
+        let bad = BotInputRequestFilter { status: Some("waiting".into()), ..Default::default() };
         let err = list_inner(db, bad).await.expect_err("非法状态");
         assert!(err.contains("ERR_VALIDATION"), "{err}");
     }

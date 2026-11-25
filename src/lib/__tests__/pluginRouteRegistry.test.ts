@@ -82,6 +82,11 @@ describe("pluginRouteRegistry", () => {
       path: "/plugins/opc-security-bundled/opc-security",
       isPlugin: true,
       pluginName: "security",
+      labelIsI18nKey: false,
+      icon: null,
+      navGroup: "packs",
+      navOrder: 0,
+      hidden: false,
     });
   });
 

@@ -37,7 +37,8 @@ fn map_error(err: axagent_harness::core_error::AxAgentError) -> String {
 
 /// 逐字段范围校验（上限即 P3 默认，ADR-P4-2：配额只收紧不放大）。
 fn validate_input(input: &BotDepartmentQuotaInput) -> Result<(), String> {
-    let checks: [(&str, i32, i32, i32); 6] = [
+    type Check = (&'static str, i32, i32, i32);
+    let checks: [Check; 6] = [
         ("maxConcurrency", input.max_concurrency, 1, 4),
         ("totalTimeoutSecs", input.total_timeout_secs, 60, 3600),
         ("maxSteps", input.max_steps, 1, 12),
@@ -125,7 +126,8 @@ mod tests {
 
     #[test]
     fn each_out_of_range_field_reports_its_name() {
-        let cases: [(&str, fn(&mut BotDepartmentQuotaInput)); 6] = [
+        type Case = (&'static str, fn(&mut BotDepartmentQuotaInput));
+        let cases: [Case; 6] = [
             ("maxConcurrency", |i| i.max_concurrency = 5),
             ("totalTimeoutSecs", |i| i.total_timeout_secs = 59),
             ("maxSteps", |i| i.max_steps = 13),

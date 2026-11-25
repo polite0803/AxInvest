@@ -18,6 +18,7 @@
 
 import { decorateWithP3 } from "./bot-ipc-audit-p3-fixture.mjs";
 import { decorateWithP4 } from "./bot-ipc-audit-p4-fixture.mjs";
+import { decorateWithP5 } from "./bot-ipc-audit-p5-fixture.mjs";
 
 /** P1 契约清单。顺序与 IPC.md §1 一致；任何字段变更都应先改文档再改这里。 */
 export const BOT_IPC = {
@@ -194,6 +195,149 @@ export const BOT_IPC = {
         ["memory_path", "String"],
       ],
     },
+    // ── P5（IPC-P5 §2/§5）──
+    {
+      name: "BotCostQuota",
+      aliases: ["BotCostQuotaDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["scope", "String"],
+        ["scope_id", "String"],
+        ["max_total_tokens", "i64"],
+        ["max_cost_usd", "f64"],
+        ["window_hours", "i32"],
+        ["is_default", "bool"],
+        ["updated_at", "Option<i64>"],
+      ],
+    },
+    {
+      name: "BotCostQuotaInput",
+      aliases: ["BotCostQuotaInputDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["scope", "String"],
+        ["scope_id", "String"],
+        ["max_total_tokens", "i64"],
+        ["max_cost_usd", "f64"],
+        ["window_hours", "i32"],
+      ],
+    },
+    {
+      name: "BotUsageEntry",
+      aliases: ["BotUsageEntryDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["id", "String"],
+        ["bot_id", "String"],
+        ["department_id", "Option<String>"],
+        ["conversation_id", "Option<String>"],
+        ["execution_id", "Option<String>"],
+        ["workflow_run_id", "Option<String>"],
+        ["assignment_id", "Option<String>"],
+        ["model_id", "String"],
+        ["origin", "String"],
+        ["input_tokens", "i64"],
+        ["output_tokens", "i64"],
+        ["cache_creation_tokens", "i64"],
+        ["cache_read_tokens", "i64"],
+        ["total_tokens", "i64"],
+        ["estimated_cost_usd", "f64"],
+        ["pricing_source", "String"],
+        ["created_at", "i64"],
+      ],
+    },
+    {
+      name: "BotUsageFilter",
+      aliases: ["BotUsageFilterDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["bot_id", "Option<String>"],
+        ["department_id", "Option<String>"],
+        ["origin", "Option<String>"],
+        ["workflow_run_id", "Option<String>"],
+        ["assignment_id", "Option<String>"],
+        ["since", "Option<i64>"],
+        ["until", "Option<i64>"],
+      ],
+    },
+    {
+      name: "BotUsageSummary",
+      aliases: ["BotUsageSummaryDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["scope", "String"],
+        ["scope_id", "String"],
+        ["window_hours", "i32"],
+        ["input_tokens", "i64"],
+        ["output_tokens", "i64"],
+        ["cache_creation_tokens", "i64"],
+        ["cache_read_tokens", "i64"],
+        ["total_tokens", "i64"],
+        ["estimated_cost_usd", "f64"],
+        ["entry_count", "i64"],
+        ["breached", "bool"],
+        ["pricing_note", "String"],
+      ],
+    },
+    {
+      name: "BotSkill",
+      aliases: ["BotSkillDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["name", "String"],
+        ["description", "String"],
+        ["source", "String"],
+        ["enabled", "bool"],
+        ["shadowed_global", "bool"],
+        ["missing", "bool"],
+        ["preset_id", "Option<String>"],
+        ["updated_at", "Option<i64>"],
+      ],
+    },
+    {
+      name: "BotSkillPreset",
+      aliases: ["BotSkillPresetDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["version", "String"],
+        ["name", "String"],
+        ["description", "String"],
+        ["skills", "Vec<BotSkillPresetItem>"],
+      ],
+    },
+    {
+      name: "BotSkillPresetItem",
+      aliases: ["BotSkillPresetItemDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["name", "String"],
+        ["description", "String"],
+        ["content", "String"],
+        ["category", "Option<String>"],
+        ["tags", "Option<Vec<String>>"],
+        ["requires_toolsets", "Option<Vec<String>>"],
+      ],
+    },
+    {
+      name: "BotSkillPresetSkipped",
+      aliases: ["BotSkillPresetSkippedDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["name", "String"],
+        ["reason", "String"],
+        ["detail", "String"],
+      ],
+    },
+    {
+      name: "BotSkillPresetResult",
+      aliases: ["BotSkillPresetResultDto"],
+      derive: "Serialize, Deserialize",
+      fields: [
+        ["preset_id", "String"],
+        ["imported", "Vec<String>"],
+        ["skipped", "Vec<BotSkillPresetSkipped>"],
+      ],
+    },
   ],
   /** IPC.md §5 + IPC-P2 §3 + IPC-P2B §4 + IPC-P3 §4：31 个错误码，必须逐字出现在 error_code.rs 的 `pub mod bot` 中。 */
   errorCodes: [
@@ -238,6 +382,11 @@ export const BOT_IPC = {
     "BOT_INPUT_REQUEST_NOT_FOUND",
     "BOT_INPUT_REQUEST_NOT_PENDING",
     "BOT_INPUT_ANSWER_EMPTY",
+    // P5（IPC-P5 §4）：费用配额 ×2 + 技能归属 ×2
+    "BOT_COST_QUOTA_INVALID",
+    "BOT_COST_QUOTA_EXCEEDED",
+    "BOT_SKILL_NOT_FOUND",
+    "BOT_SKILL_PRESET_INVALID",
   ],
   /** IPC.md §6：P1 不新增事件；P2-b / P3 冻结事件为例外（见下方白名单）。 */
   forbiddenEventPrefix: "bot-",
@@ -255,6 +404,19 @@ export const BOT_IPC = {
   ],
   localeCount: 11,
 };
+
+// P5 命令在 BOT_IPC.commands 中不强制“src/** 非 mock 调用点”警告（本批后端契约先行，
+// 前端页签并行接入；由 p5 段独立核对 + 前端补齐后自然满足）。这里单独登记命令清单给 p5 段。
+export const BOT_P5_COMMANDS = [
+  ["get_bot_cost_quota", "bot_cost"],
+  ["set_bot_cost_quota", "bot_cost"],
+  ["reset_bot_cost_quota", "bot_cost"],
+  ["list_bot_usage", "bot_cost"],
+  ["get_bot_usage_summary", "bot_cost"],
+  ["list_bot_skills", "bot_skill"],
+  ["set_bot_skill_enabled", "bot_skill"],
+  ["import_bot_skill_preset", "bot_skill"],
+];
 
 // ── 基础解析 ─────────────────────────────────────────────────────────────
 
@@ -1010,6 +1172,87 @@ export function auditBotIpc(sources) {
     }
   }
 
+  // ── P5 段（IPC-P5 §1/§2/§5）：8 命令 + DTO + 错误码出口 + B2 熔断接线 ──
+  // 仅在真实仓库检查（sources.p5 显式给出）时执行；合成 P1 源不触发。
+  const p5 = sources.p5;
+  if (p5) {
+    const costRs = p5.costRs ?? "";
+    // 错误码出口允许分布在命令层与服务层（命令薄/服务厚分层）；两者合并核对。
+    const skillRs = (p5.skillRs ?? "") + "\n" + (p5.skillServiceRs ?? "");
+    const quotaEnforceRs = p5.quotaEnforceRs ?? "";
+    // 出口既可用错误码字面值（`BOT_X`），也可用 error_code.rs 常量短名（`bot_err::X`）。
+    const hasErrExit = (src, code) => src.includes(code) || src.includes(code.replace(/^BOT_/, ""));
+
+    for (const [name, mod] of BOT_P5_COMMANDS) {
+      const src = mod === "bot_cost" ? costRs : skillRs;
+      if (!new RegExp(`pub\\s+async\\s+fn\\s+${name}\\b`).test(src)) {
+        errors.push("[P5] 缺命令 " + name + "（commands/" + mod + ".rs 中无 fn 定义）");
+      }
+      if (!(sources.registerRs ?? "").includes("commands::" + mod + "::" + name + ",")) {
+        errors.push("[P5] " + name + " 未出现在 register_commands.rs（两步注册缺一步）");
+      }
+    }
+
+    const p5StructBody = (src, header) => {
+      const start = src.indexOf(header);
+      if (start < 0) return null;
+      const end = src.indexOf("\n}", start);
+      return end < 0 ? null : src.slice(start, end);
+    };
+
+    const P5_DTOS = [
+      ["BotCostQuota", ["scope", "scope_id", "max_total_tokens", "max_cost_usd", "window_hours", "is_default", "updated_at"]],
+      ["BotCostQuotaInput", ["scope", "scope_id", "max_total_tokens", "max_cost_usd", "window_hours"]],
+      ["BotUsageEntry", ["id", "bot_id", "department_id", "conversation_id", "execution_id", "workflow_run_id", "assignment_id", "model_id", "origin", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "estimated_cost_usd", "pricing_source", "created_at"]],
+      ["BotUsageFilter", ["bot_id", "department_id", "origin", "workflow_run_id", "assignment_id", "since", "until"]],
+      ["BotUsageSummary", ["scope", "scope_id", "window_hours", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "estimated_cost_usd", "entry_count", "breached", "pricing_note"]],
+      ["BotSkill", ["name", "description", "source", "enabled", "shadowed_global", "missing", "preset_id", "updated_at"]],
+      ["BotSkillPreset", ["version", "name", "description", "skills"]],
+      ["BotSkillPresetItem", ["name", "description", "content", "category", "tags", "requires_toolsets"]],
+      ["BotSkillPresetSkipped", ["name", "reason", "detail"]],
+      ["BotSkillPresetResult", ["preset_id", "imported", "skipped"]],
+    ];
+    for (const [dto, fields] of P5_DTOS) {
+      const rust = p5StructBody(sources.typesRs ?? "", "pub struct " + dto + " {");
+      if (!rust) {
+        errors.push("[P5] harness types/bot.rs 缺 " + dto + " 结构（IPC-P5 §2）");
+      } else {
+        const missing = fields.filter((f) => !rust.includes(f + ":"));
+        if (missing.length) {
+          errors.push("[P5] " + dto + " 缺字段: " + missing.join(", "));
+        }
+      }
+      // TS 镜像：存在则核对 camelCase 字段，缺失给 warning（前端并行线）。
+      const tsNames = [dto + "Dto", dto];
+      const ts = tsNames.map((n) => p5StructBody(sources.typesTs ?? "", "export interface " + n + " {")).find(Boolean);
+      if (!ts) {
+        warnings.push("[P5] src/types/bot.ts 尚无 " + dto + " 镜像（前端负责，落地后自动核对）");
+      } else {
+        const camel = fields.map((f) => f.replace(/_([a-z])/g, (_, c) => c.toUpperCase()));
+        // 冻结稿 IPC-P5 §2 的 TS 镜像用可选字段（`botId?:`）；同时接受必选 `botId:`。
+        const tsMissing = camel.filter((f) => !ts.includes(f + ":") && !ts.includes(f + "?:"));
+        if (tsMissing.length) {
+          errors.push("[P5] 前端 " + dto + " 缺 camelCase 字段: " + tsMissing.join(", "));
+        }
+      }
+    }
+
+    for (const code of ["BOT_COST_QUOTA_INVALID", "BOT_COST_QUOTA_EXCEEDED", "BOT_SKILL_NOT_FOUND", "BOT_SKILL_PRESET_INVALID"]) {
+      if (!(sources.errorCodeRs ?? "").includes('"' + code + '"')) {
+        errors.push("[P5] error_code.rs 缺错误码 " + code);
+      }
+    }
+    if (!hasErrExit(costRs, "BOT_COST_QUOTA_INVALID")) {
+      errors.push("[P5] bot_cost 命令缺 BOT_COST_QUOTA_INVALID 校验出口");
+    }
+    if (!hasErrExit(quotaEnforceRs, "BOT_COST_QUOTA_EXCEEDED")) {
+      errors.push("[P5] 缺 BOT_COST_QUOTA_EXCEEDED 熔断出口（ADR-P5-3 只拦新建 run/轮）");
+    }
+    if (!hasErrExit(skillRs, "BOT_SKILL_PRESET_INVALID")) {
+      errors.push("[P5] bot_skill 缺 BOT_SKILL_PRESET_INVALID 出口");
+    }
+  }
+
   return { errors, warnings };
 }
 
@@ -1101,7 +1344,7 @@ function generateValidSources() {
 export function botSelftest() {
   const cases = [];
   const add = (name, mutate, expectedPattern, kind = "errors") => {
-    const sources = decorateWithP4(decorateWithP3(generateValidSources()));
+    const sources = decorateWithP5(decorateWithP4(decorateWithP3(generateValidSources())));
     mutate(sources);
     const { errors, warnings } = auditBotIpc(sources);
     const pool = kind === "warnings" ? warnings : errors;
@@ -1113,9 +1356,23 @@ export function botSelftest() {
     });
   };
 
+  // 反控：变异后「不应」命中给定错误模式（验证口径放宽未误伤/未过度报错）。
+  const addNoHit = (name, mutate, expectedPattern, kind = "errors") => {
+    const sources = decorateWithP5(decorateWithP4(decorateWithP3(generateValidSources())));
+    mutate(sources);
+    const { errors, warnings } = auditBotIpc(sources);
+    const pool = kind === "warnings" ? warnings : errors;
+    const hit = pool.some((e) => expectedPattern.test(e));
+    cases.push({
+      name,
+      pass: !hit,
+      detail: hit ? `不应命中 ${expectedPattern}，实得 ${JSON.stringify(pool)}` : "",
+    });
+  };
+
   // 正控：未破坏时必须 0 错（否则所有破坏都「命中」= 假绿）
   {
-    const { errors } = auditBotIpc(decorateWithP4(decorateWithP3(generateValidSources())));
+    const { errors } = auditBotIpc(decorateWithP5(decorateWithP4(decorateWithP3(generateValidSources()))));
     cases.push({
       name: "正控：完整契约 ⇒ 0 错",
       pass: errors.length === 0,
@@ -1234,6 +1491,41 @@ export function botSelftest() {
   add("P4 超限出口丢失（静默夹紧）", (s) => {
     s.p4.quotaEnforceRs = s.p4.quotaEnforceRs.replace("BOT_QUOTA_EXCEEDED", "BOT_QUOTA_SOFT_CAP");
   }, /\[P4\] 缺 BOT_QUOTA_EXCEEDED 出口/);
+
+  add("P5 缺命令 set_bot_cost_quota", (s) => {
+    s.p5.costRs = s.p5.costRs.replace("pub async fn set_bot_cost_quota", "pub async fn removed_cost_set");
+  }, /\[P5\] 缺命令 set_bot_cost_quota/);
+
+  add("P5 技能命令漏注册 import_bot_skill_preset", (s) => {
+    s.registerRs = s.registerRs.replace(/\s*commands::bot_skill::import_bot_skill_preset,/, "");
+  }, /\[P5\] import_bot_skill_preset 未出现在 register_commands/);
+
+  add("P5 DTO 缺字段 estimated_cost_usd", (s) => {
+    s.typesRs = s.typesRs.replace("    pub estimated_cost_usd: String,\n", "    pub estimated_cost_usd_v2: String,\n");
+  }, /\[P5\] BotUsageEntry 缺字段: estimated_cost_usd/);
+
+  add("P5 熔断出口丢失", (s) => {
+    s.p5.quotaEnforceRs = s.p5.quotaEnforceRs.replace("BOT_COST_QUOTA_EXCEEDED", "BOT_COST_QUOTA_SOFT_CAP");
+  }, /\[P5\] 缺 BOT_COST_QUOTA_EXCEEDED 熔断出口/);
+
+  // 新口径回归：可选字段写法（`botId?:`）应被接受（反控：不得报缺）。
+  addNoHit("P5 前端 DTO 可选字段不被误判", (s) => {
+    s.typesTs = s.typesTs.replace("  botId: string;", "  botId?: string;");
+  }, /\[P5\] 前端 BotUsageFilter 缺 camelCase 字段/);
+
+  add("P5 前端 DTO 真缺字段仍须变红", (s) => {
+    s.typesTs = s.typesTs.replace("  category: string;\n", "");
+  }, /\[P5\] 前端 BotSkillPresetItem 缺 camelCase 字段: category/);
+
+  // 新口径回归：错误码常量短名（`bot_err::COST_QUOTA_INVALID`）应被接受（反控）。
+  addNoHit("P5 错误码常量短名不被误判", (s) => {
+    s.p5.costRs = s.p5.costRs.replace(/BOT_COST_QUOTA_INVALID/g, "bot_err::COST_QUOTA_INVALID");
+  }, /\[P5\] bot_cost 命令缺 BOT_COST_QUOTA_INVALID 校验出口/);
+
+  add("P5 错误码真缺失仍须变红", (s) => {
+    s.p5.skillRs = s.p5.skillRs.replace(/BOT_SKILL_PRESET_INVALID/g, "SKILL_PRESET_SOFT");
+    s.p5.skillServiceRs = "";
+  }, /\[P5\] bot_skill 缺 BOT_SKILL_PRESET_INVALID 出口/);
 
   const failed = cases.filter((c) => !c.pass);
   return { cases, failed };

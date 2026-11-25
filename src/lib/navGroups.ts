@@ -44,6 +44,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     itemKeys: [
       "chat",
       "bots",
+      "bot-workflows",
       "chat-workflow",
       "chat-terminal",
       "chat-files",
@@ -56,8 +57,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     labelKey: "nav.financeInvestment",
     color: "#d4380d",
     path: "/invest",
-    // 两项均已随 stock 插件门槛迁入 `src/pages/invest/routes.tsx` 的 `nav` 声明；
-    // 宿主骨架不再点名 key，插件禁用时该组随投影一起消失。
+    // 股票业务已外迁：本组只剩「回放工作台」一项（随 stock 插件门槛出入，
+    // 声明在 `src/pages/invest/routes.tsx` 的 `nav`）；股票本体的入口由
+    // `pluginRouteRegistry` 的插件页投影提供（`/plugins/stock/stock-home`）。
     itemKeys: [],
   },
   {

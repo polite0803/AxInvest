@@ -23,6 +23,8 @@ pub struct BotSoulContext {
     pub soul: Option<String>,
     /// 已截断的 MEMORY.md（文件真相源），空文件已折叠为 `None`。
     pub memory: Option<String>,
+    /// P5 C1-2：`<bot-skills>` 段（名字+一行描述，不注入全文）；无技能时为 None。
+    pub skills: Option<String>,
 }
 
 impl BotSoulContext {
@@ -36,8 +38,13 @@ impl BotSoulContext {
         self.memory.as_deref().map(|m| format!("<bot-memory>\n{m}\n</bot-memory>"))
     }
 
+    /// `<bot-skills>` 段（P5 C1-2）：仅名字+一行描述，不注入全文。
+    pub fn skills_segment(&self) -> Option<String> {
+        self.skills.clone()
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.soul.is_none() && self.memory.is_none()
+        self.soul.is_none() && self.memory.is_none() && self.skills.is_none()
     }
 }
 
@@ -83,7 +90,10 @@ pub async fn resolve_bot_context_for_bot(
         },
     };
 
-    let ctx = BotSoulContext { soul, memory };
+    // P5 C1-2：Bot 技能摘要段（非空才注入；失败降级不影响主轮）。
+    let skills = crate::bot_skill_service::bot_skills_prompt_segment(db, &bot.id).await;
+
+    let ctx = BotSoulContext { soul, memory, skills };
     if ctx.is_empty() { None } else { Some(ctx) }
 }
 
@@ -97,12 +107,14 @@ mod tests {
         let ctx = BotSoulContext {
             soul: Some("# 投研助手".to_string()),
             memory: Some("- 用户偏好 A 股".to_string()),
+            skills: Some("<bot-skills>\n- pdf\n</bot-skills>".to_string()),
         };
         assert_eq!(ctx.soul_segment().as_deref(), Some("<bot-soul>\n# 投研助手\n</bot-soul>"));
         assert_eq!(
             ctx.memory_segment().as_deref(),
             Some("<bot-memory>\n- 用户偏好 A 股\n</bot-memory>")
         );
+        assert_eq!(ctx.skills_segment().as_deref(), Some("<bot-skills>\n- pdf\n</bot-skills>"));
         assert!(!ctx.is_empty());
         assert!(BotSoulContext::default().is_empty());
     }

@@ -56,8 +56,9 @@ impl Tool for SkillEnvCheckTool {
         false
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let action = input["action"].as_str().unwrap_or("");
+        let bot_id = ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
 
         match action {
             "check" => {
@@ -70,7 +71,7 @@ impl Tool for SkillEnvCheckTool {
 
                 let mut index = SKILL_INDEX.lock();
 
-                let entry = index.find_skill_entry(skill_name).cloned();
+                let entry = index.find_skill_entry(skill_name, bot_id);
                 let Some(entry) = entry else {
                     return Err(ToolError::execution_failed(format!(
                         "Skill '{}' 未找到",
@@ -140,7 +141,7 @@ impl Tool for SkillEnvCheckTool {
             "list" => {
                 let mut index = SKILL_INDEX.lock();
 
-                let entries = index.all_entries().to_vec();
+                let entries = index.visible_entries_snapshot(bot_id);
 
                 let mut out = String::from("## 技能环境变量需求列表\n\n");
                 let mut skills_with_env = 0;
@@ -273,8 +274,9 @@ impl Tool for SkillConfigTool {
         false
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let action = input["action"].as_str().unwrap_or("");
+        let bot_id = ctx.extra.get(crate::context_keys::BOT_ID).map(String::as_str);
 
         match action {
             "show" => {
@@ -285,7 +287,7 @@ impl Tool for SkillConfigTool {
 
                 let mut index = SKILL_INDEX.lock();
 
-                let entry = index.find_skill_entry(skill_name).cloned();
+                let entry = index.find_skill_entry(skill_name, bot_id);
                 let Some(entry) = entry else {
                     return Err(ToolError::execution_failed(format!(
                         "Skill '{}' 未找到",
@@ -400,7 +402,7 @@ impl Tool for SkillConfigTool {
                     }),
                     None => {
                         let mut index = SKILL_INDEX.lock();
-                        if let Some(entry) = index.find_skill_entry(skill_name)
+                        if let Some(entry) = index.find_skill_entry(skill_name, bot_id)
                             && let Some(setting) =
                                 entry.config_settings.iter().find(|s| s.key == key)
                             && let Some(default) = &setting.default
@@ -446,7 +448,7 @@ impl Tool for SkillConfigTool {
 
                 let mut index = SKILL_INDEX.lock();
 
-                let entry = index.find_skill_entry(skill_name).cloned();
+                let entry = index.find_skill_entry(skill_name, bot_id);
                 let Some(entry) = entry else {
                     return Err(ToolError::execution_failed(format!(
                         "Skill '{}' 未找到",

@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! G6 截图持仓诊断完整闭环 Tauri 命令层
+//! G6 截图持仓诊断完整闭环的**无 State 核心**（原 Tauri 命令层，2026-11-23 退役）
 //!
-//! 对应前端 IPC 调用，全部走 `#[tauri::command]`，返回 `Result<T, String>`。
-//! 业务实现委托给 `axagent_analysis_engine::screenshot_diagnosis`。
+//! 八条 `screenshot_diagnosis_*` Tauri 命令已由 stock 插件 worker 的同名命令取代，
+//! 经 `stock.analysis` 接缝落到 `init/stock_analysis_service.rs` 的宿主 provider。
+//! 本模块只保留业务核心（供该 provider 调用），不再注册任何 IPC 命令；
+//! 业务实现仍委托给 `axagent_analysis_engine::screenshot_diagnosis`。
 //!
-//! 命令清单：
-//! - `screenshot_diagnosis_create_from_image` —— 上传截图自动诊断（OCR + 结构化 + 风险诊断）
-//! - `screenshot_diagnosis_create` —— 直接传入 positions 创建诊断（前端预填时用）
-//! - `screenshot_diagnosis_get` —— 按 ID 获取
-//! - `screenshot_diagnosis_list_recent` —— 列出最近 N 条
-//! - `screenshot_diagnosis_list_by_status` —— 按状态过滤
-//! - `screenshot_diagnosis_archive` —— 归档诊断
-//! - `screenshot_diagnosis_update` —— 更新诊断字段
-//! - `screenshot_diagnosis_to_paper_portfolio` —— 一键转为模拟观察组合
+//! 核心函数清单（与退役命令一一对应）：
+//! - `screenshot_diagnosis_create_from_image_core` —— 上传截图自动诊断
+//! - `screenshot_diagnosis_create_core` —— 直接传入 positions 创建诊断
+//! - `screenshot_diagnosis_get_core` —— 按 ID 获取
+//! - `screenshot_diagnosis_list_recent_core` —— 列出最近 N 条
+//! - `screenshot_diagnosis_list_by_status_core` —— 按状态过滤
+//! - `screenshot_diagnosis_archive_core` —— 归档诊断
+//! - `screenshot_diagnosis_update_core` —— 更新诊断字段
+//! - `screenshot_diagnosis_to_paper_portfolio_core` —— 一键转为模拟观察组合
 //!
 //! ## 截图诊断流程
 //!
@@ -24,10 +26,8 @@
 //! 6. 调用 `stock_analysis::create_diagnosis` 持久化
 //! 7. 返回完整诊断记录给前端
 
-use crate::AppState;
 use crate::init::stock_domain_state::stock_paper_portfolio;
 use crate::init::stock_domain_state::stock_screenshot_diagnosis as screenshot_diagnosis;
-use axagent_agent_macro::agent_command;
 #[cfg(not(mobile))]
 use axagent_harness::LlmCallConfig;
 #[cfg(not(mobile))]
@@ -35,11 +35,9 @@ use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, ContentPart,
 use screenshot_diagnosis::{CreateScreenshotDiagnosisInput, UpdateScreenshotDiagnosisInput};
 #[cfg(not(mobile))]
 use screenshot_diagnosis::{RiskDiagnosis, ScreenshotPosition};
-use serde::{Deserialize, Serialize};
+use sea_orm::DatabaseConnection;
 #[cfg(not(mobile))]
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
-use tauri::State;
 
 // 复用 provider_ctx 的 VisionContext / build_vision_context
 #[cfg(not(mobile))]
@@ -264,10 +262,9 @@ async fn llm_generate_narrative(
 
 /// 截图诊断完整流程：上传截图 → OCR + 结构化 → 风险诊断 → 持久化
 #[cfg(not(mobile))]
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "截图上传自动诊断")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_create_from_image(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_create_from_image_core(
+    db: &DatabaseConnection,
+    master_key: &[u8; 32],
     image_base64: String,
     source_app: Option<String>,
     provider_id: String,
@@ -296,21 +293,18 @@ pub async fn screenshot_diagnosis_create_from_image(
 
     // 2. 查重：若已有同 hash 的诊断，直接返回
     if let Some(existing) =
-        screenshot_diagnosis::find_by_image_hash(state.harness.db(), &image_hash).await.map_err(
-            |e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            },
-        )?
+        screenshot_diagnosis::find_by_image_hash(db, &image_hash).await.map_err(|e| {
+            String::from(crate::commands::error::ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })?
     {
         return Ok(existing);
     }
 
     // 3. 构造 VisionContext
-    let vision =
-        build_vision_context(state.harness.db(), state.harness.master_key(), &provider_id).await?;
+    let vision = build_vision_context(db, master_key, &provider_id).await?;
 
     // 4. 一次 LLM 调用完成 OCR + 结构化解析
     let (positions, ocr_text) = llm_extract_positions(&vision, &model_id, &image_base64).await?;
@@ -345,7 +339,7 @@ pub async fn screenshot_diagnosis_create_from_image(
         status: "active".to_string(),
     };
 
-    screenshot_diagnosis::create_diagnosis(state.harness.db(), input).await.map_err(|e| {
+    screenshot_diagnosis::create_diagnosis(db, input).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -354,13 +348,11 @@ pub async fn screenshot_diagnosis_create_from_image(
 }
 
 /// 直接传入 positions 创建诊断（前端预填时用，不调 LLM）
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "直接创建截图诊断")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_create(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_create_core(
+    db: &DatabaseConnection,
     input: CreateScreenshotDiagnosisInput,
 ) -> Result<axagent_entities::screenshot_diagnoses::Model, String> {
-    screenshot_diagnosis::create_diagnosis(state.harness.db(), input).await.map_err(|e| {
+    screenshot_diagnosis::create_diagnosis(db, input).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -369,13 +361,11 @@ pub async fn screenshot_diagnosis_create(
 }
 
 /// 按 ID 获取诊断
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "获取截图诊断详情")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_get(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_get_core(
+    db: &DatabaseConnection,
     diagnosis_id: String,
 ) -> Result<Option<axagent_entities::screenshot_diagnoses::Model>, String> {
-    screenshot_diagnosis::get_diagnosis(state.harness.db(), &diagnosis_id).await.map_err(|e| {
+    screenshot_diagnosis::get_diagnosis(db, &diagnosis_id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -384,14 +374,12 @@ pub async fn screenshot_diagnosis_get(
 }
 
 /// 列出最近 N 条诊断（按 created_at 降序）
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "列出最近截图诊断")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_list_recent(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_list_recent_core(
+    db: &DatabaseConnection,
     limit: Option<usize>,
 ) -> Result<Vec<axagent_entities::screenshot_diagnoses::Model>, String> {
     let l = limit.unwrap_or(20);
-    screenshot_diagnosis::list_recent_diagnoses(state.harness.db(), l).await.map_err(|e| {
+    screenshot_diagnosis::list_recent_diagnoses(db, l).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -400,13 +388,11 @@ pub async fn screenshot_diagnosis_list_recent(
 }
 
 /// 按状态过滤
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "按状态筛选截图诊断")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_list_by_status(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_list_by_status_core(
+    db: &DatabaseConnection,
     status: String,
 ) -> Result<Vec<axagent_entities::screenshot_diagnoses::Model>, String> {
-    screenshot_diagnosis::list_diagnoses_by_status(state.harness.db(), &status).await.map_err(|e| {
+    screenshot_diagnosis::list_diagnoses_by_status(db, &status).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -415,13 +401,11 @@ pub async fn screenshot_diagnosis_list_by_status(
 }
 
 /// 归档诊断
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "归档截图诊断")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_archive(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_archive_core(
+    db: &DatabaseConnection,
     diagnosis_id: String,
 ) -> Result<axagent_entities::screenshot_diagnoses::Model, String> {
-    screenshot_diagnosis::archive_diagnosis(state.harness.db(), &diagnosis_id).await.map_err(|e| {
+    screenshot_diagnosis::archive_diagnosis(db, &diagnosis_id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -430,13 +414,11 @@ pub async fn screenshot_diagnosis_archive(
 }
 
 /// 更新诊断字段（narrative / recommended_actions / status / error_message）
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "更新截图诊断字段")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_update(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_update_core(
+    db: &DatabaseConnection,
     input: UpdateScreenshotDiagnosisInput,
 ) -> Result<axagent_entities::screenshot_diagnoses::Model, String> {
-    screenshot_diagnosis::update_diagnosis(state.harness.db(), input).await.map_err(|e| {
+    screenshot_diagnosis::update_diagnosis(db, input).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -445,16 +427,14 @@ pub async fn screenshot_diagnosis_update(
 }
 
 /// 一键转为模拟观察组合（调 paper_portfolio::create_portfolio_from_screenshot_diagnosis）
-#[agent_command(domain = "general", safety = Safe, call_mode = StateOnly, description =  "截图诊断转模拟组合")]
-#[tauri::command]
-pub async fn screenshot_diagnosis_to_paper_portfolio(
-    state: State<'_, AppState>,
+pub(crate) async fn screenshot_diagnosis_to_paper_portfolio_core(
+    db: &DatabaseConnection,
     diagnosis_id: String,
     name: String,
     source_event: String,
 ) -> Result<axagent_entities::paper_portfolios::Model, String> {
     stock_paper_portfolio::create_portfolio_from_screenshot_diagnosis(
-        state.harness.db(),
+        db,
         &diagnosis_id,
         &name,
         &source_event,
@@ -466,29 +446,4 @@ pub async fn screenshot_diagnosis_to_paper_portfolio(
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
     })
-}
-
-// ── mobile stub（移动端不支持截图诊断，避免依赖 screen_vision） ──────────
-
-#[cfg(mobile)]
-#[agent_command(domain = core, safety = Safe, call_mode = StateInput, description = "从图片创建截图诊断")]
-#[tauri::command]
-#[allow(dead_code)]
-pub async fn screenshot_diagnosis_create_from_image(
-    _state: State<'_, AppState>,
-    _image_base64: String,
-    _source_app: Option<String>,
-    _provider_id: String,
-    _model_id: String,
-) -> Result<axagent_entities::screenshot_diagnoses::Model, String> {
-    Err("截图诊断在移动端不可用".to_string())
-}
-
-// 显式触发 Arc / Serialize / Deserialize 引用，避免 mobile 模式下未使用警告
-#[allow(dead_code)]
-fn _touch_unused() {
-    let _: Arc<()> = Arc::new(());
-    let _ = serde_json::to_string::<()>(&()).unwrap_or_default();
-    fn _f<T: Serialize + for<'de> Deserialize<'de>>() {}
-    _f::<()>();
 }

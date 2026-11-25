@@ -2198,8 +2198,7 @@ export type PluginPageLoadingDto = "bundle" | "schema";
  * 插件贡献的页面声明（`manifest.pages[]`，页面声明的唯一权威结构）。
  *
  * 命名口径与 [`PluginDashboardPanelDto`] 同族：后端 Rust 字段 snake_case +
- * `#[serde(rename_all = "camelCase")]` ⇒ 本类型 camelCase（禁区 13）。本结构四个字段
- * 都是单词，`entry` / `id` / `title` / `loading` 序列化后键名与 Rust 侧逐字一致。
+ * `#[serde(rename_all = "camelCase")]` ⇒ 本类型 camelCase（禁区 13）。
  *
  * ⚠ 寻址不变量：前端只拿 `(pluginId, pageId)` 向后端要路径
  * （`plugin_resolve_page_asset`），**不得**用 `entry` 自行拼接安装目录 ——
@@ -2211,6 +2210,16 @@ export interface PluginPageDto {
   /** `bundle` ⇒ 安装目录内的相对资产路径；`schema` ⇒ 动态 UI Schema 的 id。 */
   entry: string;
   loading: PluginPageLoadingDto;
+  /** 宿主侧栏归属组 key（对齐 `NAV_GROUPS[].key`）；缺省由前端兜底。 */
+  navGroup?: string | null;
+  /** 宿主侧栏显示名 i18n key；有值时前端 `t(labelKey)`，否则回退 `title`。 */
+  labelKey?: string | null;
+  /** lucide 图标标识（`TrendingUp` 或 `lucide:TrendingUp`）；缺省前端用 Puzzle。 */
+  icon?: string | null;
+  /** 组内排序（升序），缺省 0。 */
+  navOrder?: number;
+  /** 隐藏侧栏/命令面板入口（路由仍注册，可直达）。 */
+  hidden?: boolean;
 }
 
 /**

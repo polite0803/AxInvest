@@ -2,7 +2,8 @@
 
 //! P3 T3'''（PLAN-P3 §3.1 测试⑩–⑰ / ADR-P3-2 ①–⑤）：多层委派链集成测试。
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -86,11 +87,14 @@ async fn drive(db: &DatabaseConnection, id: &str, result: Result<String, String>
     };
     let sink_events = events.clone();
     let sink = move |a: &BotAssignment| {
-        sink_events.lock().expect("events").push(a.status.clone());
+        // sink 是同步闭包；沿用 bot_assignment 测试的 try_lock 串行场景写法。
+        if let Ok(mut events) = sink_events.try_lock() {
+            events.push(a.status.clone());
+        }
     };
     let script = Scripted { result };
     run_assignment_inner(db, &sink, id, &script, Duration::from_secs(10), &completion).await;
-    events.lock().expect("events").clone()
+    events.lock().await.clone()
 }
 
 async fn make_run(db: &DatabaseConnection, bot: &str) -> String {

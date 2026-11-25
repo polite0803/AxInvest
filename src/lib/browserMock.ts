@@ -8020,6 +8020,75 @@ async function executeCommand<T>(
     case "stock_get_mover_recall_event_review":
     case "stock_get_valuation_params":
       return null as unknown as T;
+    // ── 模拟组合九条（宿主 `paper_portfolio_*` Tauri 命令退役 → 插件命令桥）──────
+    // 浏览器模式没有插件进程，也没有组合库：给合法空结构，不能落 default 兜底的
+    // undefined（store 会把它当数据往下读，整页被错误边界兜成空白）。
+    case "paper_portfolio_list_active_details":
+    case "paper_portfolio_list":
+      return [] as unknown as T;
+    case "paper_portfolio_get":
+      return null as unknown as T;
+    case "paper_portfolio_create":
+    case "paper_portfolio_close":
+    case "paper_portfolio_archive":
+    case "paper_portfolio_add_position":
+    case "paper_portfolio_close_position":
+      return {
+        id: "browser-mock",
+        name: "浏览器模拟组合",
+        status: "active",
+        sourceEvent: "",
+        sourceNewsId: null,
+        sourceScreenshotDiagnosisId: null,
+        createdAt: Date.now(),
+        closedAt: null,
+      } as unknown as T;
+    case "paper_portfolio_close_all_positions":
+      return 0 as unknown as T;
+    // ── 截图诊断八条（宿主 `screenshot_diagnosis_*` Tauri 命令退役 → 插件命令桥）──────
+    // 浏览器模式无插件进程、无 VLM/LLM：给合法空诊断，避免 store 把 undefined 当数据读到空白页。
+    case "screenshot_diagnosis_list_recent":
+    case "screenshot_diagnosis_list_by_status":
+      return [] as unknown as T;
+    case "screenshot_diagnosis_get":
+      return null as unknown as T;
+    case "screenshot_diagnosis_create_from_image":
+    case "screenshot_diagnosis_create":
+    case "screenshot_diagnosis_archive":
+    case "screenshot_diagnosis_update":
+      return {
+        id: "browser-mock",
+        imageHash: null,
+        imagePath: null,
+        imageThumbnailBase64: null,
+        imageWidth: null,
+        imageHeight: null,
+        sourceApp: null,
+        ocrText: null,
+        positionsJson: "[]",
+        totalMarketValue: 0,
+        diagnosisJson: "{}",
+        narrative: "",
+        recommendedActions: "[]",
+        sourceWorkflowExecutionId: null,
+        providerId: null,
+        modelId: null,
+        status: "active",
+        errorMessage: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as unknown as T;
+    case "screenshot_diagnosis_to_paper_portfolio":
+      return {
+        id: "browser-mock",
+        name: "浏览器模拟组合",
+        status: "active",
+        sourceEvent: "",
+        sourceNewsId: null,
+        sourceScreenshotDiagnosisId: "browser-mock",
+        createdAt: Date.now(),
+        closedAt: null,
+      } as unknown as T;
     case "stock_get_interface_health_history":
       return { days: [], storeEnabled: false } as unknown as T;
     case "stock_get_stock_template_version_status":

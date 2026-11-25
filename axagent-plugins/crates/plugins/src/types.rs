@@ -261,6 +261,8 @@ pub struct PluginPage {
     /// 页面标识（宿主 tab / 路由的键），在同一插件内必须唯一。
     pub id: String,
     /// 显示标题。**不做宿主侧 i18n** —— 页面文案归插件产物自己负责。
+    /// 当 [`Self::label_key`] 有值时，宿主侧栏/命令面板优先用 `label_key` 的 i18n 结果，
+    /// `title` 仍作为无 i18n 上下文时的回退纯文本。
     pub title: String,
     /// 内容定位符，语义由 [`Self::loading`] 决定：
     /// `bundle` ⇒ 相对插件安装目录的资产路径（扩展名走资产白名单）；
@@ -269,6 +271,25 @@ pub struct PluginPage {
     pub entry: String,
     /// 装载形态。**必填**：未声明即清单校验错误 —— §0.12.5 裁定 3「不许混用却不声明」的落点。
     pub loading: PluginPageLoading,
+    /// 宿主侧栏/命令面板的归属组 key（对齐前端 `NAV_GROUPS[].key`）。
+    /// 缺省 ⇒ 前端按既有兜底规则归组（兼容旧清单）；新插件应显式声明。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_group: Option<String>,
+    /// 宿主侧栏显示名的 i18n key（如 `nav.financeAnalysis`）。
+    /// 有值时前端 `t(labelKey)`；缺省时回退到 `title`（纯文本，不走 i18n）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<String>,
+    /// 侧栏/命令面板图标标识（lucide 名，如 `TrendingUp` 或 `lucide:TrendingUp`）。
+    /// 缺省 ⇒ 前端用通用 Puzzle 图标兜底。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// 组内排序（升序）。缺省 ⇒ 0。
+    #[serde(default)]
+    pub nav_order: i32,
+    /// 为 `true` 时不在侧栏/命令面板暴露导航入口（路由仍注册，可直达）。
+    /// 用于通道探针页等不应占导航位的页面。
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// 插件贡献给**任务中心**的一个任务源声明（`plugin.json` 的 `taskSources[]`，PLAN §97.4）。
@@ -520,6 +541,21 @@ pub struct RawPluginPage {
     /// `None` = 键缺失（未声明）；`Some("")` = 声明了空值。两者都按「未声明」处理。
     #[serde(default)]
     pub loading: Option<String>,
+    /// 宿主侧栏归属组（对齐前端 `NAV_GROUPS[].key`）。非法值在校验阶段报错。
+    #[serde(default)]
+    pub nav_group: Option<String>,
+    /// 宿主侧栏 i18n key。空串按未声明处理。
+    #[serde(default)]
+    pub label_key: Option<String>,
+    /// 侧栏/命令面板图标标识（lucide 名）。空串按未声明处理。
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// 组内排序（升序），缺省 0。
+    #[serde(default)]
+    pub nav_order: i32,
+    /// 隐藏侧栏/命令面板入口（路由仍注册）。缺省 false。
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// `plugin_resolve_page_asset` 的返回形状：宿主绑定的 `(pluginId, pageId)` 解析出的

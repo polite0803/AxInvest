@@ -3669,4 +3669,310 @@ impl StockAnalysisProvider for HostStockAnalysis {
             ))
         })
     }
+
+    // ── G2 模拟组合九条：宿主 `paper_portfolio_*` Tauri 命令退役后的接缝面 ──────
+    // 一律调用 `analysis-engine::paper_portfolio` 的同一份权威函数（原宿主命令也只调它），
+    // 本层只做 `Value` ↔ DTO 转换（模块头「转换点唯一」判据）。
+    /// 写 op：创建模拟组合（入参 = `CreatePortfolioInput`，出参 = 组合行）。
+    async fn paper_portfolio_create(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_create";
+        let req = Self::parse::<axagent_analysis_engine::paper_portfolio::CreatePortfolioInput>(
+            OP,
+            "{name, sourceEvent, sourceNewsId?, sourceScreenshotDiagnosisId?}",
+            input,
+        )?;
+        let model = axagent_analysis_engine::paper_portfolio::create_portfolio(&self.db, req)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 读 op：列出组合（入参 `{status?}`，缺省 = 全部）。
+    async fn paper_portfolio_list(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_list";
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct ListRequest {
+            status: Option<String>,
+        }
+        let req = Self::parse::<ListRequest>(OP, "{status?}", input)?;
+        let rows = axagent_analysis_engine::paper_portfolio::list_portfolios(
+            &self.db,
+            req.status.as_deref(),
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &rows)
+    }
+
+    /// 读 op：组合详情（入参 `{portfolioId}`，含持仓 + 实时盈亏）。
+    async fn paper_portfolio_get(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_get";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct IdRequest {
+            portfolio_id: String,
+        }
+        let req = Self::parse::<IdRequest>(OP, "{portfolioId}", input)?;
+        let detail = axagent_analysis_engine::paper_portfolio::get_portfolio_detail(
+            &self.db,
+            &*self.astock_client,
+            &req.portfolio_id,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &detail)
+    }
+
+    /// 写 op：关闭组合（入参 `{portfolioId}`，status=closed + closed_at）。
+    async fn paper_portfolio_close(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_close";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct IdRequest {
+            portfolio_id: String,
+        }
+        let req = Self::parse::<IdRequest>(OP, "{portfolioId}", input)?;
+        let model =
+            axagent_analysis_engine::paper_portfolio::close_portfolio(&self.db, &req.portfolio_id)
+                .await
+                .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：归档组合（入参 `{portfolioId}`，status=archived，不写 closed_at）。
+    async fn paper_portfolio_archive(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_archive";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct IdRequest {
+            portfolio_id: String,
+        }
+        let req = Self::parse::<IdRequest>(OP, "{portfolioId}", input)?;
+        let model = axagent_analysis_engine::paper_portfolio::archive_portfolio(
+            &self.db,
+            &req.portfolio_id,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：添加虚拟持仓（入参 = `AddPositionInput`，出参 = 持仓行）。
+    async fn paper_portfolio_add_position(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_add_position";
+        let req = Self::parse::<axagent_analysis_engine::paper_portfolio::AddPositionInput>(
+            OP,
+            "{portfolioId, symbol, market?, entryPrice, entryDate, quantity, note?}",
+            input,
+        )?;
+        let model = axagent_analysis_engine::paper_portfolio::add_position(&self.db, req)
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：平仓单只持仓（入参 = `ClosePositionInput`，出参 = 持仓行）。
+    async fn paper_portfolio_close_position(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_close_position";
+        let req = Self::parse::<axagent_analysis_engine::paper_portfolio::ClosePositionInput>(
+            OP,
+            "{positionId, exitPrice, exitDate}",
+            input,
+        )?;
+        let model =
+            axagent_analysis_engine::paper_portfolio::close_position(&self.db, req)
+                .await
+                .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：批量平仓（入参 `{portfolioId, exitPrice, exitDate}`，出参 = 受影响行数）。
+    async fn paper_portfolio_close_all_positions(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_close_all_positions";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CloseAllRequest {
+            portfolio_id: String,
+            exit_price: f64,
+            exit_date: String,
+        }
+        let req = Self::parse::<CloseAllRequest>(OP, "{portfolioId, exitPrice, exitDate}", input)?;
+        let affected = axagent_analysis_engine::paper_portfolio::close_all_positions(
+            &self.db,
+            &req.portfolio_id,
+            req.exit_price,
+            &req.exit_date,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &affected)
+    }
+
+    /// 读 op：active 组合详情（无参，Dashboard 用，逐票拉最新价）。
+    async fn paper_portfolio_list_active_details(&self, input: Value) -> Result<Value> {
+        const OP: &str = "paper_portfolio_list_active_details";
+        Self::require_no_params(OP, &input)?;
+        let rows = axagent_analysis_engine::paper_portfolio::list_active_portfolios_detail(
+            &self.db,
+            &*self.astock_client,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &rows)
+    }
+
+    // ── G6 截图诊断八条：退役的 `screenshot_diagnosis_*` Tauri 命令 ──────────────
+    // 业务核心在 `commands/screenshot_diagnosis.rs`（无 State），LLM 上下文用本结构同源的
+    // `db` + `master_key` 重建；仍复用 analysis-engine 的同一份 CRUD / 风险诊断实现。
+
+    /// 写 op：上传截图 → OCR + 结构化 → 风险诊断 → 持久化（base64 走插件帧透传）。
+    #[cfg(not(mobile))]
+    async fn screenshot_diagnosis_create_from_image(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_create_from_image";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateFromImageRequest {
+            image_base64: String,
+            source_app: Option<String>,
+            provider_id: String,
+            model_id: String,
+        }
+        let req = Self::parse::<CreateFromImageRequest>(
+            OP,
+            "{imageBase64, sourceApp?, providerId, modelId}",
+            input,
+        )?;
+        let model =
+            crate::commands::screenshot_diagnosis::screenshot_diagnosis_create_from_image_core(
+                &self.db,
+                &self.master_key,
+                req.image_base64,
+                req.source_app,
+                req.provider_id,
+                req.model_id,
+            )
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：直接传 positions 创建诊断（前端预填入口，不调 LLM）。
+    async fn screenshot_diagnosis_create(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_create";
+        let req = Self::parse::<
+            axagent_analysis_engine::screenshot_diagnosis::CreateScreenshotDiagnosisInput,
+        >(OP, "CreateScreenshotDiagnosisInput", input)?;
+        let model =
+            crate::commands::screenshot_diagnosis::screenshot_diagnosis_create_core(&self.db, req)
+                .await
+                .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 读 op：按 ID 获取诊断。
+    async fn screenshot_diagnosis_get(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_get";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DiagnosisIdRequest {
+            diagnosis_id: String,
+        }
+        let req = Self::parse::<DiagnosisIdRequest>(OP, "{diagnosisId}", input)?;
+        let model = crate::commands::screenshot_diagnosis::screenshot_diagnosis_get_core(
+            &self.db,
+            req.diagnosis_id,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 读 op：最近 N 条诊断（缺省 20）。
+    async fn screenshot_diagnosis_list_recent(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_list_recent";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ListRecentRequest {
+            limit: Option<usize>,
+        }
+        let req = Self::parse::<ListRecentRequest>(OP, "{limit?}", input)?;
+        let rows = crate::commands::screenshot_diagnosis::screenshot_diagnosis_list_recent_core(
+            &self.db, req.limit,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &rows)
+    }
+
+    /// 读 op：按状态过滤诊断。
+    async fn screenshot_diagnosis_list_by_status(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_list_by_status";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ListByStatusRequest {
+            status: String,
+        }
+        let req = Self::parse::<ListByStatusRequest>(OP, "{status}", input)?;
+        let rows = crate::commands::screenshot_diagnosis::screenshot_diagnosis_list_by_status_core(
+            &self.db, req.status,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &rows)
+    }
+
+    /// 写 op：归档诊断。
+    async fn screenshot_diagnosis_archive(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_archive";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DiagnosisIdRequest {
+            diagnosis_id: String,
+        }
+        let req = Self::parse::<DiagnosisIdRequest>(OP, "{diagnosisId}", input)?;
+        let model = crate::commands::screenshot_diagnosis::screenshot_diagnosis_archive_core(
+            &self.db,
+            req.diagnosis_id,
+        )
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：更新诊断字段（narrative / recommendedActions / status / errorMessage）。
+    async fn screenshot_diagnosis_update(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_update";
+        let req = Self::parse::<
+            axagent_analysis_engine::screenshot_diagnosis::UpdateScreenshotDiagnosisInput,
+        >(OP, "UpdateScreenshotDiagnosisInput", input)?;
+        let model =
+            crate::commands::screenshot_diagnosis::screenshot_diagnosis_update_core(&self.db, req)
+                .await
+                .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
+
+    /// 写 op：诊断一键转模拟观察组合。
+    async fn screenshot_diagnosis_to_paper_portfolio(&self, input: Value) -> Result<Value> {
+        const OP: &str = "screenshot_diagnosis_to_paper_portfolio";
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ToPortfolioRequest {
+            diagnosis_id: String,
+            name: String,
+            source_event: String,
+        }
+        let req = Self::parse::<ToPortfolioRequest>(OP, "{diagnosisId, name, sourceEvent}", input)?;
+        let model =
+            crate::commands::screenshot_diagnosis::screenshot_diagnosis_to_paper_portfolio_core(
+                &self.db,
+                req.diagnosis_id,
+                req.name,
+                req.source_event,
+            )
+            .await
+            .map_err(|e| AxAgentError::Provider(format!("stock.analysis::{OP} 失败: {e}")))?;
+        Self::to_value(OP, &model)
+    }
 }

@@ -36,6 +36,9 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   // `src/pages/opc/routes.tsx` 声明（#36 迁出期），宿主表不再登记。
 
   // ── AxInvest 本地业务页（2026-09-01 上游合并时路由被覆盖，09-06 按能力域恢复） ──
+  // 2026-11-23 T3 完整外迁：股票业务已迁入 stock 插件。`finance-investment` 仅作为
+  // `/invest`（兼容跳转桥）与 `/invest/replay` 的 pageKey 反查值保留，宿主不再有
+  // 股票页面组件；侧栏入口由 `pluginRouteRegistry` 的插件页投影提供。
   "finance-investment": "/invest",
   investReplay: "/invest/replay",
 
@@ -43,6 +46,8 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   chat: "/chat",
   /** Bot 归属层管理页（列表 / 创建 / 编辑 / SOUL / 记忆 / 线程） */
   bots: "/bots",
+  /** P3：Bot 编排页（定义 / 运行 / 委派链 / 定时入口） */
+  botWorkflows: "/bots/workflows",
   chatWorkflow: "/chat/workflow",
   chatTerminal: "/chat/terminal",
   chatFiles: "/chat/files",

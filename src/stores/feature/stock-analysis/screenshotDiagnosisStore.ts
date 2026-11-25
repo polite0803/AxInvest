@@ -8,14 +8,15 @@
  * - 一键转为模拟观察组合（G2 联动）
  * - loading / error 状态管理
  *
- * 命令清单（与后端 commands/screenshot_diagnosis.rs 对齐）：
- * - screenshot_diagnosis_create_from_image（桌面端，移动端不支持）
+ * 命令清单（宿主 Tauri 命令已退役，现由 stock 插件 worker 声明，经 stock.analysis 接缝
+ * 落到宿主 provider；业务核心仍在 commands/screenshot_diagnosis.rs）：
+ * - screenshot_diagnosis_create_from_image（依赖宿主 VLM/LLM 上下文）
  * - screenshot_diagnosis_create / get / list_recent / list_by_status
  * - screenshot_diagnosis_archive / update
  * - screenshot_diagnosis_to_paper_portfolio
  */
 
-import { invoke } from "@/lib/invoke";
+import { invokePluginCommand } from "@/lib/pluginCommand";
 import type { PaperPortfolio } from "@/types/paper-portfolio";
 import type {
   ConvertToPaperPortfolioInput,
@@ -78,7 +79,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
   fetchRecent: async (limit?: number) => {
     set({ loadingList: true, error: null });
     try {
-      const list = await invoke<ScreenshotDiagnosis[]>(
+      const list = await invokePluginCommand<ScreenshotDiagnosis[]>(
         "screenshot_diagnosis_list_recent",
         { limit: limit ?? 20 },
       );
@@ -91,7 +92,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
   fetchByStatus: async (status: string) => {
     set({ loadingList: true, error: null });
     try {
-      const list = await invoke<ScreenshotDiagnosis[]>(
+      const list = await invokePluginCommand<ScreenshotDiagnosis[]>(
         "screenshot_diagnosis_list_by_status",
         { status },
       );
@@ -104,7 +105,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
   fetchDiagnosis: async (diagnosisId: string) => {
     set({ loadingDetail: true, error: null });
     try {
-      const detail = await invoke<ScreenshotDiagnosis | null>(
+      const detail = await invokePluginCommand<ScreenshotDiagnosis | null>(
         "screenshot_diagnosis_get",
         { diagnosisId },
       );
@@ -117,7 +118,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
   createFromImage: async (input: CreateDiagnosisFromImageInput) => {
     set({ submitting: true, error: null });
     try {
-      const diagnosis = await invoke<ScreenshotDiagnosis>(
+      const diagnosis = await invokePluginCommand<ScreenshotDiagnosis>(
         "screenshot_diagnosis_create_from_image",
         {
           imageBase64: input.imageBase64,
@@ -142,7 +143,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
 
   archiveDiagnosis: async (diagnosisId: string) => {
     try {
-      const updated = await invoke<ScreenshotDiagnosis>(
+      const updated = await invokePluginCommand<ScreenshotDiagnosis>(
         "screenshot_diagnosis_archive",
         { diagnosisId },
       );
@@ -159,7 +160,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
 
   updateDiagnosis: async (input: UpdateDiagnosisInput) => {
     try {
-      const updated = await invoke<ScreenshotDiagnosis>(
+      const updated = await invokePluginCommand<ScreenshotDiagnosis>(
         "screenshot_diagnosis_update",
         { input },
       );
@@ -177,7 +178,7 @@ export const useScreenshotDiagnosisStore = create<ScreenshotDiagnosisState>((set
   convertToPaperPortfolio: async (input: ConvertToPaperPortfolioInput) => {
     set({ converting: true, error: null });
     try {
-      const portfolio = await invoke<PaperPortfolio>(
+      const portfolio = await invokePluginCommand<PaperPortfolio>(
         "screenshot_diagnosis_to_paper_portfolio",
         {
           diagnosisId: input.diagnosisId,

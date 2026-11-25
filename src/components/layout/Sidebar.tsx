@@ -12,6 +12,7 @@ import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import { pluginPageNavItem, usePluginPageRoutes } from "@/lib/pluginRouteRegistry";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
+import { resolveIconComponent } from "@/lib/skillIcons";
 import { useAgentPanelStore, useOnboardingStore, useSettingsStore, useUIStore, useUserProfileStore } from "@/stores";
 import type { AppSettings, PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
@@ -90,7 +91,9 @@ function NavItemButton({
 
   // 2026-10-28：按路径判定，兼容 `chat-workflow` 这类 key 与 pageKey 不同名的入口。
   const isActive = location.pathname === item.path || activePage === item.key;
-  const label = item.isPlugin ? item.labelKey : t(item.labelKey);
+  const label = item.isPlugin
+    ? (item.labelIsI18nKey ? t(item.labelKey) : item.labelKey)
+    : t(item.labelKey);
   const tooltipText = item.isPlugin ? `${label} (${item.pluginName})` : label;
   const action = !item.isPlugin && item.key in NAV_SHORTCUT_MAP
     ? NAV_SHORTCUT_MAP[item.key]
@@ -283,12 +286,27 @@ export function Sidebar() {
     // 2026-10-28：侧栏改为「产品导航组」轴（`navGroups.ts`），不再按 8 个能力域分组。
     // 能力域仍是协议概念（DomainHubPage / 工具域过滤用），两轴解耦。
     // 2026-11-10（#36）：域贡献项按自身 `group` 归组，宿主本表只留产品组骨架。
+    // 2026-11-25：插件页导航元数据（归属组 / 图标 / 排序 / 隐藏）由 `plugin.json` 的
+    // `pages[]` 声明，宿主只做投影与渲染 —— 禁止再按 group 写死归位（禁区 12）。
     const byKey = new Map(getNavItems().map((item) => [item.key, item]));
     const contributed = getContributedNavItems();
-    const pluginItems = pluginPages.map((entry) => ({
-      ...pluginPageNavItem(entry),
-      icon: <Puzzle size={17} />,
-    }));
+    const pluginItems: NavItem[] = pluginPages
+      .filter((entry) => !entry.hidden)
+      .map((entry) => {
+        const nav = pluginPageNavItem(entry);
+        const IconComp = nav.icon ? resolveIconComponent(nav.icon) : Puzzle;
+        return {
+          key: nav.key,
+          labelKey: nav.labelKey,
+          path: nav.path,
+          isPlugin: true,
+          pluginName: nav.pluginName,
+          labelIsI18nKey: nav.labelIsI18nKey,
+          navGroup: nav.navGroup,
+          navOrder: nav.navOrder,
+          icon: <IconComp size={17} />,
+        };
+      });
     return NAV_GROUPS.map((group) => {
       const hostItems = group.itemKeys
         .map((key) => byKey.get(key))
@@ -297,14 +315,15 @@ export function Sidebar() {
         .filter((entry) => entry.group === group.key)
         .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0))
         .map(navItemFromContribution);
-      const items = group.key === "packs"
-        ? [...hostItems, ...domainItems, ...pluginItems]
-        : [...hostItems, ...domainItems];
+      const groupPluginItems = pluginItems
+        .filter((item) => item.navGroup === group.key)
+        .sort((a, b) => (a.navOrder ?? 0) - (b.navOrder ?? 0));
+      const items = [...hostItems, ...domainItems, ...groupPluginItems];
       return {
         key: group.key,
         labelKey: group.labelKey,
         color: group.color,
-        // 组标题路径：宿主显式声明优先，否则回落到组内首项（域组的路径由域声明）
+        // 组标题路径：宿主显式声明优先，否则回落到组内首项（域组/插件组的路径由声明决定）
         path: group.path ?? items[0]?.path,
         items,
       };
@@ -370,7 +389,9 @@ export function Sidebar() {
             </button>
           )}
           {section.items.map((item) => {
-            const label = item.isPlugin ? item.labelKey : t(item.labelKey);
+            const label = item.isPlugin
+              ? (item.labelIsI18nKey ? t(item.labelKey) : item.labelKey)
+              : t(item.labelKey);
             const tooltipText = item.isPlugin
               ? `${label} (${item.pluginName})`
               : label;

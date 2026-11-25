@@ -45,6 +45,10 @@ pub mod bot_department_quotas;
 
 // P4 持久化待答请求（docs/bot-integration/P4/MODEL-P4 §3）。
 pub mod bot_input_requests;
+// P5 用量账本 / 费用配额 / 每 Bot 技能归属（docs/bot-integration/P5/MODEL-P5.md）。
+pub mod bot_cost_quotas;
+pub mod bot_skill_bindings;
+pub mod bot_usage_ledger;
 // P3 多 Bot 编排/运行实例（docs/bot-integration/P3/MODEL-P3 §2）。
 pub mod bot_workflow_runs;
 pub mod bot_workflows;

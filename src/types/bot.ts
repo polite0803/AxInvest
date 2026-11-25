@@ -316,6 +316,119 @@ export interface BotInputRequestFilter {
   workflowRunId?: string | null;
 }
 
+// ─────────────────────────── P5：费用 / Token 配额 ───────────────────────────
+
+export type BotCostQuotaScope = "bot" | "department";
+
+export interface BotCostQuota {
+  scope: BotCostQuotaScope;
+  scopeId: string;
+  maxTotalTokens: number;
+  maxCostUsd: number;
+  windowHours: number;
+  isDefault: boolean;
+  updatedAt: number | null;
+}
+
+export interface BotCostQuotaInput {
+  scope: BotCostQuotaScope;
+  scopeId: string;
+  maxTotalTokens: number;
+  maxCostUsd: number;
+  windowHours: number;
+}
+
+export type BotUsageOrigin = "interactive" | "routine" | "assignment";
+export type BotPricingSource = "model" | "config" | "heuristic" | "builtin";
+
+export interface BotUsageEntry {
+  id: string;
+  botId: string;
+  departmentId: string | null;
+  conversationId: string | null;
+  executionId: string | null;
+  workflowRunId: string | null;
+  assignmentId: string | null;
+  modelId: string;
+  origin: BotUsageOrigin;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  pricingSource: BotPricingSource;
+  createdAt: number;
+}
+
+export interface BotUsageFilter {
+  botId?: string | null;
+  departmentId?: string | null;
+  origin?: BotUsageOrigin | null;
+  workflowRunId?: string | null;
+  assignmentId?: string | null;
+  since?: number | null;
+  until?: number | null;
+}
+
+export interface BotUsageSummary {
+  scope: BotCostQuotaScope;
+  scopeId: string;
+  windowHours: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  entryCount: number;
+  breached: boolean;
+  pricingNote: string;
+}
+
+// ─────────────────────────── P5：每 Bot 技能归属 ───────────────────────────
+
+export type BotSkillSource = "global" | "bot";
+
+export interface BotSkill {
+  name: string;
+  description: string;
+  source: BotSkillSource;
+  enabled: boolean;
+  shadowedGlobal: boolean;
+  missing: boolean;
+  presetId: string | null;
+  updatedAt: number | null;
+}
+
+export interface BotSkillPreset {
+  version: "bot-skill-preset.v1";
+  name: string;
+  description: string;
+  skills: BotSkillPresetItem[];
+}
+
+export interface BotSkillPresetItem {
+  name: string;
+  description: string;
+  content: string;
+  category?: string | null;
+  tags?: string[] | null;
+  requiresToolsets?: string[] | null;
+}
+
+export interface BotSkillPresetSkipped {
+  name: string;
+  reason: "not_whitelisted" | "invalid";
+  detail: string;
+}
+
+export interface BotSkillPresetResult {
+  presetId: string;
+  imported: string[];
+  skipped: BotSkillPresetSkipped[];
+}
+
 /** 持久化待答请求 DTO（options 已是字符串数组，前端不接触 JSON 字符串）。 */
 export interface BotInputRequest {
   id: string;

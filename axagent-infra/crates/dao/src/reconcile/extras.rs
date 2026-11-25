@@ -1242,6 +1242,25 @@ const MULTI_COL_INDEXES: &[IndexDecl] = &[
         where_clause: None,
         dialect: None, // ← （静态扫描未覆盖：表级内联 UNIQUE 约束）
     },
+    // P5 成本配额 / 技能归属复合唯一索引（docs/bot-integration/P5/MODEL-P5.md §6）
+    IndexDecl {
+        table: "bot_cost_quotas",
+        name: "idx_bot_cost_quotas_scope_scope_id_uniq",
+        cols: &["scope", "scope_id"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-25，P5 B1）
+    },
+    IndexDecl {
+        table: "bot_skill_bindings",
+        name: "idx_bot_skill_bindings_bot_skill_uniq",
+        cols: &["bot_id", "skill_name"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-25，P5 C1-1）
+    },
 ];
 
 // ═══════════════ partial 索引（实体无 WHERE 条件表达） ═══════════════
@@ -1431,7 +1450,7 @@ mod counts {
     const EXPECT_FUNCTIONS: usize = 1;
     const EXPECT_CHECKS: usize = 11;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 38;
+    const EXPECT_MULTI: usize = 40; // +2 P5
     /// partial 索引条目数。
     ///
     /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条
@@ -1482,7 +1501,7 @@ mod counts {
     }
 
     #[test]
-    fn l2_total_is_eighty_three() {
+    fn l2_total_is_eighty_five() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1493,7 +1512,7 @@ mod counts {
             + EXPECT_MULTI
             + EXPECT_UNIQUE_INDEXES
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 83, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 85, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 
@@ -1570,6 +1589,12 @@ mod counts {
             assert!(d.where_clause.is_none(), "{} 是 GIN 清单项，不应带 WHERE", d.name);
         }
         for d in MULTI_COL_INDEXES {
+            if d.unique && d.cols.len() == 1 {
+                // 单列唯一索引有时误落在 MULTI_COL_INDEXES（历史遗留）。允许但需 shape 正确。
+                assert!(d.method.is_none(), "{} 单列唯一索引不应指定访问方法", d.name);
+                assert!(d.where_clause.is_none(), "{} 单列唯一索引不应带 WHERE", d.name);
+                continue;
+            }
             assert!(
                 d.cols.len() >= 2,
                 "{} 落在多列清单却只有 {} 列（解析锚点可能取错）",

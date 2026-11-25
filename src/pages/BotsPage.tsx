@@ -18,6 +18,8 @@ import { BotDetail } from "@/components/bot/BotDetail";
 import { BotEditor, type BotEditorModelOption, type BotEditorValues } from "@/components/bot/BotEditor";
 import { BotEmptyState } from "@/components/bot/BotEmptyState";
 import { BotList } from "@/components/bot/BotList";
+import { BotSkillsPanel } from "@/components/bot/BotSkillsPanel";
+import { BotUsagePanel } from "@/components/bot/BotUsagePanel";
 import { backendErrorText } from "@/lib/errorI18n";
 import { countUnread, getNotifications } from "@/lib/notification";
 import { message } from "@/lib/toast";
@@ -108,7 +110,7 @@ export function BotsPage() {
   const [departments, setDepartments] = useState<BotDepartment[]>([]);
   const [departmentModalOpen, setDepartmentModalOpen] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<BotDepartment | null>(null);
-  const [departmentModalTab, setDepartmentModalTab] = useState<"basic" | "quota">("basic");
+  const [departmentModalTab, setDepartmentModalTab] = useState<"basic" | "quota" | "usage">("basic");
 
   // P4-b：待答请求（事件订阅 + 挂载时拉 pending；归零即撤徽章）。
   const inputRequests = useBotStore((s) => s.inputRequests) ?? [];
@@ -377,6 +379,8 @@ export function BotsPage() {
               deleting={deleting}
               routinesPanel={<BotRoutinesPanel botId={activeBot.id} />}
               assignmentsPanel={<BotAssignmentsPanel bot={activeBot} bots={bots} />}
+              usagePanel={<BotUsagePanel scope="bot" scopeId={activeBot.id} />}
+              skillsPanel={<BotSkillsPanel botId={activeBot.id} />}
               onEdit={() => {
                 void openEdit();
               }}

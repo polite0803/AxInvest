@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "超出部門執行配額",
     "BOT_INPUT_REQUEST_NOT_FOUND": "未找到待答請求",
     "BOT_INPUT_REQUEST_NOT_PENDING": "待答請求已回答或已失效",
-    "BOT_INPUT_ANSWER_EMPTY": "答覆內容不能為空"
+    "BOT_INPUT_ANSWER_EMPTY": "答覆內容不能為空",
+    "BOT_COST_QUOTA_INVALID": "Bot 費用配額取值不合法",
+    "BOT_COST_QUOTA_EXCEEDED": "超出費用或 Token 配額",
+    "BOT_SKILL_NOT_FOUND": "未找到該 Bot 的技能歸屬",
+    "BOT_SKILL_PRESET_INVALID": "技能預設格式不合法"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "投資中心",
     "tab": {
-      "marketMainline": "市場主線",
-      "screener": "選股",
-      "workspace": "工作區",
-      "screenshotDiagnosis": "截圖診斷",
-      "paperPortfolio": "模擬觀察",
-      "quant": "量化"
+      "marketMainline": "市場主線"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "已取消",
       "answerFailed": "提交失敗，請重試",
       "empty": "暫無待答問題"
+    },
+    "usage": {
+      "title": "用量與費用",
+      "subtitle": "最近的 Token 用量與估算費用",
+      "estimated": "估算",
+      "estimatedHint": "按本地價格表估算，與服務商帳單可能存在差異",
+      "pricingSource": "計價來源",
+      "inputTokens": "輸入 Token",
+      "outputTokens": "輸出 Token",
+      "cacheCreationTokens": "快取寫入 Token",
+      "cacheReadTokens": "快取讀取 Token",
+      "totalTokens": "Token 合計",
+      "totalCost": "估算費用",
+      "quotaTitle": "費用配額",
+      "quotaHint": "超限後只攔截新建的執行，已啟動的會跑完",
+      "breached": "已超限",
+      "window": "統計視窗",
+      "empty": "暫無用量記錄",
+      "refresh": "重新整理"
+    },
+    "skills": {
+      "title": "技能",
+      "subtitle": "該 Bot 可用的技能；全域技能對所有 Bot 可見",
+      "globalSource": "全域",
+      "botSource": "本 Bot",
+      "shadowedGlobal": "同名時優先使用本 Bot 的技能",
+      "missing": "技能檔案缺失",
+      "enabled": "啟用",
+      "disabled": "已停用",
+      "empty": "該 Bot 尚未設定技能",
+      "importPreset": "匯入預設",
+      "presetName": "預設名稱",
+      "presetImported": "已匯入 {count} 個技能",
+      "presetSkipped": "跳過 {count} 個技能",
+      "presetInvalid": "預設格式不合法",
+      "whitelist": "白名單"
     }
   }
 }

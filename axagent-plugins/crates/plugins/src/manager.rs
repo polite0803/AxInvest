@@ -406,6 +406,15 @@ pub enum PluginManifestValidationError {
         page: String,
         detail: String,
     },
+    /// 页面声明的 `navGroup` 不在宿主侧栏已知分组集合内。
+    ///
+    /// 与 `InvalidPageLoading` 同族：枚举型字段走清单校验错误，指到具体页 id。
+    /// 允许值与前端 `src/lib/navGroups.ts` 的 `NAV_GROUPS[].key` 对齐：
+    /// `chat` / `invest` / `knowledge` / `opc` / `packs` / `tasks` / `system`。
+    InvalidPageNavGroup {
+        page: String,
+        nav_group: String,
+    },
     /// 任务源声明的 `id` 形状非法（任务 #148）。
     ///
     /// 源 id 会进宿主 `SourceId` 与 `runIdOf(source, id)` 的拼接，带 `:` / 空格 / 大写
@@ -562,6 +571,11 @@ impl Display for PluginManifestValidationError {
             Self::InvalidPageAsset { page, detail } => {
                 write!(f, "plugin page `{page}` has an invalid entry: {detail}")
             },
+            Self::InvalidPageNavGroup { page, nav_group } => write!(
+                f,
+                "plugin page `{page}` navGroup `{nav_group}` must be one of {}",
+                VALID_PAGE_NAV_GROUPS.join(", ")
+            ),
             Self::InvalidTaskSourceId { source, detail } => {
                 write!(f, "plugin task source `{source}` has an invalid id: {detail}")
             },
@@ -3768,7 +3782,40 @@ fn build_manifest_pages(
             }
         }
 
-        validated.push(PluginPage { id, title: page.title, entry: page.entry, loading });
+        let nav_group = page
+            .nav_group
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string);
+        if let Some(group) = nav_group.as_deref()
+            && !VALID_PAGE_NAV_GROUPS.contains(&group)
+        {
+            errors.push(PluginManifestValidationError::InvalidPageNavGroup {
+                page: id.clone(),
+                nav_group: group.to_string(),
+            });
+        }
+        let label_key = page
+            .label_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string);
+        let icon =
+            page.icon.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(ToString::to_string);
+
+        validated.push(PluginPage {
+            id,
+            title: page.title,
+            entry: page.entry,
+            loading,
+            nav_group,
+            label_key,
+            icon,
+            nav_order: page.nav_order,
+            hidden: page.hidden,
+        });
     }
 
     validated
@@ -4783,6 +4830,12 @@ pub(crate) const PANEL_ASSET_ALLOWED_EXTS: &[&str] = &["html", "htm", "js", "css
 /// 面板资产大小上限。`skill_read_asset` 无上限，此处**刻意收紧**：
 /// 读的是第三方代码，巨型文件既无正当用途又是内存放大面。
 pub(crate) const PANEL_ASSET_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// 宿主侧栏已知分组键（与前端 `src/lib/navGroups.ts` 的 `NAV_GROUPS[].key` 同源）。
+/// 插件页 `navGroup` 只能落在这个集合里，否则侧栏无法归组。
+/// ⚠ 这里与前端是**两处同源**：改一侧必须同步改另一侧；门禁见 `scripts/check-route-reachability.mjs`。
+pub(crate) const VALID_PAGE_NAV_GROUPS: &[&str] =
+    &["chat", "invest", "knowledge", "opc", "packs", "tasks", "system"];
 
 /// 资产声明的**形状**校验（不做 I/O）：绝对路径 / 逃逸 / 扩展名。
 ///
@@ -6363,10 +6416,17 @@ mod tests {
             title: "Main".to_string(),
             entry: "pages/index.html".to_string(),
             loading: PluginPageLoading::Bundle,
+            nav_group: None,
+            label_key: None,
+            icon: None,
+            nav_order: 0,
+            hidden: false,
         };
         let json = serde_json::to_value(&page).expect("页面声明应可序列化");
-        assert_eq!(sorted_keys(&json), ["entry", "id", "loading", "title"]);
+        assert_eq!(sorted_keys(&json), ["entry", "hidden", "id", "loading", "navOrder", "title"]);
         assert_eq!(json["loading"], serde_json::json!("bundle"));
+        assert_eq!(json["hidden"], serde_json::json!(false));
+        assert_eq!(json["navOrder"], serde_json::json!(0));
 
         let located = PluginPageAssetLocation {
             plugin_id: "ui-pages".to_string(),
@@ -6622,6 +6682,11 @@ mod tests {
                 title: "Chart".to_string(),
                 entry: "web/index.html".to_string(),
                 loading: crate::types::PluginPageLoading::Bundle,
+                nav_group: None,
+                label_key: None,
+                icon: None,
+                nav_order: 0,
+                hidden: false,
             }
         );
         assert_eq!(
@@ -6631,6 +6696,11 @@ mod tests {
                 title: "Order".to_string(),
                 entry: "order-form".to_string(),
                 loading: crate::types::PluginPageLoading::Schema,
+                nav_group: None,
+                label_key: None,
+                icon: None,
+                nav_order: 0,
+                hidden: false,
             }
         );
 

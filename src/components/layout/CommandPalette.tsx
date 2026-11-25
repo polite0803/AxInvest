@@ -251,16 +251,23 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     });
 
     // 插件页导航命令：与侧栏共用同一张路由投影，启用/禁用后立即增删。
-    const pluginCommands: Command[] = pluginPages.map((entry) => ({
-      id: `plugin-page:${entry.id}`,
-      label: `${nav}: ${entry.navLabel}`,
-      icon: <Puzzle size={16} style={{ color: CHAT_ICON_COLORS.Puzzle }} />,
-      category: nav,
-      action: () => {
-        navigate(entry.path);
-        onClose();
-      },
-    }));
+    // 图标/隐藏/文案均来自 plugin.json 声明，不在宿主写死（禁区 12）。
+    const pluginCommands: Command[] = pluginPages
+      .filter((entry) => !entry.hidden)
+      .map((entry) => {
+        const label = entry.navLabelIsI18nKey ? t(entry.navLabel) : entry.navLabel;
+        const IconComp = entry.icon ? resolveIconComponent(entry.icon) : Puzzle;
+        return {
+          id: `plugin-page:${entry.id}`,
+          label: `${nav}: ${label}`,
+          icon: <IconComp size={16} style={{ color: CHAT_ICON_COLORS.Puzzle }} />,
+          category: nav,
+          action: () => {
+            navigate(entry.path);
+            onClose();
+          },
+        };
+      });
 
     // 合并动态注册的命令（去重）
     const ids = new Set(builtin.map((c) => c.id));

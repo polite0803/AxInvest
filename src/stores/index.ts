@@ -40,7 +40,7 @@ export { useAppConfigStore } from "./feature/appConfigStore";
 export type { FeatureFlags, ModelTier as AppConfigModelTier } from "./feature/appConfigStore";
 export { useApprovalStore } from "./feature/approvalStore";
 export { useBackupStore } from "./feature/backupStore";
-export { useBotStore } from "./feature/botStore";
+export { ensureBotInputRequestListener, useBotStore } from "./feature/botStore";
 export type { BotStoreState } from "./feature/botStore";
 export { useBuddyStore } from "./feature/buddyStore";
 export type { BuddyInfo, BuddyMessage, BuddyMood } from "./feature/buddyStore";

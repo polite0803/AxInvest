@@ -3130,7 +3130,11 @@
     "BOT_QUOTA_EXCEEDED": "تم تجاوز حصة تشغيل القسم",
     "BOT_INPUT_REQUEST_NOT_FOUND": "لم يتم العثور على طلب الإدخال",
     "BOT_INPUT_REQUEST_NOT_PENDING": "تمت الإجابة على الطلب أو انتهت صلاحيته",
-    "BOT_INPUT_ANSWER_EMPTY": "لا يمكن أن تكون الإجابة فارغة"
+    "BOT_INPUT_ANSWER_EMPTY": "لا يمكن أن تكون الإجابة فارغة",
+    "BOT_COST_QUOTA_INVALID": "قيمة حصة تكلفة الروبوت غير صالحة",
+    "BOT_COST_QUOTA_EXCEEDED": "تم تجاوز حصة التكلفة أو الرموز",
+    "BOT_SKILL_NOT_FOUND": "لم يتم العثور على ربط مهارة الروبوت",
+    "BOT_SKILL_PRESET_INVALID": "تنسيق الإعداد المسبق للمهارة غير صالح"
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -11807,12 +11811,7 @@
   "invest": {
     "title": "مركز الاستثمار",
     "tab": {
-      "marketMainline": "الخط الرئيسي للسوق",
-      "screener": "المسح",
-      "workspace": "مساحة العمل",
-      "screenshotDiagnosis": "تشخيص لقطة الشاشة",
-      "paperPortfolio": "محفظة ورقية",
-      "quant": "كمي"
+      "marketMainline": "الخط الرئيسي للسوق"
     }
   },
   "paperPortfolio": {
@@ -19438,6 +19437,42 @@
       "cancelled": "Cancelled",
       "answerFailed": "Failed to submit; please retry",
       "empty": "No pending questions"
+    },
+    "usage": {
+      "title": "الاستخدام والتكلفة",
+      "subtitle": "استخدام الرموز الأخير والتكلفة المقدرة",
+      "estimated": "تقديري",
+      "estimatedHint": "تقدير بناءً على التسعير المحلي؛ قد يختلف عن فاتورة المزود",
+      "pricingSource": "مصدر التسعير",
+      "inputTokens": "رموز الإدخال",
+      "outputTokens": "رموز الإخراج",
+      "cacheCreationTokens": "رموز إنشاء ذاكرة التخزين المؤقت",
+      "cacheReadTokens": "رموز قراءة ذاكرة التخزين المؤقت",
+      "totalTokens": "إجمالي الرموز",
+      "totalCost": "التكلفة المقدرة",
+      "quotaTitle": "حصة التكلفة",
+      "quotaHint": "عند التجاوز، يتم حظر التشغيلات الجديدة فقط؛ التشغيلات التي بدأت بالفعل ستكتمل",
+      "breached": "تم تجاوز الحصة",
+      "window": "نافذة",
+      "empty": "لا توجد سجلات استخدام بعد",
+      "refresh": "تحديث"
+    },
+    "skills": {
+      "title": "المهارات",
+      "subtitle": "المهارات المتاحة لهذا الروبوت؛ المهارات العامة مرئية لجميع الروبوتات",
+      "globalSource": "عام",
+      "botSource": "هذا الروبوت",
+      "shadowedGlobal": "مهارة الروبوت لها الأولوية على المهارة العامة التي تحمل نفس الاسم",
+      "missing": "ملف المهارة مفقود",
+      "enabled": "مفعّل",
+      "disabled": "معطّل",
+      "empty": "لا توجد مهارات مهيأة لهذا الروبوت",
+      "importPreset": "استيراد إعداد مسبق",
+      "presetName": "اسم الإعداد المسبق",
+      "presetImported": "تم استيراد {count} مهارات",
+      "presetSkipped": "تم تخطي {count} مهارات",
+      "presetInvalid": "تنسيق الإعداد المسبق غير صالح",
+      "whitelist": "قائمة السماح"
     }
   }
 }

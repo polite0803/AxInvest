@@ -80,19 +80,23 @@
 
 ### 对外命令（后端）
 
-全部命令在 `src-tauri/src/commands/paper_portfolio.rs`，统一返回 `Result<T, String>`：
+九条同名命令已从宿主 Tauri 命令退役（2026-11-23），现由 stock 插件 worker 声明，
+经 `stock.analysis` 接缝落到宿主 provider；业务实现仍是
+`axagent_analysis_engine::paper_portfolio` 的同一份权威函数。契约在
+`axagent-core/crates/harness/src/stock_analysis.rs:1308`，唯一的 `Value` ↔ DTO 转换点
+（也就是运行时权威实现）在 `src-tauri/src/init/stock_analysis_service.rs`：
 
-| 命令 | 行号 |
+| 命令（插件 worker / 接缝 op 同名） | provider 实现 |
 |---|---|
-| `paper_portfolio_create` | `src-tauri/src/commands/paper_portfolio.rs:28` |
-| `paper_portfolio_list` | `src-tauri/src/commands/paper_portfolio.rs:43` |
-| `paper_portfolio_get` | `src-tauri/src/commands/paper_portfolio.rs:58` |
-| `paper_portfolio_close` | `src-tauri/src/commands/paper_portfolio.rs:79` |
-| `paper_portfolio_archive` | `src-tauri/src/commands/paper_portfolio.rs:94` |
-| `paper_portfolio_add_position` | `src-tauri/src/commands/paper_portfolio.rs:109` |
-| `paper_portfolio_close_position` | `src-tauri/src/commands/paper_portfolio.rs:124` |
-| `paper_portfolio_close_all_positions` | `src-tauri/src/commands/paper_portfolio.rs:139` |
-| `paper_portfolio_list_active_details` | `src-tauri/src/commands/paper_portfolio.rs:158` |
+| `paper_portfolio_create` | `src-tauri/src/init/stock_analysis_service.rs:3677` |
+| `paper_portfolio_list` | `src-tauri/src/init/stock_analysis_service.rs:3691` |
+| `paper_portfolio_get` | `src-tauri/src/init/stock_analysis_service.rs:3709` |
+| `paper_portfolio_close` | `src-tauri/src/init/stock_analysis_service.rs:3728` |
+| `paper_portfolio_archive` | `src-tauri/src/init/stock_analysis_service.rs:3744` |
+| `paper_portfolio_add_position` | `src-tauri/src/init/stock_analysis_service.rs:3762` |
+| `paper_portfolio_close_position` | `src-tauri/src/init/stock_analysis_service.rs:3776` |
+| `paper_portfolio_close_all_positions` | `src-tauri/src/init/stock_analysis_service.rs:3791` |
+| `paper_portfolio_list_active_details` | `src-tauri/src/init/stock_analysis_service.rs:3813` |
 
 （对应版本：当前实现）
 

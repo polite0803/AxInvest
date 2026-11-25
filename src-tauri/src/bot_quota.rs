@@ -10,8 +10,9 @@
 //! 上限，不在派发热路径重复查库。超额一律拒绝并报字段（D3=A），从不静默夹紧。
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::bot_department_quota as quota_repo;
@@ -178,16 +179,16 @@ fn contexts() -> &'static Mutex<HashMap<String, QuotaLimits>> {
 
 impl AssignmentContext {
     pub fn install(run_id: &str, limits: QuotaLimits) {
-        contexts().lock().expect("quota context lock poisoned").insert(run_id.to_string(), limits);
+        contexts().blocking_lock().insert(run_id.to_string(), limits);
     }
 
     pub fn get(run_id: &str) -> Option<QuotaLimits> {
-        contexts().lock().expect("quota context lock poisoned").get(run_id).cloned()
+        contexts().blocking_lock().get(run_id).cloned()
     }
 
     /// run 终态时移除，避免登记表随进程长跑无界增长。
     pub fn remove(run_id: &str) {
-        contexts().lock().expect("quota context lock poisoned").remove(run_id);
+        contexts().blocking_lock().remove(run_id);
     }
 
     /// 未登记（实例级/纯委派/进程重启）→ P3 默认，零 DB 读。

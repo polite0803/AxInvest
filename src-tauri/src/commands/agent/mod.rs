@@ -2052,6 +2052,7 @@ pub async fn agent_query(
         persona_prompt.as_deref(),
         bot_context.as_ref().and_then(|c| c.soul.as_deref()),
         bot_context.as_ref().and_then(|c| c.memory.as_deref()),
+        bot_context.as_ref().and_then(|c| c.skills.as_deref()),
         profile_prompt.as_deref(),
         user_custom_prompt.as_deref(),
         rag_context_parts.as_deref(),
@@ -2096,6 +2097,12 @@ pub async fn agent_query(
         },
         request.agent_context.as_ref(),
     );
+
+    // P5 C1-2：Bot 会话把 bot_id 注入 tool extra，SkillIndex/SkillView 按此过滤可见性。
+    if let Some(ref bid) = conversation.bot_id {
+        tool_registry =
+            tool_registry.with_tool_extra(axagent_tools::context_keys::BOT_ID, bid.as_str());
+    }
 
     // ── 注入 Tauri 命令索引到系统提示 ──
     // 使用配置化的领域映射解析可见命令域
@@ -2612,6 +2619,25 @@ pub async fn agent_query(
                 .await
                 {
                     tracing::warn!("Agent session 成本持久化失败 id={}: {}", axagent_session_id, e);
+                }
+            }
+
+            // P5-b B2: 交互轮用量记账（append-only）。已启动轮跑完后记账，不阻塞（ADR-P5-3）。
+            if let Some(ref bot_id) = conversation.bot_id {
+                if let Err(e) = crate::bot_cost_quota::record_usage(
+                    app_state.harness.db(),
+                    bot_id,
+                    Some(&conversation_id),
+                    session.axagent_session_id(),
+                    None,
+                    None,
+                    axagent_harness::types::BotUsageOrigin::Interactive,
+                    &request.model_id,
+                    &summary.usage,
+                )
+                .await
+                {
+                    tracing::warn!("Bot 交互轮用量记账失败 bot_id={}: {}", bot_id, e);
                 }
             }
 

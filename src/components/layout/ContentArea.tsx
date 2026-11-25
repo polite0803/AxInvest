@@ -269,7 +269,7 @@ export const ContentArea = memo(function ContentArea() {
           />
           {/* P3：Bot 编排页（与 /bots 并列的独立路由） */}
           <Route
-            path="/bots/workflows"
+            path={BUILTIN_PAGE_PATH.botWorkflows}
             element={
               <PageContextProvider page="bots">
                 <SafeLazyPage Page={LazyBotWorkflowsPage} />
@@ -337,9 +337,10 @@ export const ContentArea = memo(function ContentArea() {
             }
           />
           {
-            /* 2026-11-11 #263：投资域主页与回放工作台（/invest、/invest/replay）均由
-              `src/pages/invest/routes.tsx` 声明，经注册表投影渲染；两条路由都受 stock
-              插件门槛约束，本文件不再登记。旧 /replay-workbench 链已删除。 */
+            /* 2026-11-11 #263：投资域路由（/invest、/invest/replay）均由
+              `src/pages/invest/routes.tsx` 声明，经注册表投影渲染，本文件不登记。
+              2026-11-23 T3 完整外迁：/invest 已是零业务代码的兼容跳转桥（转到 stock
+              插件 bundle 页），只有 /invest/replay 仍受 stock 插件门槛约束。 */
           }
           <Route
             path={BUILTIN_PAGE_PATH["tasks-center"]}
@@ -352,7 +353,7 @@ export const ContentArea = memo(function ContentArea() {
           {
             /* ── 域贡献的页面路由（注册表投影）：宿主不 import 任何域页面组件 ──
               覆盖 OPC 主页（/opc、/opc/:tab）、14 个能力包页（/opc/domain/:id）、需求发现页
-              与投资域主页（/invest，#263）。
+              与投资域旧链桥（/invest，#263；2026-11-23 起不再承载股票页面组件）。
               域侧增删页面改 `src/pages/<域>/routes.tsx`，本文件不动（#36 迁出期解耦点）。 */
           }
           {contributedPages.map(({ id, path, pageKey, Page }) => (
@@ -366,13 +367,24 @@ export const ContentArea = memo(function ContentArea() {
               }
             />
           ))}
-          {pluginPages.map(({ id, path, navKey, Page }) => (
+          {
+            /* 插件页路由：**必须**把 slug / pageId 显式传给容器。
+              2026-11-25 实测事故：此前这里注册的是**字面路径**
+              （`/plugins/opc-accounting-bundled/opc-accounting`）并渲染通用
+              `PluginPageRouteHost`，而该容器靠 `useParams()` 取 `pluginSlug` / `pageId`
+              —— React Router 在**字面路径** Route 下 `useParams()` 恒返回空对象
+              ⇒ 取到两个 `undefined` ⇒ 命中查找落空 ⇒ **侧栏那 16 个插件项点进去全是 404**。
+              （顺带一提：改成带参路由 `/plugins/:pluginSlug/:pageId` 也救不了 ——
+              React Router v6 里静态段排名高于动态段，字面路由照样先命中。
+              ⇒ 唯一正确形态是「字面路径 + 显式传参」。 */
+          }
+          {pluginPages.map(({ id, path, navKey, pluginSlug, pageId }) => (
             <Route
               key={id}
               path={path}
               element={
                 <PageContextProvider page={navKey}>
-                  <SafeLazyPage Page={Page} />
+                  <PluginPageRouteHost pluginSlug={pluginSlug} pageId={pageId} />
                 </PageContextProvider>
               }
             />
@@ -457,7 +469,10 @@ export const ContentArea = memo(function ContentArea() {
           <Route path={BUILTIN_PAGE_PATH.learningGraph} element={<Navigate to="/knowledge/learning" replace />} />
 
           {/* 旧股票业务路由 → 投资中心（历史记录/复盘/行情表格/时间旅行等调用方仍指向旧地址） */}
-          {/* 2026-10-28：股票旧路由已全部删除，统一走 /invest（query 参数由 InvestPage 消费）。 */}
+          {
+            /* 2026-11-23：股票业务已整棵迁入 stock 插件；/invest 现由 LegacyInvestRedirect
+              转到插件 bundle 页，宿主不再编译 InvestPage / InvestHub / StockWorkspaceShell。 */
+          }
 
           <Route path="*" element={<NotFoundRoute />} />
         </Routes>

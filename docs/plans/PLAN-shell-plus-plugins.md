@@ -10857,20 +10857,233 @@ src/hooks` 100 文件 / 1417 测试全绿；路由门禁自检 OK、strict 40 �
   cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
 **2026-11-23 追加：T3 第二个业务视图（模拟观察）迁入 bundle**
 
-- 股票插件新增 `plugin-stock/src-web/portfolio.ts`，把宿主 `PaperPortfolioPage` 的数据面
-  收敛为原生 DOM：单条 `stock_get_portfolio_dashboard` 读命令（worker 已声明，经 `stock.analysis`
-  接缝取 R2 组合监控），渲染 8 张汇总卡 + 持仓表 + 行业暴露条 + 三档压力测试；
-  缺字段显示破折号而非 0，四态分列，连续刷新只让最后一轮回包上屏。
+- 股票插件新增 `plugin-stock/src-web/portfolio.ts`，把**组合监控看板**的数据面收敛为原生 DOM：
+  单条 `stock_get_portfolio_dashboard` 读命令（worker 已声明，经 `stock.analysis` 接缝取 R2
+  组合监控），渲染 8 张汇总卡 + 持仓表 + 行业暴露条 + 三档压力测试；缺字段显示破折号而非
+  0，四态分列，连续刷新只让最后一轮回包上屏。
+  ⚠ 归属澄清：这不是宿主 `PaperPortfolioPage` 的完整迁移 —— 那个页面用的九条
+  `paper_portfolio_*` 命令目前 **0/9 在插件 worker 声明**，须先做 T2 命令外迁；本视图
+  只覆盖组合监控读数，不可据此声称「模拟观察 Tab 已完整外迁」。
 - `src-web/main.ts` 内部 Tab 壳增加第三页「模拟观察」，与其它视图共用唯一桥客户端：
   首次点开才装载并发命令，切走只隐藏 DOM；cleanup 同时解绑两个懒装载视图。
   `web/pages/index.html` 补本地 CSS 变量驱动的卡片 / 表格 / 条图样式（iframe 不继承宿主 token）。
 - verifier 新增帧级断言：只发一条组合看板命令、走 `plugin_execute_command`、激活视图、
   8 卡 / 1 行持仓 / 2 行行业 / 3 档压力测试均渲染。bundle 重建后 35.0kb，SHA-256
-  `b863f1243dfb8f971e737880e45935f356d8bc6c4b4ffba5c946c51852b93d12`；
+  `3b44bc4ed547290fd5876a67229e58ad3a4ac0398d64cd9fd098774b33a9345e`（含后续量化页的最终值）；
   已同步 `axagent-plugins/dist/plugins/stock` 与 `src-tauri/plugins/bundled/stock` 两处
   gitignored 预置目录（用户授权覆盖），三处哈希一致，两份 packager `--check` 全 PASS。
 - 定点验证：插件前端 `tsc -p plugin-stock/tsconfig.json` EXIT=0；bundle verifier 全通过；
   两份 packager `--check` EXIT=0。未跑全量 cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
-- **T3 终局仍差**：`InvestHub` 剩余 4 个 Tab（screener / workspace / screenshot-diagnosis /
-  quant）与 `StockWorkspaceShell` 6 视图尚未迁入 bundle；宿主 `/invest` 编译期路由未删。
-  已迁入的数据切片 / 跨市场 / 模拟观察三页仍通过插件页独立 URL 展示，宿主旧页保留为回退。
+**2026-11-23 追加：T3 第三个业务视图（量化实验）迁入 bundle**
+
+- 只读调研（5 个宿主 Tab 的命令覆盖）：quant 6/7 命令已在插件清单声明且不依赖上传/路由/
+  复杂 store；screener 11/22；workspace 约 49/63 且带路由 + 多 store + VLM 截图导入；
+  screenshot-diagnosis 0/7（`screenshot_diagnosis_*` 全未声明）；paper-portfolio 0/9
+  （`paper_portfolio_*` 全未声明）。据此选 quant 先迁。
+- 新增 `plugin-stock/src-web/quant.ts`：策略列表默认加载，运行详情 / 指标对比按用户输入的
+  runId、runIds 显式查询；空 id 显示「未发调用」而不发空串。三条命令
+  `stock_quant_strategies_list` / `stock_quant_run_get` / `stock_quant_metrics_compare`
+  均已在 worker 声明；`quant_backtest_run` 未声明，本视图不提供「发起回测」，不做半迁移。
+- `main.ts` 内部 Tab 壳增至四页；verifier 新增断言：首帧只发策略列表、策略表两行、
+  空 ID 跳过态、`runId=r1`、`runIds=["r1","r2"]` 逐字校验、全帧走桥通道。
+  bundle 重建 44.2kb，SHA-256 `3b44bc4ed547290fd5876a67229e58ad3a4ac0398d64cd9fd098774b33a9345e`，
+  已同步两处预置目录且三处哈希一致，两份 packager `--check` 全 PASS。
+- 定点验证：插件前端 `tsc -p plugin-stock/tsconfig.json` EXIT=0；bundle verifier 全通过；
+  两份 packager `--check` EXIT=0。未跑全量 cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
+**2026-11-23 追加：T3 第四个业务视图（智能选股）迁入 bundle**
+
+- 新增 `plugin-stock/src-web/screener.ts`：六条已声明只读命令并发（候选池批次 / 板块范围 /
+  热股榜 / 涨停池 / 龙虎榜 / 荐股历史），再以热股榜回执里的 6 位代码级联
+  `stock_get_latest_analyses_for_stocks`；代码提取不到时显式跳过，不发空串。
+  写操作 `stock_start_task` / `stock_apply_reco_weights` / `stock_set_reco_board_scope`
+  刻意不迁 —— 插件侧没有完整任务台账与权重回写 UI，不做半截写链路。
+- verifier 断言七条命令的名称集合、全帧走桥、级联 `stockCodes=["600519","000858"]`
+  逐字取自热股榜回执、七区渲染与候选池六张卡。bundle 重建 53.4kb，
+  SHA-256 `3b44bc4ed547290fd5876a67229e58ad3a4ac0398d64cd9fd098774b33a9345e`，
+  三处副本哈希一致，两份 packager `--check` 全 PASS。
+- 定点验证：插件前端 `tsc -p plugin-stock/tsconfig.json` EXIT=0；bundle verifier 全通过。
+  未跑全量 cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
+- **T3 终局仍差**：宿主 `InvestHub` 的 workspace / screenshot-diagnosis / paper-portfolio
+  三 Tab 与 `StockWorkspaceShell` 六视图未完整迁入 bundle；后两个 Tab 的命令分别 0/7 与
+  0/9 尚未外迁到插件，workspace 约 49/63 且带路由 + 多 store + VLM 截图导入。
+  宿主 `/invest` 编译期路由未删。已迁入的数据切片 / 跨市场 / 组合监控 / 量化 / 选股
+  五个插件视图通过独立 URL 展示，宿主旧页保留为回退。
+
+**2026-11-23 追加：G2 模拟组合九条 Tauri 命令外迁（T2 前置，页面尚未迁）**
+
+- 宿主 `src-tauri/src/commands/paper_portfolio.rs` 九条命令整体退役：文件删除，
+  `src-tauri/src/commands/mod.rs` 的 `pub mod` 同步删除；`src-tauri/src/register_commands.rs`
+  由 build.rs 重生成（九条注册归零，未手改生成物）。业务体不是复制：九条 op 全部落到
+  `axagent_analysis_engine::paper_portfolio` 的同一份权威函数，宿主命令与插件共用。
+- 接缝：`axagent-core/crates/harness/src/stock_analysis.rs` 与 stock 仓
+  `sdk/harness/src/stock_analysis.rs` 双副本新增九条默认 op（穷举测试同步）；
+  `src-tauri/src/init/stock_analysis_service.rs` 是唯一的 `Value` ↔ DTO 转换点，
+  组合详情与 active 列表复用同一个 `astock_client` 取最新价。
+- worker：`axagent-plugins/crates/plugins/src/worker.rs` 六条写 op 设 `Write` 闸、
+  三条读 op 保持 `None`（新增权限单测）；stock 仓 `plugin-stock/src/main.rs`
+  九条同名命令常量 + `stock.analysis` 显式臂 + 三张路由表负向断言清单。
+- 声明同步：`scripts/lib/plugin-contract.json`、两份 `build-plugin-bundle.mjs` 的
+  `commands[]`（六写三读权限口径与宿主 worker 一致）；前端
+  `src/stores/feature/paperPortfolioStore.ts` 九处调用切 `invokePluginCommand`，
+  `src/lib/browserMock.ts` 补九条合法空态桩，避免浏览器模式落 default 兜底白屏。
+- 产物：两处预置目录已同步，worker SHA-256
+  `739c61748aa07ba8a20a0327f0ac86aee9d257b26da4b3e906ffda2ef46f28ff`，
+  两份 packager `--check` 全 PASS（describe 握手 + sha 一致 + 命令声明自洽）。
+- 定点验证：`cargo check -p axagent-plugins` / `-p axagent` / 插件仓
+  `-p axagent-plugin-stock`、三仓定点 `clippy --all-targets -- -D warnings`、
+  `npm run typecheck`、四份前端单测（32/32）、契约双脚本、dprint、行尾检查
+  全部 EXIT=0。未跑全量 cargo/npm 门禁（Bot WIP 按用户裁定不碰）。
+- **本批边界**：只完成命令外迁；宿主 `PaperPortfolioPage` 仍在编译期路由，
+  需要下一批把页面迁进 bundle 后才能删宿主 `/invest` 入口。
+
+**2026-11-23 追加：G6 截图诊断八条 Tauri 命令外迁（T2 前置，页面尚未迁）**
+
+- 宿主 `src-tauri/src/commands/screenshot_diagnosis.rs` 的八条 `#[tauri::command]` /
+  `#[agent_command]` 全部退役；与上一批不同，**文件保留为无 State 核心**：`*_core`
+  函数仍持有 VLM 截图解析链（`provider_ctx::build_vision_context` + 两次 LLM 调用 +
+  `compute_risk_diagnosis`）与 CRUD 包装，供接缝 provider 调用，避免复制第二份算法（禁区 12）。
+  `src-tauri/src/register_commands.rs` 由 build.rs 重生成，八条注册归零（未手改生成物）；
+  mobile stub 随命令一起删除，移动端改由 trait 默认实现显式报「不支持此数据面」。
+- 接缝：harness 双副本新增八条默认 op（五写三读，穷举测试同步）；
+  `src-tauri/src/init/stock_analysis_service.rs` 仍是唯一 `Value` ↔ DTO 转换点，
+  `create_from_image` 用 provider 同源的 `db` + `master_key` 重建 `VisionContext`。
+  插件帧单帧上限 64 MB，截图 base64 走原样透传，不在 worker 侧解码。
+- worker：五条写 op 设 `Write` 闸、三条读 op 保持 `None`（新增权限单测）；
+  stock 仓 `plugin-stock/src/main.rs` 八条同名命令常量 + `stock.analysis` 显式臂 +
+  三张路由表负向断言清单。契约 `scripts/lib/plugin-contract.json`、两份
+  `build-plugin-bundle.mjs` 的 `commands[]` 同步（命令总数 443 → 451）。
+- 前端：`src/stores/feature/stock-analysis/screenshotDiagnosisStore.ts` 七处调用切
+  `invokePluginCommand`（命令命名不变），`src/lib/browserMock.ts` 补八条合法空态桩。
+- 产物：stock 独立仓 `dist/plugins/stock`、主仓 `axagent-plugins/dist/plugins/stock`
+  与 `src-tauri/plugins/bundled/stock` 三处 worker SHA-256
+  `eaaea20da9c9e796ae79c397bc2b7be11d9c7b6d18c2982138a2e3c6f35964fa`；两份 packager
+  `--check` 全 PASS（页面断言、任务源自证、describe 握手 + sha 一致）。
+- 定点验证：`cargo check -p axagent-harness/-p axagent-plugins/-p axagent` 与插件仓
+  `-p axagent-plugin-stock` 全 EXIT=0；`clippy -p axagent-plugins --all-targets` 与插件仓
+  `-p axagent-plugin-stock --all-targets` EXIT=0；`clippy -p axagent --all-targets`
+  被 Bot WIP 的两处既存 `unused import` 短路（`bot_department.rs:18` /
+  `bot_routine_runner.rs:275`），按用户裁定不碰；`npm run typecheck`、四份前端单测
+  （32/32）、`check-plugin-contract`（commands=451）、dprint、行尾、两仓 `git diff --check`
+  全绿。`check-contracts` 仍红于 6 条 Bot WIP 错误码（既存，未扩面）。
+- 遗留：`commands/stock_analysis_setup/seed_screenshot_portfolio_diagnosis.rs` 的种子
+  工作流仍按工具名引用 `screenshot_diagnosis_create_from_image`；命令退役后该工具名
+  不再注册，待工作流侧改走插件桥或 migration 重写种子时一并处理（本批不扩面）。
+- **本批边界**：只完成命令外迁；宿主 screenshot-diagnosis Tab 仍在编译期路由，
+  与 `PaperPortfolioPage` 一起留到下一批迁 bundle 后才能删宿主 `/invest` 入口。
+
+**2026-11-23 追加：T3 页面 bundle 第二批 —— 模拟组合账本 + 截图诊断**
+
+- stock 独立仓 `plugin-stock/src-web/` 新增 `paperLedger.ts` 与 `screenshotDiagnosis.ts`：
+  分别消费已声明的 `paper_portfolio_*` / `screenshot_diagnosis_*` 命名命令。沿用
+  `portfolio.ts` 的 `mountX(root, client) => cleanup`、首次点击 lazy mount、
+  generation guard 与四态渲染模式；bundle 仍是原生 TS + esbuild IIFE，不引入 React。
+- 数据面覆盖：组合 active 详情列表、详情持仓表、创建、归档；诊断最近列表、详情、
+  归档、一键转组合、截图上传（FileReader → base64 → `create_from_image`）。
+  详情/归档/转组合的 id 只从真实回执取，空串不发调用；创建与上传的必填字段缺失时
+  只渲染「未发调用」提示，不投递占位帧。
+- `src-web/main.ts` 从五个 Tab 扩到七个（新增「模拟组合账本」「截图诊断」）；
+  仍是同一个桥客户端、一帧 `skill:ready`、一次 `dispose()`，切走只隐藏 DOM。
+  `web/pages/index.html` 同步注释与两个新切片的本地 CSS 变量样式。
+- `src-web/__verify__/verify-bundle.mjs` 在 `assertScreener(withData)` 之后追加两个断言块：
+  各有默认读命令单帧、级联入参取自真实回执、写命令入参非空、全部经
+  `plugin_execute_command`；额外锁定空上传表单零帧发出。noData 场景不点新 Tab，
+  既有 10 section 计数不受影响。
+- 产物：前端 bundle SHA-256
+  `525a9ad07113802705629cc6b24ed4c4fc335e5a8f2c6100147bf1dbadb7bd77`（源 / 独立仓 dist /
+  主仓 dist / 宿主 bundled 四处一致）；worker SHA-256
+  `eaaea20da9c9e796ae79c397bc2b7be11d9c7b6d18c2982138a2e3c6f35964fa`（三处一致）；
+  两份 packager `--check` 全 PASS（页面断言 + 任务源自证 + describe/shutdown + sha）。
+- 定点验证：JSDOM bundle 验证器全绿（两个场景 + 卸载钩子）、`check-plugin-contract`
+  （commands=451）、行尾检查、两仓 `git diff --check` 全绿。未跑全量 cargo/npm 门禁
+  （Bot WIP 按用户裁定不碰）。
+- **本批边界**：宿主 `InvestHub` 的两个 Tab、`ScreenshotDiagnosisDashboard` /
+  `PaperPortfolioDashboard` 与 `/invest` 编译期路由仍在；待 workspace Tab 也迁入
+  bundle 后，再一次性删宿主静态入口（先加插件页、后删宿主页，两个可回滚提交）。
+
+**2026-11-23 追加：T3 页面 bundle 第三批 —— 股票工作区（六视图数据面）**
+
+- stock 独立仓 `plugin-stock/src-web/` 新增 `workspace.ts`：把宿主
+  `StockWorkspaceShell` 六视图的数据面映射到已声明的只读命令 —— 分析
+  （`stock_get_quote` + `stock_get_financials`）、监控（portfolio + price_alerts）、
+  交易（positions + trades）、回测（recent_analyses）、对比（analyses → detail 级联）、
+  复盘（reflections）。不复制宿主 React UI / store；股票代码由用户输入，空值零帧。
+- `src-web/main.ts` 扩到八个内部 Tab（新增「股票工作区」），仍是同一桥客户端、
+  一帧 `skill:ready`、一次 `dispose()`；首次点击才装载，切走只隐藏 DOM。
+- `src-web/__verify__/verify-bundle.mjs` 增 `assertWorkspace`：锁定分析/监控默认帧序、
+  对比级联 `analysisId` 取自列表回执（`a-1`）、空代码零帧、全帧走
+  `plugin_execute_command`。`npm run build:web && node src-web/__verify__/verify-bundle.mjs`
+  EXIT=0，十项工作区断言全 PASS。
+- 两仓 packager `--check` 全 PASS（`bpemxr46v` / `bthvh5psc`，各含 describe 握手 +
+  shutdown + sha 一致）；产物前端 bundle SHA-256
+  `25f5100b46248eaec4a5666f20aca418df312c809a69fafd4f55f3509716c5c8`（源 / 独立仓 dist /
+  主仓 dist / 宿主 bundled 四处一致），worker SHA-256
+  `eaaea20da9c9e796ae79c397bc2b7be11d9c7b6d18c2982138a2e3c6f35964fa`（三处一致）。
+
+**2026-11-23 追加：T3 宿主入口删除（先加插件页，后删宿主页）**
+
+- `src/pages/invest/routes.tsx` 的 `invest:index` 不再编译 `InvestPage` / `InvestHub`；
+  改为 `LegacyInvestRedirect`（零业务代码的兼容跳转桥）：插件启用时 `<Navigate replace>`
+  到 `pluginRouteRegistry` 投影出的 `/plugins/stock/stock-home`，未启用/未就绪时显示
+  明确降级提示（复用 `invest.title` / `plugin.pages.empty` / `nav.settings` 现有键）。
+- **保留 `/invest` 路径的理由**：`ReplayWorkbench`（`/invest/replay`）与历史调用方仍构造
+  `/invest?...` 链接；直接删路由会让它们落 404（用户报告过的导航失效形态）。
+  兼容桥不设 `nav`（侧栏股票入口由插件页投影提供）也不设 `requiresPlugin`
+  （禁用插件时旧链仍要落到降级提示，而不是 404）。`/invest/replay` 仍是宿主真页面，
+  保持 stock 门槛不变。
+- 删除 `src/pages/InvestPage.tsx`、`src/components/invest/InvestHub.tsx`；11 语言
+  `invest.tab.{screener,workspace,screenshotDiagnosis,paperPortfolio,quant}` 同步删除
+  （`invest.title` 由兼容桥复用，保留；LF + 保序全量重写）。宿主内其余股票组件文件
+  失去引用后不再进入编译图，作为本批可回滚边界保留源码，待后续清理批次处理。
+- `ContentArea` / `pageRegistry` / `navGroups` / `navRegistry` 注释同步；`domainPageRegistry`
+  单测改钉「3 条侧栏入口 + `/invest` 桥恒可达 + 回放路由随 stock 门槛消失」。
+  兼容桥自带 3 秒就绪超时：插件投影挂掉时显示中文降级结果页，不无限转圈。
+- 删除只验证已外迁宿主 `InvestHub` 的
+  `src/components/stock-analysis/__tests__/ScreenerToWorkspace.integration.test.tsx`；
+  其覆盖的「选股点击 → 工作区预填」数据面由插件 bundle 的
+  `screener.ts` / `workspace.ts` + JSDOM 验证器承接。
+- 兼容桥新增 `src/pages/invest/__tests__/LegacyInvestRedirect.test.tsx` 三态单测
+  （插件页跳转 / 未启用降级 / 3 秒超时降级），与 `domainPageRegistry` 一起 12/12 PASS。
+- 定点验证（不跑全量门禁）：`npm run typecheck` EXIT=0；`domainPageRegistry` + 布局单测
+  38/38 PASS；`check-route-reachability`（40 路由 / 33 入口）EXIT=0；
+  `check-i18n-orphan-diff`（41 变更 / 24 src）PASS 无孤儿；`check-contracts` 本轮实测
+  errors=0 / warnings=0（G 事件名 85 / H 聚合 246 处，Bot IPC 契约 errors=0）；
+  dprint / 行尾 / 两仓 `git diff --check` 全绿。
+- 遗留仍未扩面：Bot WIP 两处 clippy `unused import`（本轮按用户裁定未跑全量 clippy，
+  未复核其当前读数）；Windows 真机验收由用户提供步骤并执行。
+
+**2026-11-25 追加：插件页导航元数据声明面 + 宿主投影消费（修 404 根因后的导航异常）**
+
+- **问题**：14 个 OPC 行业包/stock 侧栏入口“同图标、硬编码、全塞一组”；`opc` 公共探针页也暴露在侧栏；CommandPalette 插件项同样写死 Puzzle。根因是 `PluginPage` manifest 只有 `id/title/entry/loading`，宿主 Sidebar/CommandPalette 把全部插件项写死 `<Puzzle>` 并只塞 `packs` 组。
+- **声明面（唯一，禁区 12）**：`PluginPage` / `RawPluginPage` / `PluginPageDto` 增加
+  `navGroup? / labelKey? / icon? / navOrder / hidden`；`manager::build_manifest_pages`
+  规范化空串为 `None`、校验 `navGroup ∈ {chat,invest,knowledge,opc,packs,tasks,system}`
+  （非法清单装载期拒绝）、透传到投影；`plugin_list_pages` 单测锁住字段存在与默认值。
+- **宿主消费**：`pluginDomainPageRoutes.ts` 透传 nav 元数据，labelKey 存在时
+  `navLabel=labelKey` 且 `navLabelIsI18nKey=true`（纯文本回退 title/pageId）；
+  `pluginRouteRegistry.ts` 的 `pluginPageNavItem` 暴露上述字段并新增
+  `getVisiblePluginPageRoutes/useVisiblePluginPageRoutes`；`navRegistry.tsx NavItem`
+  增加 `labelIsI18nKey/navGroup/navOrder`；Sidebar 按 `navGroup` 分发、`navOrder` 排序、
+  `hidden` 过滤、`resolveIconComponent(icon)` 渲染并回退 Puzzle，Tooltip/label 尊重
+  i18n key；CommandPalette 同步；`AppHeader` 插件标题按 `navLabelIsI18nKey` 决定
+  `t(navLabel)` 或直出，修复 key 直出缺口。
+- **打包声明**：主仓 `axagent-plugins/scripts/build-plugin-bundle.mjs` 为 stock-home
+  声明 `navGroup:"invest", labelKey:"nav.stockAnalysis", icon:"ChartBar", navOrder:0`；
+  `opc` 探针页 `hidden:true`；14 个 OPC 行业包统一走 `OPC_DOMAIN_PAGE_NAV +
+  opcDomainPageDecl()`，全部归 `packs`，navOrder 0..13，labelKey 复用既有 `nav.*`
+ （11 语言已齐），icon 为 lucide 名称（TrendingUp/Calculator/Users/Layers/ShoppingBag/
+  Code/ShieldCheck/MapPin/Brain/Video/Palette/GraduationCap/Gamepad2）；同步裁剪写入
+  17 个独立插件仓 `scripts/build-plugin-bundle.mjs`（独立仓 pre-existing dirty 未触碰）。
+- **清理**：`pluginRouteRegistry.ts` 删除无消费的 `Page/pageComponent` lazy map
+  （ContentArea 已直渲 `PluginPageRouteHost`）；`pluginProjectionGate` 改断言
+  `plugin-page-host` 并补齐 mock nav 元数据字段。
+- **定点验证（不跑全量门禁）**：`node node_modules/vitest/vitest.mjs run
+  src/components/layout/__tests__/pluginProjectionGate.test.tsx` 6/6 PASS；
+  `npx tsc --noEmit` EXIT=0；`cargo fmt -p axagent-plugins` 执行后 clean；
+  `cargo check -p axagent-plugins --manifest-path axagent-plugins/Cargo.toml` EXIT=0；
+  `cargo clippy -p axagent-plugins --manifest-path axagent-plugins/Cargo.toml
+  --all-targets -- -D warnings` EXIT=0；`node scripts/check-route-reachability.mjs
+  --selftest` PASS；`node scripts/check-route-reachability.mjs --strict` EXIT=0
+  （41 路由 / 34 入口，仅 2 条既有 llm-wiki inline-only 提示）。
+- **待验收**：Windows 真机确认插件页直达不 404、侧栏分组与图标正确、opc 探针页
+  不显示、启停后入口变化；是否需要为“分组/图标/hidden/labelIsI18nKey”补
+  `ci-check.mjs + ci.yml` 同源机械门禁，待后续裁定。

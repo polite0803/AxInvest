@@ -8,7 +8,7 @@
 //! `run_assignment_inner` + `RoutineTurnExecutor`。
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axagent_dao::DatabaseConnection;
@@ -38,7 +38,7 @@ type StepScheduler = dyn Fn(String) + Send + Sync;
 
 static STEP_SCHEDULER: OnceLock<Box<StepScheduler>> = OnceLock::new();
 static CONTEXT_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-static NOTIFIERS: OnceLock<Mutex<HashMap<String, Arc<Notify>>>> = OnceLock::new();
+static NOTIFIERS: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<Notify>>>> = OnceLock::new();
 
 fn context_lock() -> &'static tokio::sync::Mutex<()> {
     CONTEXT_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -50,8 +50,8 @@ pub fn step_scheduler() -> Option<&'static StepScheduler> {
 }
 
 fn notifier(run_id: &str) -> Arc<Notify> {
-    let map = NOTIFIERS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = map.lock().expect("notifier lock poisoned");
+    let map = NOTIFIERS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()));
+    let mut guard = map.blocking_lock();
     guard.entry(run_id.to_string()).or_insert_with(|| Arc::new(Notify::new())).clone()
 }
 
@@ -63,6 +63,7 @@ fn emit_run(app: Option<&AppHandle>, run: &BotWorkflowRun) {
 
 fn code_in(raw: &str) -> Option<&'static str> {
     const CODES: &[&str] = &[
+        bot_err::COST_QUOTA_EXCEEDED,
         bot_err::QUOTA_EXCEEDED,
         bot_err::WORKFLOW_STEP_BOT_MISSING,
         bot_err::WORKFLOW_MEMBER_CHANGED,
@@ -190,7 +191,7 @@ pub async fn start_run(
             &e,
         )
         .await?;
-        return Ok(run_repo::get_run(db, run_id).await.map_err(|e| e.to_string())?);
+        return run_repo::get_run(db, run_id).await.map_err(|e| e.to_string());
     }
     // P4 配额（ADR-P4-8）：run 创建时解析一次，登记到 AssignmentContext；
     // 排除本 run 自身后复核部门同时在跑数（手工触发已在命令层查过一次，
@@ -200,9 +201,31 @@ pub async fn start_run(
         Err(e) => {
             fail_run(db, app.as_ref(), &run, code_in(&e).unwrap_or(bot_err::QUOTA_EXCEEDED), &e)
                 .await?;
-            return Ok(run_repo::get_run(db, run_id).await.map_err(|e| e.to_string())?);
+            return run_repo::get_run(db, run_id).await.map_err(|e| e.to_string());
         },
     };
+
+    // P5-b B3：编排 run 新建前熔断（ADR-P5-3），与 P4 配额并列、不合并。
+    // 熔断按 workflow 关联的 bot；无明确 bot_id（多 bot 或无步骤）则跳过并说明。
+    let distinct_bots: std::collections::BTreeSet<&str> =
+        workflow.steps.iter().map(|s| s.bot_id.as_str()).filter(|id| !id.is_empty()).collect();
+    if distinct_bots.len() == 1 {
+        let target_bot = *distinct_bots.iter().next().unwrap_or(&"");
+        if let Err(cost_err) = crate::bot_cost_quota::ensure_bot_cost_quota_ok(db, target_bot).await {
+            let code =
+                code_in(&cost_err).unwrap_or(bot_err::COST_QUOTA_EXCEEDED);
+            fail_run(db, app.as_ref(), &run, code, &cost_err).await?;
+            return run_repo::get_run(db, run_id).await.map_err(|e| e.to_string());
+        }
+    } else {
+        tracing::info!(
+            run_id = %run.id,
+            workflow_id = %workflow.id,
+            bot_count = distinct_bots.len(),
+            "P5 cost quota 熔断跳过：workflow 无明确单一 bot_id（不臆造）"
+        );
+    }
+
     crate::bot_quota::AssignmentContext::install(&run.id, limits);
 
     let anchor = axagent_dao::repo::message::create_message(

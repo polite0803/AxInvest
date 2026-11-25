@@ -333,7 +333,13 @@
 | `P4/IPC-P4.md` | 参考 | P4 IPC 冻结稿：6 新命令 + 改 agent_respond_ask（签名不变）、bot-input-request-updated 事件、5 码、DTO、审计扩展与门禁原文。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
 | `P4/I18N-KEYS-P4.md` | 参考 | P4 权威 i18n 键清单：5 码 + bot.quota.* 20 键 + bot.input.* 14 键 = 429 条 11 语言译文，落盘顺序与文案约束。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
 | `P4/BASELINE-P4.md` | 参考 | P4 启动前 18 条门禁基线读数：clean HEAD 13 绿 / 5 红、存量红归因、主检出并行 WIP 对照与「不新增红」阈值。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
-| `P4/ACCEPTANCE-P4.md` | 参考 | P4 门禁实测台账：9 条 fixme 全部点亮跑绿（0 skipped）、PLAN-P4 §9.2 全量命令 exit 与读数、§9.1 七条 PASS 判定与「P4 可收口」结论。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P4/ACCEPTANCE-P4.md` | 参考 | P4 门禁实测台账：9 条 fixme 全部点亮跑绿（0 skipped）、18+1 条门禁 exit/读数、PLAN-P4 §9.1 七条 PASS 判定与「P4 可收口」结论。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P5/GAP-P5.md` | 参考 | P5 差距分析：18 条 A/B/C 判定（B 费用/Token 配额 14 条、C1 每 Bot 技能归属 14 条）；A/C3 不进本批；F-1/F-2 外部事实待核实。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P5/ADR-P5.md` | 参考 | P5 8 条决策：两条独立切片（B+C1）、append-only 账本、事后熔断（只拦新建）、费用是估算、Bot 内优先技能可见性、preset 整包原子+白名单、A 不进本批、执行器不回传签名不变。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P5/MODEL-P5.md` | 参考 | P5 数据模型：新增 bot_usage_ledger / bot_cost_quotas / bot_skill_bindings 三表；既有表零变更；EXPECT_MULTI 38→40、total 83→85；回滚=删实体注册+SCHEMA 行。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P5/IPC-P5.md` | 参考 | P5 IPC 冻结稿：8 新命令 + 改 AssignmentTurnExecutor（新增 execute_with_usage，默认实现兜旧）、4 码、8 DTO、审计扩展与门禁原文。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P5/I18N-KEYS-P5.md` | 参考 | P5 权威 i18n 键清单：4 码 + bot.usage.* 17 键 + bot.skills.* 15 键 = 396 条译文（11 语言）；BOT_I18N_KEYS 185→217；落盘顺序与文案约束。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
+| `P5/PLAN-P5.md` | 计划 | P5 冻结计划：B 费用/Token 配额 + C1 每 Bot 技能归属两条独立切片；D1–D6 已裁决；B1–B5/C1-1–C1-4 拆卡、12–15 人日、收口七条与门禁原文。 | active | 2026-11-25 | 3.1.0 | 本地原创 |
 | `PROPOSAL-computer-use-a11y-semantic.md` | 方案 | computer-use 从「截图+坐标」迁移到「无障碍树语义化」：三平台 UIA/AX/AT-SPI2 + 语义动作 + 清除 xcap/pipewire 链。 | approved | 2026-11-17 | v3.0.0+（未定版，待确认） | 本地原创 |
 | `agent-runtime.md` | 说明书 | 这条链路把「一次对话 / 一次工作流节点」落到可执行动作：会话持有上下文与事件，工具注册表把工具统一成可校验、可审计、可审批的执行单元，编排器决定哪些工具能并行；上下文超预算时由压… | active | 2026-11-04 | v3.0.0 | 本地原创 |
 | `workflow-schema.md` | 参考 | 工作流节点 Schema 定义（供编辑器与校验共用） | active | 2026-10-30 | v2.9.9 | 本地原创 |
@@ -760,6 +766,12 @@
 | `P4/I18N-KEYS-P4.md` | Bot P4 i18n 权威键清单 | 错误码 ×5 + 前端 34 键 = 429 条译文（11 语言）；BOT_I18N_KEYS 151→185；落盘顺序与文案约束。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P4/IPC-P4.md` |
 | `P4/BASELINE-P4.md` | Bot P4 门禁基线读数（clean HEAD） | 18 条 §9.2 命令逐条 exit/摘要；③⑧⑮⑯⑰ 五项归因；主检出 WIP 对照；收口比对阈值表。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P4/PLAN-P4.md` `P4/IPC-P4.md` |
 | `P4/ACCEPTANCE-P4.md` | Bot 集成 P4 门禁验收台账 | 9 条 fixme 处置（全部点亮，越界文案口径已裁定）、18+1 条门禁 exit/读数、PLAN-P4 §9.1 七条逐项 PASS 与收口结论、未验证边界。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P4/PLAN-P4.md` `P4/IPC-P4.md` |
+| `P5/GAP-P5.md` | Bot 集成 P5 差距分析 | 18 条 A/B/C 判定（B 费用/Token 配额 14 条、C1 每 Bot 技能归属 14 条）；A/C3 不进本批；F-1/F-2 外部事实待核实。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P5/PLAN-P5.md` `P5/SCOPE-OPTIONS-P5.md` |
+| `P5/ADR-P5.md` | Bot 集成 P5 架构决策记录（8 条） | 两条独立切片（B+C1）、append-only 账本、事后熔断（只拦新建）、费用是估算、Bot 内优先技能可见性、preset 整包原子+白名单、A 不进本批、执行器不回传签名不变。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P5/MODEL-P5.md` `P5/IPC-P5.md` |
+| `P5/MODEL-P5.md` | Bot P5 数据模型（3 新表，既有表零变更） | bot_usage_ledger / bot_cost_quotas / bot_skill_bindings；既有表零变更；MULTI_COL_INDEXES +2、EXPECT_MULTI 38→40、total 83→85；回滚=删实体注册+SCHEMA 行。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P5/ADR-P5.md` `P5/IPC-P5.md` |
+| `P5/IPC-P5.md` | Bot P5 IPC 契约（冻结稿） | 8 新命令 + AssignmentTurnExecutor 新增 execute_with_usage（默认实现兜旧）；4 码；8 DTO；审计扩展与门禁原文。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P5/MODEL-P5.md` `P5/PLAN-P5.md` |
+| `P5/I18N-KEYS-P5.md` | Bot P5 i18n 权威键清单 | 错误码 ×4 + bot.usage.* 17 键 + bot.skills.* 15 键 = 396 条译文（11 语言）；BOT_I18N_KEYS 185→217；落盘顺序与文案约束。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P5/IPC-P5.md` |
+| `P5/PLAN-P5.md` | PLAN：Bot 集成的 P5 纵向切片（frozen） | B 费用/Token 配额 + C1 每 Bot 技能归属两条独立切片；D1–D6 已裁决；B1–B5/C1-1–C1-4 拆卡、12–15 人日、收口七条与门禁原文。 | active | 2026-11-25 | 3.1.0 | 运行时与智能体 | 本地原创 | `P5/ADR-P5.md` `P5/MODEL-P5.md` `P5/IPC-P5.md` |
 | `dependency-graph.md` | AxAgent 仓库依赖图与拆分分析 | 仓库依赖图与按技术层拆分可行性分析（参考） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `dependency-matrix.md` | AxAgent Crate 精确依赖矩阵（实测） | 逐 crate 读取 Cargo.toml 得到的精确依赖矩阵（2026-10-31 实测） | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 |  |
 | `gate-coverage-ledger.md` | 门禁覆盖台账（gate-coverage-ledger） | CI / 本地门禁覆盖面台账与补齐进度 | active | 2026-10-31 | v3.0.0 | 构建与 CI | 本地原创 | `PLAN-declarative-schema-sync.md` |

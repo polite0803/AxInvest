@@ -107,7 +107,7 @@ pub async fn update_department(
         am.name = Set(name.clone());
     }
     if let Some(description) = &patch.description {
-        am.description = Set(description.clone().unwrap_or_else(|| String::new()));
+        am.description = Set(description.clone().unwrap_or_default());
     }
     if let Some(chief) = &patch.chief_bot_id {
         am.chief_bot_id = Set(chief.clone());

@@ -13,13 +13,11 @@
  *
  * B. 页面证据（A4 已落盘，2026-11-25 复核 HEAD 749203835）：
  *    BotsPage 部门弹窗里的 BotQuotaPanel（默认值提示 / 越界预校验 / 保存回显 / 恢复默认）。
- *    ✔ 「默认值 + isDefault 提示」与「保存回显 + 恢复默认」两条已点亮为 `test`
- *      （testid 全齐：bot-quota-panel、六项输入、save/reset/default-hint/error、
- *       bot-department-quota-open）。
- *    ✘ 「越界前端预校验 + 后端码映射」保留 `test.fixme`，原因见该用例上方注释：
- *      实现只渲染本地化字段标签，不含断言要求的原始字段名；且前端预校验在提交前拦截，
- *      UI 无路径把后端 BOT_QUOTA_INVALID 暴露到 bot-quota-error。待契约/产品裁决后再点亮，
- *      不迁就改断言。
+ *    ✔ 三条页面用例全部点亮为 `test`（testid 全齐：bot-quota-panel、六项输入、
+ *       save/reset/default-hint/error、bot-department-quota-open）。
+ *      越界用例按 2026-11-25 架构线裁定：预校验文案用本地化字段标签，不暴露内部键名；
+ *      后端 BOT_QUOTA_INVALID 的 detail 透传改由组件测试
+ *      `BotP4Panels.test.tsx` 钉住（UI 结构上不会把越界值提交给后端）。
  *
  * 未在本文件覆盖：cron 触发超配额 → history 失败（调度器闭包在 init/services.rs，
  * 浏览器面无入口）；该断言落在 `src-tauri/tests/bot_quota.rs` 的 cron_gate 用例。
@@ -281,7 +279,7 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
   });
 });
 
-// ── B. 页面证据（A4 未落地：fixme 显式待办） ────────────────────────────
+// ── B. 页面证据（A4 已落盘并全部点亮） ──────────────────────────────────
 
 test.describe("P4-a 配额 · 部门弹窗面板", () => {
   test("UI：打开部门配额面板，6 项默认值来自 get 且显示 isDefault 提示", async ({ page }) => {

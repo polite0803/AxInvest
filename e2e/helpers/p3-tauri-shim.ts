@@ -1,20 +1,47 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * P3 e2e 的 IPC 替身：只在测试页注入，不改 src/ 业务实现。
+ * P3/P4 e2e 的 IPC 替身：只在测试页注入，不改 src/ 业务实现。
  * browserMockBots.ts 只实现 P1/P2 命令，P3 的 8 条编排命令在浏览器模式没有数据面。
  * 这里按 IPC-P3.md §2/§3 的冻结 DTO 与错误码做最小状态机，经 Tauri IPC 入口驱动真实页面。
  * 边界：这是 UI ↔ IPC 契约层 e2e，不替代 Rust 运行时状态机的证据。
+ *
+ * P4 扩展（docs/bot-integration/P4/IPC-P4.md §1/§3 冻结契约、ADR-P4 D2/D3）：
+ *   · 6 条新命令：get/set/reset_bot_department_quota、list/answer/cancel_bot_input_request；
+ *     以及 agent_respond_ask 的 P4 分支（命中 askId 时转 answered，否则保持旧行为）；
+ *   · 事件 bot-input-request-updated（pending/answered/expired/cancelled 各发一次）；
+ *   · 部门配额只收紧不放松：ownerScope='department' 的定义超配额 → BOT_QUOTA_EXCEEDED:字段；
+ *     部门在跑编排数达 maxConcurrentRuns → 触发被拒（ADR-P4 D3「拒绝不裁剪」）；
+ *   · 未落库部门返回 MODEL-P4 §2.1 默认值且 isDefault=true（与后端 get 语义对齐）；
+ *   · 测试钩子：__P3_TEST__.seedInputRequest（模拟 B2 落 pending 行 + 事件）、
+ *     __P3_TEST__.expireInputRequests（模拟 B2 启动清扫/超时转 expired）。
  */
 export interface P3ShimBot { id: string; name: string; soul?: string; approvalMode?: string; }
-export interface P3ShimSeed { bots: P3ShimBot[]; }
+export interface P3ShimDepartment { id: string; name: string; chiefBotId?: string | null; }
+export interface P3ShimSeed { bots: P3ShimBot[]; departments?: P3ShimDepartment[]; }
 
 export function installP3Shim(seed: P3ShimSeed): void {
   const w = window as any;
+  // 常量必须定义在函数体内：Playwright 的 addInitScript 只序列化函数源码，
+  // 模块级标识符在页面上下文里不存在（首轮实测 'P4_QUOTA_DEFAULTS is not defined'）。
+  /** MODEL-P4 §2.1 bot_department_quotas 默认值与 CHECK 范围（单一口径来源）。 */
+  const P4_QUOTA_DEFAULTS = {
+    maxConcurrency: 2, totalTimeoutSecs: 900, maxSteps: 12,
+    maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 2,
+  };
+  const P4_QUOTA_RANGES: Record<string, [number, number]> = {
+    maxConcurrency: [1, 4], totalTimeoutSecs: [60, 3600], maxSteps: [1, 12],
+    maxInFlightPerDepth: [1, 4], stepTimeoutSecs: [30, 900], maxConcurrentRuns: [1, 8],
+  };
+  /** ADR-P4 D5：pending 请求 300s 过期。 */
+  const P4_INPUT_EXPIRY_MS = 300_000;
+  const P4_INPUT_STATUSES = ["pending", "answered", "expired", "cancelled"];
+
   const now = () => Date.now();
   const uid = (prefix: string) => prefix + "-" + Math.random().toString(36).slice(2, 10);
   const state = {
     workflows: [] as any[], runs: [] as any[], assignments: [] as any[],
     schedules: [] as any[], receipts: [] as any[],
+    quotas: [] as any[], inputRequests: [] as any[],
     log: [] as Array<{ cmd: string; args: any; at: number }>,
   };
   const listeners = new Map<string, Set<number>>();
@@ -33,6 +60,115 @@ export function installP3Shim(seed: P3ShimSeed): void {
   const fail = (code: string): never => { throw new Error(code); };
   const terminals = new Set(["completed", "failed", "cancelled"]);
   const active = (a: any) => !terminals.has(a.status);
+
+  // ---------- P4-a 部门配额 ----------
+  const departmentExists = (id: string) =>
+    (seed.departments ?? []).some((d) => d.id === id);
+
+  const quotaFor = (departmentId: string): any => {
+    const row = state.quotas.find((q: any) => q.departmentId === departmentId);
+    return row ?? {
+      departmentId, ...P4_QUOTA_DEFAULTS, isDefault: true, updatedAt: null,
+    };
+  };
+
+  /** ADR-P4 D3：超限直接拒绝，错误码带字段名（不裁剪为上限）。 */
+  const quotaViolation = (field: string, defined: number, ceiling: number): never => {
+    const err = new Error("BOT_QUOTA_EXCEEDED:" + field) as Error & {
+      detail?: string; param?: string; code?: string;
+    };
+    err.code = "BOT_QUOTA_EXCEEDED";
+    err.param = field;
+    err.detail = field + ": 定义值 " + defined + " 超过部门配额上限 " + ceiling;
+    throw err;
+  };
+
+  /** 定义层校验：仅 ownerScope='department' 受配额约束（ADR-P4 D2）。 */
+  const checkDefinition = (wf: any): void => {
+    if (wf.ownerScope !== "department" || !wf.departmentId) return;
+    const quota = quotaFor(wf.departmentId);
+    const steps = (wf.steps ?? []) as any[];
+    if (steps.length > quota.maxSteps) quotaViolation("maxSteps", steps.length, quota.maxSteps);
+    if (wf.maxConcurrency > quota.maxConcurrency) {
+      quotaViolation("maxConcurrency", wf.maxConcurrency, quota.maxConcurrency);
+    }
+    if (wf.totalTimeoutSecs > quota.totalTimeoutSecs) {
+      quotaViolation("totalTimeoutSecs", wf.totalTimeoutSecs, quota.totalTimeoutSecs);
+    }
+    for (const step of steps) {
+      // MODEL-P4 §3.1：步骤级超时缺省继承工作流总预算，因此仅在显式给出时比较。
+      if (typeof step?.stepTimeoutSecs === "number" &&
+          step.stepTimeoutSecs > quota.stepTimeoutSecs) {
+        quotaViolation("stepTimeoutSecs", step.stepTimeoutSecs, quota.stepTimeoutSecs);
+      }
+    }
+  };
+
+  /** 运行层校验：部门在跑编排数达上限即拒绝。 */
+  const checkRunCapacity = (wf: any, excludeRunId?: string | null): void => {
+    if (wf.ownerScope !== "department" || !wf.departmentId) return;
+    const quota = quotaFor(wf.departmentId);
+    const deptIds = new Set(
+      state.workflows
+        .filter((x: any) => x.ownerScope === "department" && x.departmentId === wf.departmentId)
+        .map((x: any) => x.id),
+    );
+    const running = state.runs.filter(
+      (r: any) => deptIds.has(r.workflowId) && !terminals.has(r.status) && r.id !== excludeRunId,
+    ).length;
+    if (running >= quota.maxConcurrentRuns) {
+      quotaViolation("maxConcurrentRuns", running + 1, quota.maxConcurrentRuns);
+    }
+  };
+
+  // ---------- P4-b 输入请求 ----------
+  const inputDto = (raw: any): any => {
+    const createdAt = raw.createdAt ?? now();
+    return {
+      id: raw.id ?? uid("input"), askId: raw.askId ?? uid("ask"),
+      conversationId: raw.conversationId ?? "",
+      botId: raw.botId ?? null,
+      workflowRunId: raw.workflowRunId ?? null,
+      assignmentId: raw.assignmentId ?? null,
+      origin: raw.origin ?? "person",
+      question: raw.question ?? "",
+      options: raw.options ?? [],
+      status: raw.status ?? "pending",
+      answer: raw.answer ?? null,
+      answeredAt: raw.answeredAt ?? null,
+      expiresAt: raw.expiresAt ?? createdAt + P4_INPUT_EXPIRY_MS,
+      createdAt, updatedAt: raw.updatedAt ?? createdAt,
+    };
+  };
+
+  const findInput = (requestId: string) =>
+    state.inputRequests.find((x: any) => x.id === requestId);
+
+  // 事件 payload 必须是**快照**：真 Tauri 每次事件都会序列化，消费方拿到的是独立对象；
+  // 若直接 emit 可变行的引用，测试末尾读事件数组会看到所有事件都是最后一态（实测踩过）。
+  const inputSnapshot = (row: any) => ({ ...row, options: [...(row.options ?? [])] });
+
+  const seedInputRequest = (input: any): any => {
+    const row = inputDto(input);
+    state.inputRequests.push(row);
+    emit("bot-input-request-updated", inputSnapshot(row));
+    return row;
+  };
+
+  const settleInput = (row: any, status: string, patch: any = {}): any => {
+    row.status = status;
+    Object.assign(row, patch, { updatedAt: now() });
+    emit("bot-input-request-updated", inputSnapshot(row));
+    return { ...row };
+  };
+
+  const expireInputRequests = (at: number = now()): any[] => {
+    const hit = state.inputRequests.filter(
+      (x: any) => x.status === "pending" && x.expiresAt <= at,
+    );
+    for (const row of hit) settleInput(row, "expired");
+    return hit;
+  };
 
   const makeAssignment = (input: any): any => {
     const parent = input.parentAssignmentId
@@ -114,7 +250,88 @@ export function installP3Shim(seed: P3ShimSeed): void {
         createdAt: 1700000000000, updatedAt: 1700000000000,
       }));
       case "get_bot": return seed.bots.find((b) => b.id === args?.botId) ?? null;
-      case "list_bot_departments": return [];
+      case "list_bot_departments": return (seed.departments ?? []).map((d) => ({
+        id: d.id, name: d.name, chiefBotId: d.chiefBotId ?? null,
+      }));
+
+      // ---------- P4-a：部门配额 3 命令（IPC-P4 §1） ----------
+      case "get_bot_department_quota": {
+        const departmentId = args?.departmentId;
+        if (!departmentId || !departmentExists(departmentId)) fail("BOT_DEPARTMENT_NOT_FOUND");
+        return quotaFor(departmentId);
+      }
+      case "set_bot_department_quota": {
+        const input = args?.input ?? {};
+        const departmentId = input.departmentId;
+        if (!departmentId || !departmentExists(departmentId)) fail("BOT_DEPARTMENT_NOT_FOUND");
+        const next: any = { departmentId, isDefault: false, updatedAt: now() };
+        for (const field of Object.keys(P4_QUOTA_RANGES)) {
+          const value = input[field];
+          if (value === undefined) continue;
+          const [min, max] = P4_QUOTA_RANGES[field];
+          if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+            const err = new Error("BOT_QUOTA_INVALID:" + field) as Error & {
+              code?: string; param?: string;
+            };
+            err.code = "BOT_QUOTA_INVALID"; err.param = field;
+            throw err;
+          }
+          next[field] = value;
+        }
+        const index = state.quotas.findIndex((q: any) => q.departmentId === departmentId);
+        const merged = {
+          ...P4_QUOTA_DEFAULTS, ...(index >= 0 ? state.quotas[index] : {}), ...next,
+        };
+        if (index >= 0) state.quotas[index] = merged; else state.quotas.push(merged);
+        return merged;
+      }
+      case "reset_bot_department_quota": {
+        const departmentId = args?.departmentId;
+        if (!departmentId || !departmentExists(departmentId)) fail("BOT_DEPARTMENT_NOT_FOUND");
+        state.quotas = state.quotas.filter((q: any) => q.departmentId !== departmentId);
+        // IPC-P4 §1：reset 签名为 Result<(), ErrorResponse>，幂等（无行也 Ok），前端保存后自行 get。
+        return undefined;
+      }
+
+      // ---------- P4-b：输入请求 3 命令（IPC-P4 §1） ----------
+      case "list_bot_input_requests": {
+        const f = args?.filter ?? args ?? {};
+        if (f.status != null && !P4_INPUT_STATUSES.includes(f.status)) fail("ERR_VALIDATION");
+        return state.inputRequests
+          .filter((x: any) => {
+            if (f.conversationId && x.conversationId !== f.conversationId) return false;
+            if (f.botId && x.botId !== f.botId) return false;
+            if (f.status && x.status !== f.status) return false;
+            if (f.workflowRunId && x.workflowRunId !== f.workflowRunId) return false;
+            return true;
+          })
+          .slice()
+          .sort((a: any, b: any) => b.createdAt - a.createdAt);
+      }
+      case "answer_bot_input_request": {
+        const row = findInput(args?.requestId);
+        if (!row) fail("BOT_INPUT_REQUEST_NOT_FOUND");
+        if (row.status !== "pending") fail("BOT_INPUT_REQUEST_NOT_PENDING");
+        const answer = typeof args?.answer === "string" ? args.answer : "";
+        if (answer.trim() === "") fail("BOT_INPUT_ANSWER_EMPTY");
+        return settleInput(row, "answered", { answer, answeredAt: now() });
+      }
+      case "cancel_bot_input_request": {
+        const row = findInput(args?.requestId);
+        if (!row) fail("BOT_INPUT_REQUEST_NOT_FOUND");
+        if (row.status !== "pending") fail("BOT_INPUT_REQUEST_NOT_PENDING");
+        return settleInput(row, "cancelled");
+      }
+      // IPC-P4 §5：签名不变（askId/answer）；命中 P4 行时转 answered，否则保持 P2 行为（undefined）。
+      case "agent_respond_ask": {
+        const row = state.inputRequests.find((x: any) => x.askId === args?.askId);
+        if (!row) return undefined;
+        if (row.status !== "pending") fail("BOT_INPUT_REQUEST_NOT_PENDING");
+        const answer = typeof args?.answer === "string" ? args.answer : "";
+        if (answer.trim() === "") fail("BOT_INPUT_ANSWER_EMPTY");
+        return settleInput(row, "answered", { answer, answeredAt: now() });
+      }
+
       case "list_bot_assignments": {
         const f = args ?? {};
         return state.assignments.filter((a: any) => {
@@ -149,6 +366,7 @@ export function installP3Shim(seed: P3ShimSeed): void {
       case "list_bot_workflows": return state.workflows;
       case "create_bot_workflow": {
         const wf = wfDto(args?.input ?? {});
+        checkDefinition(wf); // ADR-P4 D2/D3：定义超配额即拒绝，不写库
         state.workflows.push(wf);
         return wf;
       }
@@ -160,6 +378,7 @@ export function installP3Shim(seed: P3ShimSeed): void {
         }
         const patch = { ...args };
         delete patch.id;
+        checkDefinition({ ...wf, ...patch });
         Object.assign(wf, patch, { updatedAt: now() });
         return wf;
       }
@@ -181,6 +400,8 @@ export function installP3Shim(seed: P3ShimSeed): void {
         if (!args || !("workflowId" in args) || !("requesterConversationId" in args)) fail("ERR_VALIDATION");
         const wf = state.workflows.find((x: any) => x.id === args.workflowId);
         if (!wf) fail("BOT_WORKFLOW_NOT_FOUND");
+        checkDefinition(wf);
+        checkRunCapacity(wf); // ADR-P4 D3：部门在跑编排数达上限即拒绝
         const run = runDto(wf, args);
         state.runs.push(run);
         for (const [index, step] of wf.steps.entries()) {
@@ -258,5 +479,8 @@ export function installP3Shim(seed: P3ShimSeed): void {
   w.__P3_TEST__ = {
     state, emit, invoke,
     listeners: () => Object.fromEntries([...listeners].map(([k, v]) => [k, [...v]])),
+    // P4 钩子：模拟 B2 落库 / B2 超时清扫，让 UI 在没有 Rust 运行时的浏览器模式下也能被点亮。
+    seedInputRequest, expireInputRequests,
+    quotaFor,
   };
 }

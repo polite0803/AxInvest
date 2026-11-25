@@ -121,3 +121,30 @@ FAIL src/pages/__tests__/BotsPage.test.tsx (7 tests | 7 failed)
 - 18 条命令在冻结 HEAD 上：**13 条绿**，5 条红（③⑧⑮⑯⑰），其中 ③⑰ 是 P4 产物缺失（本轮骨架落盘后应转绿），⑧⑮ 是非 Bot 存量红，⑯ 是冻结命令缺陷 + 11 条 Bot 前端存量红。
 - 本轮随之落盘（独立提交）：`src-tauri/tests/bot_quota.rs`、`src-tauri/tests/bot_input.rs`（可编译，pending 场景以 `#[cfg(any())]` 屏蔽，点亮方式写在文件头）、`e2e/helpers/p3-tauri-shim.ts` 扩展（6 命令 + `bot-input-request-updated`）、`e2e/bot-quota.spec.ts`、`e2e/bot-needs-input.spec.ts`（场景 `test.fixme`，待 A4/B4 UI 落地点亮）。落盘后 ③ 预期 exit 0、⑰ 预期 exit 0（skipped），其余读数不得变化。
 - 待实现转绿的断言清单见两份 Rust 骨架文件头与 e2e spec 头注释；未点亮项一律在 `ACCEPTANCE-P4.md` 显式列出，不冒充已覆盖。
+
+## 7. 骨架落盘后复测（同日，主检出）
+
+落盘内容（本轮，独立提交于本文件之后）：
+
+- 新增 `src-tauri/tests/bot_input.rs`：B5 骨架，当前仅 1 个可运行守卫，`mod p4b` 由 `#[cfg(any())]` 屏蔽，点亮步骤写在文件头；
+- 追加 `src-tauri/tests/bot_quota.rs` 2 个用例（A2 原有 7 个用例由后端随 A2 落盘，本轮只补齐 A5 缺口）；
+- 扩展 `e2e/helpers/p3-tauri-shim.ts`：6 条 P4 命令 + `bot-input-request-updated` + `agent_respond_ask` P4 分支 + 配额只收紧；
+- 新增 `e2e/bot-quota.spec.ts`、`e2e/bot-needs-input.spec.ts`：契约自检 16 条可跑，A4/B4 页面证据 9 条 `test.fixme`。
+
+| # | 命令原文 | exit | 关键输出 |
+|---|---|---|---|
+| ③ | `__TAURI_WORKSPACE__=true cargo test --manifest-path src-tauri/Cargo.toml --test bot_quota --test bot_input` | 0 | `bot_input`: `1 passed`（`frozen_expiry_matches_p3_dispatch_cap`）；`bot_quota`: `9 passed`（后端 A2 的 7 条 + 本轮 2 条：`step_timeout_violation_names_the_offending_step`、`cron_gate_rejects_before_run_creation_across_workflows`），`0 failed` |
+| ⑰ | `npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert '@heavy' --timeout=120000 --reporter=list` | 0 | `16 passed; 9 skipped`（skipped 全部是 `test.fixme`：A4 面板 3 条、B4 卡片/徽章 6 条） |
+| ⑥ | `npm run typecheck` | 0 | 无错（`src` 1599 文件） |
+
+结论：③⑰ 从「P4 产物缺失」转为绿，§4 阈值表对应两行的允许形态已达成；⑧⑮⑯ 的存量红未因本轮改动变化（本轮只动 `e2e/`、`src-tauri/tests/`、`docs/`）。
+
+过程中的一次真实红（记录以备复现）：两 spec 首跑 14 红，根因都在**替身自身**而非产品：
+`page.addInitScript` 只序列化函数源码，模块级常量在页面上下文未定义（`P4_QUOTA_DEFAULTS is not defined`）；
+事件 payload 直接 emit 了可变行引用，测试末尾读到的历史事件全被后续状态覆盖。
+两者修复后才绿——说明这批契约自检确实能拦住替身与冻结契约不符，而不是写了就算通过。
+
+尚未有证据的项（不得计入已覆盖）：
+- A5「cron 触发超限 → history 失败」只有**门禁之前**的可观测部分（`cron_gate_rejects_before_run_creation_across_workflows`）；history 记 `failed` 走 `init/services.rs` 调度器闭包内的既有错误路径，需后端抽出 seam 或端到端启动调度器才能断言。
+- B5 ①③⑤ 与 ⑥ 的「无活 sender」分支分别依赖 B2 交互桥与 B3 命令层，待其落盘后由各自测试锁定，`bot_input.rs` 文件头已列归属表。
+

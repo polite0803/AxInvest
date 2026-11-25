@@ -3,6 +3,12 @@
 //! P4 A2 配额解析集成测试（PLAN-P4 §6.3 测试①–⑤、⑦）：
 //! 默认等于 P3、min 生效、超额拒绝带字段、部门并发 run 上限、两部门互不影响、
 //! 删部门清配额、每层在途按配额生效。
+//!
+//! 门禁侧补充（A5 缺口，2026-11-25）：
+//! - `step_timeout_violation_names_the_offending_step`：单步超时必须点名越界步骤；
+//! - `cron_gate_rejects_before_run_creation_across_workflows`：测试⑥ 可观测部分——
+//!   部门容量跨编排共享，cron 预检（`check_run_allowed`）在 `create_run` 之前拒绝且
+//!   不留 run 行；「history 记 failed」属调度器闭包内既有错误路径，本文件无法驱动。
 
 use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::bot as bot_repo;
@@ -317,4 +323,62 @@ async fn per_depth_cap_follows_run_quota() {
         .expect_err("同层第二个应被配额 1 拒绝");
     assert!(err.contains("BOT_DELEGATE_BUSY"), "{err}");
     AssignmentContext::remove("run-depth");
+}
+
+/// ③ 补充：单步超时的拒绝必须点名具体步骤（ADR-P4 D3 的 detail 可定位要求），
+/// 否则运维只能看到「某一步超了」而无法知道是哪一步。
+#[tokio::test]
+async fn step_timeout_violation_names_the_offending_step() {
+    let h = pool().await;
+    let db = &h.conn;
+    let dept = make_department(db, "点名部门").await;
+    set_quota(db, &dept, 2, 900, 12, 2, 60, 2).await;
+    let bot = make_bot(db, "研究员").await;
+
+    let steps = vec![step("collect", &bot, 30), step("analyze", &bot, 600)];
+    let err = check_definition_allowed(db, &dept, 2, 900, &steps)
+        .await
+        .expect_err("analyze 单步 600s 超过配额 60s");
+    assert!(err.contains("stepTimeoutSecs"), "{err}");
+    assert!(err.contains("步骤 analyze"), "detail 应点名越界步骤: {err}");
+    assert!(!err.contains("步骤 collect"), "未越界的步骤不应出现在 detail: {err}");
+}
+
+/// ⑥ cron/定时触发前的同一道门（PLAN-P4 §6.3 A2 测试⑥）。
+///
+/// `init/services.rs` 的 `task_type=="bot_workflow"` 分支在
+/// `create_bot_workflow_persistent_conversation + create_run` 之前调用的就是
+/// `check_run_allowed(db, &workflow, None)`。本测试锁定其中可观测的部分：
+/// **容量按部门跨编排共享**——兄弟编排占满 `max_concurrent_runs` 时，cron 目标
+/// 编排的预检必须失败，且不得留下任何 run 行。
+///
+/// 边界（如实记录，不伪造覆盖）：闭包内的「history 记 failed」是调度器既有错误
+/// 路径，无法在集成测试内驱动；该段只在端到端启动调度器时可验证。
+#[tokio::test]
+async fn cron_gate_rejects_before_run_creation_across_workflows() {
+    let h = pool().await;
+    let db = &h.conn;
+    let dept = make_department(db, "定时部门").await;
+    let bot = make_bot(db, "研究员").await;
+    set_quota(db, &dept, 2, 900, 12, 2, 300, 1).await;
+
+    // 兄弟编排先用掉部门唯一的并发额度（queued_run 的 origin = routine，与 cron 同源）。
+    let sibling = make_workflow(db, &dept, vec![step("a", &bot, 30)], 2, 900).await;
+    let occupying = queued_run(db, &sibling).await;
+
+    // cron 目标的预检：定义合规，但部门容量已满 → 在 create_run 之前就被拒。
+    let cron_target = make_workflow(db, &dept, vec![step("a", &bot, 30)], 2, 900).await;
+    let err = check_run_allowed(db, &cron_target, None)
+        .await
+        .expect_err("部门容量 1 已被兄弟编排占用");
+    assert!(err.contains("BOT_QUOTA_EXCEEDED"), "{err}");
+    assert!(err.contains("maxConcurrentRuns"), "{err}");
+
+    // 「不创建 run」：cron 目标编排名下 0 条 run。
+    let runs = run_repo::list_runs(db, Some(&cron_target.id), None).await.expect("列 run");
+    assert!(runs.is_empty(), "预检失败的触发不得写入 run 行: {runs:?}");
+
+    // 占用方仍在跑（预检失败没有误伤兄弟编排）。
+    let still = run_repo::get_run(db, &occupying.id).await.expect("读占用 run");
+    assert!(!["completed", "failed", "cancelled"].contains(&still.status.as_str()));
 }

@@ -42,6 +42,9 @@ pub mod bot_department_members;
 pub mod bot_departments;
 // P4 部门运行配额（docs/bot-integration/P4/MODEL-P4 §2）。
 pub mod bot_department_quotas;
+
+// P4 持久化待答请求（docs/bot-integration/P4/MODEL-P4 §3）。
+pub mod bot_input_requests;
 // P3 多 Bot 编排/运行实例（docs/bot-integration/P3/MODEL-P3 §2）。
 pub mod bot_workflow_runs;
 pub mod bot_workflows;

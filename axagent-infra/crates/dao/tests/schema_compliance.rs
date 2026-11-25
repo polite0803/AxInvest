@@ -213,6 +213,26 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bot_input_requests",
+        &[
+            ("id", "TEXT"),
+            ("ask_id", "TEXT"),
+            ("conversation_id", "TEXT"),
+            ("bot_id", "TEXT"),
+            ("workflow_run_id", "TEXT"),
+            ("assignment_id", "TEXT"),
+            ("origin", "TEXT"),
+            ("question", "TEXT"),
+            ("options_json", "TEXT"),
+            ("status", "TEXT"),
+            ("answer", "TEXT"),
+            ("answered_at", "BIGINT"),
+            ("expires_at", "BIGINT"),
+            ("created_at", "BIGINT"),
+            ("updated_at", "BIGINT"),
+        ],
+    ),
+    (
         "background_tasks",
         &[
             ("id", "TEXT"),

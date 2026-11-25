@@ -431,3 +431,63 @@ impl BotDepartmentQuota {
         }
     }
 }
+
+/// 持久化待答请求 DTO（IPC-P4 §2）。`options` 由 `options_json` 解析而来，
+/// 前端永不接触 JSON 字符串；`status` / `origin` 值域见 [`input_status`] /
+/// [`input_origin`]。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotInputRequest {
+    pub id: String,
+    pub ask_id: String,
+    pub conversation_id: String,
+    pub bot_id: Option<String>,
+    /// 预留列（D4=A 恒 None）。
+    pub workflow_run_id: Option<String>,
+    /// 预留列（D4=A 恒 None）。
+    pub assignment_id: Option<String>,
+    pub origin: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub status: String,
+    pub answer: Option<String>,
+    pub answered_at: Option<i64>,
+    pub expires_at: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// `list_bot_input_requests` 的过滤入参：四项全可选，省略即不过滤。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotInputRequestFilter {
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub bot_id: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub workflow_run_id: Option<String>,
+}
+
+/// 待答请求四态（MODEL-P4 §3）：`pending → answered | expired | cancelled`，
+/// 终态不可回退。
+pub mod input_status {
+    pub const PENDING: &str = "pending";
+    pub const ANSWERED: &str = "answered";
+    pub const EXPIRED: &str = "expired";
+    pub const CANCELLED: &str = "cancelled";
+
+    /// 是否终态（answered / expired / cancelled）。
+    pub fn is_terminal(status: &str) -> bool {
+        matches!(status, ANSWERED | EXPIRED | CANCELLED)
+    }
+}
+
+/// 待答请求来源（D4=A：交互线程一律 `person`，其余为预留）。
+pub mod input_origin {
+    pub const PERSON: &str = "person";
+    pub const ROUTINE: &str = "routine";
+    pub const WORKFLOW: &str = "workflow";
+}

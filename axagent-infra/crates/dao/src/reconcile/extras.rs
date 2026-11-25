@@ -906,6 +906,17 @@ const MULTI_COL_INDEXES: &[IndexDecl] = &[
         where_clause: None,
         dialect: None, // 声明式新增（2026-11-25，P4 A1）
     },
+    // P4 待答请求（MODEL-P4 §3）：ask_id 与 agent-ask-user 的 askId 一一对应，
+    // UNIQUE 用于答复去重（同一 askId 不得落两行）。
+    IndexDecl {
+        table: "bot_input_requests",
+        name: "idx_bot_input_requests_ask_uniq",
+        cols: &["ask_id"],
+        unique: true,
+        method: None,
+        where_clause: None,
+        dialect: None, // 声明式新增（2026-11-25，P4 B1）
+    },
     IndexDecl {
         table: "agent_sessions",
         name: "idx_sessions_user",
@@ -1417,7 +1428,7 @@ mod counts {
     const EXPECT_FUNCTIONS: usize = 1;
     const EXPECT_CHECKS: usize = 11;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 39;
+    const EXPECT_MULTI: usize = 40;
     /// partial 索引条目数。
     ///
     /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条

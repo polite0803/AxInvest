@@ -11,6 +11,7 @@ pub mod bot;
 pub mod bot_assignment;
 pub mod bot_department;
 pub mod bot_department_quota;
+pub mod bot_input_request;
 pub mod bot_workflow;
 pub mod bot_workflow_run;
 pub mod capability_domain_override;

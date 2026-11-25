@@ -20,14 +20,27 @@
  * 浏览器面无法制造；该断言落在 `src-tauri/tests/bot_input.rs`（B2 expire_stale 用例）。
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { installP3Shim } from "./helpers/p3-tauri-shim";
 
 const BASE_BOT = {
-  title: null, description: null, soulHash: "00000000", soulDrift: false, icon: "🤖",
-  color: null, section: "default", modelId: null, providerId: null, effort: null,
-  workdir: null, agentProfileId: null, approvalMode: "full", isEnabled: true, sortOrder: 0,
-  createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000,
+  title: null,
+  description: null,
+  soulHash: "00000000",
+  soulDrift: false,
+  icon: "🤖",
+  color: null,
+  section: "default",
+  modelId: null,
+  providerId: null,
+  effort: null,
+  workdir: null,
+  agentProfileId: null,
+  approvalMode: "full",
+  isEnabled: true,
+  sortOrder: 0,
+  createdAt: 1_700_000_000_000,
+  updatedAt: 1_700_000_000_000,
 };
 
 const INPUT_BOTS = [
@@ -64,7 +77,9 @@ async function captureEvents(page: Page) {
       (e: any) => w.__P4_EVENTS__.push(e.payload),
     );
     await w.__P3_TEST__.invoke("plugin:event|listen", {
-      event: "bot-input-request-updated", target: { kind: "Any" }, handler,
+      event: "bot-input-request-updated",
+      target: { kind: "Any" },
+      handler,
     });
   });
 }
@@ -74,8 +89,12 @@ async function events(page: Page): Promise<any[]> {
 }
 
 const pendingSeed = (over: Record<string, any> = {}) => ({
-  askId: "ask-1", conversationId: "conv-bot-1", botId: "bot-input-a",
-  origin: "person", question: "请确认标的池范围？", options: ["沪深300", "中证500"],
+  askId: "ask-1",
+  conversationId: "conv-bot-1",
+  botId: "bot-input-a",
+  origin: "person",
+  question: "请确认标的池范围？",
+  options: ["沪深300", "中证500"],
   ...over,
 });
 
@@ -111,10 +130,17 @@ test.describe("P4-b 待答请求 · IPC 契约自检（shim）", () => {
 
     const row = await seedPending(page);
     expect(row).toMatchObject({
-      askId: "ask-1", conversationId: "conv-bot-1", botId: "bot-input-a",
-      workflowRunId: null, assignmentId: null, origin: "person",
-      question: "请确认标的池范围？", options: ["沪深300", "中证500"],
-      status: "pending", answer: null, answeredAt: null,
+      askId: "ask-1",
+      conversationId: "conv-bot-1",
+      botId: "bot-input-a",
+      workflowRunId: null,
+      assignmentId: null,
+      origin: "person",
+      question: "请确认标的池范围？",
+      options: ["沪深300", "中证500"],
+      status: "pending",
+      answer: null,
+      answeredAt: null,
     });
     // MODEL-P4：expires_at = created_at + 300_000（ADR-P4 D5）
     expect(row.expiresAt - row.createdAt).toBe(TTL_MS);
@@ -137,14 +163,16 @@ test.describe("P4-b 待答请求 · IPC 契约自检（shim）", () => {
     const row = await seedPending(page);
 
     const answered = await ipc(page, "answer_bot_input_request", {
-      requestId: row.id, answer: "沪深300",
+      requestId: row.id,
+      answer: "沪深300",
     });
     expect(answered.ok).toBe(true);
     expect((answered as any).value).toMatchObject({ status: "answered", answer: "沪深300" });
     expect((answered as any).value.answeredAt).toBeGreaterThan(0);
 
     const again = await ipc(page, "answer_bot_input_request", {
-      requestId: row.id, answer: "中证500",
+      requestId: row.id,
+      answer: "中证500",
     });
     expect(again).toEqual({ ok: false, error: "BOT_INPUT_REQUEST_NOT_PENDING" });
 
@@ -196,13 +224,24 @@ test.describe("P4-b 待答请求 · IPC 契约自检（shim）", () => {
     await captureEvents(page);
 
     const at = Date.now();
-    const stale = await seedPending(page, pendingSeed({
-      askId: "ask-stale", conversationId: "conv-bot-1",
-      createdAt: at - TTL_MS - 1_000, expiresAt: at - 1_000,
-    }));
-    const fresh = await seedPending(page, pendingSeed({
-      askId: "ask-fresh", conversationId: "conv-bot-1", createdAt: at, expiresAt: at + TTL_MS,
-    }));
+    const stale = await seedPending(
+      page,
+      pendingSeed({
+        askId: "ask-stale",
+        conversationId: "conv-bot-1",
+        createdAt: at - TTL_MS - 1_000,
+        expiresAt: at - 1_000,
+      }),
+    );
+    const fresh = await seedPending(
+      page,
+      pendingSeed({
+        askId: "ask-fresh",
+        conversationId: "conv-bot-1",
+        createdAt: at,
+        expiresAt: at + TTL_MS,
+      }),
+    );
 
     const expired = await page.evaluate(() => (window as any).__P3_TEST__.expireInputRequests());
     expect(expired.map((r: any) => r.id)).toEqual([stale.id]);
@@ -227,13 +266,26 @@ test.describe("P4-b 待答请求 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     const at = Date.now();
     await seedPending(page, pendingSeed({ askId: "a-old", createdAt: at - 2_000, expiresAt: at + TTL_MS }));
-    await seedPending(page, pendingSeed({
-      askId: "a-new", conversationId: "conv-bot-2", createdAt: at - 1_000, expiresAt: at + TTL_MS,
-    }));
-    await seedPending(page, pendingSeed({
-      askId: "a-run", conversationId: "conv-bot-1", origin: "workflow",
-      workflowRunId: "run-1", createdAt: at, expiresAt: at + TTL_MS,
-    }));
+    await seedPending(
+      page,
+      pendingSeed({
+        askId: "a-new",
+        conversationId: "conv-bot-2",
+        createdAt: at - 1_000,
+        expiresAt: at + TTL_MS,
+      }),
+    );
+    await seedPending(
+      page,
+      pendingSeed({
+        askId: "a-run",
+        conversationId: "conv-bot-1",
+        origin: "workflow",
+        workflowRunId: "run-1",
+        createdAt: at,
+        expiresAt: at + TTL_MS,
+      }),
+    );
 
     const all = await ipc(page, "list_bot_input_requests", { filter: {} });
     expect(((all as any).value as any[]).map((r) => r.askId)).toEqual(["a-run", "a-new", "a-old"]);
@@ -282,10 +334,15 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     await page.goto("/chat?bot=bot-input-a");
     await dismissOnboarding(page);
     await waitForInputSubscription(page);
-    await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
-      askId: "ask-ui-1", conversationId: "conv-bot-1", botId: "bot-input-a",
-      question: "请确认标的池范围？", options: ["沪深300", "中证500"],
-    }));
+    await page.evaluate(() =>
+      (window as any).__P3_TEST__.seedInputRequest({
+        askId: "ask-ui-1",
+        conversationId: "conv-bot-1",
+        botId: "bot-input-a",
+        question: "请确认标的池范围？",
+        options: ["沪深300", "中证500"],
+      })
+    );
 
     const card = page.getByTestId("bot-input-request-card");
     await expect(card).toBeVisible({ timeout: 15_000 });
@@ -302,10 +359,14 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     await page.goto("/chat?bot=bot-input-a");
     await dismissOnboarding(page);
     await waitForInputSubscription(page);
-    await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
-      askId: "ask-ui-2", conversationId: "conv-bot-1", botId: "bot-input-a",
-      question: "刷新后仍在？",
-    }));
+    await page.evaluate(() =>
+      (window as any).__P3_TEST__.seedInputRequest({
+        askId: "ask-ui-2",
+        conversationId: "conv-bot-1",
+        botId: "bot-input-a",
+        question: "刷新后仍在？",
+      })
+    );
 
     await page.reload();
     await dismissOnboarding(page);
@@ -319,10 +380,15 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     await dismissOnboarding(page);
     await waitForInputSubscription(page);
     const at = Date.now();
-    await page.evaluate(([now]) => (window as any).__P3_TEST__.seedInputRequest({
-      askId: "ask-ui-3", conversationId: "conv-bot-1", botId: "bot-input-a",
-      question: "会过期的问题", createdAt: now - 400_000, expiresAt: now - 100_000,
-    }), [at]);
+    await page.evaluate(([now]) =>
+      (window as any).__P3_TEST__.seedInputRequest({
+        askId: "ask-ui-3",
+        conversationId: "conv-bot-1",
+        botId: "bot-input-a",
+        question: "会过期的问题",
+        createdAt: now - 400_000,
+        expiresAt: now - 100_000,
+      }), [at]);
     await page.evaluate(() => (window as any).__P3_TEST__.expireInputRequests());
 
     await expect(page.getByTestId("bot-input-request-status")).toContainText("已过期");
@@ -334,10 +400,14 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     await page.goto("/chat?bot=bot-input-a");
     await dismissOnboarding(page);
     await waitForInputSubscription(page);
-    await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
-      askId: "ask-ui-4", conversationId: "conv-bot-1", botId: "bot-input-a",
-      question: "可取消的问题",
-    }));
+    await page.evaluate(() =>
+      (window as any).__P3_TEST__.seedInputRequest({
+        askId: "ask-ui-4",
+        conversationId: "conv-bot-1",
+        botId: "bot-input-a",
+        question: "可取消的问题",
+      })
+    );
 
     await page.getByTestId("bot-input-request-cancel").click();
     await expect(page.getByTestId("bot-input-request-status")).toContainText("已取消");
@@ -348,9 +418,13 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     await page.goto("/chat");
 
     // 通用聊天只走既有 agent-ask-user；不得出现持久化卡，也不得落 bot_input_requests 行
-    await page.evaluate(() => (window as any).__P3_TEST__.emit("agent-ask-user", {
-      askId: "ask-generic", question: "通用提问", options: null,
-    }));
+    await page.evaluate(() =>
+      (window as any).__P3_TEST__.emit("agent-ask-user", {
+        askId: "ask-generic",
+        question: "通用提问",
+        options: null,
+      })
+    );
     await expect(page.getByTestId("bot-input-request-card")).toHaveCount(0);
     const rows = await page.evaluate(async () => {
       const t = (window as any).__P3_TEST__;
@@ -367,15 +441,21 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     await page.evaluate(() => {
       const t = (window as any).__P3_TEST__;
       t.seedInputRequest({
-        askId: "ask-ui-6a", conversationId: "conv-bot-a", botId: "bot-input-a",
+        askId: "ask-ui-6a",
+        conversationId: "conv-bot-a",
+        botId: "bot-input-a",
         question: "A 的待答？",
       });
       t.seedInputRequest({
-        askId: "ask-ui-6b-1", conversationId: "conv-bot-b", botId: "bot-input-b",
+        askId: "ask-ui-6b-1",
+        conversationId: "conv-bot-b",
+        botId: "bot-input-b",
         question: "B 的第一条？",
       });
       t.seedInputRequest({
-        askId: "ask-ui-6b-2", conversationId: "conv-bot-b", botId: "bot-input-b",
+        askId: "ask-ui-6b-2",
+        conversationId: "conv-bot-b",
+        botId: "bot-input-b",
         question: "B 的第二条？",
       });
     });

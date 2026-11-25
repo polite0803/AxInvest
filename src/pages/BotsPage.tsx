@@ -12,23 +12,23 @@
  * ChatPage 把 `botId` 传给 ChatSidebar 做归属过滤，新建会话也带该 `botId`。
  */
 
+import { BotAssignmentsPanel } from "@/components/bot/BotAssignmentsPanel";
 import { BotDepartmentModal } from "@/components/bot/BotDepartmentModal";
 import { BotDetail } from "@/components/bot/BotDetail";
 import { BotEditor, type BotEditorModelOption, type BotEditorValues } from "@/components/bot/BotEditor";
 import { BotEmptyState } from "@/components/bot/BotEmptyState";
 import { BotList } from "@/components/bot/BotList";
-import { BotAssignmentsPanel } from "@/components/bot/BotAssignmentsPanel";
 import { backendErrorText } from "@/lib/errorI18n";
 import { countUnread, getNotifications } from "@/lib/notification";
 import { message } from "@/lib/toast";
 import { useBotStore, useConversationStore, useProviderStore } from "@/stores";
 import { ensureBotInputRequestListener } from "@/stores/feature/botStore";
 import type { Bot, BotDepartment, CreateBotInput, UpdateBotInput } from "@/types";
-import { BotRoutinesPanel } from "./BotsPage/BotRoutinesPanel";
 import { Alert, Button, Spin, theme } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { BotRoutinesPanel } from "./BotsPage/BotRoutinesPanel";
 
 /** `providerId::modelId` → `{ providerId, modelId }`；空串表示不指定模型（两者同为 null）。 */
 function parseModelPair(model: string): { providerId: string | null; modelId: string | null } {

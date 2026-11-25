@@ -2197,14 +2197,17 @@ pub async fn run_scheduled_bot_workflow(
     let workflow_id = crate::commands::scheduled_task::bot_workflow_id_from_job(&job);
     let started = axagent_runtime_core::cron_job::now_millis();
     let outcome: Result<String, String> = async {
-        let workflow_id = workflow_id.ok_or_else(|| "bot_workflow 任务缺少 params.workflowId".to_string())?;
+        let workflow_id =
+            workflow_id.ok_or_else(|| "bot_workflow 任务缺少 params.workflowId".to_string())?;
         let workflow = axagent_dao::repo::bot_workflow::get_workflow(&db, &workflow_id)
             .await
             .map_err(|e| e.to_string())?;
         // P4 配额（ADR-P4-2）：超限时本次触发直接失败入 history，不创建 run。
         crate::bot_quota::check_run_allowed(&db, &workflow, None).await?;
-        let conv = crate::commands::scheduled_task::create_bot_workflow_persistent_conversation(&db, &workflow)
-            .await?;
+        let conv = crate::commands::scheduled_task::create_bot_workflow_persistent_conversation(
+            &db, &workflow,
+        )
+        .await?;
         let queued = axagent_dao::repo::bot_workflow_run::create_run(
             &db,
             &axagent_harness::types::CreateBotWorkflowRun {
@@ -2220,9 +2223,14 @@ pub async fn run_scheduled_bot_workflow(
         .await
         .map_err(|e| e.to_string())?;
         if let Some(app) = app.as_ref() {
-            let _ = tauri::Emitter::emit(app, axagent_harness::event_names::IpcEventName::BotWorkflowRunUpdated.as_str(), &queued);
+            let _ = tauri::Emitter::emit(
+                app,
+                axagent_harness::event_names::IpcEventName::BotWorkflowRunUpdated.as_str(),
+                &queued,
+            );
         }
-        let started_run = crate::bot_workflow_runner::start_run(&db, app.clone(), &queued.id).await?;
+        let started_run =
+            crate::bot_workflow_runner::start_run(&db, app.clone(), &queued.id).await?;
         let terminal = loop {
             let run = axagent_dao::repo::bot_workflow_run::get_run(&db, &started_run.id)
                 .await
@@ -2254,14 +2262,9 @@ pub async fn run_scheduled_bot_workflow(
         partial: false,
     };
     store.record_run(&job_id, result).await;
-    if !recurring
-        && !store
-            .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-            .await
+    if !recurring && !store.set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled).await
     {
-        tracing::warn!(
-            "[CronScheduler] 一次性 bot_workflow 任务 '{job_id}' 置为 Disabled 失败"
-        );
+        tracing::warn!("[CronScheduler] 一次性 bot_workflow 任务 '{job_id}' 置为 Disabled 失败");
     }
     outcome.map(|_| ())
 }
@@ -2284,11 +2287,10 @@ pub async fn run_scheduled_bot_workflow(
 async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppState) {
     use axagent_runtime::cron::{CronExecutor, CronScheduler};
 
-    #[cfg(mobile)]
-    let _ = app;
-    #[cfg(not(mobile))]
     // `Option<&AppHandle>::cloned()` = `Option<AppHandle>`（owned）——
-    // 下面两处分支都要把 `AppHandle` move 进 `'static` 闭包 ⇒ 必须 owned 而不能再借引用。
+    // 下面多处分支都要把 `AppHandle` move 进 `'static` 闭包 ⇒ 必须 owned。
+    // mobile 也保留该变量（`run_scheduled_bot_workflow` 取 Option<AppHandle>）；
+    // 桌面通知在各自分支内 `#[cfg(not(mobile))]` 门控，移动端不发通知。
     let app_handle = app.cloned();
 
     let store = state.cron_job_store.clone();

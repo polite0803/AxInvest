@@ -198,14 +198,8 @@ pub async fn start_run(
     let limits = match crate::bot_quota::check_run_allowed(db, &workflow, Some(&run.id)).await {
         Ok(limits) => limits,
         Err(e) => {
-            fail_run(
-                db,
-                app.as_ref(),
-                &run,
-                code_in(&e).unwrap_or(bot_err::QUOTA_EXCEEDED),
-                &e,
-            )
-            .await?;
+            fail_run(db, app.as_ref(), &run, code_in(&e).unwrap_or(bot_err::QUOTA_EXCEEDED), &e)
+                .await?;
             return Ok(run_repo::get_run(db, run_id).await.map_err(|e| e.to_string())?);
         },
     };
@@ -342,6 +336,7 @@ pub async fn on_assignment_completed(
             if let Err(e) = fail_run(db, app, &run, code_ref, &detail).await {
                 tracing::warn!(run_id, error = %e, "abort 落 run.failed 失败");
             }
+            #[cfg(not(mobile))]
             if let Err(e) = crate::commands::desktop::send_desktop_notification_opt(
                 app.cloned(),
                 "Bot 编排步骤失败".to_string(),
@@ -404,6 +399,7 @@ pub async fn on_assignment_completed(
         Err(e) => tracing::warn!(run_id, error = %e, "run 上下文更新失败"),
     }
     // 通知复用 P2-a 桌面管线；run 级不另发通知。
+    #[cfg(not(mobile))]
     if let Err(e) = crate::commands::desktop::send_desktop_notification_opt(
         app.cloned(),
         "Bot 编排步骤完成".to_string(),
@@ -548,8 +544,8 @@ async fn orchestrate(
     let run_id = run.id.clone();
     let notify = notifier(&run_id);
     let limits = crate::bot_quota::AssignmentContext::limits_for_run(Some(&run_id));
-    let deadline = tokio::time::Instant::now()
-        + Duration::from_secs(limits.total_timeout_secs.max(1) as u64);
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(limits.total_timeout_secs.max(1) as u64);
     let mut launched: HashSet<String> = HashSet::new();
 
     loop {

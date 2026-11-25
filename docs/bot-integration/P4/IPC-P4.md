@@ -147,7 +147,7 @@ npm run check:layers
 npm run check:serde   # 存量红（vector_store.rs）保持，不新增
 
 # 前端单测与 e2e
-node scripts/vitest-run.mjs run --grep-invert "@heavy"
+node scripts/vitest-run.mjs run
 npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 npx playwright test e2e/bot-workflow.spec.ts e2e/bot-delegation-chain.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 ```

@@ -320,7 +320,7 @@ D0 冻结包（用户裁决 + 5 份规格）─┬→ A1 配额实体/DAO ─→
 - **路由**：**无新增**；沿用 `/bots` 的部门弹窗（`src/pages/BotsPage.tsx`）。
 - **i18n**：`bot.quota.*` 20 键 × 11 语言。
 - **测试**：vitest：默认值展示 `isDefault`、越界前端预校验与后端码映射、保存后回显、恢复默认二次确认；不破坏现有部门 CRUD 测试。
-- **门禁**：`npm run typecheck && node scripts/vitest-run.mjs run --grep-invert "@heavy"`
+- **门禁**：`npm run typecheck && node scripts/vitest-run.mjs run`
 - **依赖**：A3 DTO。
 - **可立即开工**：**否**（DTO 未冻结）。
 
@@ -374,7 +374,7 @@ D0 冻结包（用户裁决 + 5 份规格）─┬→ A1 配额实体/DAO ─→
 - **路由**：**无新增**；沿用 `/chat?bot=<botId>`（`src/pages/ChatPage.tsx:37`）与 `/bots`。
 - **i18n**：`bot.input.*` 14 键 × 11 语言。
 - **测试**：vitest：刷新后从 `list_bot_input_requests` 恢复 pending 卡；answered/expired/cancelled 三终态渲染；空答复禁用提交；同 askId 不双卡；侧栏计数随事件增减。
-- **门禁**：`npm run typecheck && node scripts/vitest-run.mjs run --grep-invert "@heavy"`
+- **门禁**：`npm run typecheck && node scripts/vitest-run.mjs run`
 - **依赖**：B3 DTO、B2 事件。
 - **可立即开工**：**否**。
 
@@ -532,8 +532,9 @@ npm run check:routes
 npm run check:layers
 npm run check:serde   # 存量红（vector_store.rs）保持，不新增
 
+# 注：vitest-run.mjs 不接受 --grep-invert（vitest 无此 flag）；@heavy 过滤由脚本/配置承担，2026-11-25 基线实测修正
 # 前端单测与 e2e
-node scripts/vitest-run.mjs run --grep-invert "@heavy"
+node scripts/vitest-run.mjs run
 npx playwright test e2e/bot-quota.spec.ts e2e/bot-needs-input.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 npx playwright test e2e/bot-workflow.spec.ts e2e/bot-delegation-chain.spec.ts --project=chromium --grep-invert "@heavy" --timeout=120000 --reporter=list
 ```

@@ -107,4 +107,30 @@ describe("BotList", () => {
     expect(screen.queryAllByTestId("bot-list-item")).toHaveLength(0);
     expect(screen.getByTestId("bot-create-btn")).toBeInTheDocument();
   });
+
+  it("B4-R：待答徽章按 botId 逐行计数（双 Bot 各显示自己的数，无 pending 的行不显示）", () => {
+    render(
+      <BotList
+        bots={[
+          makeBot({ id: "bot-a", name: "A" }),
+          makeBot({ id: "bot-b", name: "B" }),
+          makeBot({ id: "bot-c", name: "C" }),
+        ]}
+        activeBotId={null}
+        pendingByBot={{ "bot-a": 1, "bot-b": 3 }}
+        onSelect={vi.fn()}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    const badges = screen.getAllByTestId("bot-input-badge-row");
+    // 回归锁：全局计数形态会让三行各渲染同一个数（3 个徽章），这里必须只有两个。
+    expect(badges).toHaveLength(2);
+    expect(badges[0]).toHaveAttribute("data-bot-id", "bot-a");
+    expect(badges[0]).toHaveTextContent("1");
+    expect(badges[1]).toHaveAttribute("data-bot-id", "bot-b");
+    expect(badges[1]).toHaveTextContent("3");
+    // 无 pending 的 bot-c 行内不得出现徽章
+    expect(badges.some((b) => b.getAttribute("data-bot-id") === "bot-c")).toBe(false);
+  });
 });

@@ -119,10 +119,22 @@ export function BotsPage() {
       void loadInputRequests({ status: "pending" }).catch(() => {});
     }
   }, [loadInputRequests]);
-  const pendingInputCount = useMemo(
-    () => inputRequests.filter((r) => r.status === "pending").length,
-    [inputRequests],
-  );
+  // B4-R：待答数按 botId 聚合（`Record<botId, number>` 逐行注入）；
+  // 头部徽章仍用全量 pending 总数，与逐行计数同源、一次遍历。
+  const { pendingInputCount, pendingByBot } = useMemo(() => {
+    const byBot: Record<string, number> = {};
+    let total = 0;
+    for (const r of inputRequests) {
+      if (r.status !== "pending") {
+        continue;
+      }
+      total += 1;
+      if (r.botId) {
+        byBot[r.botId] = (byBot[r.botId] ?? 0) + 1;
+      }
+    }
+    return { pendingInputCount: total, pendingByBot: byBot };
+  }, [inputRequests]);
 
   const reloadDepartments = useCallback(() => {
     void listBotDepartments()
@@ -321,6 +333,7 @@ export function BotsPage() {
           onSelect={setActiveBot}
           onCreate={openCreate}
           pendingBadgeCount={pendingInputCount}
+          pendingByBot={pendingByBot}
           onOpenQuota={departments.length > 0
             ? () => {
               setEditingDepartment(departments[0]);

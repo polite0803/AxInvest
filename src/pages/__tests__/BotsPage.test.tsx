@@ -35,6 +35,11 @@ const h = vi.hoisted(() => {
     createBot: fn(),
     updateBot: fn(),
     deleteBot: fn(),
+    // P2-b：部门分组数据源（页面挂载即拉取；测试默认空清单）
+    listBotDepartments: fn(),
+    // B4-R：待答请求数据源（页面挂载即拉 pending）
+    inputRequests: [] as Array<Record<string, unknown>>,
+    loadInputRequests: fn(),
   };
   const providerState = {
     providers: [] as Array<{ id: string; name: string; enabled: boolean; models: unknown[] }>,
@@ -48,12 +53,16 @@ const h = vi.hoisted(() => {
     botState,
     providerState,
     conversationStore,
+    // B4-R：捕获页面注入 BotList 的 props，断言按 botId 聚合后的计数
+    botListSpy: fn(),
     toastSuccess: fn(),
     toastError: fn(),
   };
 });
 
 const { botState, providerState, conversationStore, toastError } = h;
+// P2-b：页面挂载即拉部门清单，默认解析为空（分组退化态）
+botState.listBotDepartments.mockResolvedValue([]);
 const { loadBots, setActiveBot } = botState;
 const { fetchProviders } = providerState;
 const { createConversation, setActiveConversation } = conversationStore;
@@ -104,31 +113,33 @@ vi.mock("@/lib/errorI18n", () => ({
 }));
 
 vi.mock("@/components/bot/BotList", () => ({
-  BotList: ({
-    bots,
-    onSelect,
-    onCreate,
-  }: {
+  BotList: (props: {
     bots: Bot[];
     onSelect: (id: string) => void;
     onCreate: () => void;
-  }) => (
-    <div data-testid="bot-list">
-      <button type="button" data-testid="create-bot" onClick={onCreate}>
-        create
-      </button>
-      {bots.map((bot) => (
-        <button
-          key={bot.id}
-          type="button"
-          data-testid={`select-${bot.id}`}
-          onClick={() => onSelect(bot.id)}
-        >
-          {bot.name}
+    pendingBadgeCount?: number;
+    pendingByBot?: Record<string, number>;
+  }) => {
+    h.botListSpy(props);
+    const { bots, onSelect, onCreate } = props;
+    return (
+      <div data-testid="bot-list">
+        <button type="button" data-testid="create-bot" onClick={onCreate}>
+          create
         </button>
-      ))}
-    </div>
-  ),
+        {bots.map((bot) => (
+          <button
+            key={bot.id}
+            type="button"
+            data-testid={`select-${bot.id}`}
+            onClick={() => onSelect(bot.id)}
+          >
+            {bot.name}
+          </button>
+        ))}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/components/bot/BotDetail", () => ({
@@ -164,6 +175,30 @@ vi.mock("@/components/bot/BotEditor", () => ({
   BotEditor: () => <div data-testid="bot-editor" />,
 }));
 
+function makeInputRequest(
+  id: string,
+  botId: string,
+  status: "pending" | "answered",
+): Record<string, unknown> {
+  return {
+    id,
+    askId: `ask-${id}`,
+    conversationId: `conv-${botId}`,
+    botId,
+    workflowRunId: null,
+    assignmentId: null,
+    origin: "person",
+    question: "？",
+    options: [],
+    status,
+    answer: null,
+    answeredAt: null,
+    expiresAt: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
 function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
@@ -182,6 +217,8 @@ describe("BotsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     botState.bots = [makeBot({ id: "bot-1" })];
+    botState.inputRequests = [];
+    botState.loadInputRequests.mockResolvedValue([]);
     botState.activeBotId = "bot-1";
     botState.loading = false;
     botState.error = null;
@@ -259,5 +296,28 @@ describe("BotsPage", () => {
       expect(toastError).toHaveBeenCalledWith("CONVERSATION_CREATE_FAILED");
     });
     expect(screen.getByTestId("location")).toHaveTextContent("/bots");
+  });
+
+  it("B4-R：待答数按 botId 聚合后注入列表（双 Bot 各自计数，头部保留总数）", async () => {
+    botState.bots = [makeBot({ id: "bot-a", name: "A" }), makeBot({ id: "bot-b", name: "B" })];
+    botState.activeBotId = "bot-a";
+    botState.inputRequests = [
+      makeInputRequest("r1", "bot-a", "pending"),
+      makeInputRequest("r2", "bot-b", "pending"),
+      makeInputRequest("r3", "bot-b", "pending"),
+      makeInputRequest("r4", "bot-a", "answered"),
+    ];
+
+    renderPage();
+    // 页面挂载即拉部门/待答（mock 立即 resolve），等在 act 内冲刷完再断言
+    await waitFor(() => expect(h.botListSpy).toHaveBeenCalled());
+
+    const props = h.botListSpy.mock.calls.at(-1)?.[0] as {
+      pendingBadgeCount?: number;
+      pendingByBot?: Record<string, number>;
+    };
+    // 回归锁：此前传的是全局 pending 数，逐行同数；现在必须是 botId → 各自计数
+    expect(props.pendingByBot).toEqual({ "bot-a": 1, "bot-b": 2 });
+    expect(props.pendingBadgeCount).toBe(3);
   });
 });

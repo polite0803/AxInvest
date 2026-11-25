@@ -30,7 +30,10 @@ const BASE_BOT = {
   createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000,
 };
 
-const INPUT_BOTS = [{ ...BASE_BOT, id: "bot-input-a", name: "问答助手" }];
+const INPUT_BOTS = [
+  { ...BASE_BOT, id: "bot-input-a", name: "问答助手" },
+  { ...BASE_BOT, id: "bot-input-b", name: "复核助手" },
+];
 const TTL_MS = 300_000; // ADR-P4 D5
 
 async function bootShim(page: Page) {
@@ -85,6 +88,12 @@ async function seedPending(page: Page, over: Record<string, any> = {}): Promise<
 async function dismissOnboarding(page: Page) {
   await page.getByTestId("onboarding-skip").click({ timeout: 8_000 }).catch(() => undefined);
 }
+
+/** /bots 侧栏中某个 Bot 行内的待答徽章（B4-R：逐行按 botId 渲染）。 */
+const rowBadge = (page: Page, botId: string) =>
+  page.locator(
+    `[data-testid="bot-list-item"][data-bot-id="${botId}"] [data-testid="bot-input-badge-row"]`,
+  );
 
 /** 等页面把 bot-input-request-updated 订阅上再投种子，事件驱动路径才不是竞态。 */
 async function waitForInputSubscription(page: Page) {
@@ -350,23 +359,52 @@ test.describe("P4-b 待答请求 · Bot 线程持久化卡片", () => {
     expect(rows).toHaveLength(0);
   });
 
-  test("AC-B5-UI-6：/bots 侧栏待答数徽章随 pending/answered 事件增减", async ({ page }) => {
+  test("AC-B5-UI-6：/bots 侧栏待答徽章按 botId 逐行计数（双 Bot），归零即隐藏", async ({ page }) => {
     await page.addInitScript(installP3Shim, { bots: INPUT_BOTS, departments: [] });
     await page.goto("/bots");
     await dismissOnboarding(page);
     await waitForInputSubscription(page);
-    await page.evaluate(() => (window as any).__P3_TEST__.seedInputRequest({
-      askId: "ask-ui-6", conversationId: "conv-bot-1", botId: "bot-input-a",
-      question: "侧栏计数？",
-    }));
-
-    await expect(page.getByTestId("bot-input-badge")).toContainText("1");
-    const row = await page.evaluate(async () => {
+    await page.evaluate(() => {
       const t = (window as any).__P3_TEST__;
-      const list = await t.invoke("list_bot_input_requests", { filter: { status: "pending" } });
+      t.seedInputRequest({
+        askId: "ask-ui-6a", conversationId: "conv-bot-a", botId: "bot-input-a",
+        question: "A 的待答？",
+      });
+      t.seedInputRequest({
+        askId: "ask-ui-6b-1", conversationId: "conv-bot-b", botId: "bot-input-b",
+        question: "B 的第一条？",
+      });
+      t.seedInputRequest({
+        askId: "ask-ui-6b-2", conversationId: "conv-bot-b", botId: "bot-input-b",
+        question: "B 的第二条？",
+      });
+    });
+
+    // 头部仍是全量总数（1 + 2 = 3）
+    await expect(page.getByTestId("bot-input-badge")).toContainText("3");
+    // 回归锁：此前每行显示同一个全局数；现在每行只显示自己 botId 的计数
+    await expect(rowBadge(page, "bot-input-a")).toHaveText("1");
+    await expect(rowBadge(page, "bot-input-b")).toHaveText("2");
+
+    // 只作答 B 的一条 → B 行降为 1，A 行保持 1（证明行间互不串数）
+    const answered = await page.evaluate(async () => {
+      const t = (window as any).__P3_TEST__;
+      const list = await t.invoke("list_bot_input_requests", { filter: { botId: "bot-input-b", status: "pending" } });
       return t.invoke("answer_bot_input_request", { requestId: list[0].id, answer: "好" });
     });
-    expect(row.status).toBe("answered");
+    expect(answered.status).toBe("answered");
+    await expect(rowBadge(page, "bot-input-b")).toHaveText("1");
+    await expect(rowBadge(page, "bot-input-a")).toHaveText("1");
+
+    // 全部作答 → 行内徽章消失、头部归零隐藏
+    await page.evaluate(async () => {
+      const t = (window as any).__P3_TEST__;
+      const pending = await t.invoke("list_bot_input_requests", { filter: { status: "pending" } });
+      for (const item of pending) {
+        await t.invoke("answer_bot_input_request", { requestId: item.id, answer: "好" });
+      }
+    });
+    await expect(page.getByTestId("bot-input-badge-row")).toHaveCount(0);
     await expect(page.getByTestId("bot-input-badge")).toHaveCount(0);
   });
 });

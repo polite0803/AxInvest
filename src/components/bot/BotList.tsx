@@ -32,8 +32,10 @@ export interface BotListProps {
   onManageDepartments?: () => void;
   /** P2-b：编辑单个部门（部门组头上的菜单） */
   onEditDepartment?: (department: BotDepartment) => void;
-  /** P4-b：待答总数（>0 时头部徽章可见，归零隐藏） */
+  /** P4-b：全量待答总数（>0 时头部徽章可见，归零隐藏） */
   pendingBadgeCount?: number;
+  /** B4-R：botId → 该 Bot 的待答数（逐行徽章；页面层按 botId 聚合后注入） */
+  pendingByBot?: Record<string, number>;
   /** P4-a：配额入口（打开首个部门的配额面板） */
   onOpenQuota?: () => void;
 }
@@ -50,9 +52,9 @@ export function projectDepartmentGroups(
 ): { department: BotDepartment | null; bots: Bot[] }[] {
   const groups: { department: BotDepartment | null; bots: Bot[] }[] = departments.map((d) => ({
     department: d,
-    bots: bots.filter((b) => d.botIds.includes(b.id)),
+    bots: bots.filter((b) => (d.botIds ?? []).includes(b.id)),
   }));
-  const groupedIds = new Set(departments.flatMap((d) => d.botIds));
+  const groupedIds = new Set(departments.flatMap((d) => d.botIds ?? []));
   const rest = bots.filter((b) => !groupedIds.has(b.id));
   if (rest.length > 0 || departments.length === 0) {
     groups.push({ department: null, bots: rest });
@@ -70,6 +72,7 @@ export function BotList({
   onManageDepartments,
   onEditDepartment,
   pendingBadgeCount = 0,
+  pendingByBot,
   onOpenQuota,
 }: BotListProps) {
   const { t } = useTranslation();
@@ -86,6 +89,7 @@ export function BotList({
 
   const renderBot = (bot: Bot) => {
     const active = bot.id === activeBotId;
+    const pendingCount = pendingByBot?.[bot.id] ?? 0;
     return (
       <div
         key={bot.id}
@@ -129,6 +133,18 @@ export function BotList({
             )
             : null}
         </span>
+        {pendingCount > 0
+          ? (
+            <span
+              data-testid="bot-input-badge-row"
+              data-bot-id={bot.id}
+              data-pending-count={pendingCount}
+              title={t("bot.input.pendingBadge")}
+            >
+              <Badge count={pendingCount} size="small" />
+            </span>
+          )
+          : null}
       </div>
     );
   };

@@ -116,7 +116,8 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     );
 
     // 前端资产随包安装 —— `pages[]` 声明的 entry 必须解析成**安装目录内**的既有文件，
-    // 且页面仍装载随包 bundle（真实数据切片页已取代早期仅显示探针文案的占位页）。
+    // 且页面仍装载随包 bundle。T3 之后 HTML 只留稳定的 #root 壳，八个页签与业务视图
+    // 都从 bundle.js 动态构建；这里只断言壳与 bundle，具体页签由 stock 仓的 bundle 验收锁。
     let listed = manager.list_plugin_pages().expect("页面列表投影应可读");
     let stock = listed
         .iter()
@@ -138,7 +139,7 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     );
     assert!(page_path.is_file(), "页面资产不存在：{}", page_path.display());
     let html = std::fs::read_to_string(&page_path).expect("页面资产应可读");
-    assert!(html.contains("股票插件 · 数据切片"), "读到的不是当前股票插件页：{html}");
+    assert!(html.contains("<div id=\"root\"></div>"), "读到的不是当前股票插件页：{html}");
     assert!(html.contains("./bundle.js"), "页面必须装载随包 bundle：{html}");
     let bundle_path = page_path.parent().expect("页面资产应有父目录").join("bundle.js");
     assert!(bundle_path.is_file(), "随包 bundle.js 必须存在：{}", bundle_path.display());

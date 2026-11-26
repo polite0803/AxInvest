@@ -25,7 +25,7 @@ const DEFAULT_PRESET_TEMPLATE = JSON.stringify(
     skills: [
       {
         name: "example-skill",
-        description: "示例技能",
+        description: "Example skill",
         content: "# example-skill\n\nDescribe what this skill does.\n",
       },
     ],

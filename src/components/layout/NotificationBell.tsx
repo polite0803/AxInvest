@@ -14,8 +14,8 @@ import {
   getNotifications,
   listNotificationBotIds,
   markAllAsRead,
-  readNotification,
   type Notification,
+  readNotification,
 } from "@/lib/notification";
 import { BellOutlined } from "@ant-design/icons";
 import { Badge, Empty, theme, Typography } from "antd";

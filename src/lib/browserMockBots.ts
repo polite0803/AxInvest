@@ -676,7 +676,7 @@ export async function handleBotCommand(
       const assignments = loadAssignments().map((row) =>
         row.assigneeBotId === botId && (row.status === "queued" || row.status === "running")
           ? { ...row, status: "cancelled" as const, finishedAt: Date.now(), updatedAt: Date.now() }
-          : row,
+          : row
       );
       saveAssignments(assignments);
       return { detachedThreads: detached, removedRoutines, memoryPath: `~/.axagent/bots/${botId}` };
@@ -987,10 +987,10 @@ export async function handleBotCommand(
       const status = field<string | null>(a, "status") ?? null;
       return loadAssignments()
         .filter((x) => {
-          if (requesterBotId && x.requesterBotId !== requesterBotId) return false;
-          if (assigneeBotId && x.assigneeBotId !== assigneeBotId) return false;
-          if (botId && x.assigneeBotId !== botId && x.requesterBotId !== botId) return false;
-          if (status && x.status !== status) return false;
+          if (requesterBotId && x.requesterBotId !== requesterBotId) { return false; }
+          if (assigneeBotId && x.assigneeBotId !== assigneeBotId) { return false; }
+          if (botId && x.assigneeBotId !== botId && x.requesterBotId !== botId) { return false; }
+          if (status && x.status !== status) { return false; }
           return true;
         })
         .sort((x, y) => y.createdAt - x.createdAt);

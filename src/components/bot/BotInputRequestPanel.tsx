@@ -10,11 +10,11 @@ export function BotInputRequestPanel({
   requests: BotInputRequest[];
 }) {
   const visible = useMemo(() => {
-    if (!botId) return [];
+    if (!botId) { return []; }
     return requests.filter((r) => r.botId === botId);
   }, [botId, requests]);
 
-  if (!botId || visible.length === 0) return null;
+  if (!botId || visible.length === 0) { return null; }
 
   return (
     <div

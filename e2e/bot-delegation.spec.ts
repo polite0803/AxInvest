@@ -33,7 +33,7 @@
  * 少任何一个以「元素不存在」明确失败，不静默跳过。
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const CHIEF = { id: "bot-t6b-chief", name: "统筹机器人甲", soul: "# 统筹 SOUL", approvalMode: "edits" };
 const WORKER = { id: "bot-t6b-worker", name: "执行机器人乙", soul: "# 执行 SOUL", approvalMode: "ask" };
@@ -162,10 +162,13 @@ test.describe("Bot 部门归属与委派（P2-b T6″）", () => {
     // 部门保留、Chief 保留（A 未被删）、B 从成员消失；两条在途单均转 cancelled。
     const state = await page.evaluate(() => ({
       departments: JSON.parse(localStorage.getItem("axagent_bot_departments") ?? "[]") as {
-        name: string; chiefBotId: string | null; botIds: string[];
+        name: string;
+        chiefBotId: string | null;
+        botIds: string[];
       }[],
       assignments: JSON.parse(localStorage.getItem("axagent_bot_assignments") ?? "[]") as {
-        status: string; assigneeBotId: string;
+        status: string;
+        assigneeBotId: string;
       }[],
     }));
     const dept = state.departments.find((d) => d.name === DEPT);

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { BotInputRequestPanel } from "@/components/bot/BotInputRequestPanel";
-import { ensureBotInputRequestListener } from "@/stores/feature/botStore";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import type { ChatViewScrollApi } from "@/components/chat/ChatView";
 import { ChatView } from "@/components/chat/ChatView";
@@ -17,6 +16,7 @@ import {
   useTabStore,
   useUIStore,
 } from "@/stores";
+import { ensureBotInputRequestListener } from "@/stores/feature/botStore";
 import { theme } from "antd";
 import { ChevronLeft, ChevronRight, PanelRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -245,7 +245,7 @@ export function ChatPage() {
     void ensureBotInputRequestListener?.();
   }, []);
   useEffect(() => {
-    if (typeof loadInputRequests !== "function") return;
+    if (typeof loadInputRequests !== "function") { return; }
     if (activeBotId) {
       void loadInputRequests({ botId: activeBotId }).catch(() => {});
     } else if (activeConversationId) {

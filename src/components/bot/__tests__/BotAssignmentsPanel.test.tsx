@@ -8,10 +8,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BotAssignmentsPanel, isTerminalStatus, statusBadgeColor, statusI18nKey } from "../BotAssignmentsPanel";
 import i18n from "@/i18n";
 import { useBotStore } from "@/stores/feature/botStore";
 import type { Bot, BotAssignment, BotAssignmentStatus } from "@/types";
+import { BotAssignmentsPanel, isTerminalStatus, statusBadgeColor, statusI18nKey } from "../BotAssignmentsPanel";
 
 function makeBot(id: string, name: string): Bot {
   return {
@@ -124,5 +124,4 @@ describe("BotAssignmentsPanel 渲染", () => {
     expect(screen.getByText("失败")).toBeTruthy();
     expect(screen.getByText("委派执行超时")).toBeTruthy(); // errorDetail 如实展示
   });
-
 });

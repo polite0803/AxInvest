@@ -25,7 +25,7 @@ export function BotInputRequestCard({ request }: { request: BotInputRequest }) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    if (request.status !== "pending") return;
+    if (request.status !== "pending") { return; }
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [request.status]);
@@ -46,14 +46,14 @@ export function BotInputRequestCard({ request }: { request: BotInputRequest }) {
   const remaining = Math.max(0, request.expiresAt - now);
 
   const statusText = useMemo(() => {
-    if (answered) return t("bot.input.answered");
-    if (expired) return t("bot.input.expired");
-    if (cancelled) return t("bot.input.cancelled");
+    if (answered) { return t("bot.input.answered"); }
+    if (expired) { return t("bot.input.expired"); }
+    if (cancelled) { return t("bot.input.cancelled"); }
     return t("bot.input.pendingBadge");
   }, [answered, cancelled, expired, t]);
 
   const onSubmit = useCallback(async () => {
-    if (!canSubmit) return;
+    if (!canSubmit) { return; }
     setSubmitting(true);
     try {
       await answerInputRequest(request.id, trimmed);
@@ -65,7 +65,7 @@ export function BotInputRequestCard({ request }: { request: BotInputRequest }) {
   }, [answerInputRequest, canSubmit, request.id, t, trimmed]);
 
   const onCancel = useCallback(async () => {
-    if (!pending || submitting) return;
+    if (!pending || submitting) { return; }
     setSubmitting(true);
     try {
       await cancelInputRequest(request.id);
@@ -83,7 +83,10 @@ export function BotInputRequestCard({ request }: { request: BotInputRequest }) {
           <Text strong>{t("bot.input.pendingTitle")}</Text>
           <Space size={8}>
             {pending ? <Text type="secondary">{t("bot.input.expiresIn", { time: fmtLeft(remaining) })}</Text> : null}
-            <Tag data-testid="bot-input-request-status" color={answered ? "green" : expired ? "red" : cancelled ? "default" : "gold"}>
+            <Tag
+              data-testid="bot-input-request-status"
+              color={answered ? "green" : expired ? "red" : cancelled ? "default" : "gold"}
+            >
               {statusText}
             </Tag>
           </Space>
@@ -94,24 +97,26 @@ export function BotInputRequestCard({ request }: { request: BotInputRequest }) {
           <div data-testid="bot-input-request-question" style={{ whiteSpace: "pre-wrap" }}>{request.question}</div>
         </div>
 
-        {request.options.length > 0 ? (
-          <Space wrap data-testid="bot-input-request-options">
-            {request.options.map((opt) => (
-              <Button
-                key={opt}
-                size="small"
-                type={selected === opt ? "primary" : "default"}
-                disabled={!pending || submitting}
-                onClick={() => {
-                  setSelected(opt);
-                  setAnswer(opt);
-                }}
-              >
-                {opt}
-              </Button>
-            ))}
-          </Space>
-        ) : null}
+        {request.options.length > 0
+          ? (
+            <Space wrap data-testid="bot-input-request-options">
+              {request.options.map((opt) => (
+                <Button
+                  key={opt}
+                  size="small"
+                  type={selected === opt ? "primary" : "default"}
+                  disabled={!pending || submitting}
+                  onClick={() => {
+                    setSelected(opt);
+                    setAnswer(opt);
+                  }}
+                >
+                  {opt}
+                </Button>
+              ))}
+            </Space>
+          )
+          : null}
 
         <Input.TextArea
           data-testid="bot-input-request-answer"
@@ -133,19 +138,25 @@ export function BotInputRequestCard({ request }: { request: BotInputRequest }) {
             data-testid="bot-input-request-submit"
             disabled={!canSubmit}
             loading={submitting && pending}
-            onClick={() => { void onSubmit(); }}
+            onClick={() => {
+              void onSubmit();
+            }}
           >
             {t("bot.input.submit")}
           </Button>
-          {pending ? (
-            <Button
-              data-testid="bot-input-request-cancel"
-              disabled={submitting}
-              onClick={() => { void onCancel(); }}
-            >
-              {t("bot.input.cancel")}
-            </Button>
-          ) : null}
+          {pending
+            ? (
+              <Button
+                data-testid="bot-input-request-cancel"
+                disabled={submitting}
+                onClick={() => {
+                  void onCancel();
+                }}
+              >
+                {t("bot.input.cancel")}
+              </Button>
+            )
+            : null}
         </Space>
       </Space>
     </Card>

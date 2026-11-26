@@ -13,14 +13,14 @@
  */
 
 import { backendErrorText } from "@/lib/errorI18n";
+import { listen } from "@/lib/invoke";
 import { useBotStore } from "@/stores/feature/botStore";
 import type { Bot, BotAssignment, BotAssignmentStatus } from "@/types";
-import { App, Alert, Badge, Button, Card, Empty, Form, Input, Popconfirm, Select, Spin, Tag, Typography } from "antd";
+import type { IpcEventName } from "@/types/generated/events";
+import { Alert, App, Badge, Button, Card, Empty, Form, Input, Popconfirm, Select, Spin, Tag, Typography } from "antd";
 import { Plus, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@/lib/invoke";
-import type { IpcEventName } from "@/types/generated/events";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -43,7 +43,9 @@ export interface BotAssignmentsPanelProps {
 }
 
 /** 状态 → 徽章色（在途蓝、终态绿灰、失败红）。导出供单测直断映射。 */
-export function statusBadgeColor(status: BotAssignmentStatus): "default" | "processing" | "success" | "error" | "warning" {
+export function statusBadgeColor(
+  status: BotAssignmentStatus,
+): "default" | "processing" | "success" | "error" | "warning" {
   switch (status) {
     case "queued":
       return "default";
@@ -276,11 +278,11 @@ export function BotAssignmentsPanel({ bot, bots }: BotAssignmentsPanelProps) {
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                     <Badge
                       status={statusBadgeColor(assignment.status)}
-                      text={(
+                      text={
                         <Text strong style={{ fontSize: 13 }}>
                           {t(statusI18nKey(assignment.status))}
                         </Text>
-                      )}
+                      }
                     />
                     <Text type="secondary" ellipsis style={{ fontSize: 12, flex: 1 }}>
                       {`${t("bot.assignment.assignee")}: ${assignment.assigneeName}`}

@@ -11,9 +11,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BotList, departmentOfBot, projectDepartmentGroups } from "../BotList";
 import i18n from "@/i18n";
 import type { Bot, BotDepartment } from "@/types";
+import { BotList, departmentOfBot, projectDepartmentGroups } from "../BotList";
 
 function makeBot(id: string, name: string): Bot {
   return {

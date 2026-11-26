@@ -278,22 +278,35 @@ describe("browserMock: Bot 数据面", () => {
     const bot = await makeBot("V");
     await expect(
       handleCommand("create_bot_scheduled_task", {
-        botId: bot.id, name: "x", prompt: "   ", cronExpression: "30 8 * * 1-5",
+        botId: bot.id,
+        name: "x",
+        prompt: "   ",
+        cronExpression: "30 8 * * 1-5",
       }),
     ).rejects.toThrow(/COMMON_INVALID_INPUT/);
     await expect(
       handleCommand("create_bot_scheduled_task", {
-        botId: bot.id, name: "x", prompt: "p", cronExpression: "每天早上",
+        botId: bot.id,
+        name: "x",
+        prompt: "p",
+        cronExpression: "每天早上",
       }),
     ).rejects.toThrow(/BOT_SCHEDULE_CRON_INVALID/);
     await expect(
       handleCommand("create_bot_scheduled_task", {
-        botId: bot.id, name: "x", prompt: "p", cronExpression: "30 8 * * 1-5", timezone: "UTC+8",
+        botId: bot.id,
+        name: "x",
+        prompt: "p",
+        cronExpression: "30 8 * * 1-5",
+        timezone: "UTC+8",
       }),
     ).rejects.toThrow(/BOT_SCHEDULE_TIMEZONE_INVALID/);
     await expect(
       handleCommand("create_bot_scheduled_task", {
-        botId: "missing-bot", name: "x", prompt: "p", cronExpression: "30 8 * * 1-5",
+        botId: "missing-bot",
+        name: "x",
+        prompt: "p",
+        cronExpression: "30 8 * * 1-5",
       }),
     ).rejects.toThrow(/BOT_NOT_FOUND/);
     await expect(handleCommand("list_bot_scheduled_tasks", { botId: "missing-bot" })).rejects.toThrow(
@@ -312,7 +325,12 @@ describe("browserMock: Bot 数据面", () => {
       "axagent_bot_routines",
       JSON.stringify(
         (JSON.parse(localStorage.getItem("axagent_bot_routines") ?? "[]") as RoutineDto[]).concat([
-          { ...(JSON.parse(localStorage.getItem("axagent_bot_routines") ?? "[]") as RoutineDto[])[0], id: "plain-task", taskType: "backup", botId: null as unknown as string },
+          {
+            ...(JSON.parse(localStorage.getItem("axagent_bot_routines") ?? "[]") as RoutineDto[])[0],
+            id: "plain-task",
+            taskType: "backup",
+            botId: null as unknown as string,
+          },
         ]),
       ),
     );
@@ -343,7 +361,8 @@ describe("browserMock: Bot 数据面", () => {
 
     // 删除 Bot 级联只删本 Bot 例程（GAP G-10）
     const res = await handleCommand<{ detachedThreads: number; removedRoutines: number }>(
-      "delete_bot", { botId: bot.id },
+      "delete_bot",
+      { botId: bot.id },
     );
     expect(res.removedRoutines).toBe(2);
     expect(await handleCommand<RoutineDto[]>("list_bot_scheduled_tasks", { botId: other.id })).toHaveLength(1);
@@ -366,7 +385,6 @@ describe("browserMock: Bot 数据面", () => {
     );
   });
 });
-
 
 // ── P2-b：部门与委派（IPC-P2B 冻结契约）─────────────────────────────────
 

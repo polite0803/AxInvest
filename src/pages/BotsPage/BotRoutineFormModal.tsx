@@ -12,12 +12,12 @@
  */
 
 import { backendErrorText } from "@/lib/errorI18n";
+import { validateCronSyntax } from "@/pages/TasksCenterPage/CronScheduleBuilder";
 import { useBotStore } from "@/stores/feature/botStore";
 import type { ScheduledTask } from "@/types";
 import { App, Form, Input, Modal, Select } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { validateCronSyntax } from "@/pages/TasksCenterPage/CronScheduleBuilder";
 
 /** 时区下拉的预设清单（常用 IANA 名；「跟随系统」= null 另行表达） */
 const COMMON_TIMEZONES = [
@@ -210,9 +210,7 @@ export function BotRoutineFormModal({ open, botId, editing, onClose, onSaved }: 
             placeholder={t("bots.routineTimezoneLocal")}
             options={timezoneOptions}
             // 自由输入非预设时区（例如用户机器上的冷门 IANA 名）
-            filterOption={(input, option) =>
-              (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-            }
+            filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
           />
         </Form.Item>
       </Form>

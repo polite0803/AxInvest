@@ -13,11 +13,11 @@ import { App } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pickVisibleAskUsers } from "@/components/chat/askUserVisibility";
-import { BotQuotaPanel } from "../BotQuotaPanel";
-import { BotInputRequestCard } from "../BotInputRequestCard";
 import i18n from "@/i18n";
 import { useBotStore } from "@/stores/feature/botStore";
 import type { BotDepartmentQuota, BotInputRequest, BotInputRequestStatus } from "@/types";
+import { BotInputRequestCard } from "../BotInputRequestCard";
+import { BotQuotaPanel } from "../BotQuotaPanel";
 
 function makeQuota(over: Partial<BotDepartmentQuota> = {}): BotDepartmentQuota {
   return {
@@ -161,16 +161,22 @@ describe("BotInputRequestCard", () => {
     const submit = screen.getByTestId("bot-input-request-submit") as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     await user.type(screen.getByTestId("bot-input-request-answer"), "就用 A");
-    await waitFor(() => expect((screen.getByTestId("bot-input-request-submit") as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect((screen.getByTestId("bot-input-request-submit") as HTMLButtonElement).disabled).toBe(false)
+    );
     await user.click(screen.getByTestId("bot-input-request-submit"));
-    await waitFor(() => expect(useBotStore.getState().answerInputRequest).toHaveBeenCalledWith("req-pending", "就用 A"));
+    await waitFor(() =>
+      expect(useBotStore.getState().answerInputRequest).toHaveBeenCalledWith("req-pending", "就用 A")
+    );
   });
 
-  it.each([
-    ["answered", "已回答"],
-    ["expired", "该问题已过期"],
-    ["cancelled", "已取消"],
-  ] as const)("%s 终态渲染", (status, text) => {
+  it.each(
+    [
+      ["answered", "已回答"],
+      ["expired", "该问题已过期"],
+      ["cancelled", "已取消"],
+    ] as const,
+  )("%s 终态渲染", (status, text) => {
     renderInApp(<BotInputRequestCard request={makeRequest(status)} />);
     expect(screen.getByTestId("bot-input-request-status").textContent).toContain(text);
     expect((screen.getByTestId("bot-input-request-submit") as HTMLButtonElement).disabled).toBe(true);

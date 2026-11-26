@@ -82,20 +82,20 @@ const requestedPluginVersion = pluginVersionFlag >= 0 && argv[pluginVersionFlag 
  * 本地 `--plugin stock` 验证一直没暴露）。
  */
 const OPC_DOMAIN_PAGE_NAV = {
-  "opc-finance-invest":     { navGroup: "packs", labelKey: "nav.financeAnalysis",      icon: "TrendingUp",    navOrder: 0 },
-  "opc-accounting":         { navGroup: "packs", labelKey: "nav.financeAccounting",    icon: "Calculator",    navOrder: 1 },
-  "opc-sales-growth":       { navGroup: "packs", labelKey: "nav.automationSales",      icon: "TrendingUp",    navOrder: 2 },
-  "opc-project-management": { navGroup: "packs", labelKey: "nav.automationProjects",   icon: "Layers",        navOrder: 3 },
-  "opc-consulting":         { navGroup: "packs", labelKey: "nav.automationConsulting", icon: "Users",         navOrder: 4 },
-  "opc-ecommerce":          { navGroup: "packs", labelKey: "nav.automationEcommerce",  icon: "ShoppingBag",   navOrder: 5 },
-  "opc-software-dev":       { navGroup: "packs", labelKey: "nav.devopsSoftware",       icon: "Code",          navOrder: 6 },
-  "opc-security":           { navGroup: "packs", labelKey: "nav.devopsSecurity",       icon: "ShieldCheck",   navOrder: 7 },
-  "opc-geospatial":         { navGroup: "packs", labelKey: "nav.dataGeospatial",       icon: "MapPin",        navOrder: 8 },
-  "opc-ai-research":        { navGroup: "packs", labelKey: "nav.dataAiResearch",       icon: "Brain",         navOrder: 9 },
-  "opc-content-media":      { navGroup: "packs", labelKey: "nav.contentMedia",         icon: "Video",         navOrder: 10 },
-  "opc-design":             { navGroup: "packs", labelKey: "nav.contentDesign",        icon: "Palette",       navOrder: 11 },
-  "opc-education":          { navGroup: "packs", labelKey: "nav.contentEducation",     icon: "GraduationCap", navOrder: 12 },
-  "opc-game-dev":           { navGroup: "packs", labelKey: "nav.aiMediaGame",          icon: "Gamepad2",      navOrder: 13 },
+  "opc-finance-invest": { navGroup: "packs", labelKey: "nav.financeAnalysis", icon: "TrendingUp", navOrder: 0 },
+  "opc-accounting": { navGroup: "packs", labelKey: "nav.financeAccounting", icon: "Calculator", navOrder: 1 },
+  "opc-sales-growth": { navGroup: "packs", labelKey: "nav.automationSales", icon: "TrendingUp", navOrder: 2 },
+  "opc-project-management": { navGroup: "packs", labelKey: "nav.automationProjects", icon: "Layers", navOrder: 3 },
+  "opc-consulting": { navGroup: "packs", labelKey: "nav.automationConsulting", icon: "Users", navOrder: 4 },
+  "opc-ecommerce": { navGroup: "packs", labelKey: "nav.automationEcommerce", icon: "ShoppingBag", navOrder: 5 },
+  "opc-software-dev": { navGroup: "packs", labelKey: "nav.devopsSoftware", icon: "Code", navOrder: 6 },
+  "opc-security": { navGroup: "packs", labelKey: "nav.devopsSecurity", icon: "ShieldCheck", navOrder: 7 },
+  "opc-geospatial": { navGroup: "packs", labelKey: "nav.dataGeospatial", icon: "MapPin", navOrder: 8 },
+  "opc-ai-research": { navGroup: "packs", labelKey: "nav.dataAiResearch", icon: "Brain", navOrder: 9 },
+  "opc-content-media": { navGroup: "packs", labelKey: "nav.contentMedia", icon: "Video", navOrder: 10 },
+  "opc-design": { navGroup: "packs", labelKey: "nav.contentDesign", icon: "Palette", navOrder: 11 },
+  "opc-education": { navGroup: "packs", labelKey: "nav.contentEducation", icon: "GraduationCap", navOrder: 12 },
+  "opc-game-dev": { navGroup: "packs", labelKey: "nav.aiMediaGame", icon: "Gamepad2", navOrder: 13 },
 };
 
 const PLUGIN_SPECS = {

@@ -57,10 +57,10 @@ export function BotQuotaPanel({ departmentId }: { departmentId: string }) {
     setErrorText(null);
     void getDepartmentQuota(departmentId)
       .then((q) => {
-        if (alive) setForm(toForm(q));
+        if (alive) { setForm(toForm(q)); }
       })
       .catch((e) => {
-        if (alive) setErrorText(backendErrorText(e));
+        if (alive) { setErrorText(backendErrorText(e)); }
       });
     return () => {
       alive = false;
@@ -113,7 +113,7 @@ export function BotQuotaPanel({ departmentId }: { departmentId: string }) {
     for (const field of FIELDS) {
       const value = form[field];
       const { min, max } = LIMITS[field];
-      if (!Number.isInteger(value) || value < min || value > max) return field;
+      if (!Number.isInteger(value) || value < min || value > max) { return field; }
     }
     return null;
   }, [form]);
@@ -154,13 +154,17 @@ export function BotQuotaPanel({ departmentId }: { departmentId: string }) {
     <div data-testid="bot-quota-panel" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
         <Text strong>{t("bot.quota.title")}</Text>
-        <div><Text type="secondary" style={{ fontSize: 12 }}>{t("bot.quota.subtitle")}</Text></div>
+        <div>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t("bot.quota.subtitle")}</Text>
+        </div>
       </div>
-      {quota?.isDefault ? (
-        <Text type="secondary" data-testid="bot-quota-default-hint" style={{ fontSize: 12 }}>
-          {t("bot.quota.inheritHint")}
-        </Text>
-      ) : null}
+      {quota?.isDefault
+        ? (
+          <Text type="secondary" data-testid="bot-quota-default-hint" style={{ fontSize: 12 }}>
+            {t("bot.quota.inheritHint")}
+          </Text>
+        )
+        : null}
       {FIELDS.map((field) => (
         <div key={field} style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 8, alignItems: "center" }}>
           <div>
@@ -180,14 +184,25 @@ export function BotQuotaPanel({ departmentId }: { departmentId: string }) {
           />
         </div>
       ))}
-      {errorText ? (
-        <Text type="danger" data-testid="bot-quota-error">{errorText}</Text>
-      ) : null}
+      {errorText ? <Text type="danger" data-testid="bot-quota-error">{errorText}</Text> : null}
       <Space>
-        <Button type="primary" onClick={() => { void onSave(); }} loading={quotaSaving} data-testid="bot-quota-save">
+        <Button
+          type="primary"
+          onClick={() => {
+            void onSave();
+          }}
+          loading={quotaSaving}
+          data-testid="bot-quota-save"
+        >
           {t("bot.quota.save")}
         </Button>
-        <Popconfirm title={t("bot.quota.resetConfirm")} onConfirm={() => { void onReset(); }} okText={t("common.confirm")}>
+        <Popconfirm
+          title={t("bot.quota.resetConfirm")}
+          onConfirm={() => {
+            void onReset();
+          }}
+          okText={t("common.confirm")}
+        >
           <Button disabled={quotaSaving} data-testid="bot-quota-reset">{t("bot.quota.reset")}</Button>
         </Popconfirm>
       </Space>

@@ -11,7 +11,7 @@ export function pickVisibleAskUsers<T extends { askId: string }>(
   asks: T[],
   hiddenAskIds?: readonly string[],
 ): T[] {
-  if (!hiddenAskIds || hiddenAskIds.length === 0) return asks;
+  if (!hiddenAskIds || hiddenAskIds.length === 0) { return asks; }
   const hidden = new Set(hiddenAskIds);
   return asks.filter((ask) => !hidden.has(ask.askId));
 }

@@ -23,14 +23,27 @@
  * 浏览器面无入口）；该断言落在 `src-tauri/tests/bot_quota.rs` 的 cron_gate 用例。
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { installP3Shim } from "./helpers/p3-tauri-shim";
 
 const BASE_BOT = {
-  title: null, description: null, soulHash: "00000000", soulDrift: false, icon: "🤖",
-  color: null, section: "default", modelId: null, providerId: null, effort: null,
-  workdir: null, agentProfileId: null, approvalMode: "full", isEnabled: true, sortOrder: 0,
-  createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000,
+  title: null,
+  description: null,
+  soulHash: "00000000",
+  soulDrift: false,
+  icon: "🤖",
+  color: null,
+  section: "default",
+  modelId: null,
+  providerId: null,
+  effort: null,
+  workdir: null,
+  agentProfileId: null,
+  approvalMode: "full",
+  isEnabled: true,
+  sortOrder: 0,
+  createdAt: 1_700_000_000_000,
+  updatedAt: 1_700_000_000_000,
 };
 
 const QUOTA_BOTS = [
@@ -45,7 +58,8 @@ const QUOTA_DEPARTMENTS = [
 /** 只等替身注入完成，不依赖页面结构：契约自检不应因 UI 改版而假红。 */
 async function bootShim(page: Page) {
   await page.addInitScript(installP3Shim, {
-    bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
+    bots: QUOTA_BOTS,
+    departments: QUOTA_DEPARTMENTS,
   });
   await page.goto("/bots");
   await page.waitForFunction(() => Boolean((window as any).__P3_TEST__));
@@ -65,17 +79,26 @@ async function ipc(page: Page, cmd: string, args: any): Promise<IpcResult> {
 }
 
 const step = (stepKey: string, botId = "bot-quota-a") => ({
-  stepKey, botId, promptTemplate: "处理 " + stepKey,
+  stepKey,
+  botId,
+  promptTemplate: "处理 " + stepKey,
 });
 
 const deptWorkflow = (over: Record<string, any> = {}) => ({
-  name: "部门编排", ownerScope: "department", departmentId: "dept-alpha",
-  maxConcurrency: 1, totalTimeoutSecs: 60,
-  steps: [step("s1")], ...over,
+  name: "部门编排",
+  ownerScope: "department",
+  departmentId: "dept-alpha",
+  maxConcurrency: 1,
+  totalTimeoutSecs: 60,
+  steps: [step("s1")],
+  ...over,
 });
 
-const countCalls = (page: Page, cmd: string) => page.evaluate(
-  (c) => (window as any).__P3_TEST__.state.log.filter((e: any) => e.cmd === c).length, cmd);
+const countCalls = (page: Page, cmd: string) =>
+  page.evaluate(
+    (c) => (window as any).__P3_TEST__.state.log.filter((e: any) => e.cmd === c).length,
+    cmd,
+  );
 
 /** 首启引导层会拦截指针事件（与 bot-workflow/bot-delegation-chain 同口径）；无引导时静默跳过。 */
 async function dismissOnboarding(page: Page) {
@@ -92,9 +115,14 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     expect(got.ok).toBe(true);
     expect((got as any).value).toEqual({
       departmentId: "dept-alpha",
-      maxConcurrency: 2, totalTimeoutSecs: 900, maxSteps: 12,
-      maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 2,
-      isDefault: true, updatedAt: null,
+      maxConcurrency: 2,
+      totalTimeoutSecs: 900,
+      maxSteps: 12,
+      maxInFlightPerDepth: 2,
+      stepTimeoutSecs: 300,
+      maxConcurrentRuns: 2,
+      isDefault: true,
+      updatedAt: null,
     });
 
     // IPC-P4 §1：部门不存在 → BOT_DEPARTMENT_NOT_FOUND
@@ -110,8 +138,12 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
 
     const outOfRange: Array<[string, number]> = [
-      ["maxConcurrency", 5], ["totalTimeoutSecs", 59], ["maxSteps", 13],
-      ["maxInFlightPerDepth", 0], ["stepTimeoutSecs", 901], ["maxConcurrentRuns", 9],
+      ["maxConcurrency", 5],
+      ["totalTimeoutSecs", 59],
+      ["maxSteps", 13],
+      ["maxInFlightPerDepth", 0],
+      ["stepTimeoutSecs", 901],
+      ["maxConcurrentRuns", 9],
     ];
     for (const [field, value] of outOfRange) {
       const res = await ipc(page, "set_bot_department_quota", {
@@ -122,14 +154,25 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
 
     const saved = await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 1, totalTimeoutSecs: 60, maxSteps: 3,
-        maxInFlightPerDepth: 1, stepTimeoutSecs: 120, maxConcurrentRuns: 1,
+        departmentId: "dept-alpha",
+        maxConcurrency: 1,
+        totalTimeoutSecs: 60,
+        maxSteps: 3,
+        maxInFlightPerDepth: 1,
+        stepTimeoutSecs: 120,
+        maxConcurrentRuns: 1,
       },
     });
     expect(saved.ok).toBe(true);
     expect((saved as any).value).toMatchObject({
-      departmentId: "dept-alpha", maxConcurrency: 1, totalTimeoutSecs: 60, maxSteps: 3,
-      maxInFlightPerDepth: 1, stepTimeoutSecs: 120, maxConcurrentRuns: 1, isDefault: false,
+      departmentId: "dept-alpha",
+      maxConcurrency: 1,
+      totalTimeoutSecs: 60,
+      maxSteps: 3,
+      maxInFlightPerDepth: 1,
+      stepTimeoutSecs: 120,
+      maxConcurrentRuns: 1,
+      isDefault: false,
     });
 
     // 回读 == 写入（保存回显的数据面）
@@ -142,8 +185,13 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 1, totalTimeoutSecs: 60, maxSteps: 3,
-        maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 2,
+        departmentId: "dept-alpha",
+        maxConcurrency: 1,
+        totalTimeoutSecs: 60,
+        maxSteps: 3,
+        maxInFlightPerDepth: 2,
+        stepTimeoutSecs: 300,
+        maxConcurrentRuns: 2,
       },
     });
 
@@ -162,8 +210,13 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 2, totalTimeoutSecs: 900, maxSteps: 2,
-        maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 2,
+        departmentId: "dept-alpha",
+        maxConcurrency: 2,
+        totalTimeoutSecs: 900,
+        maxSteps: 2,
+        maxInFlightPerDepth: 2,
+        stepTimeoutSecs: 300,
+        maxConcurrentRuns: 2,
       },
     });
 
@@ -183,8 +236,13 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 2, totalTimeoutSecs: 900, maxSteps: 2,
-        maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 2,
+        departmentId: "dept-alpha",
+        maxConcurrency: 2,
+        totalTimeoutSecs: 900,
+        maxSteps: 2,
+        maxInFlightPerDepth: 2,
+        stepTimeoutSecs: 300,
+        maxConcurrentRuns: 2,
       },
     });
     await ipc(page, "reset_bot_department_quota", { departmentId: "dept-alpha" });
@@ -202,8 +260,13 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 2, totalTimeoutSecs: 900, maxSteps: 2,
-        maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 2,
+        departmentId: "dept-alpha",
+        maxConcurrency: 2,
+        totalTimeoutSecs: 900,
+        maxSteps: 2,
+        maxInFlightPerDepth: 2,
+        stepTimeoutSecs: 300,
+        maxConcurrentRuns: 2,
       },
     });
 
@@ -214,7 +277,8 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
 
     const beta = await ipc(page, "create_bot_workflow", {
       input: deptWorkflow({
-        departmentId: "dept-beta", steps: [step("s1"), step("s2"), step("s3")],
+        departmentId: "dept-beta",
+        steps: [step("s1"), step("s2"), step("s3")],
       }),
     });
     expect(beta.ok).toBe(true);
@@ -227,8 +291,13 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 1, totalTimeoutSecs: 60, maxSteps: 3,
-        maxInFlightPerDepth: 2, stepTimeoutSecs: 300, maxConcurrentRuns: 1,
+        departmentId: "dept-alpha",
+        maxConcurrency: 1,
+        totalTimeoutSecs: 60,
+        maxSteps: 3,
+        maxInFlightPerDepth: 2,
+        stepTimeoutSecs: 300,
+        maxConcurrentRuns: 1,
       },
     });
     const wf = await ipc(page, "create_bot_workflow", {
@@ -238,12 +307,14 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     const workflowId = (wf as any).value.id;
 
     const first = await ipc(page, "run_bot_workflow", {
-      workflowId, requesterConversationId: "thread-quota-1",
+      workflowId,
+      requesterConversationId: "thread-quota-1",
     });
     expect(first.ok).toBe(true);
 
     const second = await ipc(page, "run_bot_workflow", {
-      workflowId, requesterConversationId: "thread-quota-2",
+      workflowId,
+      requesterConversationId: "thread-quota-2",
     });
     expect(second.ok).toBe(false);
     expect((second as any).error).toContain("BOT_QUOTA_EXCEEDED");
@@ -257,14 +328,21 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
     await bootShim(page);
     await ipc(page, "set_bot_department_quota", {
       input: {
-        departmentId: "dept-alpha", maxConcurrency: 1, totalTimeoutSecs: 60, maxSteps: 1,
-        maxInFlightPerDepth: 1, stepTimeoutSecs: 30, maxConcurrentRuns: 1,
+        departmentId: "dept-alpha",
+        maxConcurrency: 1,
+        totalTimeoutSecs: 60,
+        maxSteps: 1,
+        maxInFlightPerDepth: 1,
+        stepTimeoutSecs: 30,
+        maxConcurrentRuns: 1,
       },
     });
 
     const instance = await ipc(page, "create_bot_workflow", {
       input: {
-        name: "实例编排", ownerScope: "instance", departmentId: "dept-alpha",
+        name: "实例编排",
+        ownerScope: "instance",
+        departmentId: "dept-alpha",
         steps: [step("s1"), step("s2"), step("s3")],
       },
     });
@@ -272,7 +350,8 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
 
     // 同一 departmentId 但 instance 归属：运行也不吃部门并发额度
     const run = await ipc(page, "run_bot_workflow", {
-      workflowId: (instance as any).value.id, requesterConversationId: "thread-instance",
+      workflowId: (instance as any).value.id,
+      requesterConversationId: "thread-instance",
     });
     expect(run.ok).toBe(true);
     expect(await countCalls(page, "run_bot_workflow")).toBe(1);
@@ -284,7 +363,8 @@ test.describe("P4-a 配额 · IPC 契约自检（shim）", () => {
 test.describe("P4-a 配额 · 部门弹窗面板", () => {
   test("UI：打开部门配额面板，6 项默认值来自 get 且显示 isDefault 提示", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
-      bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
+      bots: QUOTA_BOTS,
+      departments: QUOTA_DEPARTMENTS,
     });
     await page.goto("/bots");
     await dismissOnboarding(page);
@@ -305,7 +385,8 @@ test.describe("P4-a 配额 · 部门弹窗面板", () => {
   // detail 透传改由组件测试钉住（BotP4Panels「后端码映射」用例），不在 e2e 里伪造旁路。
   test("UI：越界被前端预校验拦下，错误位显示本地化字段名且不提交", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
-      bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
+      bots: QUOTA_BOTS,
+      departments: QUOTA_DEPARTMENTS,
     });
     await page.goto("/bots");
     await dismissOnboarding(page);
@@ -322,7 +403,8 @@ test.describe("P4-a 配额 · 部门弹窗面板", () => {
 
   test("UI：保存后回显 + 恢复默认二次确认后回到 isDefault 读数", async ({ page }) => {
     await page.addInitScript(installP3Shim, {
-      bots: QUOTA_BOTS, departments: QUOTA_DEPARTMENTS,
+      bots: QUOTA_BOTS,
+      departments: QUOTA_DEPARTMENTS,
     });
     await page.goto("/bots");
     await dismissOnboarding(page);

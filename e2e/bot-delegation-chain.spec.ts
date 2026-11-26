@@ -93,21 +93,42 @@ test("P3 多层链：depth 1→2→3、root/parent 字段、L 前缀回执、cyc
   const chain = await page.evaluate(async () => {
     const t = (window as any).__P3_TEST__;
     const root = await t.invoke("create_bot_assignment", {
-      assigneeBotId: "bot-chain-b", taskText: "一层派工", stepKey: "root-step", origin: "person",
+      assigneeBotId: "bot-chain-b",
+      taskText: "一层派工",
+      stepKey: "root-step",
+      origin: "person",
     });
     const mid = await t.invoke("create_bot_assignment", {
-      parentAssignmentId: root.id, assigneeBotId: "bot-chain-c",
-      taskText: "二层派工", stepKey: "mid-step", origin: "bot", requesterBotId: "bot-chain-b",
+      parentAssignmentId: root.id,
+      assigneeBotId: "bot-chain-c",
+      taskText: "二层派工",
+      stepKey: "mid-step",
+      origin: "bot",
+      requesterBotId: "bot-chain-b",
     });
     const leaf = await t.invoke("create_bot_assignment", {
-      parentAssignmentId: mid.id, assigneeBotId: "bot-chain-d",
-      taskText: "三层派工", stepKey: "leaf-step", origin: "bot", requesterBotId: "bot-chain-c",
+      parentAssignmentId: mid.id,
+      assigneeBotId: "bot-chain-d",
+      taskText: "三层派工",
+      stepKey: "leaf-step",
+      origin: "bot",
+      requesterBotId: "bot-chain-c",
     });
     const rows = await t.invoke("list_bot_assignments", { rootId: root.rootId });
-    return { root, mid, leaf, rows: rows.map((a: any) => ({
-      id: a.id, rootId: a.rootId, parentId: a.parentId, depth: a.depth,
-      origin: a.origin, resultText: a.resultText, status: a.status,
-    })) };
+    return {
+      root,
+      mid,
+      leaf,
+      rows: rows.map((a: any) => ({
+        id: a.id,
+        rootId: a.rootId,
+        parentId: a.parentId,
+        depth: a.depth,
+        origin: a.origin,
+        resultText: a.resultText,
+        status: a.status,
+      })),
+    };
   });
   expect([chain.root.depth, chain.mid.depth, chain.leaf.depth]).toEqual([1, 2, 3]);
   expect(chain.rows).toHaveLength(3);
@@ -137,26 +158,40 @@ test("P3 多层链：depth 1→2→3、root/parent 字段、L 前缀回执、cyc
     const t = (window as any).__P3_TEST__;
     const out: Record<string, string> = {};
     const attempt = async (key: string, args: any) => {
-      try { await t.invoke("create_bot_assignment", args); out[key] = "NO_ERROR"; }
-      catch (e: any) { out[key] = String(e.message ?? e); }
+      try {
+        await t.invoke("create_bot_assignment", args);
+        out[key] = "NO_ERROR";
+      } catch (e: any) {
+        out[key] = String(e.message ?? e);
+      }
     };
     await attempt("cycle", {
-      parentAssignmentId: t.state.assignments[1].id, assigneeBotId: "bot-chain-b", taskText: "回派祖先",
+      parentAssignmentId: t.state.assignments[1].id,
+      assigneeBotId: "bot-chain-b",
+      taskText: "回派祖先",
     });
     await attempt("maxDepth", {
-      parentAssignmentId: t.state.assignments[2].id, assigneeBotId: "bot-chain-e", taskText: "第四层",
+      parentAssignmentId: t.state.assignments[2].id,
+      assigneeBotId: "bot-chain-e",
+      taskText: "第四层",
     });
     await attempt("busy1", {
-      parentAssignmentId: t.state.assignments[0].id, assigneeBotId: "bot-chain-d",
-      taskText: "同层第一单", status: "queued",
+      parentAssignmentId: t.state.assignments[0].id,
+      assigneeBotId: "bot-chain-d",
+      taskText: "同层第一单",
+      status: "queued",
     });
     await attempt("busy2", {
-      parentAssignmentId: t.state.assignments[0].id, assigneeBotId: "bot-chain-e",
-      taskText: "同层第二单", status: "queued",
+      parentAssignmentId: t.state.assignments[0].id,
+      assigneeBotId: "bot-chain-e",
+      taskText: "同层第二单",
+      status: "queued",
     });
     await attempt("busy3", {
-      parentAssignmentId: t.state.assignments[0].id, assigneeBotId: "bot-chain-c",
-      taskText: "同层第三单", status: "queued",
+      parentAssignmentId: t.state.assignments[0].id,
+      assigneeBotId: "bot-chain-c",
+      taskText: "同层第三单",
+      status: "queued",
     });
     return out;
   });
@@ -171,16 +206,21 @@ test("P3 多层链：depth 1→2→3、root/parent 字段、L 前缀回执、cyc
   const waitRunId = await page.evaluate(async () => {
     const t = (window as any).__P3_TEST__;
     const wf = await t.invoke("create_bot_workflow", {
-      name: "链等待验证", ownerScope: "instance", steps: [], maxConcurrency: 2, totalTimeoutSecs: 60,
+      name: "链等待验证",
+      ownerScope: "instance",
+      steps: [],
+      maxConcurrency: 2,
+      totalTimeoutSecs: 60,
     });
     const run = await t.invoke("run_bot_workflow", {
-      workflowId: wf.id, requesterConversationId: "thread-chain-wait",
+      workflowId: wf.id,
+      requesterConversationId: "thread-chain-wait",
     });
     const chainIds = [t.state.assignments[0].id, t.state.assignments[1].id, t.state.assignments[2].id];
     for (const a of t.state.assignments) {
-      if (chainIds.includes(a.id)) a.workflowRunId = run.id;
-      if (a.id === chainIds[0]) a.status = "completed";
-      if (chainIds.slice(1).includes(a.id)) a.status = "queued";
+      if (chainIds.includes(a.id)) { a.workflowRunId = run.id; }
+      if (a.id === chainIds[0]) { a.status = "completed"; }
+      if (chainIds.slice(1).includes(a.id)) { a.status = "queued"; }
     }
     run.status = "completed"; // 根 completed 不应关 run：前端按在途子孙投影为 running
     t.emit("bot-workflow-run-updated", run);
@@ -194,7 +234,7 @@ test("P3 多层链：depth 1→2→3、root/parent 字段、L 前缀回执、cyc
   await page.evaluate((runId) => {
     const t = (window as any).__P3_TEST__;
     for (const a of t.state.assignments) {
-      if (a.workflowRunId === runId && a.status !== "completed") a.status = "completed";
+      if (a.workflowRunId === runId && a.status !== "completed") { a.status = "completed"; }
     }
     t.emit("bot-assignment-updated", {});
   }, waitRunId);
@@ -205,7 +245,7 @@ test("P3 多层链：depth 1→2→3、root/parent 字段、L 前缀回执、cyc
     const t = (window as any).__P3_TEST__;
     const rootId = t.state.assignments[0].rootId;
     for (const a of t.state.assignments) {
-      if (a.rootId === rootId) a.status = "queued";
+      if (a.rootId === rootId) { a.status = "queued"; }
     }
     await t.invoke("cancel_bot_assignment", { assignmentId: t.state.assignments[0].id });
     const ids = [t.state.assignments[0].id, t.state.assignments[1].id, t.state.assignments[2].id];

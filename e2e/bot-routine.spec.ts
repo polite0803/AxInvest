@@ -57,14 +57,15 @@ function seedScript() {
   return `(() => {
     if (localStorage.getItem("__t6_routine_seeded")) { return; }
     localStorage.setItem("axagent_bots", JSON.stringify([
-      { ...${JSON.stringify(BASE_BOT)}, id: ${JSON.stringify(BOT.id)}, name: ${JSON.stringify(BOT.name)}, soul: ${JSON.stringify(BOT.soul)} },
+      { ...${JSON.stringify(BASE_BOT)}, id: ${JSON.stringify(BOT.id)}, name: ${JSON.stringify(BOT.name)}, soul: ${
+    JSON.stringify(BOT.soul)
+  } },
     ]));
     localStorage.setItem("__t6_routine_seeded", "1");
   })();`;
 }
 
-const botItems = (page: import("@playwright/test").Page) =>
-  page.locator('[data-testid="bot-list-item"]');
+const botItems = (page: import("@playwright/test").Page) => page.locator('[data-testid="bot-list-item"]');
 
 test.describe("Bot 例程（P2-a T6'）", () => {
   test("纵向：建例程 → 列表展示 → 通知带 Bot 归属 → 角标 → 删 Bot 级联", async ({ page }) => {

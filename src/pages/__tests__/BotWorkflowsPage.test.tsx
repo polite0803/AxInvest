@@ -18,14 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NAV_GROUPS } from "@/lib/navGroups";
 import { builtinNavItems, getNavItems } from "@/lib/navRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
-import type {
-  Bot,
-  BotAssignment,
-  BotDepartment,
-  BotWorkflow,
-  BotWorkflowRun,
-  CreateBotWorkflowInput,
-} from "@/types";
+import type { Bot, BotAssignment, BotDepartment, BotWorkflow, BotWorkflowRun, CreateBotWorkflowInput } from "@/types";
 
 const h = vi.hoisted(() => {
   const fn = () => vi.fn();

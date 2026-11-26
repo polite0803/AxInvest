@@ -139,8 +139,11 @@ test("P3 纵向：建编排 → 运行 → 步骤输出/回执 → 取消 → cr
     return {
       runArgs: t.state.log.find((e: any) => e.cmd === "run_bot_workflow")?.args,
       assignments: t.state.assignments.map((a: any) => ({
-        rootId: a.rootId, parentId: a.parentId, depth: a.depth,
-        stepKey: a.stepKey, resultText: a.resultText,
+        rootId: a.rootId,
+        parentId: a.parentId,
+        depth: a.depth,
+        stepKey: a.stepKey,
+        resultText: a.resultText,
       })),
       receipts: t.state.receipts.map((r: any) => r.text),
       eventSubscriptions: t.listeners(),
@@ -156,7 +159,8 @@ test("P3 纵向：建编排 → 运行 → 步骤输出/回执 → 取消 → cr
   expect(runEvidence.receipts.some((text: string) => text.startsWith("[步骤 collect ·"))).toBe(true);
   expect(runEvidence.receipts.some((text: string) => text.startsWith("[L2 ·"))).toBe(true);
   expect(Object.keys(runEvidence.eventSubscriptions)).toEqual(
-    expect.arrayContaining(["bot-workflow-run-updated", "bot-assignment-updated"]));
+    expect.arrayContaining(["bot-workflow-run-updated", "bot-assignment-updated"]),
+  );
 
   // 3) cancel：终态再取消必须有语义错误码（不静默成功）
   await page.getByTestId("bot-workflow-run-cancel").click();
@@ -164,8 +168,12 @@ test("P3 纵向：建编排 → 运行 → 步骤输出/回执 → 取消 → cr
   const cancelError = await page.evaluate(async () => {
     const t = (window as any).__P3_TEST__;
     const id = t.state.runs[0].id;
-    try { await t.invoke("cancel_bot_workflow_run", { runId: id }); return "NO_ERROR"; }
-    catch (e: any) { return String(e.message ?? e); }
+    try {
+      await t.invoke("cancel_bot_workflow_run", { runId: id });
+      return "NO_ERROR";
+    } catch (e: any) {
+      return String(e.message ?? e);
+    }
   });
   expect(cancelError).toContain("BOT_WORKFLOW_CANCEL_INVALID");
 
@@ -179,8 +187,11 @@ test("P3 纵向：建编排 → 运行 → 步骤输出/回执 → 取消 → cr
     return { task: t.state.schedules[0], workflowId: t.state.workflows[0].id };
   });
   expect(schedule.task).toMatchObject({
-    taskType: "bot_workflow", cronExpression: "0 9 * * 1-5", timezone: "Asia/Shanghai",
-    botId: null, params: { workflowId: schedule.workflowId },
+    taskType: "bot_workflow",
+    cronExpression: "0 9 * * 1-5",
+    timezone: "Asia/Shanghai",
+    botId: null,
+    params: { workflowId: schedule.workflowId },
   });
 
   // 5) 契约负路径：手工触发缺线程 id 键 → ERR_VALIDATION（无隐式建线程）
@@ -189,7 +200,9 @@ test("P3 纵向：建编排 → 运行 → 步骤输出/回执 → 取消 → cr
     try {
       await t.invoke("run_bot_workflow", { workflowId: t.state.workflows[0].id });
       return "NO_ERROR";
-    } catch (e: any) { return String(e.message ?? e); }
+    } catch (e: any) {
+      return String(e.message ?? e);
+    }
   });
   expect(validationError).toContain("ERR_VALIDATION");
 
@@ -198,13 +211,14 @@ test("P3 纵向：建编排 → 运行 → 步骤输出/回执 → 取消 → cr
   const failureRunId = await page.evaluate(async (workflowId) => {
     const t = (window as any).__P3_TEST__;
     const run = await t.invoke("run_bot_workflow", {
-      workflowId, requesterConversationId: "thread-failure-skip",
+      workflowId,
+      requesterConversationId: "thread-failure-skip",
     });
     run.status = "failed";
     run.errorCode = "BOT_WORKFLOW_STEP_BOT_MISSING";
     run.context.skipped = ["analyze"];
     for (const a of t.state.assignments) {
-      if (a.workflowRunId === run.id && a.stepKey === "analyze") a.status = "failed";
+      if (a.workflowRunId === run.id && a.stepKey === "analyze") { a.status = "failed"; }
     }
     t.emit("bot-workflow-run-updated", run);
     t.emit("bot-assignment-updated", {});

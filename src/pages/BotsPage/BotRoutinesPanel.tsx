@@ -192,9 +192,7 @@ export function BotRoutinesPanel({ botId }: BotRoutinesPanelProps) {
                 <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
                   <Text ellipsis strong>
                     {task.name}
-                    {task.status === "paused" && (
-                      <Tag style={{ marginInlineStart: 8 }}>{t("bots.routinePause")}</Tag>
-                    )}
+                    {task.status === "paused" && <Tag style={{ marginInlineStart: 8 }}>{t("bots.routinePause")}</Tag>}
                   </Text>
                   <Text type="secondary" style={{ fontSize: 12 }} ellipsis>
                     {task.cronExpression ?? "-"}

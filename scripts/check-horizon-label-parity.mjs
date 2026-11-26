@@ -34,12 +34,13 @@
  *   「持有 90 交易日」读成「持有 1 个季度」。
  * - **判据 C（权威对账）**：zh-CN 四档必须**逐字等于** `Period::label_zh()` 四臂右值；
  *   zh-TW 必须等于其显式繁简映射（映射表登记在本文件，不猜）。`label_zh` 解析不出 ⇒ 判红。
- * - **判据 D（e2e 锚点对账）**：`e2e/stock-reflection-four-horizon.spec.ts` 里
- *   `horizonTab(expanded, "🟢 长线")` 这类**硬编码档名锚点**剥离状态徽标后必须落在
- *   权威值集内。e2e 是档名的**第 10 套副本**（i18n 8 套 + 后端 + 导出之外），且实测
- *   在 2026-10-16 改名后**没有跟随回退**（仍是 `"🟢 季度"`）而当时全门全绿 ⇒ 必须一起对账。
- *   抽不到任何锚点也判红（防空扫）。**扫描前先剥整行注释**（`stripCommentLines`）：
- *   注释里复刻事故原形不得算锚点 —— 判据假红会诱发「放宽判据」，那比漏报更贵。
+ * - **判据 D（e2e 锚点对账）已退役（2026-11-26）**：原扫
+ *   `e2e/stock-reflection-four-horizon.spec.ts` 的 `horizonTab(..., "🟢 …")` 硬编码档名锚点。
+ *   该 spec 的断言对象（宿主反思面板）随 T3 股票页外迁删除（见
+ *   `PLAN-shell-plus-plugins.md`「CI run 45721938652 三红修复」），消费方没了 ⇒
+ *   判据 D 连同 0/D 失效检查、`stripCommentLines` / `parseE2eTierAnchors` 一并下线。
+ *   档名对账面回归为 i18n 8 套 + 权威 `label_zh`；反思面板的 UI 对账待 stock 仓
+ *   web 测试基建重建后随迁移恢复。
  * - **判据 E（唯一族 + 禁回流）**：11 语言里，`RETIRED_FAMILIES` 的 **28 条路径必须全部不存在**。
  *   任何一条复活 ⇒ 判红（「值一样」不是理由：两份定义就是两条会各自腐烂的链）。
  * - **判据 F（四档不得同值）**：单一族的四档值必须**互不相同** —— 4 档抄成同一串
@@ -71,7 +72,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCALE_DIR = path.join(ROOT, "src/i18n/locales");
 const HOLDING = path.join(ROOT, "axagent-core/crates/harness/src/holding_period.rs");
-const E2E_SPEC = path.join(ROOT, "e2e/stock-reflection-four-horizon.spec.ts");
 
 /** **唯一**档名键族的四条完整路径（超短 / 短 / 中 / 长）。
  *  按**完整路径**读，避免同键名误伤（`quant.trades.long` = 「做多」、
@@ -109,41 +109,6 @@ export const ZH_TW_MAP = { 超短线: "超短線", 短线: "短線", 中线: "�
 
 const get = (o, k) => k.split(".").reduce((a, p) => (a == null ? undefined : a[p]), o);
 
-/** 剔除**整行注释**（`//` / `/*` / `*` 起首）—— 判据 D 的扫描面只应含**真实调用点**。
- *
- * 由来（2026-10-16 实测）：正则在**源码文本**上跑，于是注释里那句
- * 「曾写成 `horizonTab(expanded, "🟢 季度")`」会被当成锚点 ⇒ 判据 D **当场假红**
- * （同日加一条注释即从 4 条涨到 5 条，亲眼复现），而下一个人的「修法」通常就是**放宽判据**
- * —— 本门同日刚吃过一次（门 i 曾被放宽成认「长线|季度」＝改判据去适配改名）。**假红比漏报更能腐蚀门禁。**
- *
- * 只按**行首形态**判，不写状态机：同日已有反面教材 —— 自写剥注释状态机被
- * `stock-analysis-utils.ts` 一句**含引号的正则**带偏（字符类里的 `'` 被当成字符串起点）。
- * **行尾注释不剥**（`//` 可能落在字符串里，如 URL）：故锚点仍须写在**独立代码行**上。
- */
-export function stripCommentLines(src) {
-  return src
-    .split("\n")
-    .map((line) => {
-      const t = line.trimStart();
-      return t.startsWith("//") || t.startsWith("/*") || t.startsWith("*") ? "" : line;
-    })
-    .join("\n");
-}
-
-/** 从 e2e 规格的**真实调用点**抽 `horizonTab(<locator>, "<状态徽标> <档名>")` 锚点（剥徽标前缀）。
- *
- * e2e 是档名的**第 10 套副本**，且 2026-10-16 实测它**没跟随回退**（改名后仍写 `"🟢 季度"`，
- * 而当时 i18n / 后端 / 导出的门全绿）⇒ 只扫 i18n 会漏掉「UI 断言与实际档名脱钩」这类红。
- * 徽标是 emoji/符号（非 `\p{L}\p{N}`），故用「剥前导非字母非数字」得到裸档名。
- * 注释行先剥掉（见 `stripCommentLines`）——注释里的原形不算锚点。 */
-export function parseE2eTierAnchors(src) {
-  const out = [];
-  for (const m of stripCommentLines(src).matchAll(/horizonTab\(\s*[\w$]+\s*,\s*"([^"]+)"\s*\)/g)) {
-    out.push({ raw: m[1], name: m[1].replace(/^[^\p{L}\p{N}]*/u, "") });
-  }
-  return out;
-}
-
 /** 读 `Period::label_zh()` 的四个臂右值。取不到 ⇒ `ok:false`（调用侧必须判红）。 */
 export function parseLabelZh(src) {
   const anchor = "pub fn label_zh(&self) -> &'static str {";
@@ -173,8 +138,8 @@ export function readFamilies(localeDir = LOCALE_DIR) {
   return out;
 }
 
-/** 纯判据（与 IO 解耦，供 `--selftest` 用内存夹具驱动）。`e2eText` 传 e2e 规格源码。 */
-export function judge(families, authority, e2eText = "") {
+/** 纯判据（与 IO 解耦，供 `--selftest` 用内存夹具驱动）。 */
+export function judge(families, authority) {
   const violations = [];
   let scanned = 0;
 
@@ -258,48 +223,27 @@ export function judge(families, authority, e2eText = "") {
     }
   }
 
-  // 判据 D：e2e 规格里的硬编码档名锚点（第 10 套副本）
-  // 权威值集直接取 `authority.values`（与判据 C 同源），不在此另抄一份 —— 抄了就是第 11 套。
-  const anchors = parseE2eTierAnchors(e2eText);
-  if (anchors.length === 0) {
-    violations.push(
-      "[判据 0/D] e2e 里抽不到任何 `horizonTab(..., \"…\")` 锚点 ⇒ 本判据失效"
-        + "（0 命中 ≠ 没问题：写法若改成变量，这里会静默变空）",
-    );
-  }
-  const zhOk = new Set(authority.values);
-  for (const a of anchors) {
-    scanned += 1;
-    if (!zhOk.has(a.name)) {
-      violations.push(
-        `[判据 D] e2e 档名锚点 "${a.raw}" 的档名部分 "${a.name}" 不在权威值集`
-          + ` {${[...zhOk].join(" / ")}} 内 ⇒ e2e 断言与 UI 实际档名脱钩`,
-      );
-    }
-  }
-
   // 判据 0：扫描面非零
   if (scanned === 0) {
     violations.push("[判据 0] 扫描面为 0 ⇒ 本门不可信（0 命中 ≠ 没问题）");
   }
 
-  return { violations, scanned, anchors: anchors.length };
+  return { violations, scanned };
 }
 
 function run() {
   const authority = parseLabelZh(fs.readFileSync(HOLDING, "utf8"));
   const families = readFamilies();
-  const e2eText = fs.existsSync(E2E_SPEC) ? fs.readFileSync(E2E_SPEC, "utf8") : "";
-  const { violations, scanned, anchors } = judge(families, authority, e2eText);
+  const { violations, scanned } = judge(families, authority);
   console.log(
-    `比对面：${families.size} 语言 × **唯一族** 4 档 + e2e 锚点 ${anchors} 条`
+    `比对面：${families.size} 语言 × **唯一族** 4 档`
       + ` | 已退休族 ${RETIRED_FAMILIES.flat().length} 键 + ${RETIRED_SHELLS.length} 壳（须全部不存在）`
       + ` | 权威 \`label_zh\` = `
       + (authority.ok ? authority.values.map((v) => `"${v}"`).join(" / ") : "❌ 解析失败")
       + ` | 扫描点 ${scanned}`,
   );
   if (violations.length === 0) {
-    console.log("✅ 通过：档名只有一族、7 套冗余族未回流、档名不含尺度词、四档互异、zh 与 `Period::label_zh()` 逐字对账、e2e 锚点同源");
+    console.log("✅ 通过：档名只有一族、7 套冗余族未回流、档名不含尺度词、四档互异、zh 与 `Period::label_zh()` 逐字对账");
     return 0;
   }
   violations.forEach((v) => console.log(`✖ ${v}`));
@@ -311,7 +255,6 @@ function run() {
 function selftest() {
   const authority = parseLabelZh(fs.readFileSync(HOLDING, "utf8"));
   const disk = readFamilies();
-  const e2eText = fs.existsSync(E2E_SPEC) ? fs.readFileSync(E2E_SPEC, "utf8") : "";
   const cases = [];
 
   /** 深拷贝夹具（每条正控只动一处，互不污染）。 */
@@ -387,40 +330,9 @@ function selftest() {
     wantIn: ["判据 0"],
   });
 
-  // 正控 D：e2e 锚点跟丢（2026-10-16 实测漏网形态）
-  cases.push({
-    name: "正控 D：e2e 锚点写成「🟢 季度」⇒ 须红（i18n 全绿也拦不住）",
-    families: disk,
-    auth: authority,
-    e2e: 'await horizonTab(expanded, "🟢 季度").click();',
-    wantRed: true,
-    wantIn: ["判据 D", "季度"],
-  });
-
-  // 正控 0/D：e2e 抽不到锚点不得静默通过（防空扫）
-  cases.push({
-    name: "正控 0/D：e2e 写法变了导致抽不到锚点 ⇒ 须红（不静默放行）",
-    families: disk,
-    auth: authority,
-    e2e: 'await horizonTab(expanded, tabNameVar).click();',
-    wantRed: true,
-    wantIn: ["判据 0/D"],
-  });
-
-  // 负控：注释里复刻事故原形（「🟢 季度」）**不得**被当锚点 ⇒ 须绿。
-  // 动机：为本次事故补文档时，注释里天然就会写「曾写成 horizonTab(expanded, "🟢 季度")」，
-  // 若它被当锚点，判据 D 立刻假红 ⇒ 下一个人的修法会变成放宽判据（同日已吃过一次）。
-  cases.push({
-    name: "负控：注释里的档名原形（🟢 季度）不得被当锚点 ⇒ 须绿",
-    families: disk,
-    auth: authority,
-    e2e: '// 曾写成 horizonTab(expanded, "🟢 季度")\n * 亦见 horizonTab(expanded, "🟢 季度")\nawait horizonTab(expanded, "🟢 长线");',
-    wantRed: false,
-  });
-
   let bad = 0;
   for (const c of cases) {
-    const { violations } = judge(c.families, c.auth, c.e2e ?? e2eText);
+    const { violations } = judge(c.families, c.auth);
     const red = violations.length > 0;
     const hitAll = !c.wantIn || c.wantIn.every((needle) => violations.some((v) => v.includes(needle)));
     const ok = red === c.wantRed && (c.wantRed ? hitAll : true);

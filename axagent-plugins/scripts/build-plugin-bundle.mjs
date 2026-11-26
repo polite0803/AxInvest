@@ -64,6 +64,40 @@ const requestedPluginVersion = pluginVersionFlag >= 0 && argv[pluginVersionFlag 
  * - `manifest(ctx)`：清单构造器，`ctx = { version, binaryName, sha256 }`。**键序即产物键序**
  *   （`JSON.stringify` 保序），改键序等于改产物，下游比对会当漂移。
  */
+/**
+ * OPC 域包页面的侧栏元数据（唯一声明面）。
+ *
+ * ⚠ 这里的 navGroup / labelKey / icon / navOrder 是宿主侧栏投影的权威来源；
+ * 前端 Sidebar / CommandPalette 只做渲染，不得再按插件名写死分组或图标（禁区 12）。
+ * labelKey 复用既有 `nav.*`（11 语言已齐），不新增文案。
+ *
+ * 映射来源：git 7b43b5f92^:src/pages/opc/routes.tsx（14 个行业包的编译期声明被删前的原形），
+ * 加上 opc-accounting（会计，独立清单工厂）与 opc 公共包（探针页，hidden）。
+ *
+ * ⚠ 本表必须定义在 `PLUGIN_SPECS` 之前：打包主流程是**模块顶层顺序执行**（§356 取 spec →
+ * §594 调 `spec.manifest(...)` → manifest 工厂闭包调 `opcDomainPageDecl` 引用本表）。
+ * 函数声明有提升、const 没有 —— 本表曾放在文件尾部的声明区（PLUGIN_SPECS 之后 5700+ 行），
+ * 顶层 594 行先于 5827 行执行 ⇒ `Cannot access 'OPC_DOMAIN_PAGE_NAV' before initialization`
+ * （Release run 45721938652 的 macOS ARM 构建即崩于此；stock 不走 OPC 域包路径，
+ * 本地 `--plugin stock` 验证一直没暴露）。
+ */
+const OPC_DOMAIN_PAGE_NAV = {
+  "opc-finance-invest":     { navGroup: "packs", labelKey: "nav.financeAnalysis",      icon: "TrendingUp",    navOrder: 0 },
+  "opc-accounting":         { navGroup: "packs", labelKey: "nav.financeAccounting",    icon: "Calculator",    navOrder: 1 },
+  "opc-sales-growth":       { navGroup: "packs", labelKey: "nav.automationSales",      icon: "TrendingUp",    navOrder: 2 },
+  "opc-project-management": { navGroup: "packs", labelKey: "nav.automationProjects",   icon: "Layers",        navOrder: 3 },
+  "opc-consulting":         { navGroup: "packs", labelKey: "nav.automationConsulting", icon: "Users",         navOrder: 4 },
+  "opc-ecommerce":          { navGroup: "packs", labelKey: "nav.automationEcommerce",  icon: "ShoppingBag",   navOrder: 5 },
+  "opc-software-dev":       { navGroup: "packs", labelKey: "nav.devopsSoftware",       icon: "Code",          navOrder: 6 },
+  "opc-security":           { navGroup: "packs", labelKey: "nav.devopsSecurity",       icon: "ShieldCheck",   navOrder: 7 },
+  "opc-geospatial":         { navGroup: "packs", labelKey: "nav.dataGeospatial",       icon: "MapPin",        navOrder: 8 },
+  "opc-ai-research":        { navGroup: "packs", labelKey: "nav.dataAiResearch",       icon: "Brain",         navOrder: 9 },
+  "opc-content-media":      { navGroup: "packs", labelKey: "nav.contentMedia",         icon: "Video",         navOrder: 10 },
+  "opc-design":             { navGroup: "packs", labelKey: "nav.contentDesign",        icon: "Palette",       navOrder: 11 },
+  "opc-education":          { navGroup: "packs", labelKey: "nav.contentEducation",     icon: "GraduationCap", navOrder: 12 },
+  "opc-game-dev":           { navGroup: "packs", labelKey: "nav.aiMediaGame",          icon: "Gamepad2",      navOrder: 13 },
+};
+
 const PLUGIN_SPECS = {
   "opc-accounting": {
     packageName: "axagent-plugin-opc-accounting",
@@ -5814,33 +5848,6 @@ function opcAccountingManifest({ version, binaryName, sha256 }) {
  * `file_write` / `run_automation_rules`），不为每个域另写一份 —— 11 域共用同一份
  * 工具实现，schema 也必须同源。
  */
-/**
- * OPC 域包页面的侧栏元数据（唯一声明面）。
- *
- * ⚠ 这里的 navGroup / labelKey / icon / navOrder 是宿主侧栏投影的权威来源；
- * 前端 Sidebar / CommandPalette 只做渲染，不得再按插件名写死分组或图标（禁区 12）。
- * labelKey 复用既有 `nav.*`（11 语言已齐），不新增文案。
- *
- * 映射来源：git 7b43b5f92^:src/pages/opc/routes.tsx（14 个行业包的编译期声明被删前的原形），
- * 加上 opc-accounting（会计，独立清单工厂）与 opc 公共包（探针页，hidden）。
- */
-const OPC_DOMAIN_PAGE_NAV = {
-  "opc-finance-invest":     { navGroup: "packs", labelKey: "nav.financeAnalysis",      icon: "TrendingUp",    navOrder: 0 },
-  "opc-accounting":         { navGroup: "packs", labelKey: "nav.financeAccounting",    icon: "Calculator",    navOrder: 1 },
-  "opc-sales-growth":       { navGroup: "packs", labelKey: "nav.automationSales",      icon: "TrendingUp",    navOrder: 2 },
-  "opc-project-management": { navGroup: "packs", labelKey: "nav.automationProjects",   icon: "Layers",        navOrder: 3 },
-  "opc-consulting":         { navGroup: "packs", labelKey: "nav.automationConsulting", icon: "Users",         navOrder: 4 },
-  "opc-ecommerce":          { navGroup: "packs", labelKey: "nav.automationEcommerce",  icon: "ShoppingBag",   navOrder: 5 },
-  "opc-software-dev":       { navGroup: "packs", labelKey: "nav.devopsSoftware",       icon: "Code",          navOrder: 6 },
-  "opc-security":           { navGroup: "packs", labelKey: "nav.devopsSecurity",       icon: "ShieldCheck",   navOrder: 7 },
-  "opc-geospatial":         { navGroup: "packs", labelKey: "nav.dataGeospatial",       icon: "MapPin",        navOrder: 8 },
-  "opc-ai-research":        { navGroup: "packs", labelKey: "nav.dataAiResearch",       icon: "Brain",         navOrder: 9 },
-  "opc-content-media":      { navGroup: "packs", labelKey: "nav.contentMedia",         icon: "Video",         navOrder: 10 },
-  "opc-design":             { navGroup: "packs", labelKey: "nav.contentDesign",        icon: "Palette",       navOrder: 11 },
-  "opc-education":          { navGroup: "packs", labelKey: "nav.contentEducation",     icon: "GraduationCap", navOrder: 12 },
-  "opc-game-dev":           { navGroup: "packs", labelKey: "nav.aiMediaGame",          icon: "Gamepad2",      navOrder: 13 },
-};
-
 function opcDomainPageDecl(name, title) {
   const nav = OPC_DOMAIN_PAGE_NAV[name];
   const base = { id: name, title, entry: PAGE_ENTRY, loading: "bundle" };

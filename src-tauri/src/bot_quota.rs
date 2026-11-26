@@ -9,10 +9,14 @@
 //! [`AssignmentContext`] 按 `workflow_run_id` 登记；子孙 assignment 复用同一组
 //! 上限，不在派发热路径重复查库。超额一律拒绝并报字段（D3=A），从不静默夹紧。
 
+// SAFETY: 本文件的 std::sync::Mutex 仅保护同步登记表，guard 只在单次调用内存活，
+// 不跨 await。start_run/orchestrate 在 tokio runtime 内调用本表，tokio::sync::Mutex::blocking_lock
+// 会 panic（Cannot block the current thread from within a runtime）。符合 clippy.toml 合法例外。
+#![allow(clippy::disallowed_types)]
+
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::Mutex;
 
 use axagent_dao::DatabaseConnection;
 use axagent_dao::repo::bot_department_quota as quota_repo;
@@ -179,16 +183,16 @@ fn contexts() -> &'static Mutex<HashMap<String, QuotaLimits>> {
 
 impl AssignmentContext {
     pub fn install(run_id: &str, limits: QuotaLimits) {
-        contexts().blocking_lock().insert(run_id.to_string(), limits);
+        contexts().lock().expect("登记表锁不应毒化").insert(run_id.to_string(), limits);
     }
 
     pub fn get(run_id: &str) -> Option<QuotaLimits> {
-        contexts().blocking_lock().get(run_id).cloned()
+        contexts().lock().expect("登记表锁不应毒化").get(run_id).cloned()
     }
 
     /// run 终态时移除，避免登记表随进程长跑无界增长。
     pub fn remove(run_id: &str) {
-        contexts().blocking_lock().remove(run_id);
+        contexts().lock().expect("登记表锁不应毒化").remove(run_id);
     }
 
     /// 未登记（实例级/纯委派/进程重启）→ P3 默认，零 DB 读。

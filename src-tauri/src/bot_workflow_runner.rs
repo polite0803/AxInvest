@@ -49,9 +49,11 @@ pub fn step_scheduler() -> Option<&'static StepScheduler> {
     STEP_SCHEDULER.get().map(|s| s.as_ref())
 }
 
-fn notifier(run_id: &str) -> Arc<Notify> {
+/// 取得 run 对应的唤醒器。所有调用点都在异步函数内，`await` 期间不持 guard。
+/// 曾经的 `blocking_lock()` 会在 tokio runtime 线程上 panic（start_run 触发链实测）。
+async fn notifier(run_id: &str) -> Arc<Notify> {
     let map = NOTIFIERS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()));
-    let mut guard = map.blocking_lock();
+    let mut guard = map.lock().await;
     guard.entry(run_id.to_string()).or_insert_with(|| Arc::new(Notify::new())).clone()
 }
 
@@ -296,7 +298,7 @@ pub async fn on_assignment_completed(
             }
             emit_run(app, &run);
         }
-        notifier(run_id).notify_one();
+        notifier(run_id).await.notify_one();
         return;
     }
     if !asmt_repo::status::is_terminal(&row.status) {
@@ -369,7 +371,7 @@ pub async fn on_assignment_completed(
             {
                 tracing::warn!(run_id, error = %e, "编排失败通知发送失败");
             }
-            notifier(run_id).notify_one();
+            notifier(run_id).await.notify_one();
             return;
         }
     }
@@ -437,7 +439,7 @@ pub async fn on_assignment_completed(
     {
         tracing::warn!(run_id, error = %e, "编排完成通知发送失败");
     }
-    notifier(run_id).notify_one();
+    notifier(run_id).await.notify_one();
 }
 
 fn downstream_steps(workflow: &BotWorkflow, failed_key: &str) -> Vec<String> {
@@ -500,7 +502,7 @@ pub async fn fail_run(
     .await
     .map_err(|e| e.to_string())?;
     emit_run(app, &patched);
-    notifier(&run.id).notify_one();
+    notifier(&run.id).await.notify_one();
     crate::bot_quota::AssignmentContext::remove(&run.id);
     Ok(patched)
 }
@@ -552,7 +554,7 @@ pub async fn cancel_run(
     .await
     .map_err(|e| e.to_string())?;
     emit_run(app, &patched);
-    notifier(run_id).notify_one();
+    notifier(run_id).await.notify_one();
     crate::bot_quota::AssignmentContext::remove(run_id);
     Ok(patched)
 }
@@ -565,7 +567,7 @@ async fn orchestrate(
     workflow: BotWorkflow,
 ) {
     let run_id = run.id.clone();
-    let notify = notifier(&run_id);
+    let notify = notifier(&run_id).await;
     let limits = crate::bot_quota::AssignmentContext::limits_for_run(Some(&run_id));
     let deadline =
         tokio::time::Instant::now() + Duration::from_secs(limits.total_timeout_secs.max(1) as u64);

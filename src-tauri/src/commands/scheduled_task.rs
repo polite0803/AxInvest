@@ -992,14 +992,12 @@ pub(crate) async fn create_bot_workflow_persistent_conversation(
     let title = format!("Bot 编排定时: {}", workflow.name);
     let bot_id = if workflow.owner_scope == "department" {
         if let Some(dept_id) = workflow.department_id.as_deref() {
-            let dept = dept_repo::get_department(db, dept_id)
-                .await
-                .map_err(|e| {
-                    ErrorResponse::err_with_detail(
-                        crate::commands::error_code::common::INTERNAL,
-                        format!("查询 Bot 编排部门失败: {e}"),
-                    )
-                })?;
+            let dept = dept_repo::get_department(db, dept_id).await.map_err(|e| {
+                ErrorResponse::err_with_detail(
+                    crate::commands::error_code::common::INTERNAL,
+                    format!("查询 Bot 编排部门失败: {e}"),
+                )
+            })?;
             dept.chief_bot_id
         } else {
             None

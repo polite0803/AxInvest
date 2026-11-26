@@ -8,8 +8,13 @@
  *   - 依赖边（包内依赖 vs 跨根 path debt）；
  *   - `cargo package --list` 的入口文件。
  *
- * 本脚本不执行 `cargo publish`，也不改 manifest。默认写 `docs/audits/`，`--check`
- * 只比较盘上文档与当前源树是否一致，接入 CI 防止漂移。
+ * 本脚本不执行 `cargo publish`，也不改 manifest。默认写 `scripts/` 下的快照文件，
+ * `--check` 只比较盘上快照与当前源树是否一致，接入 CI 防止漂移。
+ *
+ * ⚠ 2026-11-26：输出原在 `docs/audits/AUDIT-plugin-sdk-release-manifest-2026-11-18.md`，
+ * 随「纯文档迁 Obsidian 权威源」（428a75b13）整目录删除后 `--check` 必然 FAIL。
+ * 本文件不是给人读的时点审计文档，而是门禁的**机器快照基线** —— 迁到 `scripts/` 与
+ * `component-neutrality-baseline.json` / `raw-map-err-baseline.json` 同族，语义不变。
  *
  * 用法：node scripts/generate-plugin-sdk-release-manifest.mjs [--check]
  */
@@ -20,7 +25,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "docs", "audits", "AUDIT-plugin-sdk-release-manifest-2026-11-18.md");
+const OUT = join(ROOT, "scripts", "plugin-sdk-release-manifest.snapshot.md");
 const CHECK = process.argv.includes("--check");
 const SELFTEST = process.argv.includes("--selftest");
 const PACKAGES = [

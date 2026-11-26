@@ -23,6 +23,7 @@ import { BotUsagePanel } from "@/components/bot/BotUsagePanel";
 import { backendErrorText } from "@/lib/errorI18n";
 import { countUnread, getNotifications } from "@/lib/notification";
 import { message } from "@/lib/toast";
+import { safeJoinIds } from "@/lib/validators";
 import { useBotStore, useConversationStore, useProviderStore } from "@/stores";
 import { ensureBotInputRequestListener } from "@/stores/feature/botStore";
 import type { Bot, BotDepartment, CreateBotInput, UpdateBotInput } from "@/types";
@@ -50,7 +51,7 @@ function botToEditorValues(bot: Bot): BotEditorValues {
     soul: bot.soul,
     workdir: bot.workdir ?? "",
     approvalMode: bot.approvalMode,
-    model: bot.providerId && bot.modelId ? `${bot.providerId}::${bot.modelId}` : "",
+    model: bot.providerId && bot.modelId ? safeJoinIds([bot.providerId, bot.modelId]) : "",
   };
 }
 
@@ -184,7 +185,10 @@ export function BotsPage() {
         provider.enabled
           ? provider.models
             .filter((model) => model.enabled)
-            .map((model) => ({ value: `${provider.id}::${model.modelId}`, label: `${provider.name} / ${model.name}` }))
+            .map((model) => ({
+              value: safeJoinIds([provider.id, model.modelId]),
+              label: `${provider.name} / ${model.name}`,
+            }))
           : []
       ),
     [providers],
@@ -240,7 +244,7 @@ export function BotsPage() {
             input.approvalMode = values.approvalMode;
           }
           const currentModel = editingBot.providerId && editingBot.modelId
-            ? `${editingBot.providerId}::${editingBot.modelId}`
+            ? safeJoinIds([editingBot.providerId, editingBot.modelId])
             : "";
           if (values.model !== currentModel) {
             const pair = parseModelPair(values.model);

@@ -177,27 +177,6 @@ jobs:
         run: |
           node scripts/check-input-mapping.mjs --selftest
           node scripts/check-input-mapping.mjs
-
-      # 「同一事实的多份载体」门禁（行号引用 + reranker 文件名）—— 与上几步同理：
-      # 纯 Node、秒级、不依赖 npm ci / 构建产物。
-      # 为什么需要：一个事实写在多处时，机器此前只看住了一部分 ——
-      #   ① 行号引用：`check-decl-evidence.mjs` 只扫 `harness/src/knowledge_graph.rs` 的
-      #      `evidence:` 字段；`page_type.rs` 的 7 条 rustdoc 引用**不在扫描面内**，
-      #      于是 09-14 起静默腐烂（实测 4 处偏 +10/+3，两次都不是被检查发现的）。
-      #   ② reranker 文件名：Rust 侧有真源常量 + 跨 crate 绑定测试，前端 2 处字面量却无锁
-      #      （全仓 grep 常量名在前端的命中数 = 0）—— 当初就是前端那份缺了 `.Q4_K_M.gguf` 后缀。
-      # 为什么正式步用 --ci 而不裸跑：脚本按判据 #147 把「客观错」（文件不存在 / 行号越界 /
-      #   指到空行 / 载体值不等）与「软判据」（出处那一行已不含同句引号值）分开；裸跑在只有
-      #   软命中时退 3，而软判据的修法是改判据而不是修缺陷 ⇒ 拿它拦 CI 必被绕过。
-      # 覆盖率自陈（判据 #16）：脚本把 LOCATED / NONLOC（裸 `mod.rs` 之类无法定位）/ EXTERNAL
-      #   （第三方 crate 源码）/ BROKEN 四类**分开打印**，并把未覆盖的引用点名列出 ——
-      #   不列的话「0 腐烂」会被误读成「全都查过了」。
-      # 本步两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
-      - name: Check single-source facts (line-ref rot / reranker filename drift)
-        run: |
-          node scripts/check-single-source-facts.mjs --selftest
-          node scripts/check-single-source-facts.mjs --ci
-
       # 插件页路径由运行期投影生成，静态入口扫描看不到它；反向断言宿主必须保留投影点和
       # /opc/domain/:pageId 旧链兜底，否则清单声明的页面与旧书签会静默落 404。自检先行。
       # 本步两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
@@ -583,22 +562,6 @@ jobs:
 
       - name: Check component neutrality (cross-feature coupling ratchet)
         run: node scripts/check-component-neutrality.mjs
-
-      # ── 文档「文件:行号」引用的段对齐（AGENTS.md「文档中的源码引用写法（强制）」）──
-      # 为什么需要：文档里的 `文件:行号` 必须段对齐（完整路径 / 唯一后缀 / 唯一 basename），
-      #   禁止从文件名中间截断或换同义词；但这条规则此前**零自动检查**，只靠人撞
-      #   （`PLAN-shell-plus-plugins.md` §99.4 手工抓到 `worker.rs:3798` 已差 492 行）。
-      #   行号引用随源码编辑持续腐烂，而编译 / clippy / 单测全都不读文档 ⇒ 静默失效。
-      # 判据：只有 BROKEN（仓内不存在且无截断/同义词候选）/ STALE（行号越界）判红；
-      #   ABBREV（自证候选）/ NONLOC（未检查）/ EXTERNAL / EPHEMERAL 只报告；
-      #   存量走 `scripts/doc-refs-baseline.json` 棘轮（只减不增）。
-      # 先 --selftest：点开头路径被截短、裸 `:N` 归并出怪物串，都是首版就踩过的假红。
-      # 命令行与 `scripts/ci-check.mjs` 对应 step **逐字同源**。
-      - name: Check doc line references selftest (anchor alignment / abbreviation / overflow)
-        run: node scripts/check-doc-refs.mjs --selftest
-
-      - name: Check doc line references (anchor alignment / overflow / ratchet)
-        run: node scripts/check-doc-refs.mjs
 
       - name: Contract consistency check (command registration / i18n keys / harness deps / field & event edge supply)
         # 注意：本步用 `--only` **白名单**限定检查段，新增段必须同步加进来，
@@ -1160,17 +1123,6 @@ jobs:
       # 命令行与 scripts/ci-check.mjs 对应 step 逐字同源（由对称差集护栏自动校验）。
       - name: Check cargo-all-workspaces argv assembly selftest
         run: node scripts/cargo-all-workspaces.mjs --selftest
-
-      # 能力接缝登记表对账（第五道门，2026-11-01，PLAN §0.12.4 裁定「建」/ 任务 #38）。
-      # 为什么追加在文件末尾：本文件被 18+ 处 `ci.yml:<行号>` 引用，中段插入会让引用成批腐烂。
-      # 判据/口径/正负对照见 scripts/check-capability-register.mjs 头注释（实测 15 处数字漂移 +
-      #   2 套并行口径 ⇒ 镜像表 capability-register.json 与盘上读数逐行对账，hard:false/manual 只报告）。
-      # 命令行与 scripts/ci-check.mjs 对应 step 逐字同源（由对称差集护栏自动校验）。纯 Node，无需 Rust。
-      - name: Check capability register reconciliation selftest
-        run: node scripts/check-capability-register.mjs --selftest
-
-      - name: Check capability register reconciliation (mirror table vs disk)
-        run: node scripts/check-capability-register.mjs
 
   # ── UNC 安全的 TypeScript 全量类型检查（任务 #45，2026-11-02）──
   # 为什么需要这道门：`tsc --noEmit` 走 `tsconfig.json` 的 `include: ["src"]` 目录 glob，

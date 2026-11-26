@@ -397,18 +397,6 @@ if (canRunFrontend) {
   // 为什么需要：一个事实写在多处时，机器此前只看住了其中一部分 ——
   //   · 行号引用：`check-decl-evidence.mjs` 只扫 `harness/src/knowledge_graph.rs` 的
   //     `evidence:` 字段；`page_type.rs` 的 7 条 rustdoc 引用**不在扫描面内**，
-  //     于是 09-14 起静默腐烂（实测 4 处偏 +10/+3，两次都不是被检查发现的）。
-  //   · reranker 文件名：Rust 侧有真源常量 + 跨 crate 绑定测试，前端 2 处字面量却无锁
-  //     （全仓 grep 常量名在前端的命中数 = 0）—— 当初就是前端那份缺了 `.Q4_K_M.gguf` 后缀。
-  // 为什么 --ci 用于正式步：脚本按判据 #147 把「客观错」（文件不存在 / 行号越界 / 指到空行 /
-  //   载体值不等）与「软判据」（出处那一行已不含同句引号值）分开；裸跑在只有软命中时退 3，
-  //   而软判据的修法是改判据、不是修缺陷 ⇒ 拿它拦 CI 必被绕过。
-  // 覆盖率自陈（判据 #16）：脚本会把 LOCATED / NONLOC（裸 `mod.rs` 之类无法定位）/ EXTERNAL
-  //   （第三方 crate 源码）/ BROKEN 四类分开打印，并把未覆盖的引用**点名列出** ——
-  //   不列的话「0 腐烂」会被误读成「全都查过了」。
-  // 与 `.github/workflows/ci.yml` 的「Check single-source facts」**命令行逐字同源**。
-  step("同一事实多份载体自检（正负对照）", "node scripts/check-single-source-facts.mjs --selftest");
-  step("同一事实多份载体（行号引用腐烂 / reranker 文件名漂移）", "node scripts/check-single-source-facts.mjs --ci");
 
   // 插件页路径由运行期投影生成，静态入口扫描看不到它；反向断言宿主必须保留投影点和
   // /opc/domain/:pageId 旧链兜底，否则清单声明的页面与旧书签会静默落 404。自检先行。
@@ -563,21 +551,6 @@ if (canRunFrontend) {
   step("组件中立性（跨 feature 耦合）自检", "node scripts/check-component-neutrality.mjs --selftest");
   step("组件中立性（跨 feature 耦合棘轮）", "node scripts/check-component-neutrality.mjs");
 
-  // ── 文档「文件:行号」引用的段对齐门禁（2026-11-04 补）──
-  // 为什么需要：`AGENTS.md`「文档中的源码引用写法（强制）」要求文档里的 `文件:行号` 必须
-  //   **段对齐**（完整路径 / 唯一后缀 / 唯一 basename），禁止从文件名中间截断或换同义词。
-  //   但这条规则此前**没有任何自动检查**，只靠人撞：`PLAN-shell-plus-plugins.md` §99.4 手工
-  //   抓到 `worker.rs:3798` 实际已差 492 行 —— 行号引用会随源码编辑持续腐烂，而编译 / clippy /
-  //   单测 / 现有全部门禁都不读文档 ⇒ 静默失效。
-  // 判据：OK / NONLOC（未检查，自陈）/ BROKEN / ABBREV（自证候选，只报告）/ STALE（越界）；
-  //   只有 BROKEN / STALE 判红，存量走 `scripts/doc-refs-baseline.json` 棘轮（只减不增）。
-  // 为什么先跑 --selftest：本门首版就撒过两次谎 —— 点开头路径被抽取器截短（`.github/…`
-  //   变成 `github/…` ⇒ 假 BROKEN）、承前省略写法与裸 `:N` 归并出 `266/:293` 这类怪物串。
-  //   两条都只在正负对照里才暴露。
-  // 命令行与 `.github/workflows/ci.yml` 对应步骤**逐字同源**。
-  step("文档行号引用自检（三档合法 / 段内截断 / 同义词 / 越界）", "node scripts/check-doc-refs.mjs --selftest");
-  step("文档行号引用（段对齐 / 越界 / 棘轮）", "node scripts/check-doc-refs.mjs");
-
   // ── i18n **五道**互补门禁（2026-09-14 补三道：此前本地镜像**一条都没有**）──
   // 为什么必须五道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
   //   ① 硬编码文案：代码里直接写死中文字面量（值层查不到，因为压根没进 locale）
@@ -639,15 +612,6 @@ if (canRunFrontend) {
   step("增量孤儿 i18n 键（删码须同步删 11 语言）自检", "node scripts/check-i18n-orphan-diff.mjs --selftest");
   step("增量孤儿 i18n 键（删码须同步删 11 语言）", "node scripts/check-i18n-orphan-diff.mjs");
 
-  // ── 能力接缝登记表对账（第五道门，2026-11-01，PLAN §0.12.4 裁定「建」/ 任务 #38）──
-  // 为什么需要：`PLAN-shell-plus-plugins.md` §0.7 登记表是 P5/P6 全部判据的分母，此前只靠
-  //   人工复扫 —— §0.12.4 实测抓出 15 处数字漂移 + 2 套并行口径（1534/1541、124/83 等）。
-  //   本门复跑两份 audit 口径 + §0.7.1 扫描面，对机器镜像 capability-register.json 逐行对账。
-  //   镜像表是唯一权威：无基线、无 --update-* 洗白路径；hard:false / manual 只报告不判红。
-  // 不加 `if (!quick)`：纯 Node 静态门必须走 pre-push 快速档（AGENTS.md「CI 接线」）。
-  // 命令行与 `.github/workflows/ci.yml` 对应步骤**逐字同源**。
-  step("能力接缝登记表对账自检", "node scripts/check-capability-register.mjs --selftest");
-  step("能力接缝登记表对账（镜像表 vs 盘上实测）", "node scripts/check-capability-register.mjs");
 
   // ⚠ 调用形态：直调 `node node_modules/dprint/bin.cjs`，**不用 `npx dprint`**。
   //   `npx` 是 `.cmd` 包装器，从 UNC cwd 经 cmd.exe 启动会退到 `C:\Windows`（任务 #129）

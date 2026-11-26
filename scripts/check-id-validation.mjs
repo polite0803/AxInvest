@@ -7,7 +7,8 @@
  * 检查内容：
  * 1. 模板字符串中使用可能为 undefined/null 的变量拼接 ID
  *    危险模式：`${a}::${b}` 其中 a 或 b 可能为 undefined
- * 2. 直接将 "undefined"/"null" 字符串赋值给 ID 字段
+ * 2. 禁止把字符串 "undefined"/"null" **写入** ID 字段（只生成腐化数据的写入形态；
+ *    读取比较是合法防御代码，例如 typeof x === "undefined" 与解析哨兵 m.modelId === "null"）
  * 3. 绕过 validators.ts 验证工具直接操作 ID
  *
  * 退出码：0 = 通过，1 = 发现违规
@@ -39,19 +40,22 @@ const DANGEROUS_PATTERNS = [
     suggestion:
       '使用 safeJoinIds([a, b], "::") 替代模板字符串，自动过滤 undefined/null',
   },
+  // 读取侧比较（`typeof x === "undefined"`、解析哨兵 `x === "null"`）是合法防御代码，
+  // 不是 ID 腐化源。只盯写入形态：对象字面量/赋值/箭头返回值/`??`、`||` 兜底。
+  // 匹配片段仍会经 checkFile 的注释行过滤，避免文档注释误报。
   {
-    name: "直接使用 'undefined' 字符串",
-    regex: /===?\s*["']undefined["']|["']undefined["']\s*===?/g,
+    name: "将 'undefined' 字符串写入 ID 字段",
+    regex: /(?:\b[A-Za-z_$][\w$]*[Ii]d\s*[:=]\s*["']undefined["']|["']undefined["']\s*(?:\|\||\?\?)\s*[A-Za-z_$][\w$]*[Ii]d\b)/g,
     severity: "warning",
-    description: "直接与 'undefined' 字符串比较，可能遗漏了其他无效值检查",
-    suggestion: "使用 isValidId() 或 sanitizeId() 统一验证",
+    description: "把 'undefined' 字符串写入 ID，会生成脏 ID 数据",
+    suggestion: "使用 isValidId() 或 sanitizeId() 统一验证，并用 undefined（非字符串）表示缺失",
   },
   {
-    name: "直接使用 'null' 字符串",
-    regex: /===?\s*["']null["']|["']null["']\s*===?/g,
+    name: "将 'null' 字符串写入 ID 字段",
+    regex: /(?:\b[A-Za-z_$][\w$]*[Ii]d\s*[:=]\s*["']null["']|["']null["']\s*(?:\|\||\?\?)\s*[A-Za-z_$][\w$]*[Ii]d\b)/g,
     severity: "warning",
-    description: "直接与 'null' 字符串比较，可能遗漏了其他无效值检查",
-    suggestion: "使用 isValidId() 或 sanitizeId() 统一验证",
+    description: "把 'null' 字符串写入 ID，会生成脏 ID 数据",
+    suggestion: "使用 isValidId() 或 sanitizeId() 统一验证，并用 null（非字符串）表示缺失",
   },
 ];
 

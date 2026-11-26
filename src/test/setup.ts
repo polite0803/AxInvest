@@ -118,3 +118,30 @@ if (typeof globalThis.setImmediate !== "undefined") {
     }
   };
 }
+
+// antd 的 useDelayState / raf 在测试结束后仍会 flush 一帧并调用 setState；
+// 单文件隔离跑时 16ms 落在 jsdom 生命周期内，全量并行时同一帧落到 teardown 之后，
+// react-dom 直接读裸 `window` 抛 ReferenceError（CI 实测 8 条 unhandled error，
+// 来源均指向先跑完的 BotRoutineFormModal.test.tsx）。在测试环境把取消帧的
+// 延时压到 0，让待处理更新紧跟组件生命周期 flush，避免跨文件收尾竞态。
+if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    writable: true,
+    value: (callback: FrameRequestCallback) =>
+      setTimeout(() => {
+        // jsdom 已在测试收尾销毁，帧回调仍触发 antd 通知计时器的 setState；
+        // react-dom 在裸 `window` 上取更新优先级会抛 ReferenceError。
+        // 这里与 setImmediate 兜底同口径：丢弃 teardown 后的帧回调。
+        if (typeof window === "undefined") {
+          return;
+        }
+        callback(0);
+      }, 0) as unknown as number,
+  });
+  Object.defineProperty(window, "cancelAnimationFrame", {
+    configurable: true,
+    writable: true,
+    value: (handle: number) => clearTimeout(handle as unknown as ReturnType<typeof setTimeout>),
+  });
+}

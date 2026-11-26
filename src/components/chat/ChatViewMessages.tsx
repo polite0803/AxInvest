@@ -74,8 +74,8 @@ import { useUIStore } from "@/stores/shared/uiStore";
 import type { Message } from "@/types";
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { pickVisibleAskUsers } from "@/lib/askUserVisibility";
 import { AskUserCard } from "./AskUserCard";
-import { pickVisibleAskUsers } from "./askUserVisibility";
 import { Actions, AssistantFooter, styleBtn } from "./AssistantFooter";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { AssistantMarkdown, getChatCodeThemes, THINKING_LOADING_MARKER } from "./ChatMarkdownNodes";

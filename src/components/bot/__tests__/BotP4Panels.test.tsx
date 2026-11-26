@@ -12,8 +12,8 @@ import userEvent from "@testing-library/user-event";
 import { App } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { pickVisibleAskUsers } from "@/components/chat/askUserVisibility";
 import i18n from "@/i18n";
+import { pickVisibleAskUsers } from "@/lib/askUserVisibility";
 import { useBotStore } from "@/stores/feature/botStore";
 import type { BotDepartmentQuota, BotInputRequest, BotInputRequestStatus } from "@/types";
 import { BotInputRequestCard } from "../BotInputRequestCard";

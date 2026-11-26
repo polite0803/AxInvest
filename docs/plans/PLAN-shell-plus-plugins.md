@@ -11119,3 +11119,32 @@ src/hooks` 100 文件 / 1417 测试全绿；路由门禁自检 OK、strict 40 �
   scripts/ci-check.mjs` 语法 OK。
 - **仍待**：Windows 真机验收（插件页直达不 404 / 侧栏分组与图标 / opc 探针页不显示
   / 启停后入口变化），由用户执行，不在 WSL 代替。
+
+### CI run 45721938652 三红修复（2026-11-26）
+
+发布 v3.1.1 前用户要求先收口 CI 全红。三个失败 job、三种根因，全部落地：
+
+- **Frontend Check「L1 blocker host-owned allowlist anchors」**：G2 模拟观察组合随
+  e7f56a426（Bot 集成收口）整体下线，`paper_portfolio.rs` 整文件删除 ⇒ 白名单
+  `scripts/l1-host-owned-allowlist.json` 对应条目 anchorText 腐烂。删该条目
+  ⇒ 23 条 / 6 文件，`--check-allowlist` 复验 23/23 逐条命中。
+- **Workspace Config Parity「cargo-all-workspaces argv assembly selftest」**：
+  selftest ⑲ 硬编码断言构建根 = 主仓外 `../AxInvest-plugin-repos`，而 CI / Release
+  经 `AXAGENT_PLUGIN_REPOS_ROOT=<workspace>/.plugin-repos` 钉版 checkout（主仓
+  workspace 内的独立仓目录）⇒ 本地绿、CI 必红（4 天未跑的 `CI` workflow 在
+  bbf691dbb 首跑即暴露）。修为按布局分支：env 设置时断言解析结果与 env 逐字一致
+  （尊重 `pluginReposRoot` 覆盖契约），无覆盖时保持 sibling 布局断言。两种布局
+  均 21/21；真实负例（修前 CI 红）即检法有电的实证。
+- **E2E (macOS) 3 failed**：`e2e/stock-reflection-four-horizon.spec.ts` 三个用例
+  经 `openReflectionPanel` 依赖 `/invest?tab=workspace&view=review` 上的宿主反思
+  历史表格 —— T3 股票页外迁后该链只渲染 `LegacyInvestRedirect`（bundle 页跳转桥，
+  旧链 `?tab=` 参数按设计不透传），断言对象已按裁定删除，spec 未随外迁同步处理
+  （计划阶段 7「更新受影响的 Playwright spec」遗留）。**删除该 spec**：断言已删除
+  的行为 = 永久红；stock 独立仓当前零测试基建（无 Playwright / 无 test 脚本），
+  迁移需从零搭基建 + bundle 页 fixture 通信，不作为发布阻塞项。**待办**：反思面板
+  fixture 验收（四周期状态徽标 / 切周期不串线 / legacy 记录文案）随 stock 仓
+  web 测试基建重建后迁移。
+- **教训**：`CI` workflow 与 `CI (Split Repos)` 覆盖面不一致 —— 20c6e3a11 只有
+  Split Repos 在跑（success），`CI` 4 天未跑，E2E 与纯 Node 门禁的回归被静默
+  积压到发版日才爆。两条流水线覆盖面收敛是后续独立任务。
+

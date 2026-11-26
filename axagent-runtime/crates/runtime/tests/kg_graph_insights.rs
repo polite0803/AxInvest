@@ -6,6 +6,9 @@
 //! （社区发现 / 桥节点识别 / 意外关联），对应知识层价值定位中的 #3。
 //!
 //! 运行：`cargo test -p axagent-runtime --test kg_graph_insights`
+//!
+//! fixture 随测试走（`tests/fixtures/link_graph.json`）：原 `knowledge-sources/sample/`
+//! 属文档目录，2026-11-25 已迁 Obsidian，测试依赖不应再引用文档路径。
 
 use std::collections::HashMap;
 
@@ -15,7 +18,7 @@ use axagent_harness::graph_dtos::{GraphData, LinkGraph};
 
 #[test]
 fn kg_sample_graph_insights_end_to_end() {
-    let json = include_str!("../../../../knowledge-sources/sample/link_graph.json");
+    let json = include_str!("fixtures/link_graph.json");
     let data: GraphData = serde_json::from_str(json)
         .expect("link_graph.json 应可反序列化为 harness::graph_dtos::GraphData");
 

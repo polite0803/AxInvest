@@ -141,6 +141,8 @@ mod tests {
         .await
         .expect("创建 Bot 应成功");
         // 真实 HOME 下不会有这个新 id 的 MEMORY.md，SOUL 也是空串 ⇒ 无上下文。
-        assert!(resolve_bot_context_for_bot(&handle.conn, Some(&bot.id)).await.is_none());
+        // P5 新增技能段是第三来源：全局技能目录下有启用技能时整体上下文非空是预期行为。
+        let ctx = resolve_bot_context_for_bot(&handle.conn, Some(&bot.id)).await;
+        assert!(ctx.is_some_and(|c| c.soul.is_none() && c.memory.is_none()));
     }
 }

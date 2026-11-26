@@ -214,6 +214,8 @@ function stagedManifestSource() {
     "const DOMAIN_PACK_DIR = 'domain_packs';",
     `const workspaceRoot = ${JSON.stringify(pluginRepo(ROOT, "opc"))};`,
     "const OPC_WRITE_COMMANDS = new Set();",
+    "const OPC_DOMAIN_PAGE_NAV = {};",
+    "const opcDomainPageDecl = (name, title) => ({ id: name, title, entry: PAGE_ENTRY, loading: \"bundle\" });",
     "const withRequiredPermission = (commands) => commands;",
     "const fail = (message) => { throw new Error(message); };",
     ...names.map((name) => factories[name]),

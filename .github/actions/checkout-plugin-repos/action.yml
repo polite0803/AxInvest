@@ -28,7 +28,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc
-        ref: 4e8e39e04eaa2a2f97b1261a44281a602584b628
+        ref: 3621030e4de7b05b6ca5402f4ad2f0b7ac5129fc
         path: ${{ inputs.path }}/opc
         fetch-depth: 1
         persist-credentials: false
@@ -44,7 +44,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-security
-        ref: ba74d55ede86c6eedfa94294c8e94ce7ec178d13
+        ref: d420f134041b4cb4f6930375c9985d1b572bd052
         path: ${{ inputs.path }}/opc-security
         fetch-depth: 1
         persist-credentials: false
@@ -52,7 +52,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-game-dev
-        ref: facbee52397faaf0fe8f8e0a6444deab843b9f5c
+        ref: ccc11b40daa9e201b04997679597fff7b7b0d84f
         path: ${{ inputs.path }}/opc-game-dev
         fetch-depth: 1
         persist-credentials: false
@@ -60,7 +60,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-ai-research
-        ref: 6479da2823ab99074f3481af2157539738ad670f
+        ref: 23dd2e0aacd22c47f29ae82c6d445dcfc6e54f34
         path: ${{ inputs.path }}/opc-ai-research
         fetch-depth: 1
         persist-credentials: false
@@ -68,7 +68,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-consulting
-        ref: 56faec710d33476295eb3c47eb17479ffb09b4d3
+        ref: 3a6719c3b21bda71a30bedb21c30deb75605c561
         path: ${{ inputs.path }}/opc-consulting
         fetch-depth: 1
         persist-credentials: false
@@ -76,7 +76,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-design
-        ref: e5bfd73e6bd31611e4fe222975a80fcfd47da368
+        ref: a0fa671783f793941caafc0c1df581ff9c328d76
         path: ${{ inputs.path }}/opc-design
         fetch-depth: 1
         persist-credentials: false
@@ -84,7 +84,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-ecommerce
-        ref: c064d9a08212fdd924162931962bac6993173862
+        ref: 0428fd94541f6a04c799bc32ca1ebb77fbb07d38
         path: ${{ inputs.path }}/opc-ecommerce
         fetch-depth: 1
         persist-credentials: false
@@ -92,7 +92,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-education
-        ref: 47d6388041275c7fe5c7d63d571e384788171f5b
+        ref: 4fae250cfe0a065beb295a077a46673e00e7f948
         path: ${{ inputs.path }}/opc-education
         fetch-depth: 1
         persist-credentials: false
@@ -100,7 +100,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-finance-invest
-        ref: 44d66285c2141a42a3e25bde1e5e0c1c8c532798
+        ref: 57b01499ee3991797f04754c42fab0c6c52b846b
         path: ${{ inputs.path }}/opc-finance-invest
         fetch-depth: 1
         persist-credentials: false
@@ -108,7 +108,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-geospatial
-        ref: a0720921d9912adbe60159fe6f9fa3d2581431e6
+        ref: 141264f70e322930c7a49d387e341a959291d198
         path: ${{ inputs.path }}/opc-geospatial
         fetch-depth: 1
         persist-credentials: false
@@ -116,7 +116,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-project-management
-        ref: 07e99547821457500cba797d7a087c93e4d81724
+        ref: 7cc6a6d751904334a4ba376d43a08b316fb6102a
         path: ${{ inputs.path }}/opc-project-management
         fetch-depth: 1
         persist-credentials: false
@@ -124,7 +124,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc-software-dev
-        ref: 97b33a583b2c922a5ba569660776d1868dfba99d
+        ref: 8e295090293db31f1857d850d1b53c62270f7017
         path: ${{ inputs.path }}/opc-software-dev
         fetch-depth: 1
         persist-credentials: false

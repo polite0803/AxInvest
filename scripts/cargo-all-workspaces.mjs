@@ -207,14 +207,23 @@ function selftest() {
   const stockWorker = stagedEnvironment().AXAGENT_STOCK_WORKER_BIN;
   t(`⑰ stock worker 路径指向 bundle/bin 下的平台可执行文件（${stockWorker ?? "未生成"}）`, Boolean(stockWorker && stockWorker.endsWith(path.join("bin", platformWorkerName()))));
   t(`⑱ 负控：平台 worker 文件名由平台决定（${platformWorkerName()}）`, ["axagent-plugin-stock", "axagent-plugin-stock.exe"].includes(platformWorkerName()));
-  // 构建根必须是主仓外的 17 个独立仓：主仓副本已是待删除对象，不能再当构建输入。
-  // 只验路径口径（干净 checkout 上 sibling 仓可能不在，存在性由 ensurePluginBuildRoots 负责）。
+  // 构建根必须锚定**独立仓 checkout 目录**（主仓副本 axagent-plugins/ 已删除，不能再当构建输入）。
+  // 两种合法布局：
+  //   - CI / Release：AXAGENT_PLUGIN_REPOS_ROOT 显式指定（如 <workspace>/.plugin-repos ——
+  //     主仓 workspace 内的独立仓钉版 checkout，见 .github/workflows/ci.yml 顶部 env）
+  //     ⇒ 断言解析结果与环境变量逐字一致（pluginReposRoot 的覆盖契约）；
+  //   - 本机开发：无覆盖 ⇒ 默认 sibling 布局 ../AxInvest-plugin-repos（主仓之外）。
+  // 只验路径口径，不验存在性（干净 checkout 上 sibling 仓可能不在）—— 真实存在性由
+  // ensurePluginBuildRoots 在构建分支上 fail-closed 校验。
   const sourceRootsDir = pluginSourceRootsDir(repoRoot);
+  const envReposRoot = process.env.AXAGENT_PLUGIN_REPOS_ROOT;
   t(
-    `⑲ 构建根锚定主仓外独立仓（${path.relative(repoRoot, sourceRootsDir)}）`,
-    Boolean(sourceRootsDir)
-      && path.resolve(sourceRootsDir) === path.resolve(repoRoot, "..", "AxInvest-plugin-repos")
-      && !`${path.resolve(sourceRootsDir)}${path.sep}`.startsWith(`${path.resolve(repoRoot)}${path.sep}`),
+    `⑲ 构建根锚定独立仓 checkout（${envReposRoot ?? path.relative(repoRoot, sourceRootsDir)}）`,
+    envReposRoot
+      ? path.resolve(sourceRootsDir) === path.resolve(envReposRoot)
+      : Boolean(sourceRootsDir)
+        && path.resolve(sourceRootsDir) === path.resolve(repoRoot, "..", "AxInvest-plugin-repos")
+        && !`${path.resolve(sourceRootsDir)}${path.sep}`.startsWith(`${path.resolve(repoRoot)}${path.sep}`),
   );
 
   console.log(`[cargo-all-workspaces --selftest] ${pass} 项通过 / ${fails.length} 项失败`);

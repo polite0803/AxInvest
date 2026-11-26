@@ -2,7 +2,7 @@
   "note": "L1 反向阻塞的 H 桶（宿主永久持有）白名单。消费方 = scripts/audit-l1-blockers.mjs；复扫命令 = node scripts/audit-l1-blockers.mjs --check-allowlist。",
   "why": "PLAN §54 R5：终态判据不并入 ownedRe（并入会让所有 init/ 装配代码变成不计入阻塞，读数失去意义 —— services.rs 28 处里有 9 处是 M 桶、该被看见），改成「待改写归零 + H 桶等于本名单」。名单可逐条拿 anchorText 回盘上原文复核，正则扩面不可复核。",
   "schema": "entries[] = { file: 仓库相对路径, anchorText: 该行原文的**连续子串**（不存行号，行号随编辑漂移）, reason: 为什么必须留宿主 }",
-  "seed": "2026-11-03 首批 10 条；**2026-11-04 B6 删 app_state.rs 6 条 ⇒ 4 条 / 3 文件**（六个字段随 B6 摘出 AppState，字段类型行整体消失）；**2026-11-04 B7b 再删 gateway 1 条 ⇒ 3 条 / 3 文件**（客户端改从 `init/stock_domain_state` 取，显式 `Option<Arc<AStockClient>>` 类型注解消失；`HttpPollingStreamer` 那条仍在）。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。**2026-11-07 #221 增 OPC 3 条 ⇒ 6 条 / 6 文件**（capability_pack trait 化：契约上收 harness、权威实现留 company-runtime，`AppState.pack_registry` 的 1 处生产注入点 + 2 处测试构造点必须引用域 crate 才能构造实现；来源是本批代码事实、grep 逐行可复核，非 res109 派生 —— 上面「state.rs 不入」针对的是 res109 桶计数派生，与此批来源不同）。**2026-11-14 #325 增 F9 自成模块 18 条 ⇒ 24 条 / 7 文件**（PLAN §170 F9 / §183 裁定：conditional_order 5 + market_close_sweep 7 + paper_portfolio 1 + market_sim 5 四文件的股票域 crate 引用行由 owned 挪 H 桶 —— 这四模块按裁定不随股票插件迁出，引用点属宿主永久持有；paper.rs（论文阅读，20 命令，STOCK 口径假阳性）零股票 crate 引用故无条目，其假阳性事实记 PLAN §183）。",
+  "seed": "2026-11-03 首批 10 条；**2026-11-04 B6 删 app_state.rs 6 条 ⇒ 4 条 / 3 文件**（六个字段随 B6 摘出 AppState，字段类型行整体消失）；**2026-11-04 B7b 再删 gateway 1 条 ⇒ 3 条 / 3 文件**（客户端改从 `init/stock_domain_state` 取，显式 `Option<Arc<AStockClient>>` 类型注解消失；`HttpPollingStreamer` 那条仍在）。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。**2026-11-07 #221 增 OPC 3 条 ⇒ 6 条 / 6 文件**（capability_pack trait 化：契约上收 harness、权威实现留 company-runtime，`AppState.pack_registry` 的 1 处生产注入点 + 2 处测试构造点必须引用域 crate 才能构造实现；来源是本批代码事实、grep 逐行可复核，非 res109 派生 —— 上面「state.rs 不入」针对的是 res109 桶计数派生，与此批来源不同）。**2026-11-14 #325 增 F9 自成模块 18 条 ⇒ 24 条 / 7 文件**（PLAN §170 F9 / §183 裁定：conditional_order 5 + market_close_sweep 7 + paper_portfolio 1 + market_sim 5 四文件的股票域 crate 引用行由 owned 挪 H 桶 —— 这四模块按裁定不随股票插件迁出，引用点属宿主永久持有；paper.rs（论文阅读，20 命令，STOCK 口径假阳性）零股票 crate 引用故无条目，其假阳性事实记 PLAN §183）。**2026-11-25 e7f56a426 删 paper_portfolio 条目 ⇒ 23 条 / 6 文件**（G2 模拟观察组合随 Bot 集成收口整体下线，paper_portfolio.rs 整文件删除 ⇒ 锚点腐烂，条目必须随之移除）。",
   "todo": "H 桶在 res109 的机械归桶里读数是 35 处 / 9 文件，本名单只点到 3 处 / 3 文件 ⇒ 余 32 处等后续批次按行落名（同批必须补 anchorText，不许只补文件）。**(B6 前为 10 处 / 4 文件；app_state.rs 六条已随字段摘除一并删除 —— 保留即 --check-allowlist 的「锚点腐烂」。)**",
   "entries": [
     {
@@ -94,11 +94,6 @@
       "file": "src-tauri/src/commands/market_close_sweep.rs",
       "anchorText": "axagent_analysis_engine::market_close_store::backfill_close_history_for_codes(",
       "reason": "收盘扫库宿主调度面（历史回补执行体），留宿主（PLAN §183）。"
-    },
-    {
-      "file": "src-tauri/src/commands/paper_portfolio.rs",
-      "anchorText": "use axagent_analysis_engine::paper_portfolio::{",
-      "reason": "模拟盘自成模块留宿主（PLAN §170 F9 / §183 裁定）：模拟盘引擎在 analysis-engine，宿主保留命令面；实时/调度耦合同条件单族。"
     },
     {
       "file": "src-tauri/src/commands/market_sim.rs",

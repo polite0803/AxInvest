@@ -450,6 +450,7 @@ Conventional Commits + 中文描述。类型映射：
 在本仓库工作时，如 Obsidian connector 可用，请读取以下笔记作为补充项目约定：
 
 - [[02 项目/Codex工作区/AxInvest-1bb0c688/00 AGENTS]]
+- [[02 项目/Codex工作区/AxInvest-1bb0c688/01 Docs]]
 - [[00 索引/Codex 项目工作区]]
 
 <!-- codex-obsidian-kb:end -->

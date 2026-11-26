@@ -11085,5 +11085,37 @@ src/hooks` 100 文件 / 1417 测试全绿；路由门禁自检 OK、strict 40 �
   --selftest` PASS；`node scripts/check-route-reachability.mjs --strict` EXIT=0
   （41 路由 / 34 入口，仅 2 条既有 llm-wiki inline-only 提示）。
 - **待验收**：Windows 真机确认插件页直达不 404、侧栏分组与图标正确、opc 探针页
-  不显示、启停后入口变化；是否需要为“分组/图标/hidden/labelIsI18nKey”补
-  `ci-check.mjs + ci.yml` 同源机械门禁，待后续裁定。
+  不显示、启停后入口变化；“分组/图标/hidden/labelIsI18nKey”的 `ci-check.mjs +
+  ci.yml` 同源机械门禁已于 2026-11-25 落地（见下「导航元数据消费面门禁收尾」）。
+
+### 导航元数据消费面门禁收尾（2026-11-25）
+
+本轮在 §215 导航修复基础上收尾，补齐缺口并落地防回归机械门禁：
+
+- **AppHeader i18n 缺口已修**：标题栏插件页 label 原直接渲染 `navLabel`，本轮改为
+  按 `navLabelIsI18nKey` 决定 `t(navLabel)` 或直出，避免 14 个 OPC 包 / stock 在标题栏
+  显示原始 i18n key。
+- **DomainHubPage 核查结论**：`navItemsByDomain` 只合并 `builtinNavItems` +
+  `getContributedNavItems()`（编译期域页），**不含运行期插件页投影**，故其
+  `item.isPlugin ? item.labelKey : t(item.labelKey)` 不会收到带 i18n key 的插件项，
+  无 key 直出风险，本轮未改。
+- **`pluginRouteRegistry.ts` 死代码已清理**：`PluginPageRouteEntry` 直接别名
+  `PluginDomainPageRoute`，`pluginPageNavItem` 只返回纯数据，ContentArea 已直渲
+  `PluginPageRouteHost`，无消费的 `Page/pageComponent` lazy map 已删除。
+- **新增防回归门禁 `scripts/check-plugin-nav.mjs`**：9 项正向检查，锁住三个导航异常
+  形态 —— ① 同图标（Sidebar/CommandPalette 插件图标经 `resolveIconComponent` 解析）、
+  ② 硬编码（Sidebar `labelIsI18nKey`、CommandPalette/AppHeader `navLabelIsI18nKey`
+  决定是否 `t()`）、③ 全塞一组（Sidebar 按 `item.navGroup === group.key` 分发），
+  附 `hidden` 过滤与 packager `opcDomainPageDecl` 唯一声明面。`--selftest` 正负对照
+  纯函数断言，文件缺失退 1（空洞通过防护）。
+- **CI 两处同源接入**：`scripts/ci-check.mjs` 与 `.github/workflows/ci.yml` 各加两步
+  （自检先行 + 判定），命令行逐字同源，落在 `--quick` 路径（纯 Node 静态门，无
+  `if (!quick)` 门控）。`src/__tests__/ci.workflow.test.ts` 对称差集护栏 30/30 通过。
+- **补充定点验证（不跑全量门禁）**：`node scripts/check-plugin-nav.mjs --selftest`
+  PASS、`node scripts/check-plugin-nav.mjs` `PLUGIN_NAV_OK checks=9`；
+  `node scripts/check-plugin-contract.mjs --selftest` PASS、判定
+  `PLUGIN_CONTRACT_OK plugins=17 worker=17 commands=451`；`node
+  node_modules/dprint/bin.cjs check` 本轮改动前端文件 EXIT=0；`node --check
+  scripts/ci-check.mjs` 语法 OK。
+- **仍待**：Windows 真机验收（插件页直达不 404 / 侧栏分组与图标 / opc 探针页不显示
+  / 启停后入口变化），由用户执行，不在 WSL 代替。

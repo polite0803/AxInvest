@@ -416,6 +416,10 @@ if (canRunFrontend) {
   step("路由可达性自检（正负对照）", "node scripts/check-route-reachability.mjs --selftest");
   step("路由可达性（插件页投影 / 旧链 / 孤儿键）", "node scripts/check-route-reachability.mjs --strict");
 
+  // 与 `.github/workflows/ci.yml` 的「Check plugin nav metadata consumption」两行命令逐字同源。
+  step("插件导航元数据消费面自检（正负对照）", "node scripts/check-plugin-nav.mjs --selftest");
+  step("插件导航元数据消费面（同图标 / 硬编码 / 全塞一组 / hidden）", "node scripts/check-plugin-nav.mjs");
+
   // ── 估值缺省参数等式（2026-09-22 补，见 AUDIT-300642-run-variance-2026-09-22.md §9.6）──
   // 为什么需要：同一组估值参数（永续增长率 / 折现率 / 缺省增长率 / 增长率上下界 /
   //   预测年数 / 债券收益率基准）横跨 3 个技术栈共 4 处载体，历史上**各自停在不同的

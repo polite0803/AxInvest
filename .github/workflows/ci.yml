@@ -206,6 +206,14 @@ jobs:
           node scripts/check-route-reachability.mjs --selftest
           node scripts/check-route-reachability.mjs --strict
 
+      # 插件页导航元数据（navGroup / labelKey / icon / navOrder / hidden）的消费面门禁：
+      # 锁住本轮修复的三个导航异常（同图标 / 硬编码 / 全塞一组），防回归。
+      # 两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
+      - name: Check plugin nav metadata consumption (same-icon / hardcoded / all-in-one-group / hidden)
+        run: |
+          node scripts/check-plugin-nav.mjs --selftest
+          node scripts/check-plugin-nav.mjs
+
       # 估值缺省参数横跨 3 个技术栈共 4 处载体（真相源常量 / 主 crate `ValuationParams::default()`
       # / seed 变量默认值 / 前端兜底），历史上各自停在不同校准批次上，导致前端直调链与工作流链
       # 取到两套参数。主 crate 与 seed 已是代码级派生，前端引用不到 Rust ⇒ 需机器守等式。

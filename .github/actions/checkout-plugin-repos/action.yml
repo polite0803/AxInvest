@@ -28,7 +28,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: polite0803/axinvest-plugin-opc
-        ref: 3621030e4de7b05b6ca5402f4ad2f0b7ac5129fc
+        ref: 659dd07c1feaf2cc397c13de26b2e81e73f7afe8
         path: ${{ inputs.path }}/opc
         fetch-depth: 1
         persist-credentials: false

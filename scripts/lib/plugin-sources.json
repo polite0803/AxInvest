@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "note": "CI 钉版取源清单：17 个独立插件仓的公开 commit SHA。CI 用 actions/checkout 的 repository+ref 按本清单取源；清单与远端默认分支 HEAD 不一致时只报警（scripts/check-plugin-source-pins.mjs），发布前人工 bump。",
   "defaultBranch": "main",
-  "pinnedAt": "2026-11-26",
+  "pinnedAt": "2026-11-27",
   "plugins": [
     {
       "plugin": "stock",
@@ -16,7 +16,7 @@
       "plugin": "opc",
       "owner": "polite0803",
       "repo": "axinvest-plugin-opc",
-      "sha": "3621030e4de7b05b6ca5402f4ad2f0b7ac5129fc",
+      "sha": "659dd07c1feaf2cc397c13de26b2e81e73f7afe8",
       "pluginVersion": "3.0.1",
       "rustVersion": "3.0.1"
     },

@@ -64,8 +64,13 @@ fn host_loads_stock_worker_and_executes_the_tool_through_market_quote() {
         loaded.declaration().calls
     );
 
-    // 宿主侧消费方零改动：经既有接缝 getter 取到的就是远程门面。
-    let tool_set = registry.get_tool_set().expect("tool.set 应已入表");
+    // 宿主侧消费方零改动：插件 `tool.set` 以独立扩展项入表，`get_tool_set()` 仍是宿主
+    // 内置单实例接缝，扩展消费方统一走 `list_tool_set_extensions()`。
+    let tool_set = registry
+        .list_tool_set_extensions()
+        .into_iter()
+        .find(|provider| provider.tools().iter().any(|tool| tool.name() == "get_stock_quote"))
+        .expect("插件 tool.set 扩展应已入表");
     let tool = tool_set
         .tools()
         .into_iter()
@@ -106,9 +111,15 @@ fn host_loads_stock_worker_and_executes_the_tool_through_market_quote() {
     assert_eq!(reply.command, "stock_get_quote");
     assert_eq!(reply.value["price"], 1500.25, "命令面行情必须原样透出：{:?}", reply.value);
 
-    // 卸载 = 可逆回滚：句柄撤销后接缝不得残留 provider。
+    // 卸载 = 可逆回滚：句柄撤销后扩展不得残留。
     drop(loaded);
-    assert!(registry.get_tool_set().is_none(), "drop 后应回滚 tool.set 注册");
+    assert!(
+        !registry
+            .list_tool_set_extensions()
+            .iter()
+            .any(|provider| provider.tools().iter().any(|tool| tool.name() == "get_stock_quote")),
+        "drop 后应回滚插件 tool.set 扩展"
+    );
     // `EffectHandle` 没有 `Drop` 实现（只有显式 `undo()`），别把「drop 变量」当撤销。
     market.undo();
     assert!(registry.get_market_data().is_none(), "行情替身句柄 undo 后应回滚");

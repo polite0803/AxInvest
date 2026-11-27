@@ -2713,8 +2713,16 @@ impl PluginManager {
             let install_path = install_root.join(sanitize_plugin_id(&plugin_id));
             let now = unix_time_ms();
             let existing_record = registry.plugins.get(&plugin_id);
-            let installed_copy_is_valid =
-                install_path.exists() && load_plugin_from_directory(&install_path).is_ok();
+            let installed_manifest = install_path
+                .exists()
+                .then(|| load_plugin_from_directory(&install_path).ok())
+                .flatten();
+            let installed_copy_is_valid = installed_manifest.is_some();
+            // 版本相同不等于内容相同：bundled 插件的 pages[].icon / entry / navGroup
+            // 会在同版本内修正（侧栏图标与页面装载都读已安装目录的 manifest）。
+            // 旧逻辑只比版本/描述，已安装的旧包不会刷新 ⇒ 用户升级后仍看到 Puzzle
+            // 与旧 entry 造成的沙箱超时。这里按完整 manifest 比对，强制整目录替换。
+            let installed_manifest_is_current = installed_manifest.as_ref() == Some(&manifest);
             let needs_sync = existing_record.is_none_or(|record| {
                 record.kind != PluginKind::Bundled
                     || record.version != manifest.version
@@ -2723,11 +2731,16 @@ impl PluginManager {
                     || record.install_path != install_path
                     || !record.install_path.exists()
                     || !installed_copy_is_valid
+                    || !installed_manifest_is_current
             });
 
             if !needs_sync {
                 continue;
             }
+            tracing::info!(
+                plugin_id = %plugin_id,
+                "bundled 插件清单或安装内容已变化，整目录重新同步"
+            );
 
             if install_path.exists() {
                 remove_dir_all_with_retry(&install_path, 3)?;

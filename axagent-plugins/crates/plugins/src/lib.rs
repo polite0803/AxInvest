@@ -262,6 +262,17 @@ mod tests {
         );
     }
 
+    /// 同版本 bundled 插件的页面导航元数据修正夹具：只改 manifest，不改 version。
+    fn write_bundled_plugin_page_with_icon(root: &Path, name: &str, icon: &str) {
+        write_file(
+            root.join(MANIFEST_RELATIVE_PATH).as_path(),
+            format!(
+                "{{\n  \"name\": \"{name}\",\n  \"version\": \"1.0.0\",\n  \"description\": \"bundled plugin\",\n  \"defaultEnabled\": true,\n  \"pages\": [{{\n    \"id\": \"{name}-home\",\n    \"title\": \"{name}\",\n    \"entry\": \"index.html\",\n    \"loading\": \"bundle\",\n    \"navGroup\": \"packs\",\n    \"labelKey\": \"nav.packs\",\n    \"icon\": \"{icon}\",\n    \"navOrder\": 1\n  }}]\n}}"
+            )
+            .as_str(),
+        );
+    }
+
     /// 阶段3-①（commands[] 执行分发）夹具：声明一个命名命令的插件。
     /// `with_subprocess=false` 时故意不声明 `subprocess_execution`，用于验证权限拦截。
     fn write_command_plugin(root: &Path, name: &str, version: &str, with_subprocess: bool) {
@@ -843,6 +854,40 @@ mod tests {
         let registry = manager.load_registry().expect("load registry");
         assert!(!registry.plugins.contains_key("stale@bundled"));
         assert!(!stale_install_path.exists());
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(bundled_root);
+    }
+
+    /// 回归：同版本 bundled 插件只改 `pages[].icon` 也必须刷新已安装目录。
+    /// 旧逻辑只比版本/名称/描述，用户升级应用后仍读到旧 manifest ⇒ 侧栏全是 Puzzle。
+    #[test]
+    fn bundled_sync_refreshes_same_version_manifest_page_metadata() {
+        let _guard = env_guard();
+        let config_home = temp_dir("bundled-metadata-home");
+        let bundled_root = temp_dir("bundled-metadata-root");
+        let source = bundled_root.join("navfix");
+        write_bundled_plugin(&source, "navfix", "1.0.0", true);
+
+        let mut config = isolated_config(&config_home);
+        config.bundled_root = Some(bundled_root.clone());
+        let manager = PluginManager::new(config.clone());
+        manager.list_installed_plugins().expect("首次同步应安装 bundled 插件");
+        let pages_before = manager.list_plugin_pages().expect("首次页面投影");
+        assert!(pages_before.iter().all(|info| info.pages.is_empty()));
+
+        // 同版本只改页面导航元数据：旧判据会因 version/description 不变而跳过同步。
+        write_bundled_plugin_page_with_icon(&source, "navfix", "Calculator");
+
+        let reloaded = PluginManager::new(config);
+        let pages_after = reloaded.list_plugin_pages().expect("刷新后的页面投影");
+        let page = pages_after
+            .iter()
+            .find(|info| info.id == "navfix@bundled")
+            .and_then(|info| info.pages.first())
+            .expect("更新后的页面应被投影");
+        assert_eq!(page.icon.as_deref(), Some("Calculator"));
+        assert_eq!(page.nav_group.as_deref(), Some("packs"));
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);

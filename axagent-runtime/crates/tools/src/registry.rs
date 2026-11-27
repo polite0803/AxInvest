@@ -774,11 +774,22 @@ impl UnifiedToolRegistry {
         //
         // 内置工具集经 `tool.set` 接缝取回 —— 外部实现注册同一接缝即可整体替换。
         // 接缝未注册时（未走启动装配的路径，如单测直接构造注册表）回退内置实现。
-        let builtin = match axagent_harness::get_capability_registry().get_tool_set() {
+        let capability_registry = axagent_harness::get_capability_registry();
+        let mut tools = match capability_registry.get_tool_set() {
             Some(provider) => provider.tools(),
             None => crate::tools::builtin_tool_instances(),
         };
-        self.tools.register_all(builtin);
+        // 插件贡献的 `tool.set` 不能占用 `tool.set` 单实例接缝（会与内置工具集重复注册
+        // 并让 worker 整体回滚），它们以独立扩展项登记；工具注册表创建时一并汇总，
+        // 否则「注册成功但任何变化都没有」。
+        for provider in capability_registry.list_tool_set_extensions() {
+            let plugin_tools = provider.tools();
+            if !plugin_tools.is_empty() {
+                tracing::info!(count = plugin_tools.len(), "tool.set 插件扩展已登记到工具注册表");
+            }
+            tools.extend(plugin_tools);
+        }
+        self.tools.register_all(tools);
 
         // 配置默认工具级权限要求
         self.permission_policy = Arc::new(Mutex::new(

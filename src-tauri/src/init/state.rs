@@ -380,6 +380,11 @@ pub async fn create_app_state_with_resource_dir(
         match capability_registry.register_tool_set(Arc::new(axagent_tools::tools::BuiltinToolSet))
         {
             Ok(_) => tracing::info!("tool.set 接缝已注册 (BuiltIn)"),
+            // 单实例接缝由启动装配独占：若历史进程/测试上下文已经注册过，保留先到者，
+            // 不能因为重复注册而回滚插件 worker 或替换内置工具表。
+            Err(axagent_harness::CapabilityError::Duplicate { .. }) => {
+                tracing::info!("tool.set 接缝已由既有实现占用，保留先到者")
+            },
             Err(e) => tracing::warn!("tool.set 注册失败: {e}"),
         }
 
@@ -414,6 +419,10 @@ pub async fn create_app_state_with_resource_dir(
 
     let config_home = app_dir.clone();
     let mut plugin_config = PluginManagerConfig::new(config_home.clone());
+    // 禁用状态写在 `<config_home>/settings.json` 的 `enabledPlugins`：不在这里读回，重启后
+    // bundled 插件全部退回 `defaultEnabled=true`，侧栏会留下已禁用插件的入口，而它的
+    // worker / 能力并未启动（点进去即空壳或沙箱超时）。
+    plugin_config.enabled_plugins = PluginManagerConfig::load_enabled_plugins(&config_home);
     plugin_config.bundled_root =
         Some(PluginManagerConfig::resolve_bundled_root(resource_dir.as_deref()));
     plugin_config.external_dirs = axagent_kit::skill_dirs::all_skills_dirs();

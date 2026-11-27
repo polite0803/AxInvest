@@ -275,6 +275,37 @@ impl PluginManagerConfig {
         }
     }
 
+    /// 读取 `settings.json` 里落盘的启停状态，作为 `PluginManagerConfig` 的初始快照。
+    ///
+    /// `write_enabled_state()` 只把状态写盘并同步更新内存里的 `enabled_plugins`；如果应用
+    /// 重启时不在这里读回，所有内置插件都会退回 `defaultEnabled`（本仓 bundled 全是 true），
+    /// 于是「禁用后重启」在 UI 与路由投影里都重新变成启用 —— 侧栏留下禁用插件的入口，
+    /// 而 worker / 能力注册又没启动，点进去就是空壳或超时。
+    ///
+    /// 文件不存在 / 坏 JSON 一律按「没有持久化覆盖」处理，让 `defaultEnabled` 与
+    /// `PluginKind` 的默认口径继续生效；启停命令会在下一次成功时重写整份文件。
+    #[must_use]
+    pub fn load_enabled_plugins(config_home: &Path) -> BTreeMap<String, bool> {
+        let path = config_home.join(SETTINGS_FILE_NAME);
+        let Ok(contents) = fs::read_to_string(path) else {
+            return BTreeMap::new();
+        };
+        let Ok(root) = serde_json::from_str::<Value>(&contents) else {
+            return BTreeMap::new();
+        };
+        root.get("enabledPlugins")
+            .and_then(Value::as_object)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|(plugin_id, value)| {
+                        value.as_bool().map(|enabled| (plugin_id.clone(), enabled))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// 解析「内置插件」根：优先用**应用资源目录**里的 `plugins/bundled`（发布版），
     /// 不存在时退回源码树（开发期）。
     ///

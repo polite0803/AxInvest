@@ -960,7 +960,7 @@ mod tests {
 
         let mut reloaded_config = isolated_config(&config_home);
         reloaded_config.bundled_root = Some(bundled_root.clone());
-        reloaded_config.enabled_plugins = load_enabled_plugins(&manager.settings_path());
+        reloaded_config.enabled_plugins = PluginManagerConfig::load_enabled_plugins(&config_home);
         let reloaded_manager = PluginManager::new(reloaded_config);
         let reloaded = reloaded_manager
             .list_installed_plugins()
@@ -994,7 +994,7 @@ mod tests {
 
         let mut reloaded_config = isolated_config(&config_home);
         reloaded_config.bundled_root = Some(bundled_root.clone());
-        reloaded_config.enabled_plugins = load_enabled_plugins(&manager.settings_path());
+        reloaded_config.enabled_plugins = PluginManagerConfig::load_enabled_plugins(&config_home);
         let reloaded_manager = PluginManager::new(reloaded_config);
         let reloaded = reloaded_manager
             .list_installed_plugins()

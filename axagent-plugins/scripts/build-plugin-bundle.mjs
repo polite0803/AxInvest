@@ -627,6 +627,17 @@ if (domainPackSource) {
 // 4) 清单：形状归 `PLUGIN_SPECS[*].manifest`，此处只递随产物变化的三个量。
 const manifest = spec.manifest({ version: workerVersion, binaryName, sha256 });
 const manifestPath = path.join(outRoot, "plugin.json");
+// `pages[]` 里的 navGroup/labelKey/icon/navOrder 是宿主侧栏的唯一声明源；
+// 这里在落盘前做最后一道校验，防止旧脚本 / 手改清单把导航元数据磨掉，
+// 退化成整列 Puzzle 图标 + 无分组。
+const declaredPages = Array.isArray(manifest.pages) ? manifest.pages : [];
+for (const page of declaredPages) {
+  if (!page.icon || !page.labelKey || !page.navGroup || page.navOrder === undefined) {
+    fail(
+      `插件 ${manifest.name} 的页面 ${page.id} 缺少导航元数据（navGroup/labelKey/icon/navOrder），侧栏会退化为 Puzzle 兜底图标`,
+    );
+  }
+}
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`[plugin-bundle] 产物目录：${outRoot}`);

@@ -11372,7 +11372,10 @@ fn register_remote_seam(
                         seam: seam.to_string(),
                         reason,
                     })?;
-                registry.register_tool_set(Arc::new(tool_set))
+                // `tool.set` 是宿主注入的内置接缝；插件 contribution 以“聚合工具”形式
+                // 叠加，不能占用 `tool.set` 这个单实例 ID（会与 BuiltinToolSet 冲突，
+                // 且失败时 LoadedPlugin::load 整体回滚 worker）。
+                registry.register_tool_set_extension(plugin_id, Arc::new(tool_set))
             },
             other => {
                 return Err(WorkerError::UnsupportedSeam {
@@ -11421,6 +11424,88 @@ mod tests {
         assert_eq!(
             verdict_from_value(&json!({ "verdict": "rewrite" })),
             SubscriberVerdict::Continue
+        );
+    }
+
+    struct StubTool {
+        name: String,
+    }
+
+    #[async_trait]
+    impl axagent_harness::Tool for StubTool {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn description(&self) -> &str {
+            "测试替身工具"
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+        fn category(&self) -> axagent_harness::ToolCategory {
+            axagent_harness::ToolCategory::Integration
+        }
+        async fn call(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &axagent_harness::ToolContext,
+        ) -> Result<axagent_harness::ToolResult, axagent_harness::ToolError> {
+            unreachable!("测试只检查注册/撤销，不调用工具")
+        }
+    }
+
+    struct SingleToolSet {
+        tool: Arc<dyn axagent_harness::Tool>,
+    }
+
+    impl axagent_harness::ToolSetProvider for SingleToolSet {
+        fn tools(&self) -> Vec<Arc<dyn axagent_harness::Tool>> {
+            vec![self.tool.clone()]
+        }
+    }
+
+    fn builtin_tool_set_stub() -> SingleToolSet {
+        SingleToolSet { tool: Arc::new(StubTool { name: "TestBuiltinTool".to_string() }) }
+    }
+
+    #[test]
+    fn tool_set_registration_uses_extension_id_without_displacing_builtin() {
+        let registry = get_capability_registry();
+        let builtin = if let Some(builtin) = registry.get_tool_set() {
+            builtin
+        } else {
+            registry
+                .register_tool_set(Arc::new(builtin_tool_set_stub()))
+                .expect("测试进程应能建立 tool.set 基线");
+            registry.get_tool_set().expect("刚注册的 tool.set 应可取回")
+        };
+        let handle = register_remote_seam(
+            registry,
+            "stock@bundled",
+            "tool.set",
+            "exec",
+            Arc::new(ScriptedInvoker::new(&[("list", json!([]))])),
+        )
+        .expect("插件 tool.set 应登记为独立扩展项，而不是失败回滚 worker");
+        assert!(
+            Arc::ptr_eq(&builtin, &registry.get_tool_set().expect("内置 tool.set 不应被移除")),
+            "插件注册不得替换内置 tool.set"
+        );
+        let all_extensions = registry.list_tool_set_extensions();
+        assert!(
+            !all_extensions.is_empty(),
+            "插件工具集扩展应可被消费方取回（实际 {} 项）",
+            all_extensions.len()
+        );
+        let handle_provider =
+            all_extensions.into_iter().next().expect("插件工具集扩展应可被消费方取回");
+        handle.undo();
+        assert!(
+            !registry
+                .list_tool_set_extensions()
+                .iter()
+                .any(|provider| std::ptr::eq(provider.as_ref(), handle_provider.as_ref())),
+            "撤销后插件工具集扩展应从注册表移除"
         );
     }
 

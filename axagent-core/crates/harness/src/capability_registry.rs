@@ -1064,6 +1064,46 @@ impl CapabilityRegistry {
         self.provider_as::<dyn crate::ToolSetProvider>("tool.set")
     }
 
+    /// 注册插件贡献的工具集扩展，不占用 `tool.set` 单实例接缝。
+    ///
+    /// `tool.set` 由宿主内置工具集占用，工具注册表初始化时通过
+    /// [`Self::get_tool_set`] 取回。插件若直接注册同一 ID，会与内置注册冲突，
+    /// 并导致 `LoadedPlugin::load` 回滚整个 worker；更糟的是替换后内置工具会消失。
+    /// 这里把插件工具作为**独立注册项**保存，消费方可调用
+    /// [`Self::list_tool_set_extensions`] 一并并入。
+    pub fn register_tool_set_extension(
+        &self,
+        plugin_id: &str,
+        provider: Arc<dyn crate::ToolSetProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        let id = format!("tool.set.extension.{plugin_id}");
+        self.register(
+            ServiceDefinition::new(
+                &id,
+                "1.0",
+                "axagent_harness::ToolSetProvider",
+                format!("来自插件 `{plugin_id}` 的工具集扩展"),
+            ),
+            CapabilityOrigin::ExternalPlugin,
+            Arc::new(provider) as Arc<dyn std::any::Any + Send + Sync>,
+        )
+    }
+
+    /// 列出全部插件贡献的工具集扩展，供工具注册表汇总。
+    pub fn list_tool_set_extensions(&self) -> Vec<Arc<dyn crate::ToolSetProvider>> {
+        let guard = self.inner.read();
+        guard
+            .iter()
+            .filter(|(id, _)| id.starts_with("tool.set.extension."))
+            .filter_map(|(_, registration)| {
+                registration
+                    .provider
+                    .downcast_ref::<Arc<dyn crate::ToolSetProvider>>()
+                    .map(|provider| provider.clone())
+            })
+            .collect()
+    }
+
     // ── market.quote 接缝（行情数据提供者，单实例） ─────────────────────────
 
     /// 注册一个行情数据提供者（`market.quote` 接缝）。

@@ -1096,10 +1096,7 @@ impl CapabilityRegistry {
             .iter()
             .filter(|(id, _)| id.starts_with("tool.set.extension."))
             .filter_map(|(_, registration)| {
-                registration
-                    .provider
-                    .downcast_ref::<Arc<dyn crate::ToolSetProvider>>()
-                    .map(|provider| provider.clone())
+                registration.provider.downcast_ref::<Arc<dyn crate::ToolSetProvider>>().cloned()
             })
             .collect()
     }

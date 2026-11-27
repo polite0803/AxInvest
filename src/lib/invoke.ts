@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { AutoLearnResult, IpcEventName, Personality, PersonalityInfo } from "@/types";
-import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { onBrowserEvent } from "./browserEvents";
 import { handleCommand } from "./browserMock";
@@ -845,9 +845,9 @@ export function agentSessionList(): Promise<string[]> {
 }
 
 /**
- * 把宿主文件系统上的**绝对路径**换成沙箱可装载的 asset URL（`convertFileSrc` 的收口出口）。
+ * 把宿主文件系统上的**绝对路径**换成沙箱可装载的 asset URL（Tauri asset 协议的收口出口）。
  *
- * 为什么住在 `@/lib/invoke` 而不是让业务侧 `import { convertFileSrc } from "@tauri-apps/api/core"`：
+ * 为什么住在 `@/lib/invoke` 而不是让业务侧各自拼 asset URL 或直接 import Tauri API：
  * 禁区 1 要求全站碰 Tauri API 的口子只有这一个（`invoke` / `listen` 都从这里出）。换 URL 看着只是
  * 拼字符串，但它拼的是**装载面** —— 多开一条 import 面就等于给「哪些路径能进 webview」留了第二个答案。
  *
@@ -855,13 +855,27 @@ export function agentSessionList(): Promise<string[]> {
  * **不得**由前端拿 manifest 的 `entry` 自行拼接：安装目录包含性与 `assetProtocol.scope` 两道防线
  * 都只在后端解析那一步成立，前端拼串会把它们绕过去。
  *
- * ⚠ 只在 Tauri 环境有解：浏览器模式（`npm run dev`）没有 asset 协议，`convertFileSrc` 会去读
- * 不存在的 `window.__TAURI_INTERNALS__`。这里明确报错，而不是回一个装不出内容的半截 URL ——
+ * ⚠ 只在 Tauri 环境有解：浏览器模式（`npm run dev`）没有 asset 协议。这里明确报错，
+ * 而不是回一个装不出内容的半截 URL ——
  * 后者的症状是「iframe 空白 + 30 s 后报超时」，与「忘记 announceReady」无法区分。
  */
 export function assetUrl(absolutePath: string): string {
   if (!isTauri()) {
     throw new Error("assetUrl: 需要 Tauri 环境（浏览器模式没有 asset 协议）");
   }
-  return convertFileSrc(absolutePath);
+  // ⚠ `asset:` 在 URL 标准里是 non-special scheme：把 `convertFileSrc()` 产出的整串
+  // percent-encoded 路径直接放进 iframe 时，文档里的相对路径会丢掉所有父目录段
+  // （`/home/.../pages/index.html` + `./bundle.js` ⇒ `asset://localhost/bundle.js`），
+  // bundle 根本不执行、ready 不到，宿主等满超时。
+  // 这里保留路径分隔符、仅逐段编码。Tauri asset handler 会剥掉 pathname 的首个 `/`
+  // 再 percent-decode，所以 Linux 绝对路径必须留成 `asset://localhost//home/...`：
+  // 首 `/` 给 handler 剥、第二个 `/` 才是原路径的根，scope 才会命中绝对路径。
+  const normalized = absolutePath.replace(/\\/g, "/");
+  const segments = normalized.split("/").filter(Boolean).map(encodeURIComponent);
+  // Linux 绝对路径：多留一个 `/` ⇒ `asset://localhost//home/...`，handler 剥首个 `/`
+  // 后得到 `/home/...`（绝对路径，scope 命中），相对 `./bundle.js` 也仍落在安装目录。
+  // Windows 盘符路径（`C:/...`）：单斜杠 `asset://localhost/C:/...` 剥首个 `/` 后
+  // 得到 `C:/...`，仍是原形态，与 scope 一致。
+  const rootSlash = normalized.startsWith("/") ? "/" : "";
+  return `asset://localhost/${rootSlash}${segments.join("/")}`;
 }

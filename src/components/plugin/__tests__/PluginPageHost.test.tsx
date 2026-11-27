@@ -53,7 +53,10 @@ import { PluginPageHost } from "@/components/plugin/PluginPageHost";
 const PLUGIN_ID = "own-pack";
 /** 清单原值：故意起一个「像路径」的名字，好让「参与拼接」的缺陷在断言里当场显形。 */
 const ENTRY = "dist/pages/main.js";
-const ABSOLUTE_PATH = "/home/dev/.axagent/plugins/installed/own-pack/dist/pages/main.js";
+const ABSOLUTE_PATH = "/home/dev/.axagent/plugins/installed/own-pack/dist/pages/index.html";
+// asset handler 收到的 URL 必须保留目录分隔符，否则 HTML 里的相对脚本会解析到根目录。
+// asset handler 剥首个 `/` 后必须仍得到绝对路径，故 Linux 绝对路径需双斜杠。
+const EXPECTED_ASSET_URL = "asset://localhost/" + ABSOLUTE_PATH;
 
 const bundlePage: PluginPageDto = { id: "home", title: "行情首页", entry: ENTRY, loading: "bundle" };
 const schemaPage: PluginPageDto = { id: "form", title: "录入表", entry: "schema-42", loading: "schema" };
@@ -117,9 +120,8 @@ function ipcCalls(command: string): unknown[][] {
 
 beforeEach(() => {
   vi.mocked(invoke).mockReset();
-  // 浏览器模式没有 asset 协议：把 Tauri 的两个开关按真实形态补上，让**真的** assetUrl() 走到底
+  // 浏览器模式没有 asset 协议：补上 Tauri 判据，让**真的** assetUrl() 走到底
   vi.stubGlobal("isTauri", true);
-  vi.stubGlobal("__TAURI_INTERNALS__", { convertFileSrc: (p: string): string => `asset://localhost/${p}` });
 });
 
 afterEach(() => {
@@ -163,7 +165,7 @@ describe("装载形态：后端绝对路径 → assetUrl() → iframe src（§20
     await waitFor(() => {
       expect(iframe.getAttribute("src")).toBeTruthy();
     });
-    expect(iframe.getAttribute("src")).toBe(`asset://localhost/${ABSOLUTE_PATH}`);
+    expect(iframe.getAttribute("src")).toBe(EXPECTED_ASSET_URL);
   });
 
   it("换一个 entry、同一 absolutePath ⇒ src 逐字不变（entry 没参与路径构造）", async () => {
@@ -172,7 +174,24 @@ describe("装载形态：后端绝对路径 → assetUrl() → iframe src（§20
     await waitFor(() => {
       expect(iframe.getAttribute("src")).toBeTruthy();
     });
-    expect(iframe.getAttribute("src")).toBe(`asset://localhost/${ABSOLUTE_PATH}`);
+    expect(iframe.getAttribute("src")).toBe(EXPECTED_ASSET_URL);
+  });
+
+  it("asset URL 保留绝对路径分隔符：相对 bundle.js 不能掉到 asset 根目录", async () => {
+    mockResolveOk();
+    const { iframe } = renderBundleHost();
+    await waitFor(() => {
+      expect(iframe.getAttribute("src")).toBeTruthy();
+    });
+    const src = iframe.getAttribute("src") ?? "";
+    expect(src).toBe(EXPECTED_ASSET_URL);
+    // 文档路径必须仍以双斜杠开头；Tauri handler 剥首个 `/` 后才得到绝对路径。
+    expect(src).toMatch(/^asset:\/\/localhost\/\//);
+    // 相对资源解析必须留在同一安装目录（原 convertFileSrc 单段编码会掉到 /bundle.js）。
+    const resolved = new URL("./bundle.js", src).href;
+    expect(resolved).toBe(EXPECTED_ASSET_URL.replace(/index\.html$/, "bundle.js"));
+    expect(new URL("bundle.js", "asset://localhost/" + encodeURIComponent(ABSOLUTE_PATH)).href)
+      .toBe("asset://localhost/bundle.js");
   });
 
   it("sandbox 只有 allow-scripts，绝不出现 allow-same-origin", () => {
@@ -230,7 +249,7 @@ describe("ready 是唯一开闸信号（§20.4 A/B）", () => {
     });
 
     expect(screen.getByText(i18n.t("skill.timeoutError")), "外来 ready 帧把加载超时撤了").toBeTruthy();
-    expect(iframe.getAttribute("src")).toBe(`asset://localhost/${ABSOLUTE_PATH}`);
+    expect(iframe.getAttribute("src")).toBe(EXPECTED_ASSET_URL);
   });
 
   it("宿主文档报运行时错误 ⇒ 立即显示错误并撤掉加载超时，不继续挂着 loading", async () => {

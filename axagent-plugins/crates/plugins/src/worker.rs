@@ -11730,7 +11730,12 @@ mod tests {
             ])),
         )
         .expect("远程接缝应注册成功");
-        let tool_set = registry.get_tool_set().expect("远程实现应可取回");
+        // 插件 `tool.set` 以扩展项登记，不能占用宿主单实例接缝；消费方统一从扩展列表取回。
+        let tool_set = registry
+            .list_tool_set_extensions()
+            .into_iter()
+            .next()
+            .expect("远程实现应作为扩展可取回");
         let tools = tool_set.tools();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name(), "remote_echo");

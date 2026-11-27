@@ -869,6 +869,9 @@ pub mod plugin {
     pub const PANEL_ASSET_TAMPERED: &str = "PLUGIN_PANEL_ASSET_TAMPERED";
     /// 安装或更新前提供的来源 SHA-256 缺失、格式非法，或与物化后的插件目录不一致。
     pub const SOURCE_INTEGRITY_FAILED: &str = "PLUGIN_SOURCE_INTEGRITY_FAILED";
+    /// 插件目录被占用或权限不足（Windows `ERROR_ACCESS_DENIED` / os error 5）。
+    /// 用户动作是关掉占用该插件的程序后重试，而不是核对 SHA-256。
+    pub const ACCESS_DENIED: &str = "PLUGIN_ACCESS_DENIED";
 }
 
 /// 进化引擎相关错误码

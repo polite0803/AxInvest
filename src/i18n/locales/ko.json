@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "봇 비용 할당량 값이 올바르지 않습니다",
     "BOT_COST_QUOTA_EXCEEDED": "비용 또는 토큰 할당량을 초과했습니다",
     "BOT_SKILL_NOT_FOUND": "해당 봇의 스킬 바인딩을 찾을 수 없습니다",
-    "BOT_SKILL_PRESET_INVALID": "스킬 프리셋 형식이 올바르지 않습니다"
+    "BOT_SKILL_PRESET_INVALID": "스킬 프리셋 형식이 올바르지 않습니다",
+    "PLUGIN_ACCESS_DENIED": "플러그인 디렉터리가 잠겨 있거나 접근할 수 없습니다. 해당 플러그인을 사용 중인 프로그램을 닫고 다시 시도하세요."
   },
   "errorBoundary": {
     "copied": "복사됨",

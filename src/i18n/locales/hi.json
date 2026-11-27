@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "बॉट लागत कोटा मान अमान्य है",
     "BOT_COST_QUOTA_EXCEEDED": "लागत या टोकन कोटा पार हो गया",
     "BOT_SKILL_NOT_FOUND": "बॉट कौशल बाइंडिंग नहीं मिली",
-    "BOT_SKILL_PRESET_INVALID": "कौशल प्रीसेट प्रारूप अमान्य है"
+    "BOT_SKILL_PRESET_INVALID": "कौशल प्रीसेट प्रारूप अमान्य है",
+    "PLUGIN_ACCESS_DENIED": "प्लगिन निर्देशिका लॉक है या पहुँच योग्य नहीं है। इसे उपयोग करने वाला प्रोग्राम बंद करें और फिर प्रयास करें।"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",

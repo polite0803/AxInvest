@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "Ungültiger Wert für Bot-Kostenkontingent",
     "BOT_COST_QUOTA_EXCEEDED": "Kosten- oder Token-Kontingent überschritten",
     "BOT_SKILL_NOT_FOUND": "Bot-Skill-Zuordnung nicht gefunden",
-    "BOT_SKILL_PRESET_INVALID": "Ungültiges Skill-Preset-Format"
+    "BOT_SKILL_PRESET_INVALID": "Ungültiges Skill-Preset-Format",
+    "PLUGIN_ACCESS_DENIED": "Das Plugin-Verzeichnis ist gesperrt oder nicht zugänglich. Schließen Sie das Programm, das es verwendet, und versuchen Sie es erneut."
   },
   "errorBoundary": {
     "copied": "Kopiert",

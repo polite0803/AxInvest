@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "Valor de cuota de costo del bot no válido",
     "BOT_COST_QUOTA_EXCEEDED": "Se excedió la cuota de costo o tokens",
     "BOT_SKILL_NOT_FOUND": "No se encontró la vinculación de habilidad del bot",
-    "BOT_SKILL_PRESET_INVALID": "Formato de preajuste de habilidad no válido"
+    "BOT_SKILL_PRESET_INVALID": "Formato de preajuste de habilidad no válido",
+    "PLUGIN_ACCESS_DENIED": "El directorio del complemento está bloqueado o no es accesible. Cierre el programa que lo está usando y vuelva a intentarlo."
   },
   "errorBoundary": {
     "copied": "Copiado",

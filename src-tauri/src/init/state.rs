@@ -427,11 +427,13 @@ pub async fn create_app_state_with_resource_dir(
         Some(PluginManagerConfig::resolve_bundled_root(resource_dir.as_deref()));
     plugin_config.external_dirs = axagent_kit::skill_dirs::all_skills_dirs();
     let npm_registry = Arc::new(axagent_npm::NpmRegistry::new());
-    let plugin_manager = Arc::new(tokio::sync::RwLock::new(
-        PluginManager::new(plugin_config)
-            .with_npm_registry(npm_registry)
-            .with_capability_registry(axagent_harness::get_capability_registry()),
-    ));
+    let plugin_manager = PluginManager::new(plugin_config)
+        .with_npm_registry(npm_registry)
+        .with_capability_registry(axagent_harness::get_capability_registry());
+    // 上次异常退出留下的 worker 会锁住安装目录里的 exe；Windows 下 bundled 同步
+    // 的 `remove_dir_all` 会因此报 os error 5，后续 `plugin_list` 直接空列表。
+    plugin_manager.cleanup_stale_workers();
+    let plugin_manager = Arc::new(tokio::sync::RwLock::new(plugin_manager));
 
     // ── Extract every AppState field into a local so that the same values
     //    can be shared between the top-level `AppState` and the new domain

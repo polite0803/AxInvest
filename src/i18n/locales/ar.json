@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "قيمة حصة تكلفة الروبوت غير صالحة",
     "BOT_COST_QUOTA_EXCEEDED": "تم تجاوز حصة التكلفة أو الرموز",
     "BOT_SKILL_NOT_FOUND": "لم يتم العثور على ربط مهارة الروبوت",
-    "BOT_SKILL_PRESET_INVALID": "تنسيق الإعداد المسبق للمهارة غير صالح"
+    "BOT_SKILL_PRESET_INVALID": "تنسيق الإعداد المسبق للمهارة غير صالح",
+    "PLUGIN_ACCESS_DENIED": "دليل الإضافة مقفل أو غير قابل للوصول. أغلق البرنامج الذي يستخدمه ثم أعد المحاولة."
   },
   "errorBoundary": {
     "copied": "تم النسخ",

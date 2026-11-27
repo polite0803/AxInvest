@@ -893,6 +893,38 @@ mod tests {
         let _ = fs::remove_dir_all(bundled_root);
     }
 
+    /// 回归：一个 bundled 插件同步失败（安装位置被占用）不能让其余插件和 registry 一起丢失。
+    /// 真机上对应 Windows 的 `os error 5`：旧 worker 锁住 `stock-bundled/bin/*.exe`，
+    /// 同步在 stock 处 `?` 退出，后面的插件不发、registry 不写、插件列表直接空。
+    #[test]
+    fn bundled_sync_failure_does_not_abort_other_plugins() {
+        let _guard = env_guard();
+        let config_home = temp_dir("bundled-partial-failure-home");
+        let bundled_root = temp_dir("bundled-partial-failure-root");
+        write_bundled_plugin(&bundled_root.join("aaa-blocked"), "aaa-blocked", "1.0.0", true);
+        write_bundled_plugin(&bundled_root.join("bbb-good"), "bbb-good", "1.0.0", true);
+
+        let install_root = config_home.join("plugins").join("installed");
+        fs::create_dir_all(&install_root).expect("建安装根目录");
+        fs::write(install_root.join("aaa-blocked-bundled"), b"occupied").expect("占位成普通文件");
+        let mut config = isolated_config(&config_home);
+        config.bundled_root = Some(bundled_root.clone());
+
+        let manager = PluginManager::new(config);
+        manager.list_installed_plugins().expect("单个插件失败不应让整体列表失败");
+
+        let registry = manager.load_registry().expect("registry 应落盘");
+        assert!(!registry.plugins.contains_key("aaa-blocked@bundled"));
+        assert!(registry.plugins.contains_key("bbb-good@bundled"));
+        assert!(
+            install_root.join("bbb-good-bundled").join(MANIFEST_RELATIVE_PATH).exists(),
+            "失败插件之后的插件仍应完成同步"
+        );
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(bundled_root);
+    }
+
     #[test]
     fn installed_plugin_discovery_keeps_registry_entries_outside_install_root() {
         let _guard = env_guard();
@@ -1172,6 +1204,11 @@ mod tests {
         assert_eq!(report.failures()[0].kind, PluginKind::External);
         assert!(report.failures()[0].plugin_root.ends_with(Path::new("broken")));
         assert!(report.failures()[0].error().to_string().contains("does not exist"));
+
+        // UI 投影必须比严格注册表宽容：一个坏插件不能把整个插件页清空。
+        let summaries =
+            manager.list_plugin_marketplace_summaries().expect("UI 列表应容忍单个加载失败的插件");
+        assert!(summaries.iter().any(|p| p.summary.metadata.id == "valid-report@external"));
 
         let error =
             manager.plugin_registry().expect_err("strict registry should surface load failures");

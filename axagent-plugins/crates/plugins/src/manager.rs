@@ -1019,7 +1019,21 @@ impl PluginManager {
         Ok(self.plugin_registry()?.summaries())
     }
 
-    /// 市场/列表可信投影：在 [`Self::list_plugins`] 的摘要上补来源、页面与完整性状态。
+    /// UI 只读投影专用：单个插件目录损坏 / 被占用不能让整个插件页变成空列表。
+    /// 严格 API [`Self::plugin_registry`] 仍保留给启停、执行等需要确定性失败的调用方。
+    fn list_summaries_for_ui(&self) -> Result<Vec<PluginSummary>, PluginError> {
+        let report = self.plugin_registry_report()?;
+        for failure in report.failures() {
+            tracing::warn!(
+                plugin_root = %failure.plugin_root.display(),
+                error = %failure.error(),
+                "插件列表投影跳过加载失败的插件"
+            );
+        }
+        Ok(report.into_registry_allowing_failures().summaries())
+    }
+
+    /// 市场/列表可信投影：在容错摘要上补来源、页面与完整性状态。
     ///
     /// 判据只来自已安装 registry 与目录哈希；浏览器 mock 不得伪造 `verified`。
     pub fn list_plugin_marketplace_summaries(
@@ -1027,7 +1041,7 @@ impl PluginManager {
     ) -> Result<Vec<PluginMarketplaceSummary>, PluginError> {
         let registry = self.load_registry()?;
         Ok(self
-            .list_plugins()?
+            .list_summaries_for_ui()?
             .into_iter()
             .map(|summary| {
                 let permissions = summary.permission_names.clone();
@@ -1077,7 +1091,7 @@ impl PluginManager {
         &self,
     ) -> Result<Vec<crate::types::DashboardPluginInfo>, PluginError> {
         let mut out = Vec::new();
-        for summary in self.list_plugins()? {
+        for summary in self.list_summaries_for_ui()? {
             let Some(root) = summary.metadata.root.as_deref() else { continue };
             // 单个插件清单读取失败不影响整体列表（与 registry 容错加载同口径）。
             let Ok(manifest) = load_plugin_from_directory(root) else {
@@ -1107,7 +1121,7 @@ impl PluginManager {
     /// [`Self::list_dashboard_plugins`] 同形（禁区 4、§0.7.6 的教训）。
     pub fn list_plugin_pages(&self) -> Result<Vec<crate::types::PluginPagesInfo>, PluginError> {
         let mut out = Vec::new();
-        for summary in self.list_plugins()? {
+        for summary in self.list_summaries_for_ui()? {
             let Some(root) = summary.metadata.root.as_deref() else { continue };
             // 单个插件清单读取失败不影响整体列表（与 registry 容错加载同口径）。
             let Ok(manifest) = load_plugin_from_directory(root) else {
@@ -1138,7 +1152,7 @@ impl PluginManager {
         &self,
     ) -> Result<Vec<crate::types::PluginDomainPacksInfo>, PluginError> {
         let mut out = Vec::new();
-        for summary in self.list_plugins()? {
+        for summary in self.list_summaries_for_ui()? {
             // P6.2 批 2：禁用插件不应继续贡献域包页面 / 能力声明。
             // 这里与页面资产、命名命令的启停闸对齐（未启用即不可见），否则用户关掉
             // security 后域包页面仍出现在只读投影里，禁用语义只剩注释。
@@ -1204,7 +1218,7 @@ impl PluginManager {
         &self,
     ) -> Result<Vec<crate::types::PluginTaskSourcesInfo>, PluginError> {
         let mut out = Vec::new();
-        for summary in self.list_plugins()? {
+        for summary in self.list_summaries_for_ui()? {
             let Some(root) = summary.metadata.root.as_deref() else { continue };
             let Ok(manifest) = load_plugin_from_directory(root) else {
                 tracing::warn!(root = %root.display(), "插件任务源清单：插件 manifest 读取失败，跳过");
@@ -1240,7 +1254,7 @@ impl PluginManager {
         &self,
     ) -> Result<Vec<crate::types::PluginTaskCardsInfo>, PluginError> {
         let mut out = Vec::new();
-        for summary in self.list_plugins()? {
+        for summary in self.list_summaries_for_ui()? {
             let Some(root) = summary.metadata.root.as_deref() else { continue };
             let Ok(manifest) = load_plugin_from_directory(root) else {
                 tracing::warn!(root = %root.display(), "插件卡片清单：插件 manifest 读取失败，跳过");
@@ -1271,7 +1285,7 @@ impl PluginManager {
         &self,
     ) -> Result<Vec<crate::types::PluginAgentCommand>, PluginError> {
         let mut out = Vec::new();
-        for summary in self.list_plugins()? {
+        for summary in self.list_summaries_for_ui()? {
             if !summary.enabled {
                 continue;
             }
@@ -2707,75 +2721,87 @@ impl PluginManager {
         let mut active_bundled_ids = BTreeSet::new();
 
         for source_root in bundled_plugins {
-            let manifest = load_plugin_from_directory(&source_root)?;
-            let plugin_id = plugin_id(&manifest.name, BUNDLED_MARKETPLACE);
-            active_bundled_ids.insert(plugin_id.clone());
-            let install_path = install_root.join(sanitize_plugin_id(&plugin_id));
-            let now = unix_time_ms();
-            let existing_record = registry.plugins.get(&plugin_id);
-            let installed_manifest = install_path
-                .exists()
-                .then(|| load_plugin_from_directory(&install_path).ok())
-                .flatten();
-            let installed_copy_is_valid = installed_manifest.is_some();
-            // 版本相同不等于内容相同：bundled 插件的 pages[].icon / entry / navGroup
-            // 会在同版本内修正（侧栏图标与页面装载都读已安装目录的 manifest）。
-            // 旧逻辑只比版本/描述，已安装的旧包不会刷新 ⇒ 用户升级后仍看到 Puzzle
-            // 与旧 entry 造成的沙箱超时。这里按完整 manifest 比对，强制整目录替换。
-            let installed_manifest_is_current = installed_manifest.as_ref() == Some(&manifest);
-            let needs_sync = existing_record.is_none_or(|record| {
-                record.kind != PluginKind::Bundled
-                    || record.version != manifest.version
-                    || record.name != manifest.name
-                    || record.description != manifest.description
-                    || record.install_path != install_path
-                    || !record.install_path.exists()
-                    || !installed_copy_is_valid
-                    || !installed_manifest_is_current
-            });
+            // 单个插件同步失败不能让整个插件页变空：旧实现在此处 `?`，
+            // Windows 上只要一个 worker 可执行文件被占用（os error 5），
+            // 后面的插件与整份 registry 写入都会被放弃。
+            let result = (|| -> Result<(), PluginError> {
+                let manifest = load_plugin_from_directory(&source_root)?;
+                let plugin_id = plugin_id(&manifest.name, BUNDLED_MARKETPLACE);
+                active_bundled_ids.insert(plugin_id.clone());
+                let install_path = install_root.join(sanitize_plugin_id(&plugin_id));
+                let now = unix_time_ms();
+                let existing_record = registry.plugins.get(&plugin_id);
+                let installed_manifest = install_path
+                    .exists()
+                    .then(|| load_plugin_from_directory(&install_path).ok())
+                    .flatten();
+                let installed_copy_is_valid = installed_manifest.is_some();
+                // 版本相同不等于内容相同：bundled 插件的 pages[].icon / entry / navGroup
+                // 会在同版本内修正（侧栏图标与页面装载都读已安装目录的 manifest）。
+                // 旧逻辑只比版本/描述，已安装的旧包不会刷新 ⇒ 用户升级后仍看到 Puzzle
+                // 与旧 entry 造成的沙箱超时。这里按完整 manifest 比对，强制整目录替换。
+                let installed_manifest_is_current = installed_manifest.as_ref() == Some(&manifest);
+                let needs_sync = existing_record.is_none_or(|record| {
+                    record.kind != PluginKind::Bundled
+                        || record.version != manifest.version
+                        || record.name != manifest.name
+                        || record.description != manifest.description
+                        || record.install_path != install_path
+                        || !record.install_path.exists()
+                        || !installed_copy_is_valid
+                        || !installed_manifest_is_current
+                });
 
-            if !needs_sync {
-                continue;
+                if !needs_sync {
+                    return Ok(());
+                }
+                tracing::info!(
+                    plugin_id = %plugin_id,
+                    "bundled 插件清单或安装内容已变化，整目录重新同步"
+                );
+
+                if install_path.exists() {
+                    remove_dir_all_with_retry(&install_path, 8)?;
+                }
+                copy_dir_all(&source_root, &install_path)?;
+                // bundled 同步同样是「整目录替换」⇒ 与 install/update 一致地重钉哈希，
+                // 否则三类来源里只有 bundled 的面板资产没有完整性锚点。
+                let pinned_integrity = match hash_plugin_directory(&install_path) {
+                    Ok(hash) => Some(PluginIntegrity { algorithm: "sha256".to_string(), hash }),
+                    Err(error) => {
+                        tracing::warn!(path = %install_path.display(), error = %error, "bundled 插件哈希失败");
+                        None
+                    },
+                };
+
+                let installed_at_unix_ms =
+                    existing_record.map_or(now, |record| record.installed_at_unix_ms);
+                registry.plugins.insert(
+                    plugin_id.clone(),
+                    InstalledPluginRecord {
+                        kind: PluginKind::Bundled,
+                        id: plugin_id,
+                        name: manifest.name,
+                        version: manifest.version,
+                        description: manifest.description,
+                        install_path,
+                        source: PluginInstallSource::LocalPath { path: source_root.clone() },
+                        installed_at_unix_ms,
+                        updated_at_unix_ms: now,
+                        integrity: pinned_integrity,
+                    },
+                );
+                changed = true;
+                Ok(())
+            })();
+            if let Err(error) = result {
+                tracing::warn!(
+                    path = %source_root.display(),
+                    error = %error,
+                    "bundled 插件同步失败，跳过该插件以保留其余插件列表"
+                );
             }
-            tracing::info!(
-                plugin_id = %plugin_id,
-                "bundled 插件清单或安装内容已变化，整目录重新同步"
-            );
-
-            if install_path.exists() {
-                remove_dir_all_with_retry(&install_path, 3)?;
-            }
-            copy_dir_all(&source_root, &install_path)?;
-            // bundled 同步同样是「整目录替换」⇒ 与 install/update 一致地重钉哈希，
-            // 否则三类来源里只有 bundled 的面板资产没有完整性锚点。
-            let pinned_integrity = match hash_plugin_directory(&install_path) {
-                Ok(hash) => Some(PluginIntegrity { algorithm: "sha256".to_string(), hash }),
-                Err(error) => {
-                    tracing::warn!(path = %install_path.display(), error = %error, "bundled 插件哈希失败");
-                    None
-                },
-            };
-
-            let installed_at_unix_ms =
-                existing_record.map_or(now, |record| record.installed_at_unix_ms);
-            registry.plugins.insert(
-                plugin_id.clone(),
-                InstalledPluginRecord {
-                    kind: PluginKind::Bundled,
-                    id: plugin_id,
-                    name: manifest.name,
-                    version: manifest.version,
-                    description: manifest.description,
-                    install_path,
-                    source: PluginInstallSource::LocalPath { path: source_root },
-                    installed_at_unix_ms,
-                    updated_at_unix_ms: now,
-                    integrity: pinned_integrity,
-                },
-            );
-            changed = true;
         }
-
         let stale_bundled_ids = registry
             .plugins
             .iter()
@@ -2788,7 +2814,15 @@ impl PluginManager {
         for plugin_id in stale_bundled_ids {
             if let Some(record) = registry.plugins.remove(&plugin_id) {
                 if record.install_path.exists() {
-                    remove_dir_all_with_retry(&record.install_path, 3)?;
+                    // 清理失败就让它留到下次：registry 已经摘除该记录，不能因为一个
+                    // 被占用目录把已同步好的其它插件和整份 registry 一起回滚。
+                    if let Err(error) = remove_dir_all_with_retry(&record.install_path, 8) {
+                        tracing::warn!(
+                            path = %record.install_path.display(),
+                            error = %error,
+                            "过期 bundled 插件目录清理失败，留待下次启动"
+                        );
+                    }
                 }
                 changed = true;
             }
@@ -2799,6 +2833,44 @@ impl PluginManager {
         }
 
         Ok(())
+    }
+
+    /// 启动期清掉上次进程异常退出遗留的插件 worker。
+    ///
+    /// Windows 下正在运行的 `.exe` 无法删除/覆盖：一个僵死的旧 worker 能把 bundled 同步
+    /// 卡在 `remove_dir_all`（os error 5），随后 `plugin_list` 整体失败、插件页空列表。
+    /// 只杀可执行文件位于本应用插件安装根目录下、且不是当前进程直接派生的进程。
+    pub fn cleanup_stale_workers(&self) {
+        let install_root = self.install_root();
+        let mut system = sysinfo::System::new();
+        system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let current_pid = std::process::id();
+        let mut killed_any = false;
+        for (pid, process) in system.processes() {
+            if pid.as_u32() == current_pid {
+                continue;
+            }
+            let Some(exe) = process.exe() else { continue };
+            if !exe.starts_with(&install_root) {
+                continue;
+            }
+            // 当前进程自己派生的 worker 由 `LoadedPlugin::unload` 负责优雅收尾，
+            // 不能被这里的兜底清理抢先强杀（否则能力句柄会指向死连接）。
+            if process.parent().is_some_and(|parent| parent.as_u32() == current_pid) {
+                continue;
+            }
+            tracing::warn!(
+                pid = pid.as_u32(),
+                path = %exe.display(),
+                "终止上次遗留的插件 worker"
+            );
+            let _ = process.kill();
+            killed_any = true;
+        }
+        // Windows 的句柄释放略滞后于进程退出；给同步的重试留出一点缓冲。
+        if killed_any {
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     fn is_enabled(&self, metadata: &PluginMetadata) -> bool {

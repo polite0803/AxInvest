@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "Botのコストクォータの値が不正です",
     "BOT_COST_QUOTA_EXCEEDED": "コストまたはトークンクォータを超過しました",
     "BOT_SKILL_NOT_FOUND": "このBotのスキル割り当てが見つかりません",
-    "BOT_SKILL_PRESET_INVALID": "スキルプリセットの形式が不正です"
+    "BOT_SKILL_PRESET_INVALID": "スキルプリセットの形式が不正です",
+    "PLUGIN_ACCESS_DENIED": "プラグインのディレクトリがロックされているかアクセスできません。使用中のプログラムを閉じてから再試行してください。"
   },
   "errorBoundary": {
     "copied": "コピーしました",

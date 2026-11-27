@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "Bot 費用配額取值不合法",
     "BOT_COST_QUOTA_EXCEEDED": "超出費用或 Token 配額",
     "BOT_SKILL_NOT_FOUND": "未找到該 Bot 的技能歸屬",
-    "BOT_SKILL_PRESET_INVALID": "技能預設格式不合法"
+    "BOT_SKILL_PRESET_INVALID": "技能預設格式不合法",
+    "PLUGIN_ACCESS_DENIED": "插件目錄被佔用或權限不足，請關閉佔用該插件的程式後重試"
   },
   "errorBoundary": {
     "copied": "已複製",

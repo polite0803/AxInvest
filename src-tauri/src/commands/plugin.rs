@@ -91,10 +91,7 @@ pub async fn plugin_validate_source(
         let (manifest, expected_sha256) = manager
             .validate_plugin_source_with_expected_hash(&source, expected_sha256.as_deref())
             .map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Validation,
-                ))
+                plugin_command_error_response(e, crate::commands::error::ErrorCategory::Validation)
             })?;
         Ok(PluginSourceValidationDto {
             name: manifest.name,
@@ -848,15 +845,33 @@ pub async fn plugin_update(
     Ok(outcome)
 }
 
-fn plugin_lifecycle_error_response(error: axagent_plugins::PluginError) -> String {
-    use crate::commands::error::ErrorCategory;
-    let (code, category) = match &error {
-        axagent_plugins::PluginError::IntegrityVerifyFailed(_) => {
-            (plugin_err::SOURCE_INTEGRITY_FAILED, ErrorCategory::Validation)
+/// 插件命令错误码：把 Windows `os error 5` 从裸串提升为可 i18n 的业务码。
+fn plugin_command_error_response(
+    error: axagent_plugins::PluginError,
+    category: crate::commands::error::ErrorCategory,
+) -> String {
+    let code = match &error {
+        axagent_plugins::PluginError::Io(io) if io.raw_os_error() == Some(5) => {
+            plugin_err::ACCESS_DENIED
         },
-        _ => ("COMMON_INTERNAL", ErrorCategory::Unrecoverable),
+        axagent_plugins::PluginError::IntegrityVerifyFailed(_) => {
+            plugin_err::SOURCE_INTEGRITY_FAILED
+        },
+        _ => "COMMON_INTERNAL",
     };
     String::from(ErrorResponse::from_error_with_code(code, error, category))
+}
+
+fn plugin_lifecycle_error_response(error: axagent_plugins::PluginError) -> String {
+    use crate::commands::error::ErrorCategory;
+    let category = match &error {
+        axagent_plugins::PluginError::IntegrityVerifyFailed(_) => ErrorCategory::Validation,
+        axagent_plugins::PluginError::Io(io) if io.raw_os_error() == Some(5) => {
+            ErrorCategory::PermissionDenied
+        },
+        _ => ErrorCategory::Unrecoverable,
+    };
+    plugin_command_error_response(error, category)
 }
 
 /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。

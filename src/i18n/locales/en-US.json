@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "Invalid bot cost quota value",
     "BOT_COST_QUOTA_EXCEEDED": "Cost or token quota exceeded",
     "BOT_SKILL_NOT_FOUND": "Bot skill binding not found",
-    "BOT_SKILL_PRESET_INVALID": "Invalid skill preset format"
+    "BOT_SKILL_PRESET_INVALID": "Invalid skill preset format",
+    "PLUGIN_ACCESS_DENIED": "The plugin directory is locked or inaccessible. Close any program using it and retry."
   },
   "errorBoundary": {
     "copied": "Copied",

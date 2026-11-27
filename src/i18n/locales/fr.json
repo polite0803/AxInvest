@@ -3134,7 +3134,8 @@
     "BOT_COST_QUOTA_INVALID": "Valeur de quota de coût du bot invalide",
     "BOT_COST_QUOTA_EXCEEDED": "Quota de coût ou de jetons dépassé",
     "BOT_SKILL_NOT_FOUND": "Liaison de compétence du bot introuvable",
-    "BOT_SKILL_PRESET_INVALID": "Format de préréglage de compétence invalide"
+    "BOT_SKILL_PRESET_INVALID": "Format de préréglage de compétence invalide",
+    "PLUGIN_ACCESS_DENIED": "Le répertoire du plugin est verrouillé ou inaccessible. Fermez le programme qui l'utilise, puis réessayez."
   },
   "errorBoundary": {
     "copied": "Copié",

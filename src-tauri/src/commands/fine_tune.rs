@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#[cfg(not(feature = "local-inference"))]
 use crate::commands::error::ErrorResponse;
+#[cfg(not(feature = "local-inference"))]
 use crate::commands::error_code::fine_tune::LOCAL_INFERENCE_DISABLED;
 use axagent_agent::fine_tune::dataset::{
     DatasetMetadata, FineTuneDataset, FineTuneSample, SampleMetadata,

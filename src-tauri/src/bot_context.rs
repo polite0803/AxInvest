@@ -140,9 +140,18 @@ mod tests {
         )
         .await
         .expect("创建 Bot 应成功");
-        // 真实 HOME 下不会有这个新 id 的 MEMORY.md，SOUL 也是空串 ⇒ 无上下文。
-        // P5 新增技能段是第三来源：全局技能目录下有启用技能时整体上下文非空是预期行为。
+        // 真实 HOME 下不会有这个新 id 的 MEMORY.md，SOUL 也是空串。
+        // P5 技能段是第三来源，且依赖宿主全局 ~/.axagent/skills：
+        // 本地有全局技能时返回 Some(skills-only)，CI 无全局技能时三段全空返回 None。
+        // 两种环境都必须保证 SOUL/MEMORY 不泄漏，但不能把技能目录有无写死进断言。
         let ctx = resolve_bot_context_for_bot(&handle.conn, Some(&bot.id)).await;
-        assert!(ctx.is_some_and(|c| c.soul.is_none() && c.memory.is_none()));
+        match ctx {
+            None => {},
+            Some(ctx) => {
+                assert!(ctx.soul.is_none(), "空 SOUL 不应注入：{ctx:?}");
+                assert!(ctx.memory.is_none(), "缺失 MEMORY 不应注入：{ctx:?}");
+                assert!(ctx.skills.is_some(), "Some 上下文只能来自技能段：{ctx:?}");
+            },
+        }
     }
 }

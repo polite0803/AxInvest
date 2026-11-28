@@ -62,10 +62,10 @@ fn uninstalling_stock_leaves_security_plugin_available() {
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
 
     let stock = manager
-        .install(stock_dir.to_str().expect("stock 路径应是 UTF-8"))
+        .install_test_fixture(stock_dir.to_str().expect("stock 路径应是 UTF-8"))
         .expect("stock bundle 应能安装");
     let security = manager
-        .install(security_dir.to_str().expect("security 路径应是 UTF-8"))
+        .install_test_fixture(security_dir.to_str().expect("security 路径应是 UTF-8"))
         .expect("security bundle 应能安装");
     manager.enable(&stock.plugin_id).expect("stock enable 应成功");
     manager.enable(&security.plugin_id).expect("security enable 应成功");

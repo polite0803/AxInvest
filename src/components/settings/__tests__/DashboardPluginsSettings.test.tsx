@@ -6,10 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { mocks } = vi.hoisted(() => ({
   mocks: {
     invoke: vi.fn(),
+    validateSource: vi.fn(),
     installPlugin: vi.fn(),
-    installError: vi.fn(),
-    open: vi.fn(),
-    refreshPluginPageRoutes: vi.fn(),
     listen: vi.fn(() => Promise.resolve(() => {})),
     error: vi.fn(),
     success: vi.fn(),
@@ -23,18 +21,15 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/hooks/usePluginGallery", () => ({
   usePluginGallery: () => ({
+    validateSource: mocks.validateSource,
     installPlugin: mocks.installPlugin,
-    error: mocks.installError(),
+    error: null,
   }),
 }));
 
 vi.mock("@/lib/invoke", () => ({
   invoke: mocks.invoke,
   listen: mocks.listen,
-}));
-
-vi.mock("@/lib/pluginRouteRegistry", () => ({
-  refreshPluginPageRoutes: mocks.refreshPluginPageRoutes,
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -44,77 +39,72 @@ vi.mock("@/lib/toast", () => ({
   },
 }));
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: mocks.open,
-}));
-
 import { DashboardPluginsSettings } from "../DashboardPluginsSettings";
 
-const LOCAL_SOURCE = "/tmp/local-plugin";
+const SOURCE = "https://example.com/release.json";
+const NORMALIZED = `axagent-release+${SOURCE}`;
+const TOKEN = "signed-preview-token";
 const installOutcome = {
-  pluginId: "local-plugin",
+  pluginId: "remote-plugin",
   version: "1.0.0",
-  installPath: "/tmp/installed/local-plugin",
+  installPath: "/mock/installed/remote-plugin",
 };
 
-describe("DashboardPluginsSettings 安装与刷新", () => {
+describe("DashboardPluginsSettings 远程安装与刷新", () => {
   beforeEach(() => {
     mocks.invoke.mockReset();
+    mocks.validateSource.mockReset();
     mocks.installPlugin.mockReset();
-    mocks.installError.mockReset();
-    mocks.open.mockReset();
-    mocks.refreshPluginPageRoutes.mockReset();
     mocks.listen.mockClear();
     mocks.error.mockReset();
     mocks.success.mockReset();
     mocks.invoke.mockResolvedValue([]);
+    mocks.validateSource.mockResolvedValue({ previewToken: TOKEN });
     mocks.installPlugin.mockResolvedValue(installOutcome);
-    mocks.installError.mockReturnValue(null);
-    mocks.open.mockResolvedValue(LOCAL_SOURCE);
-    mocks.refreshPluginPageRoutes.mockResolvedValue([]);
   });
 
-  it("本地目录安装统一走 pluginStore，不绕过宿主安装命令与状态链", async () => {
+  it("只接受发布地址，预览后走宿主安装链并提示手动启用", async () => {
     render(<DashboardPluginsSettings />);
-
-    // 状态链（§215）：本页不再直连 refreshPluginPageRoutes，只订阅后端广播，
-    // 由 pluginStore / bindPluginRouteStore 统一失效路由、侧栏与命令面板。
     await waitFor(() => expect(mocks.listen).toHaveBeenCalledWith("plugin-state-changed", expect.any(Function)));
-    const listLoads = () => mocks.invoke.mock.calls.filter(([command]) => command === "dashboard_list_plugins").length;
-    await waitFor(() => expect(listLoads()).toBeGreaterThan(0));
-    const loadsBeforeInstall = listLoads();
+    await screen.findByPlaceholderText("settings.dashboardPlugins.releasePlaceholder");
 
-    fireEvent.click(await screen.findByRole("button", { name: "settings.dashboardPlugins.install" }));
+    fireEvent.change(
+      screen.getByPlaceholderText("settings.dashboardPlugins.releasePlaceholder"),
+      { target: { value: SOURCE } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "settings.dashboardPlugins.install" }));
 
-    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(LOCAL_SOURCE));
+    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(NORMALIZED));
+    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(NORMALIZED, TOKEN));
     expect(mocks.invoke).not.toHaveBeenCalledWith("plugin_install", expect.anything());
-    // 投影仍是现场真值：安装成功后本页自行重拉一次（事件广播是给其它挂载面的）。
-    await waitFor(() => expect(listLoads()).toBeGreaterThan(loadsBeforeInstall));
-    expect(mocks.success).toHaveBeenCalledWith("settings.dashboardPlugins.enabled");
+    expect(mocks.success).toHaveBeenCalledWith("settings.dashboardPlugins.installedNeedEnable");
   });
 
-  it("安装失败时不刷新插件页面路由、不误报启用成功", async () => {
-    mocks.installError.mockReturnValue("integrity failed");
+  it("非发布地址不安装", async () => {
+    render(<DashboardPluginsSettings />);
+    await screen.findByPlaceholderText("settings.dashboardPlugins.releasePlaceholder");
+    fireEvent.change(
+      screen.getByPlaceholderText("settings.dashboardPlugins.releasePlaceholder"),
+      { target: { value: "/tmp/local-plugin" } },
+    );
+    const installButton = screen.getByRole("button", { name: "settings.dashboardPlugins.install" });
+    expect(installButton.hasAttribute("disabled")).toBe(true);
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(mocks.validateSource).not.toHaveBeenCalled();
+    expect(mocks.installPlugin).not.toHaveBeenCalled();
+  });
+
+  it("安装失败时不误报启用成功", async () => {
     mocks.installPlugin.mockResolvedValue(null);
     render(<DashboardPluginsSettings />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "settings.dashboardPlugins.install" }));
-
-    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(LOCAL_SOURCE));
-    expect(mocks.refreshPluginPageRoutes).not.toHaveBeenCalled();
-    expect(mocks.success).not.toHaveBeenCalledWith("settings.dashboardPlugins.enabled");
-    expect(await screen.findByRole("alert")).toHaveTextContent("settings.plugins.installFailed");
-  });
-
-  it("取消目录选择时既不安装也不刷新", async () => {
-    mocks.open.mockResolvedValue(null);
-    render(<DashboardPluginsSettings />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "settings.dashboardPlugins.install" }));
-
-    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1));
-    expect(mocks.installPlugin).not.toHaveBeenCalled();
-    expect(mocks.refreshPluginPageRoutes).not.toHaveBeenCalled();
+    await screen.findByPlaceholderText("settings.dashboardPlugins.releasePlaceholder");
+    fireEvent.change(
+      screen.getByPlaceholderText("settings.dashboardPlugins.releasePlaceholder"),
+      { target: { value: SOURCE } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "settings.dashboardPlugins.install" }));
+    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(NORMALIZED, TOKEN));
+    expect(mocks.success).not.toHaveBeenCalledWith("settings.dashboardPlugins.installedNeedEnable");
   });
 
   it("刷新失败时不显示刷新成功", async () => {
@@ -122,9 +112,7 @@ describe("DashboardPluginsSettings 安装与刷新", () => {
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("list failed"));
     render(<DashboardPluginsSettings />);
-
     fireEvent.click(await screen.findByRole("button", { name: "settings.dashboardPlugins.refresh" }));
-
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("settings.plugins.loadFailed"));
     expect(mocks.success).not.toHaveBeenCalledWith("settings.dashboardPlugins.refreshSuccess");
   });

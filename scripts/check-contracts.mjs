@@ -7,6 +7,7 @@
  *   B. 错误码 ↔ i18n 翻译:  error_code(s).rs 中的错误码值 ⊆ 11 语言 locale 的 error 段 key
  *   C. i18n key 完整性:      以 zh-CN 为源, 其余 10 语言缺失/多余的 key
  *   D. Harness 依赖方向:     consumer crate 不得直接依赖 harness 之外的 axagent-* crate
+ *   D2. 宿主依赖棘轮:          src-tauri 根包的 axagent-* 依赖只允许基线内核；只减不增
  *   E. (warning, 默认关闭)   前后端 DTO 粗对齐: 命令返回类型名应在 src/types 有同名导出
  *   F. 登记字段必有消费点:   下表登记的 DTO 字段必须在声明文件之外至少出现 1 次
  *                            (铁律 #6「声明的输入真有入边供给」, 防「死参数」回归)
@@ -45,6 +46,52 @@ const ZH = join(LOCALES_DIR, "zh-CN.json");
 
 /** consumer crate 列表: 仅允许依赖 axagent-harness */
 const CONSUMER_CRATES = ["agent", "gateway", "orchestrator", "runtime-core"];
+
+/**
+ * 宿主允许直接依赖的 axagent-* 集合。这是「主壳 = 内核 + SDK」的可执行基线：
+ * 当前存量暂以 38 项冻结，只减不增；新增业务 crate 必须先把旧依赖搬出宿主再改本表。
+ * 目标清单见历史 PLAN-shell-plus-plugins.md（19 内核 + SDK），Baseline 不是目标本身。
+ */
+const HOST_AXAGENT_DEPS_BASELINE = new Set([
+  "axagent-agent",
+  "axagent-agent-command-types",
+  "axagent-agent-macro",
+  "axagent-analysis-engine",
+  "axagent-astock-data",
+  "axagent-cache",
+  "axagent-company-runtime",
+  "axagent-credential",
+  "axagent-crypto",
+  "axagent-dao",
+  "axagent-device",
+  "axagent-disk-cache",
+  "axagent-document-parser",
+  "axagent-entities",
+  "axagent-gateway",
+  "axagent-harness",
+  "axagent-kit",
+  "axagent-market-sim",
+  "axagent-mcp",
+  "axagent-migration",
+  "axagent-notification",
+  "axagent-npm",
+  "axagent-orchestrator",
+  "axagent-plugins",
+  "axagent-prompt-guard",
+  "axagent-providers",
+  "axagent-quant",
+  "axagent-rt-messaging",
+  "axagent-rt-theme",
+  "axagent-rt-webhook",
+  "axagent-rt-workflow",
+  "axagent-runtime",
+  "axagent-runtime-core",
+  "axagent-search",
+  "axagent-storage",
+  "axagent-telemetry",
+  "axagent-tools",
+  "axagent-trajectory",
+]);
 
 const errors = [];
 const warnings = [];
@@ -214,6 +261,29 @@ function checkHarnessDirection() {
       printList(`[D] consumer crate "${name}" 越界依赖实现层 (仅允许 axagent-harness)`, violations);
       violations.forEach((d) => fail(`[D] ${name} 越界依赖: ${d}`));
     }
+  }
+}
+
+// ---------- D2. 宿主依赖棘轮 ----------
+function checkHostDependencies() {
+  const toml = join(SRC_TAURI, "Cargo.toml");
+  const src = read(toml);
+  const found = new Set();
+  for (const b of src.matchAll(/\[dependencies[^\]]*\][\s\S]*?(?=\n\[|\Z)/g)) {
+    for (const m of b[0].matchAll(/^\s*([\w-]+)\s*=/gm)) {
+      if (m[1].startsWith("axagent-")) { found.add(m[1]); }
+    }
+  }
+  const added = [...found].filter((d) => !HOST_AXAGENT_DEPS_BASELINE.has(d));
+  if (added.length) {
+    printList("[D2] src-tauri 新增 axagent-* 宿主依赖（需先搬出旧依赖或调整设计基线）", added);
+    added.forEach((d) => fail(`[D2] 宿主新增依赖: ${d}`));
+  }
+  const removed = [...HOST_AXAGENT_DEPS_BASELINE].filter((d) => !found.has(d));
+  if (removed.length) {
+    console.log(`\n[D2] 宿主依赖较基线减少 ${removed.length} 项（请同步下调 HOST_AXAGENT_DEPS_BASELINE）:`);
+    removed.forEach((d) => console.log("  " + d));
+    removed.forEach((d) => fail(`[D2] 基线已无对应依赖，请从 HOST_AXAGENT_DEPS_BASELINE 删除: ${d}`));
   }
 }
 
@@ -871,6 +941,7 @@ if (has("a")) { checkCommandRegistration(); }
 if (has("b")) { checkErrorCodeI18n(); }
 if (has("c")) { checkI18nKeys(); }
 if (has("d")) { checkHarnessDirection(); }
+if (has("d2")) { checkHostDependencies(); }
 if (has("f")) { checkFieldConsumption(); }
 if (has("g")) { checkEventSymmetry(); }
 if (has("h")) { checkSilentResultDiscard(); }

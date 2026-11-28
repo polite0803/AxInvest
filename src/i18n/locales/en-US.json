@@ -1024,8 +1024,7 @@
         "eventStatsNone": "No event subscriptions",
         "install": "Install",
         "installFailed": "Installation failed: {{error}}",
-        "installPlaceholder": "Install: @scope/name or Git URL or local path",
-        "releasePlaceholder": "Release address: axagent-release+https://.../release.json",
+        "releasePlaceholder": "Release URL (https://.../release.json)",
         "releaseHint": "The release address reads an HTTPS release manifest and verifies the artifact with the SHA-256 declared there.",
         "installSuccess": "Installed {{id}} v{{version}}",
         "installTitle": "Install {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "Search by seam ID / plugin ID",
         "registrySeam": "Seam",
         "installSource": "Install source",
-        "sha256Placeholder": "Expected SHA-256 (64 hex characters)",
-        "sha256Hint": "Remote sources require SHA-256. Local sources may leave it empty; any value entered must be valid.",
-        "sha256Invalid": "SHA-256 must contain exactly 64 hexadecimal characters",
-        "sha256Required": "This remote source requires SHA-256 before installation",
-        "sha256FromRelease": "SHA-256 is provided by the release manifest",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "Search installed plugins by name / source / permission / page",
         "listEmpty": "No installed plugins",
         "source": "Source",
@@ -1068,8 +1061,6 @@
         "pages": "Pages",
         "sourceTypeFilter": "Source type",
         "sourceTypeAll": "All sources",
-        "sourceTypeRemote": "Remote",
-        "sourceTypeLocal": "Local",
         "sourceTypeRelease": "Release",
         "enabledFilter": "Enabled state",
         "enabledAll": "All",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "Updated {{id}} v{{version}}",
         "updateFailed": "Update failed",
         "updateSourceMissing": "Plugin source is unavailable",
-        "validate": "Validate"
+        "validate": "Validate",
+        "remoteOnlyHint": "Only HTTPS release.json URLs are supported. SHA-256 is verified automatically; no manual entry is needed.",
+        "installAfterEnable": "Install then enable",
+        "installAfterEnableHint": "Installed plugins stay disabled until you enable them manually."
       }
     },
     "preferences": "Preferences",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Plugin source build failed",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Insufficient disk space or memory to build the plugin",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Rust toolchain or target platform unavailable",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "The plugin source integrity check failed; verify SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "Plugin source verification failed. Check the release URL or preview again.",
     "PLUGIN_UI_ACTION_FAILED": "The plugin failed to perform this action",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "This action requires the plugin's background worker, but the plugin is not running (no worker declared, or disabled)",
     "PROVIDER_ADAPTER_NOT_FOUND": "Provider adapter not found",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "Cost or token quota exceeded",
     "BOT_SKILL_NOT_FOUND": "Bot skill binding not found",
     "BOT_SKILL_PRESET_INVALID": "Invalid skill preset format",
-    "PLUGIN_ACCESS_DENIED": "The plugin directory is locked or inaccessible. Close any program using it and retry."
+    "PLUGIN_ACCESS_DENIED": "The plugin directory is locked or inaccessible. Close any program using it and retry.",
+    "LOCAL_INFERENCE_DISABLED": "Local inference is not enabled in this build.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "Local fine-tuning is not enabled in this build."
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -5421,19 +5417,19 @@
       "disabled": "Plugin disabled",
       "enabled": "Plugin enabled",
       "install": "Install",
-      "installFirst": "Install a plugin to get started",
       "name": "Name",
       "noPlugins": "No plugins installed",
-      "openPluginsFolder": "Open Folder",
       "panels": "Panels",
-      "pluginDirs": "Plugin Directories",
-      "pluginDirsDescription": "Manage plugin directories",
       "refresh": "Refresh",
       "refreshSuccess": "Plugins refreshed",
       "status": "Status",
       "title": "Dashboard Plugins",
       "unload": "Unload",
-      "unloaded": "Plugin unloaded"
+      "unloaded": "Plugin unloaded",
+      "releaseOnly": "Only HTTPS release.json URLs are supported.",
+      "installedNeedEnable": "Installed. Enable it manually to use it.",
+      "releasePlaceholder": "Release URL (https://.../release.json)",
+      "releaseHint": "SHA-256 and integrity are verified automatically; enable the plugin manually after installation."
     },
     "data": {
       "title": "Data Management"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "Install failed: {{error}}",
       "loadFailed": "Failed to load plugins: {{error}}",
-      "openFolderFailed": "Failed to open folder: {{error}}",
       "refreshFailed": "Refresh failed: {{error}}",
       "toggleFailed": "Toggle failed: {{error}}",
       "unloadFailed": "Unload failed: {{error}}",

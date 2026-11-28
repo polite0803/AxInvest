@@ -1024,8 +1024,7 @@
         "eventStatsNone": "कोई ईवेंट सदस्यता नहीं",
         "install": "इंस्टॉल",
         "installFailed": "स्थापना विफल: {{error}}",
-        "installPlaceholder": "इंस्टॉल करें: @scope/name या Git URL या स्थानीय पथ",
-        "releasePlaceholder": "रिलीज़ पता: axagent-release+https://.../release.json",
+        "releasePlaceholder": "रिलीज़ URL (https://.../release.json)",
         "releaseHint": "रिलीज़ पता HTTPS रिलीज़ मैनिफ़ेस्ट पढ़ता है और घोषित SHA-256 से सामग्री सत्यापित करता है।",
         "installSuccess": "{{id}} v{{version}} स्थापित",
         "installTitle": "{{name}} स्थापित करें",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "सीम ID / प्लगइन ID द्वारा खोजें",
         "registrySeam": "सीम",
         "installSource": "इंस्टॉल स्रोत",
-        "sha256Placeholder": "अपेक्षित SHA-256 (64 हेक्स वर्ण)",
-        "sha256Hint": "दूरस्थ स्रोतों के लिए SHA-256 आवश्यक है। स्थानीय स्रोत खाली रह सकते हैं; दर्ज किया गया मान मान्य होना चाहिए।",
-        "sha256Invalid": "SHA-256 में ठीक 64 हेक्साडेसिमल वर्ण होने चाहिए",
-        "sha256Required": "इंस्टॉल करने से पहले इस दूरस्थ स्रोत के लिए SHA-256 आवश्यक है",
-        "sha256FromRelease": "SHA-256 रिलीज़ मैनिफ़ेस्ट द्वारा प्रदान किया गया",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "इंस्टॉल किए गए प्लगइन नाम / स्रोत / अनुमति / पृष्ठ से खोजें",
         "listEmpty": "कोई इंस्टॉल किया गया प्लगइन नहीं",
         "source": "स्रोत",
@@ -1068,8 +1061,6 @@
         "pages": "पृष्ठ",
         "sourceTypeFilter": "स्रोत प्रकार",
         "sourceTypeAll": "सभी स्रोत",
-        "sourceTypeRemote": "रिमोट",
-        "sourceTypeLocal": "स्थानीय",
         "sourceTypeRelease": "रिलीज़",
         "enabledFilter": "सक्षम स्थिति",
         "enabledAll": "सभी",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} अपडेट किया गया",
         "updateFailed": "अपडेट विफल",
         "updateSourceMissing": "प्लगइन स्रोत उपलब्ध नहीं है",
-        "validate": "सत्यापित करें"
+        "validate": "सत्यापित करें",
+        "remoteOnlyHint": "केवल HTTPS release.json URLs समर्थित हैं। SHA-256 स्वयं सत्यापित होता है, मैन्युअल इनपुट आवश्यक नहीं है।",
+        "installAfterEnable": "केवल HTTPS release.j",
+        "installAfterEnableHint": "इंस्टॉल के बाद प्लगइन डिफ़ॉल्ट रूप से निष्क्रिय रहता है; इसे सूची में मैन्युअली सक्षम करें।"
       }
     },
     "preferences": "प्राथमिकताएँ",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "प्लगइन स्रोत का निर्माण विफल रहा",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "प्लगइन बनाने के लिए डिस्क स्थान या मेमोरी अपर्याप्त है",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Rust टूलचेन या लक्ष्य प्लेटफ़ॉर्म उपलब्ध नहीं है",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "प्लगइन स्रोत की अखंडता सत्यापित नहीं हो सकी; SHA-256 जाँचें",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "प्लगइन स्रोत सत्यापन विफल रहा; रिलीज़ URL जांचें या फिर से पूर्वावलोकन करें।",
     "PLUGIN_UI_ACTION_FAILED": "प्लगइन इस क्रिया को निष्पादित नहीं कर सका",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "इस क्रिया के लिए प्लगइन की पृष्ठभूमि प्रक्रिया आवश्यक है, लेकिन प्लगइन चल नहीं रहा है (worker घोषित नहीं या अक्षम)",
     "PROVIDER_ADAPTER_NOT_FOUND": "प्रदाता एडाप्टर नहीं मिला",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "लागत या टोकन कोटा पार हो गया",
     "BOT_SKILL_NOT_FOUND": "बॉट कौशल बाइंडिंग नहीं मिली",
     "BOT_SKILL_PRESET_INVALID": "कौशल प्रीसेट प्रारूप अमान्य है",
-    "PLUGIN_ACCESS_DENIED": "प्लगिन निर्देशिका लॉक है या पहुँच योग्य नहीं है। इसे उपयोग करने वाला प्रोग्राम बंद करें और फिर प्रयास करें।"
+    "PLUGIN_ACCESS_DENIED": "प्लगिन निर्देशिका लॉक है या पहुँच योग्य नहीं है। इसे उपयोग करने वाला प्रोग्राम बंद करें और फिर प्रयास करें।",
+    "LOCAL_INFERENCE_DISABLED": "इस बिल्ड में स्थानीय अनुमान सक्षम नहीं है।",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "इस बिल्ड में स्थानीय फ़ाइन-ट्यूनिंग सक्षम नहीं है।"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",
@@ -5421,19 +5417,19 @@
       "disabled": "प्लगइन अक्षम किया गया",
       "enabled": "प्लगइन सक्षम किया गया",
       "install": "इंस्टॉल करें",
-      "installFirst": "शुरू करने के लिए प्लगइन इंस्टॉल करें",
       "name": "नाम",
       "noPlugins": "कोई प्लगइन इंस्टॉल नहीं है",
-      "openPluginsFolder": "फ़ोल्डर खोलें",
       "panels": "पैनल",
-      "pluginDirs": "प्लगइन डिरेक्टरी",
-      "pluginDirsDescription": "प्लगइन डिरेक्टरी प्रबंधित करें",
       "refresh": "रीफ्रेश करें",
       "refreshSuccess": "प्लगइन रीफ्रेश किया गया",
       "status": "स्थिति",
       "title": "डैशबोर्ड प्लगइन",
       "unload": "अनलोड करें",
-      "unloaded": "प्लगइन अनलोड किया गया"
+      "unloaded": "प्लगइन अनलोड किया गया",
+      "releaseOnly": "केवल HTTPS release.json URLs समर्थित हैं।",
+      "installedNeedEnable": "इंस्टॉल हो गया; मैन्युअली सक्षम करें।",
+      "releasePlaceholder": "रिलीज़ URL (https://.../release.json)",
+      "releaseHint": "SHA-256 और अखंडता स्वयं सत्यापित होती है; इंस्टॉल के बाद प्लगइन मैन्युअली सक्षम करें।"
     },
     "data": {
       "title": "डेटा प्रबंधन"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "इंस्टॉल विफल: {{error}}",
       "loadFailed": "प्लगइन लोड विफल: {{error}}",
-      "openFolderFailed": "फोल्डर खोलना विफल: {{error}}",
       "refreshFailed": "रीफ्रेश विफल: {{error}}",
       "toggleFailed": "स्थिति टॉगल विफल: {{error}}",
       "unloadFailed": "अनलोड विफल: {{error}}",

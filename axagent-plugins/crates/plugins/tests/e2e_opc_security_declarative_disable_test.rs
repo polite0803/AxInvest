@@ -36,7 +36,7 @@ fn security_declarative_bundle_disable_and_restore_is_scoped_to_its_plugin() {
     let home = common::TempDir::new("security-bundle-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
     let outcome = manager
-        .install(dir.to_str().expect("产物路径应是 UTF-8"))
+        .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
         .expect("security bundle 应能安装");
     manager.enable(&outcome.plugin_id).expect("enable 应成功");
 

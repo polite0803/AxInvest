@@ -134,6 +134,8 @@ pub mod bot {
 pub mod fine_tune {
     /// 删除训练任务失败
     pub const DELETE_FAILED: &str = "FINE_TUNE_DELETE_FAILED";
+    /// 当前构建不支持本地训练
+    pub const LOCAL_INFERENCE_DISABLED: &str = "FINE_TUNE_LOCAL_INFERENCE_DISABLED";
 }
 
 /// 工具执行相关错误码
@@ -232,6 +234,8 @@ pub use axagent_harness::error_codes::master_key;
 
 /// 本地模型（llama.cpp）服务管理错误码
 pub mod local_model {
+    /// 当前构建未启用本地 Candle 推理
+    pub const LOCAL_INFERENCE_DISABLED: &str = "LOCAL_INFERENCE_DISABLED";
     /// 供应商不存在
     pub const PROVIDER_NOT_FOUND: &str = "LOCAL_MODEL_PROVIDER_NOT_FOUND";
     /// 状态探测失败

@@ -16,7 +16,7 @@
  *     · `npm run build`（ci.yml:448，= `tsc && vite build`）—— 本地只有
  *       `node node_modules/typescript/bin/tsc --noEmit`（UNC 下经盘符镜像），
  *       ⇒ vite 构建期问题（如禁区 11 的 removeCrossorigin、SHIKI_ALLOWED_LANGS 白名单）本地看不见
- *     · `npm run contracts -- --only=a,c,d,f,g,h`（ci.yml:568）—— 本地完全没有
+ *     · `npm run contracts -- --only=a,c,d,d2,f,g,h`（ci.yml:572）—— 本地完全没有
  *     · 行尾检查（ci.yml:72 的 `bash scripts/check-line-endings.sh`）—— 本地镜像没有；
  *       本机无 bash 时请改用 `node scripts/check-line-endings.mjs`（同一检测核心）
  *     · PG 集成三目标、E2E、`npm audit`、cargo audit / cargo deny（8 根 `cargo check` 与

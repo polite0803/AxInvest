@@ -7,7 +7,7 @@
  *   1. 发布生成器只接受 HTTPS `.tar.gz` / `.tgz`，按 os / arch 生成并聚合产物；
  *   2. 前端把直接粘贴的 HTTPS release.json 归一化成 `axagent-release+https://...`；
  *   3. Rust `parse_install_source` 在下载前把它识别为 ReleaseManifestUrl；
- *   4. 安装命令使用 `install_verified` 并把后端错误映射为结构化错误码；
+ *   4. 安装命令使用 `install_release` 并把后端错误映射为结构化错误码；
  *   5. 17/17 外置插件仓 bundle 自检通过，发布包由各仓自己的产物生成（`--ci-safe` 只跑 1–4，第 5 项留给本地集成与各仓 CI）。
  */
 import { spawnSync } from "node:child_process";
@@ -30,6 +30,9 @@ const SOURCE_SECURITY = join(ROOT, "src", "lib", "pluginSourceSecurity.ts");
 const MANAGER_RS = join(ROOT, "axagent-plugins", "crates", "plugins", "src", "manager.rs");
 const PLUGIN_CMD_RS = join(ROOT, "src-tauri", "src", "commands", "plugin.rs");
 const GALLERY_TSX = join(ROOT, "src", "components", "chat", "PluginGallery.tsx");
+const STORE_TS = join(ROOT, "src", "stores", "feature", "pluginStore.ts");
+const TYPES_TS = join(ROOT, "src", "types", "index.ts");
+const BROWSER_MOCK_TS = join(ROOT, "src", "lib", "browserMock.ts");
 const BUNDLE_SCRIPT = pluginBundleScript(ROOT, "opc");
 /** CI 安全面只读主仓打包器；独立仓副本由本地集成入口验证。 */
 const MAIN_BUNDLE_SCRIPT = join(ROOT, "axagent-plugins", "scripts", "build-plugin-bundle.mjs");
@@ -239,42 +242,67 @@ async function verifyFrontendNormalization() {
   const normalized = module.normalizePluginSource(raw);
   assert(normalized === `axagent-release+${raw}`, `发布地址归一化错误：${normalized}`);
   assert(module.isReleasePluginSource(normalized), "归一化后的发布源未被识别");
-  assert(!module.isRemotePluginSource(normalized), "发布源不应按通用远程源要求手填哈希");
-  assert(module.isRemotePluginSource("https://example.com/wiki.git"), "Git URL 未被识别为远程源");
-  assert(module.isRemotePluginSource("@scope/name"), "scoped npm 包未被识别为远程源");
-  assert(!module.isRemotePluginSource("C:\\plugins\\wiki"), "Windows 绝对路径被误判为远程源");
+  assert(module.isRemotePluginSource(normalized), "发布源必须是唯一合法的远程来源");
+  assert(!module.isRemotePluginSource("https://example.com/wiki.git"), "Git URL 未被拒绝");
+  assert(!module.isRemotePluginSource("@scope/name"), "scoped npm 包未被拒绝");
+  assert(!module.isRemotePluginSource("C:\\plugins\\wiki"), "Windows 绝对路径未被拒绝");
 }
 
 function verifyRustContract() {
   const manager = readFileSync(MANAGER_RS, "utf8");
   assert(manager.includes('const RELEASE_SOURCE_PREFIX: &str = "axagent-release+";'), "Rust 发布源前缀不一致");
   assert(manager.includes("PluginInstallSource::ReleaseManifestUrl"), "Rust 未登记 ReleaseManifestUrl 安装源");
-  assert(manager.includes("pub fn validate_plugin_source_with_expected_hash"), "缺少预览哈希冻结方法");
-  assert(manager.includes("pub fn install_verified"), "缺少 install_verified 安装门禁");
-  assert(manager.includes("pub fn update_verified"), "缺少 update_verified 更新门禁");
-  assert(/fn validate_expected_sha256\([\s\S]*?64/.test(manager), "SHA-256 64 位格式门禁缺失");
+  assert(manager.includes("pub fn validate_release_source"), "缺少唯一发布源预览方法");
+  assert(manager.includes("pub fn install_release"), "缺少 install_release 安装门禁");
+  assert(manager.includes("pub fn update_release"), "缺少 update_release 更新门禁");
+  assert(manager.includes("struct ReleasePreviewToken"), "缺少后端预览 token 冻结机制");
+  assert(!manager.includes("pub fn install_verified"), "仍保留用户 SHA 安装入口");
+  assert(!manager.includes("pub fn update_verified"), "仍保留用户 SHA 更新入口");
+  assert(!manager.includes("sync_bundled_plugins"), "仍保留 bundled 插件注入链");
+  const discoveryFunction = manager.slice(
+    manager.indexOf("fn discover_installed_plugins_with_failures("),
+    manager.indexOf("pub fn installed_plugin_registry_report("),
+  );
+  assert(discoveryFunction.length > 0, "未找到 installed-only 发现函数边界");
+  assert(!discoveryFunction.includes("discover_plugin_dirs("), "发现链重新扫描安装根裸目录");
+  assert(
+    !discoveryFunction.includes("external_plugin_dirs"),
+    "发现链重新引入 external 插件目录",
+  );
+  assert(
+    discoveryFunction.includes("for record in registry.plugins.values()"),
+    "发现链未以 installed registry 为唯一真相源",
+  );
+  const installFunction = manager.slice(
+    manager.indexOf("fn install_staged_with_manifest("),
+    manager.indexOf("/// 显式启用一个已安装插件"),
+  );
+  assert(installFunction.length > 0, "未找到安装函数边界");
+  assert(!installFunction.includes("write_enabled_state(plugin_id, Some(true))"), "安装仍自动启用");
 
   const command = readFileSync(PLUGIN_CMD_RS, "utf8");
-  assert(command.includes("validate_plugin_source_with_expected_hash"), "plugin_validate_source 未冻结预览哈希");
-  assert(command.includes("install_verified"), "plugin_install 未调用 install_verified");
-  assert(command.includes("update_verified"), "plugin_update 未调用 update_verified");
+  assert(command.includes("validate_release_source"), "plugin_validate_source 未走发布源门禁");
+  assert(command.includes("install_release"), "plugin_install 未调用 install_release");
+  assert(command.includes("update_release"), "plugin_update 未调用 update_release");
+  assert(!command.includes("expected_sha256"), "命令层仍有用户侧 SHA 参数");
+  assert(command.includes("preview_token"), "命令层未改用内部预览 token");
   assert(command.includes("PLUGIN_SOURCE_INTEGRITY_FAILED"), "安装错误未映射发布完整性错误码");
 }
 
 function verifyFrontendFreezeContract() {
   const gallery = readFileSync(GALLERY_TSX, "utf8");
-  assert(
-    /setConfirmSha256\(manifest\.expectedSha256\s*\?\?\s*expectedSha256\)/.test(gallery),
-    "预览返回的 expectedSha256 未冻结进确认态",
-  );
-  assert(
-    gallery.includes("installPlugin(confirmSource, confirmSha256 || undefined)"),
-    "安装确认未把冻结哈希传给 plugin_install",
-  );
-  assert(
-    gallery.includes("updatePlugin(updatingPluginId, updateConfirmSha256 || undefined)"),
-    "更新确认未把冻结哈希传给 plugin_update",
-  );
+  const store = readFileSync(STORE_TS, "utf8");
+  const dto = readFileSync(TYPES_TS, "utf8");
+  const mock = readFileSync(BROWSER_MOCK_TS, "utf8");
+  assert(!/sha256/i.test(gallery), "插件市场 UI 仍有 SHA-256 输入或提示");
+  assert(!gallery.includes('sourceTypeLocal'), "插件市场仍有本地来源筛选");
+  assert(gallery.includes("installPlugin(confirmSource, confirmManifest.previewToken)"), "安装未回传内部 token");
+  assert(gallery.includes("updatePlugin(updatingPluginId, updateManifest.previewToken)"), "更新未回传内部 token");
+  assert(!/expectedSha256/.test(store), "store 仍有用户侧 SHA 入参");
+  assert(store.includes("enabled: false"), "安装后未保持 disabled");
+  assert(dto.includes("previewToken: string"), "DTO 未声明 previewToken");
+  assert(!dto.includes("expectedSha256"), "DTO 仍有 expectedSha256");
+  assert(!/expectedSha256/.test(mock), "browserMock 仍读取用户 SHA");
 }
 
 function verifyBundleReleaseShape(script = BUNDLE_SCRIPT) {

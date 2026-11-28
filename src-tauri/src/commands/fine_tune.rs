@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::fine_tune::LOCAL_INFERENCE_DISABLED;
 use axagent_agent::fine_tune::dataset::{
     DatasetMetadata, FineTuneDataset, FineTuneSample, SampleMetadata,
 };
@@ -11,6 +13,7 @@ use axagent_agent::fine_tune::{
 use axagent_agent_macro::agent_command;
 use axagent_harness::types::{EmbedRequest, ModelType};
 use axagent_harness::{LoRATrainConfig, ProviderRequestContext, resolve_base_url_for_type};
+#[cfg(feature = "local-inference")]
 use axagent_search::inference::global_engine;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -347,15 +350,26 @@ pub async fn start_training_job(
                     epochs: config.epochs,
                     target_modules: config.target_modules.clone(),
                 };
-                global_engine()
-                    .train_lora_with_embeddings(
-                        input_emb,
-                        target_emb,
-                        &lora_config,
-                        output_dir.to_str().unwrap_or("."),
-                        dim,
-                    )
-                    .map(|r| r.safetensors_path)
+                #[cfg(feature = "local-inference")]
+                {
+                    global_engine()
+                        .train_lora_with_embeddings(
+                            input_emb,
+                            target_emb,
+                            &lora_config,
+                            output_dir.to_str().unwrap_or("."),
+                            dim,
+                        )
+                        .map(|r| r.safetensors_path)
+                }
+                #[cfg(not(feature = "local-inference"))]
+                {
+                    let _ = (input_emb, target_emb, &lora_config, dim, &output_dir);
+                    Err(ErrorResponse::err_with_detail(
+                        LOCAL_INFERENCE_DISABLED,
+                        "本地 Candle 推理未编译进当前构建",
+                    ))
+                }
             },
             _ => {
                 tracing::info!("[fine_tune] Background char-level training");
@@ -378,15 +392,32 @@ pub async fn start_training_job(
                     epochs: config.epochs,
                     target_modules: config.target_modules.clone(),
                 };
-                global_engine()
-                    .train_lora_with_embeddings(
+                #[cfg(feature = "local-inference")]
+                {
+                    global_engine()
+                        .train_lora_with_embeddings(
+                            input_embeddings,
+                            target_embeddings,
+                            &lora_config,
+                            output_dir.to_str().unwrap_or("."),
+                            vocab_size,
+                        )
+                        .map(|r| r.safetensors_path)
+                }
+                #[cfg(not(feature = "local-inference"))]
+                {
+                    let _ = (
                         input_embeddings,
                         target_embeddings,
                         &lora_config,
-                        output_dir.to_str().unwrap_or("."),
                         vocab_size,
-                    )
-                    .map(|r| r.safetensors_path)
+                        &output_dir,
+                    );
+                    Err(ErrorResponse::err_with_detail(
+                        LOCAL_INFERENCE_DISABLED,
+                        "本地 Candle 推理未编译进当前构建",
+                    ))
+                }
             },
         };
 

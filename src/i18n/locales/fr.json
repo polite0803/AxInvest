@@ -1024,8 +1024,7 @@
         "eventStatsNone": "Aucun abonnement aux événements",
         "install": "Installer",
         "installFailed": "Échec de l'installation : {{error}}",
-        "installPlaceholder": "Installer: @scope/name ou URL Git ou chemin local",
-        "releasePlaceholder": "Adresse de version : axagent-release+https://.../release.json",
+        "releasePlaceholder": "URL de publication (https://.../release.json)",
         "releaseHint": "L'adresse de version lit un manifeste HTTPS et vérifie l'archive avec le SHA-256 déclaré.",
         "installSuccess": "{{id}} v{{version}} installé",
         "installTitle": "Installer {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "Rechercher par ID de connecteur / extension",
         "registrySeam": "Connecteur",
         "installSource": "Source d'installation",
-        "sha256Placeholder": "SHA-256 attendu (64 caractères hexadécimaux)",
-        "sha256Hint": "Les sources distantes exigent SHA-256. Les sources locales peuvent rester vides ; toute valeur saisie doit être valide.",
-        "sha256Invalid": "SHA-256 doit contenir exactement 64 caractères hexadécimaux",
-        "sha256Required": "Cette source distante exige SHA-256 avant installation",
-        "sha256FromRelease": "SHA-256 fourni par le manifeste de version",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "Rechercher les plugins installés par nom / source / permission / page",
         "listEmpty": "Aucun plugin installé",
         "source": "Source",
@@ -1068,8 +1061,6 @@
         "pages": "Pages",
         "sourceTypeFilter": "Type de source",
         "sourceTypeAll": "Toutes les sources",
-        "sourceTypeRemote": "Distant",
-        "sourceTypeLocal": "Local",
         "sourceTypeRelease": "Version",
         "enabledFilter": "État d’activation",
         "enabledAll": "Tous",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} mis à jour",
         "updateFailed": "Échec de la mise à jour",
         "updateSourceMissing": "Source du plugin indisponible",
-        "validate": "Valider"
+        "validate": "Valider",
+        "remoteOnlyHint": "Seules les URL HTTPS se terminant par /release.json sont prises en charge. Le SHA-256 est vérifié automatiquement, aucune saisie n’est nécessaire.",
+        "installAfterEnable": "Seules les URL HTTPS",
+        "installAfterEnableHint": "Après installation, le plugin reste désactivé et doit être activé manuellement."
       }
     },
     "preferences": "Préférences",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Échec de la compilation du code source du plugin",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Espace disque ou mémoire insuffisants pour compiler le plugin",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Chaîne d'outils Rust ou plateforme cible indisponible",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "La vérification d'intégrité de la source du plugin a échoué ; vérifiez SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "La vérification de la source du plugin a échoué. Vérifiez l’URL de publication ou relancez l’aperçu.",
     "PLUGIN_UI_ACTION_FAILED": "Le plugin n'a pas pu exécuter cette action",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "Cette action nécessite le processus d'arrière-plan du plugin, mais celui-ci n'est pas en cours d'exécution (aucun worker déclaré ou désactivé)",
     "PROVIDER_ADAPTER_NOT_FOUND": "Adaptateur de fournisseur introuvable",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "Quota de coût ou de jetons dépassé",
     "BOT_SKILL_NOT_FOUND": "Liaison de compétence du bot introuvable",
     "BOT_SKILL_PRESET_INVALID": "Format de préréglage de compétence invalide",
-    "PLUGIN_ACCESS_DENIED": "Le répertoire du plugin est verrouillé ou inaccessible. Fermez le programme qui l'utilise, puis réessayez."
+    "PLUGIN_ACCESS_DENIED": "Le répertoire du plugin est verrouillé ou inaccessible. Fermez le programme qui l'utilise, puis réessayez.",
+    "LOCAL_INFERENCE_DISABLED": "L'inférence locale n’est pas activée dans cette version.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "Le réglage fin local n’est pas activé dans cette version."
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -5421,19 +5417,19 @@
       "disabled": "Plugin désactivé",
       "enabled": "Plugin activé",
       "install": "Installer",
-      "installFirst": "Installez un plugin pour commencer",
       "name": "Nom",
       "noPlugins": "Aucun plugin installé",
-      "openPluginsFolder": "Ouvrir le dossier",
       "panels": "Panneaux",
-      "pluginDirs": "Répertoires de plugins",
-      "pluginDirsDescription": "Gérer les répertoires de plugins",
       "refresh": "Actualiser",
       "refreshSuccess": "Plugins actualisés",
       "status": "Statut",
       "title": "Plugins de tableau de bord",
       "unload": "Décharger",
-      "unloaded": "Plugin déchargé"
+      "unloaded": "Plugin déchargé",
+      "releaseOnly": "Seules les URL HTTPS se terminant par /release.json sont prises en charge.",
+      "installedNeedEnable": "Installé. Veuillez l’activer manuellement.",
+      "releasePlaceholder": "URL de publication (https://.../release.json)",
+      "releaseHint": "Le SHA-256 et l’intégrité sont vérifiés automatiquement ; activez le plugin manuellement après installation."
     },
     "data": {
       "title": "Gestion des données"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "Échec de l'installation : {{error}}",
       "loadFailed": "Échec du chargement des plugins : {{error}}",
-      "openFolderFailed": "Échec de l'ouverture du dossier : {{error}}",
       "refreshFailed": "Échec de l'actualisation : {{error}}",
       "toggleFailed": "Échec du basculement : {{error}}",
       "unloadFailed": "Échec du déchargement : {{error}}",

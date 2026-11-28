@@ -48,7 +48,7 @@ fn common_opc_bundle_install_command_disable_and_restore() {
     let home = common::TempDir::new("common-opc-bundle-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
     let outcome = manager
-        .install(dir.to_str().expect("产物路径应是 UTF-8"))
+        .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
         .expect("公共 opc bundle 应能安装");
     assert!(
         outcome.plugin_id.starts_with("opc@"),

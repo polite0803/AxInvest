@@ -119,7 +119,7 @@ fn game_dev_bundle_commands_go_through_host_seams_and_respect_disable() {
     let home = common::TempDir::new("game-dev-bundle-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
     let outcome = manager
-        .install(dir.to_str().expect("产物路径应是 UTF-8"))
+        .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
         .expect("game_dev bundle 应能安装");
     manager.enable(&outcome.plugin_id).expect("enable 应成功");
 

@@ -22,20 +22,17 @@ interface PluginState {
   validating: boolean;
 
   loadPlugins: () => Promise<void>;
-  validateSource: (
-    source: string,
-    expectedSha256?: string,
-  ) => Promise<PluginSourceValidationDto | null>;
+  validateSource: (source: string) => Promise<PluginSourceValidationDto | null>;
   installPlugin: (
     source: string,
-    expectedSha256?: string,
+    previewToken: string,
   ) => Promise<InstallOutcomeDto | null>;
   enablePlugin: (pluginId: string) => Promise<boolean>;
   disablePlugin: (pluginId: string) => Promise<boolean>;
   uninstallPlugin: (pluginId: string) => Promise<boolean>;
   updatePlugin: (
     pluginId: string,
-    expectedSha256?: string,
+    previewToken: string,
   ) => Promise<UpdateOutcomeDto | null>;
   runUiAction: (pluginId: string, action: DynamicAction) => Promise<unknown | null>;
 }
@@ -102,12 +99,11 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
   },
 
-  validateSource: async (source, expectedSha256) => {
+  validateSource: async (source) => {
     set({ validating: true, error: null });
     try {
       const manifest = await invoke<PluginSourceValidationDto>("plugin_validate_source", {
         source,
-        expectedSha256: expectedSha256?.trim() || undefined,
       });
       set({ validating: false });
       return manifest;
@@ -121,12 +117,12 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
   },
 
-  installPlugin: async (source, expectedSha256) => {
+  installPlugin: async (source, previewToken) => {
     set({ installing: source, error: null });
     try {
       const outcome = await invoke<InstallOutcomeDto>("plugin_install", {
         source,
-        expectedSha256: expectedSha256?.trim() || undefined,
+        previewToken,
       });
       set((s) => ({
         installing: null,
@@ -137,8 +133,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
             name: outcome.pluginId.split("@")[0] || outcome.pluginId,
             version: outcome.version,
             description: "",
-            kind: source.startsWith("openclaw:") ? "openclaw" as const : "external" as const,
-            enabled: true,
+            kind: "external" as const,
+            enabled: false,
             tools: [],
             mcpServers: [],
             skills: [],
@@ -225,16 +221,17 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
   },
 
-  updatePlugin: async (pluginId, expectedSha256) => {
+  updatePlugin: async (pluginId, previewToken) => {
     try {
       const outcome = await invoke<UpdateOutcomeDto>("plugin_update", {
         pluginId,
-        expectedSha256: expectedSha256?.trim() || undefined,
+        previewToken,
       });
       set((s) => ({
         plugins: s.plugins.map((p) => p.id === pluginId ? { ...p, version: outcome.newVersion } : p),
         error: null,
       }));
+      await get().loadPlugins();
       return outcome;
     } catch (e) {
       const errorMsg = translateBackendError(e);

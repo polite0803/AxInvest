@@ -1024,8 +1024,7 @@
         "eventStatsNone": "Нет подписок на события",
         "install": "Установить",
         "installFailed": "Ошибка установки: {{error}}",
-        "installPlaceholder": "Установка: @scope/name или Git URL или локальный путь",
-        "releasePlaceholder": "Адрес выпуска: axagent-release+https://.../release.json",
+        "releasePlaceholder": "Адрес релиза (https://.../release.json)",
         "releaseHint": "Адрес выпуска читает HTTPS-манифест и проверяет артефакт по указанному в нём SHA-256.",
         "installSuccess": "{{id}} v{{version}} установлен",
         "installTitle": "Установить {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "Поиск по ID стыка / плагина",
         "registrySeam": "Стык",
         "installSource": "Источник установки",
-        "sha256Placeholder": "Ожидаемый SHA-256 (64 шестнадцатеричных символа)",
-        "sha256Hint": "Для удалённых источников требуется SHA-256. Локальные источники можно оставить пустыми; введённое значение должно быть корректным.",
-        "sha256Invalid": "SHA-256 должен содержать ровно 64 шестнадцатеричных символа",
-        "sha256Required": "Для установки из этого удалённого источника требуется SHA-256",
-        "sha256FromRelease": "SHA-256 предоставлен манифестом выпуска",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "Поиск установленных плагинов по имени / источнику / разрешению / странице",
         "listEmpty": "Нет установленных плагинов",
         "source": "Источник",
@@ -1068,8 +1061,6 @@
         "pages": "Страницы",
         "sourceTypeFilter": "Тип источника",
         "sourceTypeAll": "Все источники",
-        "sourceTypeRemote": "Удалённый",
-        "sourceTypeLocal": "Локальный",
         "sourceTypeRelease": "Выпуск",
         "enabledFilter": "Состояние",
         "enabledAll": "Все",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} обновлён",
         "updateFailed": "Ошибка обновления",
         "updateSourceMissing": "Источник плагина недоступен",
-        "validate": "Проверить"
+        "validate": "Проверить",
+        "remoteOnlyHint": "Поддерживаются только HTTPS-адреса, заканчивающиеся на /release.json. SHA-256 проверяется автоматически, ввод не требуется.",
+        "installAfterEnable": "Поддерживаются тольк",
+        "installAfterEnableHint": "После установки плагин остаётся отключённым; включите его вручную в списке."
       }
     },
     "preferences": "Предпочтения",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Не удалось собрать исходный код плагина",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Недостаточно места на диске или памяти для сборки плагина",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Цепочка инструментов Rust или целевая платформа недоступны",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "Не удалось проверить целостность источника плагина; проверьте SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "Не удалось проверить источник плагина. Проверьте адрес релиза или повторите предпросмотр.",
     "PLUGIN_UI_ACTION_FAILED": "Плагину не удалось выполнить это действие",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "Для этого действия требуется фоновый процесс плагина, но плагин не запущен (worker не объявлен или отключён)",
     "PROVIDER_ADAPTER_NOT_FOUND": "Адаптер поставщика не найден",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "Превышена квота расходов или токенов",
     "BOT_SKILL_NOT_FOUND": "Привязка навыка бота не найдена",
     "BOT_SKILL_PRESET_INVALID": "Недопустимый формат пресета навыков",
-    "PLUGIN_ACCESS_DENIED": "Каталог плагина заблокирован или недоступен. Закройте программу, использующую его, и повторите попытку."
+    "PLUGIN_ACCESS_DENIED": "Каталог плагина заблокирован или недоступен. Закройте программу, использующую его, и повторите попытку.",
+    "LOCAL_INFERENCE_DISABLED": "Локальный вывод не включён в этой сборке.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "Локальная тонкая настройка не включена в этой сборке."
   },
   "errorBoundary": {
     "copied": "Скопировано",
@@ -5421,19 +5417,19 @@
       "disabled": "Плагин отключён",
       "enabled": "Плагин включён",
       "install": "Установить",
-      "installFirst": "Установите плагин, чтобы начать",
       "name": "Название",
       "noPlugins": "Нет установленных плагинов",
-      "openPluginsFolder": "Открыть папку",
       "panels": "Панели",
-      "pluginDirs": "Каталоги плагинов",
-      "pluginDirsDescription": "Управление каталогами плагинов",
       "refresh": "Обновить",
       "refreshSuccess": "Плагины обновлены",
       "status": "Статус",
       "title": "Плагины панели управления",
       "unload": "Выгрузить",
-      "unloaded": "Плагин выгружен"
+      "unloaded": "Плагин выгружен",
+      "releaseOnly": "Поддерживаются только HTTPS-адреса release.json.",
+      "installedNeedEnable": "Установлено. Включите вручную.",
+      "releasePlaceholder": "Адрес релиза (https://.../release.json)",
+      "releaseHint": "SHA-256 и целостность проверяются автоматически; включите плагин вручную после установки."
     },
     "data": {
       "title": "Управление данными"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "Ошибка установки: {{error}}",
       "loadFailed": "Ошибка загрузки плагинов: {{error}}",
-      "openFolderFailed": "Ошибка открытия папки: {{error}}",
       "refreshFailed": "Ошибка обновления: {{error}}",
       "toggleFailed": "Ошибка переключения: {{error}}",
       "unloadFailed": "Ошибка выгрузки: {{error}}",

@@ -218,7 +218,7 @@ fn worker_domains_commands_go_through_host_seams_and_respect_disable() {
         let home = common::TempDir::new(&format!("worker-{plugin_name}"));
         let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
         let outcome = manager
-            .install(dir.to_str().expect("产物路径应是 UTF-8"))
+            .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
             .unwrap_or_else(|error| panic!("{plugin_name} bundle 应能安装：{error}"));
         manager
             .enable(&outcome.plugin_id)

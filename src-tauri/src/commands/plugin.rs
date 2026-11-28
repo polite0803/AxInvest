@@ -83,16 +83,13 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
 pub async fn plugin_validate_source(
     state: State<'_, AppState>,
     source: String,
-    expected_sha256: Option<String>,
 ) -> Result<PluginSourceValidationDto, String> {
     let plugin_manager = state.plugin_manager.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let manager = plugin_manager.blocking_read();
-        let (manifest, expected_sha256) = manager
-            .validate_plugin_source_with_expected_hash(&source, expected_sha256.as_deref())
-            .map_err(|e| {
-                plugin_command_error_response(e, crate::commands::error::ErrorCategory::Validation)
-            })?;
+        let (manifest, preview_token) = manager.validate_release_source(&source).map_err(|e| {
+            plugin_command_error_response(e, crate::commands::error::ErrorCategory::Validation)
+        })?;
         Ok(PluginSourceValidationDto {
             name: manifest.name,
             version: manifest.version,
@@ -151,7 +148,7 @@ pub async fn plugin_validate_source(
                     description: c.description.clone(),
                 })
                 .collect(),
-            expected_sha256: expected_sha256.map(|hash| hash.to_ascii_lowercase()),
+            preview_token,
         })
     })
     .await
@@ -270,14 +267,14 @@ pub async fn plugin_install(
     state: State<'_, AppState>,
     app: AppHandle,
     source: String,
-    expected_sha256: Option<String>,
+    preview_token: String,
 ) -> Result<InstallOutcomeDto, String> {
     let plugin_manager = state.plugin_manager.clone();
     let outcome =
         tauri::async_runtime::spawn_blocking(move || -> Result<InstallOutcomeDto, String> {
             let mut manager = plugin_manager.blocking_write();
             let outcome = manager
-                .install_verified(&source, expected_sha256.as_deref())
+                .install_release(&source, &preview_token)
                 .map_err(plugin_lifecycle_error_response)?;
             Ok(InstallOutcomeDto {
                 plugin_id: outcome.plugin_id,
@@ -790,14 +787,14 @@ pub async fn plugin_update(
     state: State<'_, AppState>,
     app: AppHandle,
     plugin_id: String,
-    expected_sha256: Option<String>,
+    preview_token: String,
 ) -> Result<UpdateOutcomeDto, String> {
     let plugin_manager = state.plugin_manager.clone();
     let outcome =
         tauri::async_runtime::spawn_blocking(move || -> Result<UpdateOutcomeDto, String> {
             let mut manager = plugin_manager.blocking_write();
             let outcome = manager
-                .update_verified(&plugin_id, expected_sha256.as_deref())
+                .update_release(&plugin_id, &preview_token)
                 .map_err(plugin_lifecycle_error_response)?;
             Ok(UpdateOutcomeDto {
                 plugin_id: outcome.plugin_id,
@@ -991,7 +988,7 @@ pub struct PluginCommandDto {
     pub description: String,
 }
 
-/// 预览结果带出安装时要冻结的哈希：发布地址由清单声明，其它来源沿用用户手填值。
+/// 预览结果带出后端签发的 token；前端不解析、不展示、不修改，只原样回传。
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSourceValidationDto {
@@ -1007,7 +1004,7 @@ pub struct PluginSourceValidationDto {
     pub mcp_servers: Vec<McpServerDto>,
     pub skills: Vec<SkillDto>,
     pub capabilities: Vec<PluginCapabilityDto>,
-    pub expected_sha256: Option<String>,
+    pub preview_token: String,
 }
 
 #[derive(Debug, serde::Serialize)]

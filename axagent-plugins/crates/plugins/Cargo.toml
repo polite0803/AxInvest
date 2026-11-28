@@ -12,6 +12,7 @@ axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates
 flate2 = "1.0"
 futures = "0.3"
 hex = { workspace = true }
+hmac = { workspace = true }
 parking_lot = "0.12"
 reqwest = { version = "0.13", features = ["json", "gzip", "blocking"] }
 serde = { version = "1", features = ["derive"] }

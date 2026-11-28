@@ -1024,8 +1024,7 @@
         "eventStatsNone": "Sin suscripciones a eventos",
         "install": "Instalar",
         "installFailed": "Instalación fallida: {{error}}",
-        "installPlaceholder": "Instalar: @scope/name o URL Git o ruta local",
-        "releasePlaceholder": "Dirección de lanzamiento: axagent-release+https://.../release.json",
+        "releasePlaceholder": "URL de publicación (https://.../release.json)",
         "releaseHint": "La dirección de lanzamiento lee un manifiesto HTTPS y verifica el artefacto con el SHA-256 declarado.",
         "installSuccess": "{{id}} v{{version}} instalado",
         "installTitle": "Instalar {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "Buscar por ID de conector / complemento",
         "registrySeam": "Conector",
         "installSource": "Origen de instalación",
-        "sha256Placeholder": "SHA-256 esperado (64 caracteres hexadecimales)",
-        "sha256Hint": "Las fuentes remotas requieren SHA-256. Las fuentes locales pueden dejarlo vacío; cualquier valor introducido debe ser válido.",
-        "sha256Invalid": "SHA-256 debe contener exactamente 64 caracteres hexadecimales",
-        "sha256Required": "Esta fuente remota requiere SHA-256 antes de instalar",
-        "sha256FromRelease": "SHA-256 proporcionado por el manifiesto de lanzamiento",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "Buscar plugins instalados por nombre / fuente / permiso / página",
         "listEmpty": "No hay plugins instalados",
         "source": "Fuente",
@@ -1068,8 +1061,6 @@
         "pages": "Páginas",
         "sourceTypeFilter": "Tipo de origen",
         "sourceTypeAll": "Todos los orígenes",
-        "sourceTypeRemote": "Remoto",
-        "sourceTypeLocal": "Local",
         "sourceTypeRelease": "Lanzamiento",
         "enabledFilter": "Estado de activación",
         "enabledAll": "Todos",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} actualizado",
         "updateFailed": "Actualización fallida",
         "updateSourceMissing": "No se pudo leer el origen del complemento",
-        "validate": "Validar"
+        "validate": "Validar",
+        "remoteOnlyHint": "Solo se admiten URL HTTPS que terminen en /release.json. SHA-256 se verifica automáticamente y no requiere entrada manual.",
+        "installAfterEnable": "Solo se admiten URL ",
+        "installAfterEnableHint": "Tras la instalación, el plugin permanece desactivado y debe activarse manualmente."
       }
     },
     "preferences": "Preferencias",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Error al compilar el código fuente del plugin",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Espacio en disco o memoria insuficientes para compilar el plugin",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Cadena de herramientas Rust o plataforma de destino no disponible",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "No se pudo verificar la integridad de la fuente del complemento; compruebe SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "Falló la verificación de la fuente del plugin. Compruebe la URL de publicación o vuelva a previsualizar.",
     "PLUGIN_UI_ACTION_FAILED": "El plugin no pudo realizar esta acción",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "Esta acción requiere el proceso en segundo plano del plugin, pero el plugin no está en ejecución (sin worker declarado o desactivado)",
     "PROVIDER_ADAPTER_NOT_FOUND": "Adaptador de proveedor no encontrado",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "Se excedió la cuota de costo o tokens",
     "BOT_SKILL_NOT_FOUND": "No se encontró la vinculación de habilidad del bot",
     "BOT_SKILL_PRESET_INVALID": "Formato de preajuste de habilidad no válido",
-    "PLUGIN_ACCESS_DENIED": "El directorio del complemento está bloqueado o no es accesible. Cierre el programa que lo está usando y vuelva a intentarlo."
+    "PLUGIN_ACCESS_DENIED": "El directorio del complemento está bloqueado o no es accesible. Cierre el programa que lo está usando y vuelva a intentarlo.",
+    "LOCAL_INFERENCE_DISABLED": "La inferencia local no está habilitada en esta compilación.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "El ajuste fino local no está habilitado en esta compilación."
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -5421,19 +5417,19 @@
       "disabled": "Complemento desactivado",
       "enabled": "Complemento activado",
       "install": "Instalar",
-      "installFirst": "Instale un complemento para comenzar",
       "name": "Nombre",
       "noPlugins": "No hay complementos instalados",
-      "openPluginsFolder": "Abrir carpeta",
       "panels": "Paneles",
-      "pluginDirs": "Directorios de complementos",
-      "pluginDirsDescription": "Gestionar directorios de complementos",
       "refresh": "Actualizar",
       "refreshSuccess": "Complementos actualizados",
       "status": "Estado",
       "title": "Complementos del panel",
       "unload": "Descargar",
-      "unloaded": "Complemento descargado"
+      "unloaded": "Complemento descargado",
+      "releaseOnly": "Solo se admiten URL HTTPS que terminen en /release.json.",
+      "installedNeedEnable": "Instalado. Actívelo manualmente.",
+      "releasePlaceholder": "URL de publicación (https://.../release.json)",
+      "releaseHint": "SHA-256 e integridad se verifican automáticamente; active el plugin manualmente tras la instalación."
     },
     "data": {
       "title": "Gestión de datos"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "Instalación fallida: {{error}}",
       "loadFailed": "Error al cargar plugins: {{error}}",
-      "openFolderFailed": "Error al abrir carpeta: {{error}}",
       "refreshFailed": "Actualización fallida: {{error}}",
       "toggleFailed": "Cambio de estado fallido: {{error}}",
       "unloadFailed": "Descarga fallida: {{error}}",

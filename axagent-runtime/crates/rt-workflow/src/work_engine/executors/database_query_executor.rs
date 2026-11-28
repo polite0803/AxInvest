@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DatabaseQuery executor — executes parameterized SQL against PostgreSQL,
-//! MySQL, or SQLite using `sqlx` with the Any driver.
+//! DatabaseQuery executor — executes parameterized SQL against PostgreSQL
+//! or SQLite using `sqlx` with the Any driver.
 //!
 //! Connection details are resolved from the `credential_id` stored on the
 //! node config (via `CredentialManager::get_database_connection_string`).

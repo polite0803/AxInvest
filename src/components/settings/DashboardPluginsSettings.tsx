@@ -2,10 +2,10 @@
 
 import { usePluginGallery } from "@/hooks/usePluginGallery";
 import { invoke, listen } from "@/lib/invoke";
+import { isReleasePluginSource, normalizePluginSource } from "@/lib/pluginSourceSecurity";
 import { message } from "@/lib/toast";
 import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
-import { open } from "@tauri-apps/plugin-dialog";
-import { Alert, Button, Card, Empty, Spin, Switch, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Input, Spin, Switch, Table, Tag, Typography } from "antd";
 import { FolderOpen, PanelRight, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,7 @@ const POSITION_COLORS: Record<string, string> = {
 export function DashboardPluginsSettings() {
   const { t } = useTranslation();
   const {
+    validateSource,
     installPlugin,
     enablePlugin,
     disablePlugin,
@@ -31,7 +32,7 @@ export function DashboardPluginsSettings() {
   const [plugins, setPlugins] = useState<DashboardPluginInfoDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectingSource, setSelectingSource] = useState(false);
+  const [installSource, setInstallSource] = useState("");
   const [unloadingId, setUnloadingId] = useState<string | null>(null);
 
   const loadPlugins = useCallback(async (): Promise<boolean> => {
@@ -80,36 +81,25 @@ export function DashboardPluginsSettings() {
     }
   };
 
-  const handleInstall = async () => {
-    setSelectingSource(true);
-    try {
-      const selected = await open({
-        multiple: false,
-        directory: true,
-        title: t("settings.dashboardPlugins.install"),
-      });
-      if (!selected) {
-        return;
-      }
-      // 设置页只选择本地目录，但仍统一走 pluginStore：安装来源判定和哈希门禁只能由
-      // `plugin_install` / `install_verified` 这条权威链执行，不能在这里造第二套安装入口。
-      const outcome = await installPlugin(selected);
-      if (!outcome) {
-        return;
-      }
-      await loadPlugins();
-      message.success(t("settings.dashboardPlugins.enabled"));
-    } finally {
-      setSelectingSource(false);
-    }
-  };
+  const normalizedSource = normalizePluginSource(installSource);
+  const releaseSource = isReleasePluginSource(normalizedSource);
 
-  const handleOpenPluginsFolder = async () => {
-    try {
-      await invoke("dashboard_open_plugins_folder");
-    } catch (error) {
-      message.error(t("settings.plugins.openFolderFailed", { error }));
+  const handleInstall = async () => {
+    if (!releaseSource) {
+      message.error(t("settings.dashboardPlugins.releaseOnly"));
+      return;
     }
+    const manifest = await validateSource(normalizedSource);
+    if (!manifest) {
+      return;
+    }
+    const outcome = await installPlugin(normalizedSource, manifest.previewToken);
+    if (!outcome) {
+      return;
+    }
+    setInstallSource("");
+    await loadPlugins();
+    message.success(t("settings.dashboardPlugins.installedNeedEnable"));
   };
 
   const handleToggle = async (pluginId: string, enabled: boolean) => {
@@ -258,16 +248,22 @@ export function DashboardPluginsSettings() {
           >
             {t("settings.dashboardPlugins.refresh")}
           </Button>
-          <Button
-            type="primary"
-            icon={<Plus size={16} />}
-            onClick={handleInstall}
-            loading={selectingSource}
-          >
-            {t("settings.dashboardPlugins.install")}
-          </Button>
         </div>
       </div>
+      <Card className="mb-4">
+        <Input
+          placeholder={t("settings.dashboardPlugins.releasePlaceholder")}
+          value={installSource}
+          onChange={(e) => setInstallSource(e.target.value)}
+          onPressEnter={handleInstall}
+        />
+        <Paragraph type="secondary" className="text-xs mt-2 mb-2">
+          {t("settings.dashboardPlugins.releaseHint")}
+        </Paragraph>
+        <Button type="primary" icon={<Plus size={16} />} onClick={handleInstall} disabled={!releaseSource}>
+          {t("settings.dashboardPlugins.install")}
+        </Button>
+      </Card>
 
       {installError && (
         <Alert
@@ -299,32 +295,14 @@ export function DashboardPluginsSettings() {
                   <Paragraph>
                     {t("settings.dashboardPlugins.noPlugins")}
                   </Paragraph>
-                  <Button
-                    type="primary"
-                    icon={<Plus size={16} />}
-                    onClick={handleInstall}
-                    loading={selectingSource}
-                  >
-                    {t("settings.dashboardPlugins.installFirst")}
-                  </Button>
+                  <Paragraph type="secondary">
+                    {t("settings.dashboardPlugins.releaseHint")}
+                  </Paragraph>
                 </div>
               }
             />
           </Card>
         )}
-
-      <Card className="mt-6">
-        <Title level={5}>{t("settings.dashboardPlugins.pluginDirs")}</Title>
-        <Paragraph type="secondary" className="mb-4">
-          {t("settings.dashboardPlugins.pluginDirsDescription")}
-        </Paragraph>
-        <Button
-          icon={<FolderOpen size={16} />}
-          onClick={handleOpenPluginsFolder}
-        >
-          {t("settings.dashboardPlugins.openPluginsFolder")}
-        </Button>
-      </Card>
     </div>
   );
 }

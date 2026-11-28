@@ -52,27 +52,118 @@ fn parse_release_sha256(value: &str, source: &str) -> Result<String, PluginError
     Ok(value.to_ascii_lowercase())
 }
 
-/// 发布源安装/更新时，调用方回传的哈希必须与**当前**清单声明一致。
+/// 预览 token 的 TTL（5 分钟）。
 ///
-/// 回传值不是调用方自选的任意锚点：它只能确认“预览看到的清单”未被替换。
-/// 若清单在预览与安装之间换代，拒绝比悄悄安装另一份内容更安全。
-fn validate_release_expected_sha256(
-    expected_sha256: Option<&str>,
-    manifest_sha256: &str,
-    source: &str,
-) -> Result<(), PluginError> {
-    let Some(expected) = expected_sha256 else {
-        return Err(PluginError::IntegrityVerifyFailed(format!(
-            "release plugin source `{source}` requires the SHA-256 returned by preview"
-        )));
-    };
-    validate_expected_sha256(Some(expected), true, source)?;
-    if !expected.trim().eq_ignore_ascii_case(manifest_sha256) {
-        return Err(PluginError::IntegrityVerifyFailed(format!(
-            "release manifest changed after preview: expected sha256 {expected}, manifest now declares {manifest_sha256}"
-        )));
+/// token 只是后端内部锚点：把清单 sha256、来源、版本和随机 nonce 一次性绑定，
+/// 前端只能原样回传。清单换代或超时都必须重新预览，不能静默采用新 hash。
+const PREVIEW_TOKEN_TTL_MS: u128 = 5 * 60 * 1000;
+
+/// 进程内签名盐：每次进程启动随机生成，进程重启后旧 token 自动失效。
+static PREVIEW_TOKEN_SECRET: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+
+fn release_preview_secret() -> &'static [u8; 32] {
+    PREVIEW_TOKEN_SECRET.get_or_init(|| {
+        let mut seed = [0u8; 32];
+        if let Ok(mut file) = fs::File::open("/dev/urandom") {
+            use std::io::Read;
+            let _ = file.read_exact(&mut seed);
+        }
+        if seed.iter().all(|b| *b == 0) {
+            let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+            for (index, byte) in seed.iter_mut().enumerate() {
+                *byte = ((nanos >> ((index % 16) * 8)) as u8).wrapping_add(index as u8);
+            }
+        }
+        seed
+    })
+}
+
+fn new_release_preview_nonce() -> String {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos:x}-{seq:x}")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReleasePreviewToken {
+    source: String,
+    sha256: String,
+    #[serde(default)]
+    version: Option<String>,
+    expires_at_ms: u128,
+    nonce: String,
+}
+
+impl ReleasePreviewToken {
+    fn sign(payload: &[u8]) -> String {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(release_preview_secret())
+            .expect("HMAC-SHA256 accepts arbitrary key length");
+        mac.update(payload);
+        hex::encode(mac.finalize().into_bytes())
     }
-    Ok(())
+
+    fn encode(&self) -> String {
+        let payload = serde_json::to_vec(self).expect("预览 token payload 可序列化");
+        format!("{}.{}", hex::encode(&payload), Self::sign(&payload))
+    }
+
+    fn decode(raw: &str) -> Result<Self, PluginError> {
+        let invalid = || PluginError::IntegrityVerifyFailed("invalid preview token".to_string());
+        let (payload_hex, signature) = raw.split_once('.').ok_or_else(invalid)?;
+        let payload = hex::decode(payload_hex).map_err(|_| invalid())?;
+        if !Self::sign(&payload).eq_ignore_ascii_case(signature) {
+            return Err(invalid());
+        }
+        let token: Self = serde_json::from_slice(&payload).map_err(|_| invalid())?;
+        if token.expires_at_ms < unix_time_ms() {
+            return Err(PluginError::IntegrityVerifyFailed("preview token expired".to_string()));
+        }
+        Ok(token)
+    }
+
+    fn validate(&self, source: &str, manifest_sha256: &str) -> Result<(), PluginError> {
+        if self.source != source {
+            return Err(PluginError::IntegrityVerifyFailed(
+                "preview token source mismatch".to_string(),
+            ));
+        }
+        if !self.sha256.eq_ignore_ascii_case(manifest_sha256) {
+            return Err(PluginError::IntegrityVerifyFailed(
+                "release manifest changed after preview; preview it again".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 对外可安装来源只有 release 清单地址：`axagent-release+https://.../release.json`。
+/// 裸 HTTPS release.json 也接受，等价于前端归一化后的形式。
+fn parse_release_install_source(source: &str) -> Result<PluginInstallSource, PluginError> {
+    let trimmed = source.trim();
+    let url = trimmed.strip_prefix(RELEASE_SOURCE_PREFIX).unwrap_or(trimmed);
+    if !is_https_url(url) || !url.ends_with("/release.json") {
+        return Err(PluginError::InvalidManifest(
+            "only https release.json sources are supported".to_string(),
+        ));
+    }
+    Ok(PluginInstallSource::ReleaseManifestUrl { url: url.to_string() })
+}
+
+fn parse_release_install_source_from(
+    source: &PluginInstallSource,
+) -> Result<PluginInstallSource, PluginError> {
+    match source {
+        PluginInstallSource::ReleaseManifestUrl { url } => {
+            parse_release_install_source(&format!("{RELEASE_SOURCE_PREFIX}{url}"))
+        },
+        _ => {
+            Err(PluginError::InvalidManifest("only release.json sources are supported".to_string()))
+        },
+    }
 }
 
 fn validate_release_artifact(
@@ -326,7 +417,7 @@ impl PluginManagerConfig {
 
 #[derive(Debug)]
 pub struct PluginManager {
-    config: PluginManagerConfig,
+    pub(crate) config: PluginManagerConfig,
     mcp_launcher: McpLauncher,
     skill_installer: SkillInstaller,
     npm_registry: Option<Arc<dyn NpmRegistryService>>,
@@ -949,18 +1040,11 @@ impl PluginManager {
         })?;
         // 走完整载入链而非直接读盘：清单校验与完整性核对都无法被绕过（同 read_panel_asset）。
         let manifest = load_plugin_from_directory(&record.install_path)?;
-        // 判据③（可关）：与命令执行链同口径，未启用的插件不得解析其页面资产。
+        // 判据③：与命令执行链同口径，未显式启用的插件不得解析页面资产。
         // 前端 flattenPages 只做 UI 过滤，这里补执行层闸——脚本直接 invoke 本命令时
         // 不能绕过「关掉插件」的语义（否则页面已从清单消失，资产却仍可被取到）。
-        // 直接读 config.enabled_plugins（is_enabled 的权威源），默认口径与 is_enabled 一致：
-        // External 未记录时视为关闭，其余按 manifest 默认值——不触发 plugin_registry 全量重扫。
-        let enabled =
-            self.config.enabled_plugins.get(plugin_id).copied().unwrap_or(match record.kind {
-                PluginKind::External => false,
-                PluginKind::Builtin | PluginKind::Bundled | PluginKind::OpenClaw => {
-                    manifest.default_enabled
-                },
-            });
+        // 远程-only 模型下没有 defaultEnabled 回退：registry 存在 ≠ 可用，必须显式 enabled。
+        let enabled = self.config.enabled_plugins.get(plugin_id).copied().unwrap_or(false);
         if !enabled {
             return Err(PluginError::CommandFailed(format!(
                 "插件 `{plugin_id}` 未启用，页面 `{page_id}` 资产不可解析"
@@ -999,20 +1083,12 @@ impl PluginManager {
         })
     }
 
+    /// 插件可见性的唯一真相：已安装 registry。
+    ///
+    /// bundled / builtin / external 目录一律不进入发现链；未安装插件不得出现在列表、
+    /// 导航、能力或命令投影里。
     pub fn plugin_registry_report(&self) -> Result<PluginRegistryReport, PluginError> {
-        self.sync_bundled_plugins()?;
-
-        let mut discovery = PluginDiscovery::default();
-        discovery.plugins.extend(builtin_plugins());
-
-        let installed = self.discover_installed_plugins_with_failures()?;
-        discovery.extend(installed);
-
-        let external =
-            self.discover_external_directory_plugins_with_failures(&discovery.plugins)?;
-        discovery.extend(external);
-
-        Ok(self.build_registry_report(discovery))
+        Ok(self.build_registry_report(self.discover_installed_plugins_with_failures()?))
     }
 
     pub fn list_plugins(&self) -> Result<Vec<PluginSummary>, PluginError> {
@@ -1669,179 +1745,121 @@ impl PluginManager {
         Ok(())
     }
 
-    pub fn validate_plugin_source(&self, source: &str) -> Result<PluginManifest, PluginError> {
-        self.validate_plugin_source_verified(source, None)
-    }
-
-    /// 预览插件源，并返回本次**同一次物化**锁定的期望哈希。
+    /// 预览远程发布源：下载地址、平台产物和哈希全部由后端从 release.json 推导。
     ///
-    /// 宿主 `plugin_validate_source` 必须调用本方法：发布地址的哈希来自远端清单，
-    /// 若先 `validate_plugin_source_verified` 再单独拉一次清单，两次请求之间清单变化
-    /// 会让前端冻结的哈希与刚验证的内容不一致（A/B 漂移）。
-    pub fn validate_plugin_source_with_expected_hash(
+    /// 返回的 token 是后端内部预览锚点；前端不解析、不展示，只在安装/更新时原样回传。
+    pub fn validate_release_source(
         &self,
         source: &str,
-        expected_sha256: Option<&str>,
-    ) -> Result<(PluginManifest, Option<String>), PluginError> {
-        let install_source = parse_install_source(source)?;
-        validate_expected_sha256(
-            expected_sha256,
-            false,
-            &describe_install_source(&install_source),
-        )?;
-        if let PluginInstallSource::ReleaseManifestUrl { url } = &install_source {
-            let (release, sha256) = resolve_release_manifest(url)?;
-            if expected_sha256.is_some() {
-                validate_release_expected_sha256(
-                    expected_sha256,
-                    &sha256,
-                    &describe_install_source(&install_source),
-                )?;
-            }
-            let temp_root = self.install_root().join(".tmp");
-            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
-            let result = load_plugin_from_directory(&staged).map(|mut manifest| {
-                if let Some(version) = &release.version {
-                    manifest.version = version.clone();
-                }
-                (manifest, Some(sha256.clone()))
-            });
-            if staged.starts_with(&temp_root) {
-                let _ = fs::remove_dir_all(&staged);
-            }
-            return result;
-        }
-        let manifest = self.validate_plugin_source_verified(source, expected_sha256)?;
-        Ok((manifest, expected_sha256.map(str::to_ascii_lowercase)))
-    }
-
-    /// 验证插件源，并在调用方给出 `expected_sha256` 时校验**物化目录**的规范化哈希。
-    ///
-    /// 哈希规则与安装后锚点完全同源（[`hash_plugin_directory`]）：文件相对路径（按字节排序）
-    /// 与文件内容依次喂给 SHA-256。调用方不能只对压缩包/仓库归档算哈希，否则校验口径会与
-    /// 安装目录锚点不一致；这里校验的是**最终会被安装的那棵目录**。
-    ///
-    /// 期望值为 `None` 时保持旧行为；`Some` 时在临时目录被清理前完成比对，
-    /// 不匹配即返回 [`PluginError::IntegrityVerifyFailed`]，绝不返回可供安装的半验证结果。
-    pub fn validate_plugin_source_verified(
-        &self,
-        source: &str,
-        expected_sha256: Option<&str>,
-    ) -> Result<PluginManifest, PluginError> {
-        let install_source = parse_install_source(source)?;
-        validate_expected_sha256(
-            expected_sha256,
-            false,
-            &describe_install_source(&install_source),
-        )?;
-        if let PluginInstallSource::ReleaseManifestUrl { url } = &install_source {
-            let (release, sha256) = resolve_release_manifest(url)?;
-            if expected_sha256.is_some() {
-                validate_release_expected_sha256(
-                    expected_sha256,
-                    &sha256,
-                    &describe_install_source(&install_source),
-                )?;
-            }
-            let temp_root = self.install_root().join(".tmp");
-            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
-            let mut manifest = load_plugin_from_directory(&staged)?;
-            if let Some(version) = &release.version {
-                manifest.version = version.clone();
-            }
-            if staged.starts_with(&temp_root) {
-                let _ = fs::remove_dir_all(&staged);
-            }
-            return Ok(manifest);
-        }
-        match install_source {
-            PluginInstallSource::LocalPath { path } => {
-                verify_expected_directory_hash(&path, expected_sha256)?;
-                load_plugin_from_directory(&path)
-            },
-            _ => {
-                let temp_root = self.install_root().join(".tmp");
-                let staged =
-                    materialize_source(&install_source, &temp_root, self.npm_registry.as_ref())?;
-                let result = verify_expected_directory_hash(&staged, expected_sha256)
-                    .and_then(|()| load_plugin_from_directory(&staged));
-                // 清理临时目录
-                if staged.starts_with(&temp_root) {
-                    let _ = std::fs::remove_dir_all(&staged);
-                }
-                result
-            },
-        }
-    }
-
-    pub fn install(&mut self, source: &str) -> Result<InstallOutcome, PluginError> {
-        self.install_verified(source, None)
-    }
-
-    /// 校验期望哈希后再安装。
-    ///
-    /// 校验与安装共用**同一次物化**：下载/克隆只发生一次，且哈希比对发生在写入安装目录之前。
-    /// 这不消除外部进程在物化目录上继续修改的竞态（git/npm 下载完成后它们已退出），但避免了
-    /// 「先验证 A、再重新下载 B 安装」这类确定性 TOCTOU。
-    pub fn install_verified(
-        &mut self,
-        source: &str,
-        expected_sha256: Option<&str>,
-    ) -> Result<InstallOutcome, PluginError> {
-        let install_source = parse_install_source(source)?;
-        // 一键安装通道：清单声明内容哈希，调用方回传预览时冻结的哈希；
-        // 当前清单若已换代，下载前就拒绝，不能把“验证 A、安装 B”留给竞态。
-        if let PluginInstallSource::ReleaseManifestUrl { url } = &install_source {
-            let source_description = describe_install_source(&install_source);
-            validate_expected_sha256(expected_sha256, true, &source_description)?;
-            let (release, sha256) = resolve_release_manifest(url)?;
-            validate_release_expected_sha256(expected_sha256, &sha256, &source_description)?;
-            let temp_root = self.install_root().join(".tmp");
-            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
-            let mut manifest = load_plugin_from_directory(&staged)?;
-            if let Some(version) = &release.version {
-                manifest.version = version.clone();
-            }
-            let result = self.install_staged_with_manifest(
-                &install_source,
-                &staged,
-                Some(&sha256),
-                manifest,
-            );
-            let _ = fs::remove_dir_all(&staged);
-            return result;
-        }
-        validate_expected_sha256(
-            expected_sha256,
-            install_source_requires_sha256(&install_source),
-            &describe_install_source(&install_source),
-        )?;
+    ) -> Result<(PluginManifest, String), PluginError> {
+        let install_source = parse_release_install_source(source)?;
+        let PluginInstallSource::ReleaseManifestUrl { url } = install_source else {
+            return Err(PluginError::InvalidManifest(
+                "only https release.json sources are supported".to_string(),
+            ));
+        };
+        let (release, sha256) = resolve_release_manifest(&url)?;
         let temp_root = self.install_root().join(".tmp");
-        let staged_source =
-            materialize_source(&install_source, &temp_root, self.npm_registry.as_ref())?;
-        let cleanup_source = matches!(
-            install_source,
-            PluginInstallSource::GitUrl { .. }
-                | PluginInstallSource::NpmPackage { .. }
-                | PluginInstallSource::OpenClaw { .. }
-                | PluginInstallSource::ReleaseManifestUrl { .. }
-        );
-        let result = self.install_staged(&install_source, &staged_source, expected_sha256);
-        if cleanup_source {
-            let _ = fs::remove_dir_all(&staged_source);
+        let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+        let result = load_plugin_from_directory(&staged).map(|mut manifest| {
+            if let Some(version) = &release.version {
+                manifest.version = version.clone();
+            }
+            let token = ReleasePreviewToken {
+                source: url.clone(),
+                sha256,
+                version: Some(manifest.version.clone()),
+                expires_at_ms: unix_time_ms().saturating_add(PREVIEW_TOKEN_TTL_MS),
+                nonce: new_release_preview_nonce(),
+            };
+            (manifest, token.encode())
+        });
+        if staged.starts_with(&temp_root) {
+            let _ = fs::remove_dir_all(&staged);
         }
         result
     }
 
-    fn install_staged(
+    /// 安装远程发布源：token 必须由同一次预览签发，清单换代后立即拒绝。
+    pub fn install_release(
         &mut self,
-        install_source: &PluginInstallSource,
-        staged_source: &Path,
-        expected_sha256: Option<&str>,
+        source: &str,
+        preview_token: &str,
     ) -> Result<InstallOutcome, PluginError> {
-        verify_expected_directory_hash(staged_source, expected_sha256)?;
-        let manifest = load_plugin_from_directory(staged_source)?;
-        self.install_staged_with_manifest(install_source, staged_source, expected_sha256, manifest)
+        let install_source = parse_release_install_source(source)?;
+        let PluginInstallSource::ReleaseManifestUrl { url } = &install_source else {
+            return Err(PluginError::InvalidManifest(
+                "only https release.json sources are supported".to_string(),
+            ));
+        };
+        let token = ReleasePreviewToken::decode(preview_token)?;
+        let (release, sha256) = resolve_release_manifest(url)?;
+        token.validate(url, &sha256)?;
+        let temp_root = self.install_root().join(".tmp");
+        let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+        let mut manifest = load_plugin_from_directory(&staged)?;
+        if let Some(version) = &release.version {
+            manifest.version = version.clone();
+        }
+        let result =
+            self.install_staged_with_manifest(&install_source, &staged, Some(&sha256), manifest);
+        let _ = fs::remove_dir_all(&staged);
+        result
+    }
+
+    /// 更新远程发布源：只接受 installed registry 里记录的 release 地址和预览 token。
+    pub fn update_release(
+        &mut self,
+        plugin_id: &str,
+        preview_token: &str,
+    ) -> Result<UpdateOutcome, PluginError> {
+        let mut registry = self.load_registry()?;
+        let record = registry.plugins.get(plugin_id).cloned().ok_or_else(|| {
+            PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
+        })?;
+        let PluginInstallSource::ReleaseManifestUrl { url } =
+            parse_release_install_source_from(&record.source)?
+        else {
+            return Err(PluginError::InvalidManifest(
+                "only plugins installed from a release.json source can be updated".to_string(),
+            ));
+        };
+        let token = ReleasePreviewToken::decode(preview_token)?;
+        let (release, sha256) = resolve_release_manifest(&url)?;
+        token.validate(&url, &sha256)?;
+        let temp_root = self.install_root().join(".tmp");
+        let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
+        let mut manifest = load_plugin_from_directory(&staged)?;
+        if let Some(version) = &release.version {
+            manifest.version = version.clone();
+        }
+        let result = self.update_from_staged(
+            &mut registry,
+            plugin_id,
+            record,
+            &staged,
+            Some(&sha256),
+            Some(manifest),
+        );
+        let _ = fs::remove_dir_all(&staged);
+        result
+    }
+
+    /// 内部测试夹具入口：把已经落在磁盘上的插件目录装进 registry。
+    ///
+    /// 对外命令只允许 release 地址；此函数只供仓库内 e2e 夹具把本地产物植入宿主状态，
+    /// 不接受用户来源字符串，也不走 git/npm/openclaw 物化。
+    /// 把已经落在磁盘上的插件目录装进 registry。
+    ///
+    /// 对外 Tauri 命令只接受 release 地址；本函数供仓库内 e2e 夹具植入本地产物，
+    /// 不接受用户来源字符串，也不走 git/npm/openclaw 物化。
+    /// 仅供仓库内测试夹具安装本地目录；生产命令不得调用。
+    #[doc(hidden)]
+    pub fn install_test_fixture(&mut self, source: &str) -> Result<InstallOutcome, PluginError> {
+        let path = PathBuf::from(source);
+        let install_source = PluginInstallSource::LocalPath { path: path.clone() };
+        let manifest = load_plugin_from_directory(&path)?;
+        self.install_staged_with_manifest(&install_source, &path, None, manifest)
     }
 
     fn install_staged_with_manifest(
@@ -1905,21 +1923,22 @@ impl PluginManager {
         let mut registry = self.load_registry()?;
         registry.plugins.insert(plugin_id.clone(), record);
         self.store_registry(&registry)?;
-        self.write_enabled_state(&plugin_id, Some(true))?;
-        self.config.enabled_plugins.insert(plugin_id.clone(), true);
+        // 远程-only 模型下安装不等于启用：必须用户显式调用 enable。
+        // 同时把孤儿启用态清掉，避免旧版本遗留 id 被下次启动误启用。
+        self.prune_orphan_enabled_plugins(&registry);
 
         Ok(InstallOutcome { plugin_id, version: manifest.version, install_path })
     }
 
+    /// 显式启用一个已安装插件。启用前必须通过 installed registry 与安装目录哈希校验，
+    /// 未安装、缺锚点或内容被篡改都直接拒绝；绝不让发现链里的“幽灵插件”启动。
     pub fn enable(&mut self, plugin_id: &str) -> Result<(), PluginError> {
-        self.ensure_known_plugin(plugin_id)?;
+        let record = self.ensure_installed_plugin(plugin_id)?;
+        verify_install_anchor(&record, plugin_id, "enable")?;
+        let manifest = load_plugin_from_directory(&record.install_path)?;
+        self.start_plugin_locked(plugin_id, &record, &manifest)?;
         self.write_enabled_state(plugin_id, Some(true))?;
         self.config.enabled_plugins.insert(plugin_id.to_string(), true);
-        let registry = self.load_registry()?;
-        if let Some(record) = registry.plugins.get(plugin_id) {
-            let manifest = load_plugin_from_directory(&record.install_path)?;
-            self.start_plugin_locked(plugin_id, record, &manifest)?;
-        }
         Ok(())
     }
 
@@ -2279,58 +2298,59 @@ impl PluginManager {
     }
 
     pub fn disable(&mut self, plugin_id: &str) -> Result<(), PluginError> {
+        self.ensure_installed_plugin(plugin_id)?;
         self.mcp_launcher.stop_plugin_mcps(plugin_id);
         crate::agent_provider::unregister_plugin_agents_sync(plugin_id);
         self.skill_installer.remove_plugin_skills(plugin_id).ok();
         self.unregister_plugin_capabilities(plugin_id);
         let _ = self.take_plugin_passport_ids(plugin_id);
         self.stop_plugin_worker(plugin_id);
-        self.ensure_known_plugin(plugin_id)?;
         self.write_enabled_state(plugin_id, Some(false))?;
         self.config.enabled_plugins.insert(plugin_id.to_string(), false);
         Ok(())
     }
 
+    /// 启动时只拉起 installed registry 中显式 enabled 的插件。
+    ///
+    /// 不再按 manifest.default_enabled 兜底，也不从 bundled / external 发现链补插件；
+    /// registry 中不存在的 enabledPlugins 条目一律视为孤儿并清理。
     pub fn start_enabled_plugins(&mut self) -> Result<Vec<String>, PluginError> {
         let registry = self.load_registry()?;
-        let mut started = Vec::new();
-        let mut errors = Vec::new();
+        self.prune_orphan_enabled_plugins(&registry);
 
-        let enabled_ids: Vec<String> = self
+        let mut enabled_ids: Vec<String> = self
             .config
             .enabled_plugins
             .iter()
-            .filter(|entry| *entry.1)
+            .filter(|(_, enabled)| **enabled)
             .map(|(id, _)| id.clone())
+            .filter(|id| registry.plugins.contains_key(id))
             .collect();
+        enabled_ids.sort();
 
+        let mut started = Vec::new();
+        let mut errors = Vec::new();
         for plugin_id in &enabled_ids {
-            let Some(record) = registry.plugins.get(plugin_id) else {
-                continue;
-            };
-            match load_plugin_from_directory(&record.install_path) {
-                Ok(manifest) => {
-                    if let Err(e) = self.start_plugin_locked(plugin_id, record, &manifest) {
-                        tracing::warn!("Failed to start plugin `{plugin_id}`: {e}");
-                        errors.push(format!("{plugin_id}: {e}"));
-                    } else {
-                        started.push(plugin_id.clone());
-                        tracing::info!("Started enabled plugin: {plugin_id} v{}", record.version);
-                    }
+            let record = &registry.plugins[plugin_id];
+            match load_plugin_from_directory(&record.install_path).and_then(|manifest| {
+                verify_install_anchor(record, plugin_id, "startup")?;
+                self.start_plugin_locked(plugin_id, record, &manifest)?;
+                Ok(())
+            }) {
+                Ok(()) => {
+                    started.push(plugin_id.clone());
+                    tracing::info!("Started enabled plugin: {plugin_id} v{}", record.version);
                 },
                 Err(e) => {
-                    tracing::warn!("Failed to load manifest for enabled plugin `{plugin_id}`: {e}");
+                    tracing::warn!("Failed to start plugin `{plugin_id}`: {e}");
                     errors.push(format!("{plugin_id}: {e}"));
                 },
             }
         }
-
-        if errors.is_empty() {
-            Ok(started)
-        } else {
+        if !errors.is_empty() {
             tracing::warn!("Some plugins failed to start: {}", errors.join("; "));
-            Ok(started)
         }
+        Ok(started)
     }
 
     pub fn stop_all_plugins(&mut self) {
@@ -2398,69 +2418,6 @@ impl PluginManager {
         self.write_enabled_state(plugin_id, None)?;
         self.config.enabled_plugins.remove(plugin_id);
         Ok(())
-    }
-
-    pub fn update(&mut self, plugin_id: &str) -> Result<UpdateOutcome, PluginError> {
-        self.update_verified(plugin_id, None)
-    }
-
-    /// 更新插件，并在写入安装目录前校验新内容哈希。
-    ///
-    /// 远程来源（Git / npm / OpenClaw）必须显式给出期望 SHA-256；本地目录仍可省略。
-    /// 校验与复制使用同一次物化结果，避免「验证 A、重新下载 B」的确定性 TOCTOU。
-    pub fn update_verified(
-        &mut self,
-        plugin_id: &str,
-        expected_sha256: Option<&str>,
-    ) -> Result<UpdateOutcome, PluginError> {
-        let mut registry = self.load_registry()?;
-        let record = registry.plugins.get(plugin_id).cloned().ok_or_else(|| {
-            PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
-        })?;
-        if let PluginInstallSource::ReleaseManifestUrl { url } = &record.source {
-            let source_description = describe_install_source(&record.source);
-            validate_expected_sha256(expected_sha256, true, &source_description)?;
-            let (release, sha256) = resolve_release_manifest(url)?;
-            validate_release_expected_sha256(expected_sha256, &sha256, &source_description)?;
-            let temp_root = self.install_root().join(".tmp");
-            let staged = materialize_release_artifact(&release, &sha256, &temp_root)?;
-            let mut manifest = load_plugin_from_directory(&staged)?;
-            if let Some(version) = &release.version {
-                manifest.version = version.clone();
-            }
-            let result = self.update_from_staged(
-                &mut registry,
-                plugin_id,
-                record,
-                &staged,
-                Some(&sha256),
-                Some(manifest),
-            );
-            let _ = fs::remove_dir_all(&staged);
-            return result;
-        }
-        validate_expected_sha256(
-            expected_sha256,
-            install_source_requires_sha256(&record.source),
-            &describe_install_source(&record.source),
-        )?;
-
-        let temp_root = self.install_root().join(".tmp");
-        let staged_source =
-            materialize_source(&record.source, &temp_root, self.npm_registry.as_ref())?;
-        let cleanup_source = install_source_requires_sha256(&record.source);
-        let result = self.update_from_staged(
-            &mut registry,
-            plugin_id,
-            record,
-            &staged_source,
-            expected_sha256,
-            None,
-        );
-        if cleanup_source {
-            let _ = fs::remove_dir_all(&staged_source);
-        }
-        result
     }
 
     fn update_from_staged(
@@ -2566,43 +2523,17 @@ impl PluginManager {
         })
     }
 
+    /// 远程-only 模型的唯一发现入口：只枚举 installed registry 中登记的插件。
+    ///
+    /// 绝不扫描安装目录下的其余目录 —— 手工放入的本地插件目录、旧版本残留目录、
+    /// bundled/external 路径都不能凭“目录里有 plugin.json”变成可用插件。
     fn discover_installed_plugins_with_failures(&self) -> Result<PluginDiscovery, PluginError> {
         let mut registry = self.load_registry()?;
         let mut discovery = PluginDiscovery::default();
         let mut seen_ids = BTreeSet::<String>::new();
-        let mut seen_paths = BTreeSet::<PathBuf>::new();
         let mut stale_registry_ids = Vec::new();
 
-        for install_path in discover_plugin_dirs(&self.install_root())? {
-            let matched_record =
-                registry.plugins.values().find(|record| record.install_path == install_path);
-            let kind = matched_record.map_or(PluginKind::External, |record| record.kind);
-            let source = matched_record.map_or_else(
-                || install_path.display().to_string(),
-                |record| describe_install_source(&record.source),
-            );
-            match load_plugin_definition(&install_path, kind, source.clone(), kind.marketplace()) {
-                Ok(plugin) => {
-                    if seen_ids.insert(plugin.metadata().id.clone()) {
-                        seen_paths.insert(install_path);
-                        discovery.push_plugin(plugin);
-                    }
-                },
-                Err(error) => {
-                    discovery.push_failure(PluginLoadFailure::new(
-                        install_path,
-                        kind,
-                        source,
-                        error,
-                    ));
-                },
-            }
-        }
-
         for record in registry.plugins.values() {
-            if seen_paths.contains(&record.install_path) {
-                continue;
-            }
             if !record.install_path.exists() || plugin_manifest_path(&record.install_path).is_err()
             {
                 stale_registry_ids.push(record.id.clone());
@@ -2617,7 +2548,6 @@ impl PluginManager {
             ) {
                 Ok(plugin) => {
                     if seen_ids.insert(plugin.metadata().id.clone()) {
-                        seen_paths.insert(record.install_path.clone());
                         discovery.push_plugin(plugin);
                     }
                 },
@@ -2642,197 +2572,8 @@ impl PluginManager {
         Ok(discovery)
     }
 
-    fn discover_external_directory_plugins_with_failures(
-        &self,
-        existing_plugins: &[PluginDefinition],
-    ) -> Result<PluginDiscovery, PluginError> {
-        let mut discovery = PluginDiscovery::default();
-
-        for directory in &self.config.external_dirs {
-            let source = Self::derive_source_from_external_dir(directory);
-            for root in discover_plugin_dirs(directory)? {
-                match load_plugin_definition(
-                    &root,
-                    PluginKind::External,
-                    source.clone(),
-                    EXTERNAL_MARKETPLACE,
-                ) {
-                    Ok(plugin) => {
-                        if existing_plugins
-                            .iter()
-                            .chain(discovery.plugins.iter())
-                            .all(|existing| existing.metadata().id != plugin.metadata().id)
-                        {
-                            discovery.push_plugin(plugin);
-                        }
-                    },
-                    Err(error) => {
-                        discovery.push_failure(PluginLoadFailure::new(
-                            root,
-                            PluginKind::External,
-                            source.clone(),
-                            error,
-                        ));
-                    },
-                }
-            }
-        }
-
-        Ok(discovery)
-    }
-
-    fn derive_source_from_external_dir(directory: &Path) -> String {
-        let dir_str = directory.to_string_lossy().to_lowercase();
-        // 按优先级匹配，避免 .codebuddy 被 .claude 误匹配
-        if dir_str.contains(".axagent") {
-            "axagent".to_string()
-        } else if dir_str.contains(".claude") {
-            "claude".to_string()
-        } else if dir_str.contains(".agents") {
-            "agents".to_string()
-        } else if dir_str.contains(".codebuddy") {
-            "codebuddy".to_string()
-        } else if dir_str.contains(".trae") {
-            "trae".to_string()
-        } else if dir_str.contains(".workbuddy") {
-            "workbuddy".to_string()
-        } else {
-            // Fallback: use the parent directory name (e.g. ".custom" from "~/.custom/skills")
-            directory
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        }
-    }
-
     pub fn installed_plugin_registry_report(&self) -> Result<PluginRegistryReport, PluginError> {
-        self.sync_bundled_plugins()?;
         Ok(self.build_registry_report(self.discover_installed_plugins_with_failures()?))
-    }
-
-    fn sync_bundled_plugins(&self) -> Result<(), PluginError> {
-        let bundled_root = self.config.bundled_root.clone().unwrap_or_else(Self::bundled_root);
-        let bundled_plugins = discover_plugin_dirs(&bundled_root)?;
-        let mut registry = self.load_registry()?;
-        let mut changed = false;
-        let install_root = self.install_root();
-        let mut active_bundled_ids = BTreeSet::new();
-
-        for source_root in bundled_plugins {
-            // 单个插件同步失败不能让整个插件页变空：旧实现在此处 `?`，
-            // Windows 上只要一个 worker 可执行文件被占用（os error 5），
-            // 后面的插件与整份 registry 写入都会被放弃。
-            let result = (|| -> Result<(), PluginError> {
-                let manifest = load_plugin_from_directory(&source_root)?;
-                let plugin_id = plugin_id(&manifest.name, BUNDLED_MARKETPLACE);
-                active_bundled_ids.insert(plugin_id.clone());
-                let install_path = install_root.join(sanitize_plugin_id(&plugin_id));
-                let now = unix_time_ms();
-                let existing_record = registry.plugins.get(&plugin_id);
-                let installed_manifest = install_path
-                    .exists()
-                    .then(|| load_plugin_from_directory(&install_path).ok())
-                    .flatten();
-                let installed_copy_is_valid = installed_manifest.is_some();
-                // 版本相同不等于内容相同：bundled 插件的 pages[].icon / entry / navGroup
-                // 会在同版本内修正（侧栏图标与页面装载都读已安装目录的 manifest）。
-                // 旧逻辑只比版本/描述，已安装的旧包不会刷新 ⇒ 用户升级后仍看到 Puzzle
-                // 与旧 entry 造成的沙箱超时。这里按完整 manifest 比对，强制整目录替换。
-                let installed_manifest_is_current = installed_manifest.as_ref() == Some(&manifest);
-                let needs_sync = existing_record.is_none_or(|record| {
-                    record.kind != PluginKind::Bundled
-                        || record.version != manifest.version
-                        || record.name != manifest.name
-                        || record.description != manifest.description
-                        || record.install_path != install_path
-                        || !record.install_path.exists()
-                        || !installed_copy_is_valid
-                        || !installed_manifest_is_current
-                });
-
-                if !needs_sync {
-                    return Ok(());
-                }
-                tracing::info!(
-                    plugin_id = %plugin_id,
-                    "bundled 插件清单或安装内容已变化，整目录重新同步"
-                );
-
-                if install_path.exists() {
-                    remove_dir_all_with_retry(&install_path, 8)?;
-                }
-                copy_dir_all(&source_root, &install_path)?;
-                // bundled 同步同样是「整目录替换」⇒ 与 install/update 一致地重钉哈希，
-                // 否则三类来源里只有 bundled 的面板资产没有完整性锚点。
-                let pinned_integrity = match hash_plugin_directory(&install_path) {
-                    Ok(hash) => Some(PluginIntegrity { algorithm: "sha256".to_string(), hash }),
-                    Err(error) => {
-                        tracing::warn!(path = %install_path.display(), error = %error, "bundled 插件哈希失败");
-                        None
-                    },
-                };
-
-                let installed_at_unix_ms =
-                    existing_record.map_or(now, |record| record.installed_at_unix_ms);
-                registry.plugins.insert(
-                    plugin_id.clone(),
-                    InstalledPluginRecord {
-                        kind: PluginKind::Bundled,
-                        id: plugin_id,
-                        name: manifest.name,
-                        version: manifest.version,
-                        description: manifest.description,
-                        install_path,
-                        source: PluginInstallSource::LocalPath { path: source_root.clone() },
-                        installed_at_unix_ms,
-                        updated_at_unix_ms: now,
-                        integrity: pinned_integrity,
-                    },
-                );
-                changed = true;
-                Ok(())
-            })();
-            if let Err(error) = result {
-                tracing::warn!(
-                    path = %source_root.display(),
-                    error = %error,
-                    "bundled 插件同步失败，跳过该插件以保留其余插件列表"
-                );
-            }
-        }
-        let stale_bundled_ids = registry
-            .plugins
-            .iter()
-            .filter_map(|(plugin_id, record)| {
-                (record.kind == PluginKind::Bundled && !active_bundled_ids.contains(plugin_id))
-                    .then_some(plugin_id.clone())
-            })
-            .collect::<Vec<_>>();
-
-        for plugin_id in stale_bundled_ids {
-            if let Some(record) = registry.plugins.remove(&plugin_id) {
-                if record.install_path.exists() {
-                    // 清理失败就让它留到下次：registry 已经摘除该记录，不能因为一个
-                    // 被占用目录把已同步好的其它插件和整份 registry 一起回滚。
-                    if let Err(error) = remove_dir_all_with_retry(&record.install_path, 8) {
-                        tracing::warn!(
-                            path = %record.install_path.display(),
-                            error = %error,
-                            "过期 bundled 插件目录清理失败，留待下次启动"
-                        );
-                    }
-                }
-                changed = true;
-            }
-        }
-
-        if changed {
-            self.store_registry(&registry)?;
-        }
-
-        Ok(())
     }
 
     /// 启动期清掉上次进程异常退出遗留的插件 worker。
@@ -2874,21 +2615,33 @@ impl PluginManager {
     }
 
     fn is_enabled(&self, metadata: &PluginMetadata) -> bool {
-        self.config.enabled_plugins.get(&metadata.id).copied().unwrap_or(match metadata.kind {
-            PluginKind::External => false,
-            PluginKind::Builtin | PluginKind::Bundled | PluginKind::OpenClaw => {
-                metadata.default_enabled
-            },
-        })
+        self.config.enabled_plugins.get(&metadata.id).copied().unwrap_or(false)
     }
 
-    fn ensure_known_plugin(&self, plugin_id: &str) -> Result<(), PluginError> {
-        if self.plugin_registry()?.contains(plugin_id) {
-            Ok(())
-        } else {
-            Err(PluginError::NotFound(format!(
-                "plugin `{plugin_id}` is not installed or discoverable"
-            )))
+    /// 只承认 installed registry 中的插件；这是 enable/disable 的唯一门禁。
+    fn ensure_installed_plugin(
+        &self,
+        plugin_id: &str,
+    ) -> Result<InstalledPluginRecord, PluginError> {
+        let registry = self.load_registry()?;
+        registry
+            .plugins
+            .get(plugin_id)
+            .cloned()
+            .ok_or_else(|| PluginError::NotFound(format!("plugin `{plugin_id}` is not installed")))
+    }
+
+    fn prune_orphan_enabled_plugins(&mut self, registry: &InstalledPluginRegistry) {
+        let orphans: Vec<String> = self
+            .config
+            .enabled_plugins
+            .keys()
+            .filter(|id| !registry.plugins.contains_key(*id))
+            .cloned()
+            .collect();
+        for id in orphans {
+            self.config.enabled_plugins.remove(&id);
+            let _ = self.write_enabled_state(&id, None);
         }
     }
 
@@ -5251,7 +5004,8 @@ mod tests {
             r#"{ "name": "opc_list_invoices", "description": "accounting", "command": "cmd.sh" }"#,
         );
         let mut manager = PluginManager::new(isolated_config(temp.join("home")));
-        let installed = manager.install(source.to_str().expect("utf8")).expect("install 成功");
+        let installed =
+            manager.install_test_fixture(source.to_str().expect("utf8")).expect("install 成功");
         manager.write_enabled_state(&installed.plugin_id, Some(true)).expect("启用");
         manager.config.enabled_plugins.insert(installed.plugin_id.clone(), true);
 
@@ -5275,8 +5029,9 @@ mod tests {
             r#"["subprocess_execution"]"#,
             r#"{ "name": "opc_list_invoices", "description": "legacy", "command": "cmd.sh" }"#,
         );
-        let conflict =
-            manager.install(conflict_source.to_str().expect("utf8")).expect("install 成功");
+        let conflict = manager
+            .install_test_fixture(conflict_source.to_str().expect("utf8"))
+            .expect("install 成功");
         manager.write_enabled_state(&conflict.plugin_id, Some(true)).expect("启用");
         manager.config.enabled_plugins.insert(conflict.plugin_id.clone(), true);
         manager.write_enabled_state(&installed.plugin_id, Some(true)).expect("恢复启用");
@@ -5357,7 +5112,11 @@ mod tests {
             }"#,
         )
         .expect("写入 manifest");
-        let manager = PluginManager::new(isolated_config(temp));
+        let mut manager = PluginManager::new(isolated_config(temp));
+        let outcome = manager
+            .install_test_fixture(installed.to_str().expect("utf8 path"))
+            .expect("面板插件应先进 installed registry");
+        manager.enable(&outcome.plugin_id).expect("面板插件应显式启用");
         let list = manager.list_dashboard_plugins().expect("清单投影应成功");
         let entry = list
             .iter()
@@ -5843,8 +5602,10 @@ mod tests {
             write_command_plugin_source(&source, &format!("{label}-demo"), permissions_json, &decl);
             let mut manager = PluginManager::new(isolated_config(&config_home));
             let outcome = manager
-                .install(source.to_str().expect("utf8 path"))
+                .install_test_fixture(source.to_str().expect("utf8 path"))
                 .unwrap_or_else(|e| panic!("install 应成功: {e}"));
+            // 命令执行与命令投影都要求显式 enable；安装后默认 disabled 不能被绕过。
+            manager.enable(&outcome.plugin_id).unwrap_or_else(|e| panic!("enable 应成功: {e}"));
             Self {
                 manager,
                 config_home,
@@ -6760,9 +6521,13 @@ mod tests {
 
         // ③ 坏插件：registry 里登记了记录，但安装目录已不存在 ⇒ 发现期按陈旧记录剔除，
         // 不产生加载失败，其余插件照常返回（单个坏插件不拖垮整份清单）。
-        let manager = PluginManager::new(isolated_config(temp.clone()));
+        let mut manager = PluginManager::new(isolated_config(temp.clone()));
+        let outcome = manager
+            .install_test_fixture(page_pack.to_str().expect("utf8 path"))
+            .expect("页面插件应先进 installed registry");
+        manager.enable(&outcome.plugin_id).expect("页面插件应显式启用");
         let ghost_root = installed_root.join("ghost-pack");
-        let mut registry = InstalledPluginRegistry::default();
+        let mut registry = manager.load_registry().expect("读取已安装插件 registry");
         registry.plugins.insert(
             "ghost-pack".to_string(),
             InstalledPluginRecord {
@@ -7135,7 +6900,9 @@ mod tests {
         std::fs::create_dir_all(&source).expect("创建源目录");
         write_plugin_source_with_ui(&source, &manifest("order-form", "order-form"), Some(ui_json));
         let mut manager = PluginManager::new(isolated_config(&config_home));
-        manager.install(source.to_str().expect("utf8 path")).expect("引用已声明 key 应装得上");
+        manager
+            .install_test_fixture(source.to_str().expect("utf8 path"))
+            .expect("引用已声明 key 应装得上");
         let list = manager.list_plugin_task_sources().expect("任务源投影应成功");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].task_sources[0].detail_schema.as_deref(), Some("order-form"));
@@ -7150,7 +6917,7 @@ mod tests {
         write_plugin_source_with_ui(&source, &manifest("ghost-form", "order-form"), Some(ui_json));
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .expect_err("引用未声明的 schema key 必须被拒")
             .to_string();
         assert!(text.contains("ghost-form"), "文案要指出是哪个 key：{text}");
@@ -7166,7 +6933,7 @@ mod tests {
         write_plugin_source_with_ui(&source, &manifest("order-form", "ghost-form"), Some(ui_json));
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .expect_err("任务源引用未声明的 schema key 必须被拒")
             .to_string();
         assert!(text.contains("demo-runs"), "文案要指出是哪条源：{text}");
@@ -7182,7 +6949,7 @@ mod tests {
         write_plugin_source_with_ui(&source, &manifest("order-form", "order-form"), None);
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .expect_err("没有 ui.json 的 schema 页必须被拒")
             .to_string();
         assert!(text.contains("order-form"), "实际 = {text}");
@@ -7201,7 +6968,7 @@ mod tests {
         );
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .expect_err("非法 ui.json 必须被拒")
             .to_string();
         assert!(text.contains("ui.json"), "实际 = {text}");
@@ -7237,11 +7004,21 @@ mod tests {
         .expect("写入 manifest");
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
-        manager.install(source.to_str().expect("utf8 path")).expect("装带任务源的插件应通过校验");
+        let install = manager
+            .install_test_fixture(source.to_str().expect("utf8 path"))
+            .expect("装带任务源的插件应通过校验");
 
+        let before = manager.list_plugin_task_sources().expect("任务源投影应成功");
+        assert_eq!(before.len(), 1, "实际 {before:?}");
+        assert!(
+            !before[0].enabled,
+            "远程-only 模型安装后默认 disabled，manifest 的 defaultEnabled 不再生效"
+        );
+
+        manager.enable(&install.plugin_id).expect("显式启用后才带启用位");
         let list = manager.list_plugin_task_sources().expect("任务源投影应成功");
         assert_eq!(list.len(), 1, "实际 {list:?}");
-        assert!(list[0].enabled, "defaultEnabled = true ⇒ 投影应带启用位");
+        assert!(list[0].enabled, "显式启用后投影才带启用位");
         assert_eq!(list[0].task_sources.len(), 1);
         assert_eq!(list[0].task_sources[0].id, "task-src-demo-runs");
         assert_eq!(list[0].task_sources[0].command, "rows");
@@ -7281,7 +7058,7 @@ mod tests {
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let error = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .expect_err("指向不存在命令的任务源必须被拒");
         let text = error.to_string();
         assert!(
@@ -7667,11 +7444,14 @@ mod bundled_root_tests {
         // 隔离构造：本模块在 `mod tests` 之后，走全路径引用唯一的构造点（不新增第二份配置）。
         let mut manager =
             PluginManager::new(crate::manager::test_support::isolated_config(&config_home));
-        manager.install(source.to_str().expect("utf8 path")).expect("装带卡片的插件应通过校验");
+        let outcome = manager
+            .install_test_fixture(source.to_str().expect("utf8 path"))
+            .expect("装带卡片的插件应通过校验");
+        manager.enable(&outcome.plugin_id).expect("远程-only 模型下必须显式启用");
 
         let list = manager.list_plugin_task_cards().expect("卡片投影应成功");
         assert_eq!(list.len(), 1, "实际 {list:?}");
-        assert!(list[0].enabled, "defaultEnabled = true ⇒ 投影应带启用位");
+        assert!(list[0].enabled, "显式启用后投影才带启用位");
         assert_eq!(list[0].task_cards.len(), 1);
         let card = &list[0].task_cards[0];
         assert_eq!(card.id, "demo-card");
@@ -7720,7 +7500,7 @@ mod bundled_root_tests {
         let mut manager =
             PluginManager::new(crate::manager::test_support::isolated_config(&config_home));
         let text = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .expect_err("卡片引用未声明的命令必须被拒")
             .to_string();
         assert!(text.contains("ghost-card"), "文案要指出是哪张卡：{text}");
@@ -7770,7 +7550,8 @@ mod domain_pack_tests {
             .expect("写域包清单");
             let mut manager =
                 PluginManager::new(isolated_config(temp.join(format!("{name}-home"))));
-            let outcome = manager.install(source.to_str().expect("utf8")).expect("install 成功");
+            let outcome =
+                manager.install_test_fixture(source.to_str().expect("utf8")).expect("install 成功");
             manager.write_enabled_state(&outcome.plugin_id, Some(true)).expect("启用");
             manager.config.enabled_plugins.insert(outcome.plugin_id.clone(), true);
             (manager, outcome.plugin_id)
@@ -7806,44 +7587,34 @@ mod release_source_tests {
 
     #[test]
     fn release_source_is_parsed_before_generic_https_git_url() {
-        let source = parse_install_source("axagent-release+https://example.com/manifest.json")
-            .expect("发布源应优先于普通 HTTPS Git URL 解析");
+        let source =
+            parse_release_install_source("axagent-release+https://example.com/release.json")
+                .expect("发布源应识别");
         assert_eq!(
             source,
             PluginInstallSource::ReleaseManifestUrl {
-                url: "https://example.com/manifest.json".to_string(),
+                url: "https://example.com/release.json".to_string(),
             }
         );
-
-        let error = parse_install_source("axagent-release+http://example.com/manifest.json")
-            .expect_err("发布清单只接受 HTTPS");
-        assert!(error.to_string().contains("https"), "{error}");
-
-        let git = parse_install_source("https://example.com/plugin.git")
-            .expect("裸 HTTPS 地址仍按 Git URL 解析");
-        assert!(matches!(git, PluginInstallSource::GitUrl { .. }));
+        assert!(
+            parse_release_install_source("axagent-release+https://example.com/other.json").is_err()
+        );
+        assert!(parse_release_install_source("https://example.com/plugin.git").is_err());
+        assert!(parse_release_install_source("./local-plugin").is_err());
+        assert!(parse_release_install_source("openclaw:demo").is_err());
+        assert!(parse_release_install_source("file:///tmp/plugin").is_err());
     }
 
     #[test]
-    fn release_sha256_requires_exactly_64_hex_characters() {
-        let source = "axagent-release+https://example.com/manifest.json";
-        assert!(parse_release_sha256(&"a".repeat(64), source).is_ok());
-        assert!(parse_release_sha256(&"A".repeat(64), source).is_ok());
-        assert!(parse_release_sha256(&"g".repeat(64), source).is_err());
-        assert!(parse_release_sha256(&"a".repeat(63), source).is_err());
-        assert!(parse_release_sha256("", source).is_err());
-    }
-
-    #[test]
-    fn release_install_requires_preview_hash_before_network() {
+    fn release_install_requires_valid_token_before_network() {
         let source = "axagent-release+https://127.0.0.1:9/release.json";
-        let config_home = temp_dir("release-no-preview-home");
+        let config_home = temp_dir("release-no-token-home");
         let mut manager = PluginManager::new(isolated_config(&config_home));
 
-        for expected in [None, Some("bad")] {
+        for token in ["", "bad", &"a".repeat(64)] {
             let error = manager
-                .install_verified(source, expected)
-                .expect_err("缺少或非法预览哈希必须在网络访问前拒绝");
+                .install_release(source, token)
+                .expect_err("缺少或伪造预览 token 必须在网络访问前拒绝");
             assert!(
                 matches!(error, PluginError::IntegrityVerifyFailed(_)),
                 "应报 IntegrityVerifyFailed，实际 {error:?}"
@@ -7854,17 +7625,27 @@ mod release_source_tests {
     }
 
     #[test]
-    fn release_hash_must_match_current_manifest() {
-        let source = "axagent-release+https://example.com/release.json";
-        let preview_hash = "a".repeat(64);
-        let current_hash = "b".repeat(64);
-
-        assert!(
-            validate_release_expected_sha256(Some(&preview_hash), &preview_hash, source).is_ok()
-        );
-        let error = validate_release_expected_sha256(Some(&preview_hash), &current_hash, source)
-            .expect_err("清单换代后必须拒绝安装");
+    fn preview_token_ttl_is_bounded() {
+        let token = ReleasePreviewToken {
+            source: "https://example.com/release.json".to_string(),
+            sha256: "a".repeat(64),
+            version: Some("1.0.0".to_string()),
+            expires_at_ms: unix_time_ms().saturating_sub(1),
+            nonce: new_release_preview_nonce(),
+        };
+        let encoded = token.encode();
+        let error = ReleasePreviewToken::decode(&encoded).expect_err("过期 token 必须拒绝");
         assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
+    }
+
+    #[test]
+    fn release_sha256_requires_exactly_64_hex_characters() {
+        let source = "axagent-release+https://example.com/release.json";
+        assert!(parse_release_sha256(&"a".repeat(64), source).is_ok());
+        assert!(parse_release_sha256(&"A".repeat(64), source).is_ok());
+        assert!(parse_release_sha256(&"g".repeat(64), source).is_err());
+        assert!(parse_release_sha256(&"a".repeat(63), source).is_err());
+        assert!(parse_release_sha256("", source).is_err());
     }
 
     fn release_manifest(artifacts: Vec<PluginReleaseArtifact>) -> PluginReleaseManifest {
@@ -7886,160 +7667,69 @@ mod release_source_tests {
     }
 
     #[test]
-    fn release_manifest_selects_the_current_platform_artifact() {
-        let linux_hash = "a".repeat(64);
-        let windows_hash = "b".repeat(64);
-        let (manifest, selected_hash) = select_release_manifest_artifact(
-            release_manifest(vec![
-                artifact("linux", "x86_64", "linux-x86_64", &linux_hash),
-                artifact("windows", "x86_64", "windows-x86_64", &windows_hash),
-            ]),
-            "windows",
-            "x86_64",
-            "https://example.com/release.json",
-        )
-        .expect("Windows 平台应选中自己的产物");
-
-        assert_eq!(selected_hash, windows_hash);
-        assert_eq!(manifest.artifact_url, "https://example.com/plugin-windows-x86_64.tar.gz");
-    }
-
-    #[test]
-    fn release_manifest_rejects_unsupported_platform_without_fallback() {
-        let error = select_release_manifest_artifact(
-            release_manifest(vec![artifact("linux", "x86_64", "linux-x86_64", &"a".repeat(64))]),
-            "windows",
-            "aarch64",
-            "https://example.com/release.json",
-        )
-        .expect_err("没有当前平台产物时必须拒绝，不能安装 Linux 包");
-
-        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
-        assert!(error.to_string().contains("windows/aarch64"), "{error}");
-        assert!(error.to_string().contains("linux/x86_64"), "{error}");
-    }
-
-    #[test]
-    fn release_manifest_rejects_duplicate_current_platform_artifacts() {
-        let manifest = release_manifest(vec![
-            artifact("linux", "x86_64", "linux-one", &"a".repeat(64)),
-            artifact("linux", "x86_64", "linux-two", &"b".repeat(64)),
-        ]);
-        let error = select_release_manifest_artifact(
-            manifest,
-            "linux",
-            "x86_64",
-            "https://example.com/release.json",
-        )
-        .expect_err("同平台多产物歧义必须拒绝");
-
-        assert!(error.to_string().contains("multiple artifacts"), "{error}");
-    }
-
-    #[test]
-    fn legacy_release_manifest_remains_supported() {
-        let sha256 = "a".repeat(64);
-        let manifest = PluginReleaseManifest {
-            artifact_url: "https://example.com/plugin.tgz".to_string(),
-            sha256: sha256.clone(),
-            version: Some("3.0.0".to_string()),
-            artifacts: Vec::new(),
+    fn release_hash_must_match_current_manifest_token() {
+        let source = "https://example.com/release.json";
+        let token = ReleasePreviewToken {
+            source: source.to_string(),
+            sha256: "a".repeat(64),
+            version: Some("1.0.0".to_string()),
+            expires_at_ms: unix_time_ms() + PREVIEW_TOKEN_TTL_MS,
+            nonce: new_release_preview_nonce(),
         };
-        let (selected, selected_hash) = select_release_manifest_artifact(
+        assert!(token.validate(source, &"a".repeat(64)).is_ok());
+        let error = token.validate(source, &"b".repeat(64)).expect_err("清单换代后必须拒绝");
+        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
+    }
+
+    #[test]
+    fn select_release_artifact_uses_current_platform() {
+        let manifest = release_manifest(vec![artifact(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            "ok",
+            &"a".repeat(64),
+        )]);
+        let (selected, sha256) = select_release_manifest_artifact(
             manifest,
-            "macos",
-            "aarch64",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
             "https://example.com/release.json",
         )
-        .expect("旧版单包清单应继续可用");
-
-        assert_eq!(selected_hash, sha256);
-        assert_eq!(selected.artifact_url, "https://example.com/plugin.tgz");
+        .expect("当前平台应有产物");
+        assert_eq!(selected.artifact_url, "https://example.com/plugin-ok.tar.gz".to_string());
+        assert_eq!(sha256, "a".repeat(64));
     }
 
     #[test]
-    fn release_manifest_rejects_invalid_artifact_url_and_hash() {
-        let manifest =
-            release_manifest(vec![artifact("linux", "x86_64", "linux-x86_64", &"a".repeat(64))]);
-        let mut insecure = manifest.clone();
-        insecure.artifacts[0].artifact_url = "http://example.com/plugin.tar.gz".to_string();
-        assert!(
-            select_release_manifest_artifact(
-                insecure,
-                "linux",
-                "x86_64",
-                "https://example.com/release.json"
-            )
-            .is_err()
-        );
+    fn extract_release_archive_rejects_unsafe_entries() {
+        use std::io::Write;
 
-        let mut wrong_extension = manifest.clone();
-        wrong_extension.artifacts[0].artifact_url = "https://example.com/plugin.zip".to_string();
-        assert!(
-            select_release_manifest_artifact(
-                wrong_extension,
-                "linux",
-                "x86_64",
-                "https://example.com/release.json"
-            )
-            .is_err()
-        );
-
-        let mut bad_hash = manifest;
-        bad_hash.artifacts[0].sha256 = "not-a-sha256".to_string();
-        assert!(
-            select_release_manifest_artifact(
-                bad_hash,
-                "linux",
-                "x86_64",
-                "https://example.com/release.json"
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn release_archive_rejects_unsafe_entries() {
-        // `tar::Builder` 拒绝写 `..` 路径，所以手工构造 512 字节 GNU 头再 gzip，
-        // 让生产解压器真实面对恶意条目。
-        let make_archive = |name: &str, symlink: bool| -> Vec<u8> {
-            let mut header = [0_u8; 512];
+        fn make_archive(name: &str, symlink: bool) -> Vec<u8> {
+            let mut builder = tar::Builder::new(Vec::new());
+            let mut header = tar::Header::new_gnu();
             let bytes = name.as_bytes();
-            assert!(bytes.len() < 100, "测试路径需放进 tar 的 name 字段");
-            header[..bytes.len()].copy_from_slice(bytes);
-            header[100..108].copy_from_slice(b"0000644\0");
-            header[108..116].copy_from_slice(b"0000000\0");
-            header[116..124].copy_from_slice(b"0000000\0");
-            header[124..136].copy_from_slice(b"00000000000\0");
-            header[136..148].copy_from_slice(b"00000000000\0");
-            header[148..156].fill(b' ');
-            header[156] = if symlink { b'2' } else { b'0' };
+            let raw = header.as_gnu_mut().expect("gnu header");
+            raw.name[..bytes.len()].copy_from_slice(bytes);
+            header.set_size(if symlink { 0 } else { 1 });
+            header.set_mode(0o644);
+            header.set_entry_type(if symlink {
+                tar::EntryType::Symlink
+            } else {
+                tar::EntryType::Regular
+            });
+            header.set_cksum();
+            // 直接用原始 header 写入，保留 `../` 路径以验证解压端的拒绝逻辑。
             if symlink {
-                header[157..165].copy_from_slice(b"target\0\0");
+                let _ = builder.append(&header, std::io::empty());
+            } else {
+                let _ = builder.append(&header, &b"x"[..]);
             }
-            header[257..263].copy_from_slice(b"ustar\0");
-            header[263..265].copy_from_slice(b"00");
-            let checksum: u32 = header
-                .iter()
-                .enumerate()
-                .map(|(index, byte)| {
-                    if (148..156).contains(&index) {
-                        u32::from(b' ')
-                    } else {
-                        u32::from(*byte)
-                    }
-                })
-                .sum();
-            let checksum_text = format!("{checksum:06o}\0 ");
-            header[148..156].copy_from_slice(checksum_text.as_bytes());
-
-            let mut tar = header.to_vec();
-            tar.extend_from_slice(&[0_u8; 1024]);
+            let raw = builder.into_inner().expect("结束 tar");
             let mut encoder =
                 flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::none());
-            std::io::Write::write_all(&mut encoder, &tar).expect("gzip tar");
+            encoder.write_all(&raw).expect("gzip tar");
             encoder.finish().expect("结束 gzip")
-        };
+        }
 
         let temp = std::env::temp_dir().join(format!(
             "plugins-release-archive-{}",
@@ -8056,8 +7746,7 @@ mod release_source_tests {
     }
 
     /// 真实 HTTPS E2E：`release.json` 与 tar.gz 放在公开 HTTPS 静态托管上，
-    /// 走完整 `install_verified` 链。URL 通过环境变量显式给出，避免测试依赖外部服务默认值。
-    /// 未设置时明确 SKIP，不计入通过。
+    /// URL 通过环境变量显式给出；未设置时明确 SKIP，不计入通过。
     #[test]
     fn release_source_installs_from_https_manifest() {
         let Some(manifest_url) = std::env::var_os("AXAGENT_RELEASE_MANIFEST_HTTPS_URL") else {
@@ -8069,102 +7758,17 @@ mod release_source_tests {
         let source = format!("axagent-release+{manifest_url}");
         let config_home = temp_dir("release-https-install-home");
         let mut manager = PluginManager::new(isolated_config(&config_home));
-        let (_, preview_sha256) = manager
-            .validate_plugin_source_with_expected_hash(&source, None)
-            .expect("HTTPS 发布清单预览应成功");
-        let preview_sha256 = preview_sha256.expect("发布清单预览必须返回 SHA-256");
-        let outcome = manager
-            .install_verified(&source, Some(&preview_sha256))
-            .expect("HTTPS 发布清单安装应成功");
+        let (_, preview_token) =
+            manager.validate_release_source(&source).expect("HTTPS 发布清单预览应成功");
+        let outcome =
+            manager.install_release(&source, &preview_token).expect("HTTPS 发布清单安装应成功");
         assert!(!outcome.plugin_id.is_empty());
+        let registry = manager.load_registry().expect("registry 应可读");
+        assert!(!registry.plugins.is_empty(), "安装后 registry 应有记录");
         assert!(
-            std::path::Path::new(&outcome.install_path.to_string_lossy().into_owned()).is_dir()
+            !manager.config.enabled_plugins.get(&outcome.plugin_id).copied().unwrap_or(false),
+            "安装后必须默认 disabled"
         );
         let _ = std::fs::remove_dir_all(&config_home);
-    }
-}
-
-#[cfg(test)]
-mod worker_route_tests {
-    use super::*;
-    use crate::manager::test_support::isolated_config;
-    use std::path::PathBuf;
-
-    fn temp_dir(label: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("测试：系统时间应晚于 UNIX EPOCH")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("plugin-worker-route-{label}-{nanos}"));
-        std::fs::create_dir_all(&dir).expect("创建临时目录");
-        dir
-    }
-
-    fn install_worker_route_plugin(
-        command: &str,
-        label: &str,
-    ) -> (PluginManager, PathBuf, String, PathBuf) {
-        let source = temp_dir(&format!("{label}-source"));
-        let config_home = temp_dir(&format!("{label}-home"));
-        let manifest_dir = source.join(".claude-plugin");
-        std::fs::create_dir_all(&manifest_dir).expect("创建清单目录");
-        std::fs::write(
-            manifest_dir.join("plugin.json"),
-            format!(
-                "{{\"name\":\"{label}\",\"version\":\"1.0.0\",\"description\":\"worker route probe\",\
-                 \"defaultEnabled\":true,\"permissions\":[\"subprocess_execution\"],\
-                 \"commands\":[{{\"name\":\"probe\",\"description\":\"probe\",\"command\":\"{command}\"}}]}}"
-            ),
-        )
-        .expect("写入清单");
-        let mut manager = PluginManager::new(isolated_config(&config_home));
-        let outcome = manager
-            .install(source.to_str().expect("utf8 path"))
-            .unwrap_or_else(|e| panic!("安装应成功: {e}"));
-        (manager, config_home, outcome.plugin_id, source)
-    }
-
-    /// worker 未加载时 `worker://` 是路由键而非程序名：必须 fail-fast 成可读错误，
-    /// 不能落到 `Command::new("worker://…")` 让 Windows 报 os error 123。
-    #[test]
-    fn worker_route_key_is_never_spawned_as_a_program() {
-        let (manager, config_home, plugin_id, source) =
-            install_worker_route_plugin("worker://stock_reco_ic_stats", "worker-route");
-
-        let err = manager
-            .execute_plugin_command(&plugin_id, "probe", &serde_json::json!({}))
-            .expect_err("未加载 worker 的路由键必须被拒绝");
-        assert!(matches!(err, PluginError::NotFound(_)), "期望 NotFound，实际 {err:?}");
-        let text = err.to_string();
-        assert!(text.contains("worker 未加载"), "错误应可操作：{text}");
-        assert!(!text.contains("os error"), "不能把裸 IO 错透给用户：{text}");
-
-        drop(manager);
-        let _ = std::fs::remove_dir_all(&config_home);
-        let _ = std::fs::remove_dir_all(&source);
-    }
-
-    /// 清单统一写不带后缀的程序名，解析按宿主平台补后缀（POSIX 是空串 ⇒ 幂等）。
-    #[test]
-    fn worker_program_resolution_appends_platform_suffix() {
-        let root = temp_dir("worker-program");
-        let bin = root.join("bin");
-        std::fs::create_dir_all(&bin).expect("创建 bin");
-        let expected = if cfg!(windows) {
-            bin.join("probe.exe")
-        } else {
-            bin.join("probe")
-        };
-        std::fs::write(&expected, b"stub").expect("写入假 worker");
-
-        let resolved =
-            resolve_worker_program(&root, "bin/probe").expect("应解析到平台 worker 文件");
-        assert_eq!(resolved, expected);
-        assert!(matches!(
-            resolve_worker_program(&root, "bin/missing"),
-            Err(PluginError::InvalidManifest(_))
-        ));
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

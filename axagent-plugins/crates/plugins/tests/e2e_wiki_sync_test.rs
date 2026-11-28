@@ -382,8 +382,9 @@ fn wiki_bundle_command_runs_through_host_seam_and_respects_disable() {
 
     let home = common::TempDir::new("wiki-bundle-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
-    let outcome =
-        manager.install(dir.to_str().expect("产物路径应是 UTF-8")).expect("wiki bundle 应能安装");
+    let outcome = manager
+        .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
+        .expect("wiki bundle 应能安装");
     manager.enable(&outcome.plugin_id).expect("enable 应成功");
 
     // ① 启用态：命令经 worker → 宿主 wiki.store 全链可执行。

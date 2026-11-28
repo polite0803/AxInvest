@@ -160,15 +160,15 @@ describe("PluginGallery 的 eventStats 渲染", () => {
   it("按来源类型、启用状态与完整性状态分面筛选", () => {
     pluginsRef.current = [
       plugin({
-        id: "remote-on",
-        name: "remote-on",
-        source: "https://example.com/remote.git",
+        id: "release-on",
+        name: "release-on",
+        source: "axagent-release+https://example.com/release.json",
         enabled: true,
         integrityStatus: "verified",
       }),
       plugin({
-        id: "local-off",
-        name: "local-off",
+        id: "legacy-off",
+        name: "legacy-off",
         source: "./local-plugin",
         enabled: false,
         integrityStatus: "unpinned",
@@ -177,20 +177,20 @@ describe("PluginGallery 的 eventStats 渲染", () => {
     const { container } = render(<PluginGallery />);
 
     fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.sourceTypeFilter"));
-    fireEvent.click(screen.getByText("chat.plugins.marketplace.sourceTypeRemote"));
-    expect(container.textContent).toContain("remote-on");
-    expect(container.textContent).not.toContain("local-off");
+    fireEvent.click(screen.getByText("chat.plugins.marketplace.sourceTypeRelease"));
+    expect(container.textContent).toContain("release-on");
+    expect(container.textContent).not.toContain("legacy-off");
 
-    // 来源筛选保持“远程”时，禁用分面只留下已启用的远程插件。
+    // 来源筛选保持“发布来源”时，禁用分面筛不出已启用的插件。
     fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.enabledFilter"));
     fireEvent.click(screen.getByText("chat.plugins.marketplace.disabledOnly"));
     expect(container.textContent).toContain("chat.plugins.marketplace.listEmpty");
 
-    // 切回“全部来源”后，禁用 + 未固定哈希只剩本地插件。
+    // 切回“全部来源”后，禁用 + 未固定哈希只剩旧版安装记录。
     fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.sourceTypeFilter"));
     fireEvent.click(screen.getByText("chat.plugins.marketplace.sourceTypeAll"));
-    expect(container.textContent).toContain("local-off");
-    expect(container.textContent).not.toContain("remote-on");
+    expect(container.textContent).toContain("legacy-off");
+    expect(container.textContent).not.toContain("release-on");
 
     fireEvent.mouseDown(screen.getByLabelText("chat.plugins.marketplace.integrityFilter"));
     fireEvent.click(screen.getByText("chat.plugins.marketplace.integrityVerified"));

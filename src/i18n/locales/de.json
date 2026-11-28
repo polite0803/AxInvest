@@ -1024,8 +1024,7 @@
         "eventStatsNone": "Keine Event-Abonnements",
         "install": "Installieren",
         "installFailed": "Installation fehlgeschlagen: {{error}}",
-        "installPlaceholder": "Installieren: @scope/name oder Git-URL oder lokaler Pfad",
-        "releasePlaceholder": "Release-Adresse: axagent-release+https://.../release.json",
+        "releasePlaceholder": "Release-URL (https://.../release.json)",
         "releaseHint": "Die Release-Adresse liest ein HTTPS-Release-Manifest und prüft das Artefakt mit dem darin angegebenen SHA-256.",
         "installSuccess": "{{id}} v{{version}} installiert",
         "installTitle": "{{name}} installieren",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "Nach Schnittstellen-/Plugin-ID suchen",
         "registrySeam": "Schnittstelle",
         "installSource": "Installationsquelle",
-        "sha256Placeholder": "Erwarteter SHA-256 (64 Hex-Zeichen)",
-        "sha256Hint": "Remote-Quellen erfordern SHA-256. Lokale Quellen dürfen leer bleiben; eine Eingabe muss gültig sein.",
-        "sha256Invalid": "SHA-256 muss genau 64 Hex-Zeichen enthalten",
-        "sha256Required": "Diese Remote-Quelle erfordert vor der Installation SHA-256",
-        "sha256FromRelease": "SHA-256 wird vom Release-Manifest bereitgestellt",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "Installierte Plugins nach Name / Quelle / Berechtigung / Seite suchen",
         "listEmpty": "Keine installierten Plugins",
         "source": "Quelle",
@@ -1068,8 +1061,6 @@
         "pages": "Seiten",
         "sourceTypeFilter": "Quellentyp",
         "sourceTypeAll": "Alle Quellen",
-        "sourceTypeRemote": "Remote",
-        "sourceTypeLocal": "Lokal",
         "sourceTypeRelease": "Release",
         "enabledFilter": "Aktivierungsstatus",
         "enabledAll": "Alle",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} aktualisiert",
         "updateFailed": "Aktualisierung fehlgeschlagen",
         "updateSourceMissing": "Plugin-Quelle ist nicht verfügbar",
-        "validate": "Validieren"
+        "validate": "Validieren",
+        "remoteOnlyHint": "Es werden nur HTTPS-URLs mit /release.json unterstützt. SHA-256 wird automatisch geprüft und muss nicht eingegeben werden.",
+        "installAfterEnable": "Es werden nur HTTPS-",
+        "installAfterEnableHint": "Nach der Installation bleibt das Plugin deaktiviert und muss manuell aktiviert werden."
       }
     },
     "preferences": "Präferenzen",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Build des Plugin-Quellcodes fehlgeschlagen",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Nicht genügend Speicherplatz oder Arbeitsspeicher für den Plugin-Build",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Rust-Toolchain oder Zielplattform nicht verfügbar",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "Die Integrität der Plugin-Quelle konnte nicht überprüft werden; prüfen Sie SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "Die Plugin-Quelle konnte nicht geprüft werden. Prüfen Sie die Release-URL oder starten Sie die Vorschau erneut.",
     "PLUGIN_UI_ACTION_FAILED": "Das Plugin konnte diese Aktion nicht ausführen",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "Diese Aktion erfordert den Hintergrundprozess des Plugins, aber das Plugin läuft nicht (kein Worker deklariert oder deaktiviert)",
     "PROVIDER_ADAPTER_NOT_FOUND": "Anbieter-Adapter nicht gefunden",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "Kosten- oder Token-Kontingent überschritten",
     "BOT_SKILL_NOT_FOUND": "Bot-Skill-Zuordnung nicht gefunden",
     "BOT_SKILL_PRESET_INVALID": "Ungültiges Skill-Preset-Format",
-    "PLUGIN_ACCESS_DENIED": "Das Plugin-Verzeichnis ist gesperrt oder nicht zugänglich. Schließen Sie das Programm, das es verwendet, und versuchen Sie es erneut."
+    "PLUGIN_ACCESS_DENIED": "Das Plugin-Verzeichnis ist gesperrt oder nicht zugänglich. Schließen Sie das Programm, das es verwendet, und versuchen Sie es erneut.",
+    "LOCAL_INFERENCE_DISABLED": "Lokale Inferenz ist in diesem Build nicht aktiviert.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "Lokales Feintuning ist in diesem Build nicht aktiviert."
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -5421,19 +5417,19 @@
       "disabled": "Plugin deaktiviert",
       "enabled": "Plugin aktiviert",
       "install": "Installieren",
-      "installFirst": "Installieren Sie ein Plugin, um zu beginnen",
       "name": "Name",
       "noPlugins": "Keine Plugins installiert",
-      "openPluginsFolder": "Ordner öffnen",
       "panels": "Panels",
-      "pluginDirs": "Plugin-Verzeichnisse",
-      "pluginDirsDescription": "Plugin-Verzeichnisse verwalten",
       "refresh": "Aktualisieren",
       "refreshSuccess": "Plugins aktualisiert",
       "status": "Status",
       "title": "Dashboard-Plugins",
       "unload": "Entladen",
-      "unloaded": "Plugin entladen"
+      "unloaded": "Plugin entladen",
+      "releaseOnly": "Es werden nur HTTPS-release.json-URLs unterstützt.",
+      "installedNeedEnable": "Installiert. Bitte manuell aktivieren.",
+      "releasePlaceholder": "Release-URL (https://.../release.json)",
+      "releaseHint": "SHA-256 und Integrität werden automatisch geprüft; aktivieren Sie das Plugin nach der Installation manuell."
     },
     "data": {
       "title": "Datenverwaltung"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "Installation fehlgeschlagen: {{error}}",
       "loadFailed": "Plugins laden fehlgeschlagen: {{error}}",
-      "openFolderFailed": "Ordner öffnen fehlgeschlagen: {{error}}",
       "refreshFailed": "Aktualisierung fehlgeschlagen: {{error}}",
       "toggleFailed": "Umschalten fehlgeschlagen: {{error}}",
       "unloadFailed": "Entladen fehlgeschlagen: {{error}}",

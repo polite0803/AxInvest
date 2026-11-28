@@ -569,7 +569,7 @@ jobs:
         # b 段不在此处：错误码 i18n 对齐由上面的 check-errorcode-alignment.mjs 独立执行。
         # f = 登记字段必有消费点（防死参数回归）；g = 事件发射/监听对称（防前端监听永远收不到）。
         # h = 静默丢弃 Result 棘轮（Rust 侧 bare-except 等价物，只减不增）。
-        run: npm run contracts -- --only=a,c,d,f,g,h,bot
+        run: npm run contracts -- --only=a,c,d,d2,f,g,h,bot
 
   rust-check:
     name: Rust Check (fmt + clippy + build)

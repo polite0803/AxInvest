@@ -134,7 +134,7 @@ fn four_agent_commands_project_into_catalog_and_execute_over_real_worker_frames(
     let home = TempDir::new("stock-agent-cmds-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
     let outcome = manager
-        .install(dir.to_str().expect("产物路径应是 UTF-8"))
+        .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
         .expect("install 应成功：清单合法、整目录（含 bin/）被拷贝进安装根");
     manager.enable(&outcome.plugin_id).expect("enable 应成功");
 

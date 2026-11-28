@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mocks } = vi.hoisted(() => ({
@@ -53,9 +53,9 @@ vi.mock("@/lib/invoke", () => ({
 
 import { PluginGallery } from "../PluginGallery";
 
-const SOURCE = "https://example.com/demo.git";
-const OLD_HASH = "a".repeat(64);
-const NEW_HASH = "b".repeat(64);
+const SOURCE = "https://example.com/release.json";
+const NORMALIZED = `axagent-release+${SOURCE}`;
+const TOKEN = "signed-preview-token";
 
 function manifest() {
   return {
@@ -70,21 +70,15 @@ function manifest() {
     mcpServers: [],
     skills: [],
     capabilities: [],
+    previewToken: TOKEN,
   };
 }
 
-function fillSourceAndHash(source: string, hash: string): void {
-  fireEvent.change(
-    screen.getByPlaceholderText("chat.plugins.marketplace.installPlaceholder"),
-    { target: { value: source } },
-  );
-  fireEvent.change(
-    screen.getByPlaceholderText("chat.plugins.marketplace.sha256Placeholder"),
-    { target: { value: hash } },
-  );
+function findButton(name: string): HTMLElement | undefined {
+  return screen.getAllByRole("button").find((button) => button.textContent === name);
 }
 
-describe("PluginGallery 安装完整性", () => {
+describe("PluginGallery 远程-only 安装", () => {
   beforeEach(() => {
     galleryState.plugins = [];
     mocks.validateSource.mockReset();
@@ -98,78 +92,49 @@ describe("PluginGallery 安装完整性", () => {
     });
   });
 
-  it("远程来源未填写哈希时不能发起验证", async () => {
+  it("非发布地址不能发起验证", async () => {
     render(<PluginGallery />);
     fireEvent.change(
-      screen.getByPlaceholderText("chat.plugins.marketplace.installPlaceholder"),
+      screen.getByPlaceholderText("chat.plugins.marketplace.releasePlaceholder"),
+      { target: { value: "https://example.com/plugin.git" } },
+    );
+    expect(findButton("chat.plugins.marketplace.install")?.hasAttribute("disabled")).toBe(true);
+    await waitFor(() => expect(mocks.validateSource).not.toHaveBeenCalled());
+  });
+
+  it("粘贴发布地址后预览，确认安装只回传内部 token", async () => {
+    render(<PluginGallery />);
+    fireEvent.change(
+      screen.getByPlaceholderText("chat.plugins.marketplace.releasePlaceholder"),
       { target: { value: SOURCE } },
     );
-    const installButton = screen.getAllByRole("button")
-      .find((button) => button.textContent === "chat.plugins.marketplace.install");
-    expect(installButton).toBeDefined();
-    expect(installButton?.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(installButton!);
-    await waitFor(() => expect(mocks.validateSource).not.toHaveBeenCalled());
-    expect(screen.getByText("chat.plugins.marketplace.sha256Required")).toBeInTheDocument();
-  });
+    fireEvent.click(findButton("chat.plugins.marketplace.install")!);
 
-  it("确认安装冻结验证时的哈希，而不是读取确认框打开后的输入", async () => {
-    render(<PluginGallery />);
-    fillSourceAndHash(SOURCE, OLD_HASH);
-    fireEvent.click(screen.getByRole("button", { name: "chat.plugins.marketplace.install" }));
-
-    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(SOURCE, OLD_HASH));
+    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(NORMALIZED));
     expect(await screen.findByText("chat.plugins.marketplace.installSource")).toBeInTheDocument();
-    expect(screen.getByText(OLD_HASH)).toBeInTheDocument();
     expect(mocks.installPlugin).not.toHaveBeenCalled();
 
-    // 校验成功后修改页面上的哈希输入；确认安装仍必须使用校验时冻结的旧值。
-    fireEvent.change(
-      screen.getByPlaceholderText("chat.plugins.marketplace.sha256Placeholder"),
-      { target: { value: NEW_HASH } },
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "chat.plugins.marketplace.confirmInstall" }),
-    );
-    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(SOURCE, OLD_HASH));
-  });
-
-  it("发布地址无需确认，一次点击使用清单哈希完成安装", async () => {
-    const releaseSource = "https://example.com/release.json";
-    const normalizedReleaseSource = `axagent-release+${releaseSource}`;
-    mocks.validateSource.mockResolvedValue({ ...manifest(), expectedSha256: OLD_HASH });
-    render(<PluginGallery />);
-    fireEvent.change(
-      screen.getByPlaceholderText("chat.plugins.marketplace.installPlaceholder"),
-      { target: { value: releaseSource } },
-    );
-    const installButton = screen.getAllByRole("button")
-      .find((button) => button.textContent === "chat.plugins.marketplace.install");
-    expect(installButton?.hasAttribute("disabled")).toBe(false);
-    fireEvent.click(installButton!);
-
-    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(normalizedReleaseSource, undefined));
-    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(normalizedReleaseSource, OLD_HASH));
-    expect(screen.queryByRole("button", { name: "chat.plugins.marketplace.confirmInstall" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.plugins.marketplace.confirmInstall" }));
+    await waitFor(() => expect(mocks.installPlugin).toHaveBeenCalledWith(NORMALIZED, TOKEN));
   });
 });
 
-describe("PluginGallery 更新完整性", () => {
+describe("PluginGallery 远程-only 更新", () => {
   const installedPlugin = {
     id: "demo@external",
     name: "demo",
     version: "1.0.0",
     description: "demo plugin",
-    kind: "external" as const,
-    enabled: true,
+    kind: "external",
+    enabled: false,
     tools: [],
     mcpServers: [],
     skills: [],
-    source: SOURCE,
+    source: NORMALIZED,
     permissions: [],
     pages: [],
-    integrityStatus: "verified",
-    pinnedHash: OLD_HASH,
+    integrityStatus: "unknown",
+    pinnedHash: null,
     commands: [],
     eventStats: null,
   };
@@ -177,6 +142,7 @@ describe("PluginGallery 更新完整性", () => {
   beforeEach(() => {
     galleryState.plugins = [installedPlugin];
     mocks.validateSource.mockReset();
+    mocks.installPlugin.mockReset();
     mocks.updatePlugin.mockReset();
     mocks.validateSource.mockResolvedValue(manifest());
     mocks.updatePlugin.mockResolvedValue({
@@ -187,63 +153,23 @@ describe("PluginGallery 更新完整性", () => {
     });
   });
 
-  it("远程来源未填写哈希时不能发起更新验证", async () => {
+  it("更新先预览再确认，只回传内部 token", async () => {
     render(<PluginGallery />);
-    fireEvent.click(screen.getByRole("button", { name: "chat.plugins.marketplace.update" }));
-    const validateButton = screen.getAllByRole("button")
-      .find((button) => button.textContent === "chat.plugins.marketplace.validate");
-    expect(validateButton?.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(validateButton!);
-    await waitFor(() => expect(mocks.validateSource).not.toHaveBeenCalled());
-  });
-
-  it("发布地址更新无需手填哈希，并使用预览返回的清单哈希", async () => {
-    galleryState.plugins = [{
-      ...installedPlugin,
-      source: "axagent-release+https://example.com/plugin-release.json",
-    }];
-    const releaseSource = String(galleryState.plugins[0].source);
-    mocks.validateSource.mockResolvedValue({ ...manifest(), expectedSha256: OLD_HASH });
-    render(<PluginGallery />);
-    fireEvent.click(screen.getByRole("button", { name: "chat.plugins.marketplace.update" }));
-
-    const validateButton = screen.getAllByRole("button")
-      .find((button) => button.textContent === "chat.plugins.marketplace.validate");
-    expect(validateButton?.hasAttribute("disabled")).toBe(false);
-    fireEvent.click(validateButton!);
-
-    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(releaseSource, undefined));
-    const confirmButton = await screen.findByRole(
-      "button",
-      { name: "chat.plugins.marketplace.confirmUpdate" },
-    );
-    await waitFor(() => expect(screen.getAllByText(OLD_HASH).length).toBeGreaterThan(0));
-    fireEvent.click(confirmButton);
-    await waitFor(() => expect(mocks.updatePlugin).toHaveBeenCalledWith(installedPlugin.id, OLD_HASH));
-  });
-
-  it("确认更新冻结验证时的哈希，而不是读取确认框打开后的输入", async () => {
-    render(<PluginGallery />);
-    fireEvent.click(screen.getByRole("button", { name: "chat.plugins.marketplace.update" }));
-    const updateDialog = await screen.findByRole("dialog");
-    fireEvent.change(
-      within(updateDialog).getByPlaceholderText("chat.plugins.marketplace.sha256Required"),
-      { target: { value: OLD_HASH } },
-    );
-    fireEvent.click(
-      within(updateDialog).getByRole("button", { name: "chat.plugins.marketplace.validate" }),
-    );
-    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(SOURCE, OLD_HASH));
-    const confirmButton = await within(updateDialog).findByRole("button", {
-      name: "chat.plugins.marketplace.confirmUpdate",
+    fireEvent.click(await screen.findByRole("button", { name: "chat.plugins.marketplace.update" }));
+    const validateButton = await waitFor(() => {
+      const button = findButton("chat.plugins.marketplace.validate");
+      expect(button).toBeDefined();
+      return button!;
     });
-    await waitFor(() => expect(screen.getAllByText(OLD_HASH).length).toBeGreaterThan(0));
-
-    // 校验后修改输入框不能影响确认更新使用的哈希快照。
-    fireEvent.change(screen.getByPlaceholderText("chat.plugins.marketplace.sha256Placeholder"), {
-      target: { value: NEW_HASH },
+    expect(validateButton.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(validateButton);
+    await waitFor(() => expect(mocks.validateSource).toHaveBeenCalledWith(NORMALIZED));
+    const confirmButton = await waitFor(() => {
+      const button = findButton("chat.plugins.marketplace.confirmUpdate");
+      expect(button && !button.hasAttribute("disabled")).toBe(true);
+      return button!;
     });
     fireEvent.click(confirmButton);
-    await waitFor(() => expect(mocks.updatePlugin).toHaveBeenCalledWith(installedPlugin.id, OLD_HASH));
+    await waitFor(() => expect(mocks.updatePlugin).toHaveBeenCalledWith(installedPlugin.id, TOKEN));
   });
 });

@@ -202,7 +202,7 @@ impl FallbackFixture {
 
         let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
         let outcome = manager
-            .install(source.to_str().expect("utf8 path"))
+            .install_test_fixture(source.to_str().expect("utf8 path"))
             .unwrap_or_else(|e| panic!("install 应成功: {e}"));
         manager
             .enable(&outcome.plugin_id)

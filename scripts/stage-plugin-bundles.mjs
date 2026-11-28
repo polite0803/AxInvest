@@ -1,34 +1,18 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * `tauri build` 前置：把插件 worker 产物暂存到 `src-tauri/plugins/bundled/`，
- * 供 `bundle.resources` 打进安装包（宿主按 `resource_dir/plugins/bundled` 发现，见
- * `PluginManagerConfig::resolve_bundled_root`）。
+ * 按需暂存插件 worker 产物。
  *
- * 为什么落在 `src-tauri/plugins`（而不是 `src-tauri/resources/plugins`）：Tauri 打包
- * resources 时**保留相对配置目录的路径** ⇒ 声明 `"plugins"` 会落到 `<resource_dir>/plugins/…`，
- * 与宿主的解析路径逐字对齐；多套一层 `resources/` 会让宿主找不到。
+ * 这不再是 `tauri build` 的默认前置：`beforeBuildCommand` 只构建前端，`bundle.resources`
+ * 也不再包含 `plugins`。插件产物必须由 `npm run plugin:bundle:stage` 或各插件发布流程
+ * 显式生成，用户按需安装；默认安装包不携带 17 个插件副本。
  *
- * 为什么需要 target 守卫：`beforeBuildCommand` 同时服务 `tauri android/ios build`，
- * 而 `cargo build -p <worker>` 编出的是**宿主架构**的可执行文件 —— 打进移动端
- * 包里毫无用处（还白增体积）。因此只在桌面平台暂存；移动端直接跳过并退 0。
+ * 缺省落点仍是 `src-tauri/plugins/bundled/<名字>`，供显式本地暂存/迁移脚本使用；
+ * 开发期可用 `--root axagent-plugins/crates/plugins/bundled` 落到 `tauri dev` 的源码树路径。
  *
- * 识别依据是 Tauri CLI 注入的环境变量（`TAURI_ENV_PLATFORM` / `TAURI_ENV_TARGET_TRIPLE`）。
- * 两个都没有时（手工直跑本脚本）按「桌面」处理 —— 手工运行本来就是想产出产物。
+ * 多插件清单来自 `./lib/plugin-repos.mjs`，这里只负责逐插件转调 `build-plugin-bundle.mjs`。
  *
- * 多插件（任务 #36 第 1 批）：本脚本只负责**逐插件**转调 `build-plugin-bundle.mjs`，
- * 插件清单与各自产物形状全在那个脚本的 `PLUGIN_SPECS` 里，这里不复制第二份。
- * 新增插件 = 下方 `PLUGINS` 数组加一个名字。
- *
- * 落点（任务 #163）：缺省 `src-tauri/plugins/bundled/<名字>`（发布打包用，与
- * `bundle.resources` 的配置目录对齐）。开发期宿主读的是**编译期默认根**
- * `axagent-plugins/crates/plugins/bundled/`（见 `PluginManagerConfig::resolve_bundled_root`），
- * 用 `--root <目录>` 指过去。此前 `package.json` 的两条 `plugin:bundle:*` 脚本把 `--out`
- * 写死成 `.../stock` —— 那是本清单的**第二份**，新增插件时不会有人想起改它，结果开发期
- * 盘上根本没有 opc 产物、插件解析不到，功能静默下线。⇒ 两条脚本一律转调本脚本。
- *
- * `--debug`：本地脚本用的档。发布路径靠 Tauri 注入的 `TAURI_ENV_DEBUG` 判档，手工直跑时
- * 缺省是 release；开发期要的是 debug 产物（快、且与 `tauri dev` 同档），故显式给。
+ * `--debug`：手工暂存时用 debug 产物（快）；缺省是 release。
  */
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -65,10 +49,8 @@ if (isMobile) {
   process.exit(0);
 }
 
-// 暂存的插件清单：顺序即构建顺序。这里打的是**宿主安装包**，源码权威是主仓外的
-// 17 个独立插件仓（`../AxInvest-plugin-repos/<plugin>`，`AXAGENT_PLUGIN_REPOS_ROOT` 可覆盖）。
-// 主仓 `axagent-plugins/crates/plugin-*` 副本不再参与构建；CI / Release 必须先获取这 17 个仓
-// （取源方案尚未定，缺仓时 `ensurePluginBuildRoots` 直接报错而不是回退主仓副本）。
+// 按需暂存的插件清单：顺序即构建顺序。源码权威是主仓外的独立插件仓
+// (`../AxInvest-plugin-repos/<plugin>`，`AXAGENT_PLUGIN_REPOS_ROOT` 可覆盖)。
 const PLUGINS = PLUGIN_NAMES;
 
 // `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。手工直跑要 debug 档
@@ -106,6 +88,11 @@ for (const plugin of PLUGINS) {
     cwd: repoRoot,
     env: {
       ...process.env,
+      // 17 个独立仓各自带 SDK/target 会重复编译同一批依赖；显式共享 target-dir。
+      // 各仓的 toolchain/profile/rustflags 已同源自检，缓存可安全命中。
+      CARGO_TARGET_DIR:
+        process.env.AXAGENT_SHARED_TARGET_DIR
+        ?? path.join(process.env.HOME ?? repoRoot, ".cargo", "target-axagent"),
       CARGO_PROFILE_RELEASE_STRIP: "symbols",
       CARGO_PROFILE_RELEASE_DEBUG: "0",
     },

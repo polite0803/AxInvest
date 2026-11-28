@@ -705,12 +705,19 @@ mod tests {
     #[test]
     fn discovers_builtin_and_bundled_plugins() {
         let _guard = env_guard();
-        // #189 例外：本用例验证的正是「缺省 bundled 根能装出 Bundled 插件」，必须用真实配置
-        // （钉到空目录就变成「找不到 Bundled」⇒ 断言失去意义）。因此它不计入隔离规则。
-        let manager = PluginManager::new(PluginManagerConfig::new(temp_dir("discover")));
-        let plugins = manager.list_plugins().expect("plugins should list");
-        assert!(plugins.iter().any(|plugin| plugin.metadata.kind == PluginKind::Builtin));
-        assert!(plugins.iter().any(|plugin| plugin.metadata.kind == PluginKind::Bundled));
+        let config_home = temp_dir("discover");
+        // #189 例外：本用例验证**缺省 bundled 根**在远程-only 模型下也不自动安装，
+        // 必须保留一次真实默认配置构造（钉到空目录就证明不了默认根的行为）。
+        let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        assert!(
+            manager.list_plugins().expect("plugins should list").is_empty(),
+            "未安装任何插件时，builtin / bundled / external 目录都不得泄漏进列表"
+        );
+        assert!(
+            manager.load_registry().expect("registry should load").plugins.is_empty(),
+            "默认 bundled 根不得自动写入 installed registry"
+        );
+        let _ = fs::remove_dir_all(config_home);
     }
 
     #[test]
@@ -722,17 +729,30 @@ mod tests {
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
-            .install(source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
         assert_eq!(install.plugin_id, "demo@external");
-        assert!(
-            manager
-                .list_plugins()
-                .expect("list plugins")
-                .iter()
-                .any(|plugin| plugin.metadata.id == "demo@external" && plugin.enabled)
-        );
+        // 安装后默认 disabled：registry 里有记录，但没有任何能力投影。
+        let summary = manager
+            .list_plugins()
+            .expect("list plugins")
+            .into_iter()
+            .find(|plugin| plugin.metadata.id == "demo@external")
+            .expect("installed plugin should be listed");
+        assert!(!summary.enabled);
+        assert!(manager.aggregated_hooks().expect("hooks should aggregate").is_empty());
+        let anchored = manager
+            .load_registry()
+            .expect("registry should load")
+            .plugins
+            .get("demo@external")
+            .and_then(|record| record.integrity.clone())
+            .expect("install should pin integrity anchor");
+        crate::manager::verify_declared_integrity(&install.install_path, &anchored)
+            .expect("installed directory should match pinned hash");
 
+        // 显式启用（含写盘 + 同步内存）后能力才出现。
+        manager.enable("demo@external").expect("显式启用");
         let hooks = manager.aggregated_hooks().expect("hooks should aggregate");
         assert_eq!(hooks.pre_tool_use.len(), 1);
         assert!(hooks.pre_tool_use[0].contains("pre.sh"));
@@ -740,13 +760,18 @@ mod tests {
         manager.disable("demo@external").expect("disable should work");
         assert!(manager.aggregated_hooks().expect("hooks after disable").is_empty());
         manager.enable("demo@external").expect("enable should work");
-
-        write_external_plugin(&source_root, "demo", "2.0.0");
-        let update = manager.update("demo@external").expect("update should work");
-        assert_eq!(update.old_version, "1.0.0");
-        assert_eq!(update.new_version, "2.0.0");
+        assert_eq!(manager.aggregated_hooks().expect("hooks after enable").pre_tool_use.len(), 1);
 
         manager.uninstall("demo@external").expect("uninstall should work");
+        assert!(
+            !manager
+                .load_registry()
+                .expect("registry after uninstall")
+                .plugins
+                .contains_key("demo@external"),
+            "卸载必须从 registry 移除记录"
+        );
+        assert!(!install.install_path.exists(), "卸载必须删除安装目录");
         assert!(
             !manager
                 .list_plugins()
@@ -770,19 +795,16 @@ mod tests {
         config.bundled_root = Some(bundled_root.clone());
         let manager = PluginManager::new(config);
 
-        let installed =
-            manager.list_installed_plugins().expect("bundled plugins should auto-install");
-        assert!(installed.iter().any(|plugin| {
-            plugin.metadata.id == "starter@bundled"
-                && plugin.metadata.kind == PluginKind::Bundled
-                && !plugin.enabled
-        }));
-
+        assert!(
+            manager.list_installed_plugins().expect("installed list").is_empty(),
+            "bundled 根里有插件也不等于已安装"
+        );
         let registry = manager.load_registry().expect("registry should exist");
-        let record =
-            registry.plugins.get("starter@bundled").expect("bundled plugin should be recorded");
-        assert_eq!(record.kind, PluginKind::Bundled);
-        assert!(record.install_path.exists());
+        assert!(!registry.plugins.contains_key("starter@bundled"));
+        assert!(
+            !manager.install_root().join("starter-bundled").exists(),
+            "bundled 根不得被自动复制到安装根"
+        );
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);
@@ -792,14 +814,18 @@ mod tests {
     fn default_bundled_root_loads_repo_bundles_as_installed_plugins() {
         let _guard = env_guard();
         let config_home = temp_dir("default-bundled-home");
-        // #189 例外：本用例专门验证**缺省** bundled 根（仓内 `bundled/`）的自动安装，
-        // 钉到空目录会让断言恒假。它不计入隔离规则。
+        // #189 例外：本用例专门验证**缺省** bundled 根（仓内 `bundled/`）也不再自动安装，
+        // 钉到空目录就证明不了默认根的非安装行为。它不计入隔离规则。
         let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
 
-        let installed =
-            manager.list_installed_plugins().expect("default bundled plugins should auto-install");
-        assert!(installed.iter().any(|plugin| plugin.metadata.id == "example-bundled@bundled"));
-        assert!(installed.iter().any(|plugin| plugin.metadata.id == "sample-hooks@bundled"));
+        assert!(
+            manager.list_installed_plugins().expect("installed list").is_empty(),
+            "远程-only 模型下，仓内 bundled 插件不得自动进入 installed 列表"
+        );
+        assert!(
+            manager.load_registry().expect("registry should load").plugins.is_empty(),
+            "仓内 bundled 插件不得自动写入 installed registry"
+        );
 
         let _ = fs::remove_dir_all(config_home);
     }
@@ -847,13 +873,22 @@ mod tests {
             .write_enabled_state("stale@bundled", Some(true))
             .expect("seed bundled enabled state");
 
-        let installed = manager.list_installed_plugins().expect("bundled sync should succeed");
-        assert!(installed.iter().any(|plugin| plugin.metadata.id == "active@bundled"));
-        assert!(!installed.iter().any(|plugin| plugin.metadata.id == "stale@bundled"));
+        let installed = manager.list_installed_plugins().expect("installed list");
+        assert!(
+            installed.iter().any(|plugin| plugin.metadata.id == "stale@bundled"),
+            "registry 中有记录就仍投影；远程-only 模型不做 bundled 同步/裁剪"
+        );
+        assert!(
+            installed.iter().all(|plugin| plugin.metadata.id != "active@bundled"),
+            "bundled 根里的插件未经安装不得进入 installed 列表"
+        );
 
         let registry = manager.load_registry().expect("load registry");
-        assert!(!registry.plugins.contains_key("stale@bundled"));
-        assert!(!stale_install_path.exists());
+        assert!(registry.plugins.contains_key("stale@bundled"));
+        assert!(
+            stale_install_path.exists(),
+            "registry-only 模型不会扫描/清理 bundled 根外的安装目录"
+        );
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);
@@ -872,22 +907,19 @@ mod tests {
         let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         let manager = PluginManager::new(config.clone());
-        manager.list_installed_plugins().expect("首次同步应安装 bundled 插件");
         let pages_before = manager.list_plugin_pages().expect("首次页面投影");
-        assert!(pages_before.iter().all(|info| info.pages.is_empty()));
+        assert!(pages_before.is_empty(), "未安装的 bundled 插件不应产生页面投影");
 
-        // 同版本只改页面导航元数据：旧判据会因 version/description 不变而跳过同步。
+        // 同版本只改页面导航元数据：远程-only 模型下，bundled 目录变化不触发任何同步。
         write_bundled_plugin_page_with_icon(&source, "navfix", "Calculator");
 
         let reloaded = PluginManager::new(config);
         let pages_after = reloaded.list_plugin_pages().expect("刷新后的页面投影");
-        let page = pages_after
-            .iter()
-            .find(|info| info.id == "navfix@bundled")
-            .and_then(|info| info.pages.first())
-            .expect("更新后的页面应被投影");
-        assert_eq!(page.icon.as_deref(), Some("Calculator"));
-        assert_eq!(page.nav_group.as_deref(), Some("packs"));
+        assert!(pages_after.is_empty(), "bundled 根 manifest 变化不得使未安装插件进入页面投影");
+        assert!(
+            reloaded.load_registry().expect("registry should load").plugins.is_empty(),
+            "bundled 根 manifest 变化不得写入 installed registry"
+        );
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);
@@ -911,14 +943,15 @@ mod tests {
         config.bundled_root = Some(bundled_root.clone());
 
         let manager = PluginManager::new(config);
-        manager.list_installed_plugins().expect("单个插件失败不应让整体列表失败");
-
-        let registry = manager.load_registry().expect("registry 应落盘");
+        assert!(manager.list_installed_plugins().expect("列表不应失败").is_empty());
+        let registry = manager.load_registry().expect("registry 应可读");
         assert!(!registry.plugins.contains_key("aaa-blocked@bundled"));
-        assert!(registry.plugins.contains_key("bbb-good@bundled"));
+        assert!(!registry.plugins.contains_key("bbb-good@bundled"));
         assert!(
-            install_root.join("bbb-good-bundled").join(MANIFEST_RELATIVE_PATH).exists(),
-            "失败插件之后的插件仍应完成同步"
+            fs::metadata(install_root.join("aaa-blocked-bundled"))
+                .expect("占位文件应保留")
+                .is_file(),
+            "远程-only 模型不会修改 bundled 路径下的其它目录"
         );
 
         let _ = fs::remove_dir_all(config_home);
@@ -1022,138 +1055,115 @@ mod tests {
     fn persists_bundled_plugin_enable_state_across_reloads() {
         let _guard = env_guard();
         let config_home = temp_dir("bundled-state-home");
-        let bundled_root = temp_dir("bundled-state-root");
-        write_bundled_plugin(&bundled_root.join("starter"), "starter", "0.1.0", false);
+        let source_root = temp_dir("bundled-state-source");
+        write_external_plugin(&source_root, "starter", "0.1.0");
 
-        let mut config = isolated_config(&config_home);
-        config.bundled_root = Some(bundled_root.clone());
-        let mut manager = PluginManager::new(config.clone());
-
-        manager.enable("starter@bundled").expect("enable bundled plugin should succeed");
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
+        manager.enable("starter@external").expect("显式启用");
         assert_eq!(
-            load_enabled_plugins(&manager.settings_path()).get("starter@bundled"),
+            load_enabled_plugins(&manager.settings_path()).get("starter@external"),
             Some(&true)
         );
 
         let mut reloaded_config = isolated_config(&config_home);
-        reloaded_config.bundled_root = Some(bundled_root.clone());
         reloaded_config.enabled_plugins = PluginManagerConfig::load_enabled_plugins(&config_home);
         let reloaded_manager = PluginManager::new(reloaded_config);
-        let reloaded = reloaded_manager
-            .list_installed_plugins()
-            .expect("bundled plugins should still be listed");
+        let reloaded = reloaded_manager.list_plugins().expect("installed plugin should be listed");
         assert!(
             reloaded
                 .iter()
-                .any(|plugin| { plugin.metadata.id == "starter@bundled" && plugin.enabled })
+                .any(|plugin| { plugin.metadata.id == "starter@external" && plugin.enabled }),
+            "启用态应跨重载保留"
+        );
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    /// 启动期只拉起 installed registry 中显式 enabled 的插件：
+    /// `defaultEnabled` 不再兜底，bundled 根里的未安装插件也绝不启动。
+    #[test]
+    fn start_enabled_plugins_starts_default_enabled_bundled_without_settings_entry() {
+        let _guard = env_guard();
+        let config_home = temp_dir("default-start-home");
+        let bundled_root = temp_dir("default-start-root");
+        let source_root = temp_dir("default-start-source");
+        write_bundled_plugin(&bundled_root.join("starter"), "starter", "0.1.0", true);
+        write_external_plugin(&source_root, "starter", "1.0.0");
+
+        let mut config = isolated_config(&config_home);
+        config.bundled_root = Some(bundled_root.clone());
+        let mut manager = PluginManager::new(config);
+
+        assert!(manager.start_enabled_plugins().expect("startup should succeed").is_empty());
+
+        let install = manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
+        assert!(manager.start_enabled_plugins().expect("startup after install").is_empty());
+
+        manager.enable(&install.plugin_id).expect("显式启用");
+        assert_eq!(
+            manager.start_enabled_plugins().expect("startup after explicit enable"),
+            vec![install.plugin_id.clone()]
         );
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);
+        let _ = fs::remove_dir_all(source_root);
     }
 
     #[test]
     fn persists_bundled_plugin_disable_state_across_reloads() {
         let _guard = env_guard();
         let config_home = temp_dir("bundled-disabled-home");
-        let bundled_root = temp_dir("bundled-disabled-root");
-        write_bundled_plugin(&bundled_root.join("starter"), "starter", "0.1.0", true);
+        let source_root = temp_dir("bundled-disabled-source");
+        write_external_plugin(&source_root, "starter", "1.0.0");
 
-        let mut config = isolated_config(&config_home);
-        config.bundled_root = Some(bundled_root.clone());
-        let mut manager = PluginManager::new(config);
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let install = manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
+        assert!(!install.plugin_id.is_empty());
 
-        manager.disable("starter@bundled").expect("disable bundled plugin should succeed");
+        manager.enable(&install.plugin_id).expect("显式启用");
+        manager.disable(&install.plugin_id).expect("disable installed plugin should succeed");
         assert_eq!(
-            load_enabled_plugins(&manager.settings_path()).get("starter@bundled"),
+            load_enabled_plugins(&manager.settings_path()).get(&install.plugin_id),
             Some(&false)
         );
 
         let mut reloaded_config = isolated_config(&config_home);
-        reloaded_config.bundled_root = Some(bundled_root.clone());
         reloaded_config.enabled_plugins = PluginManagerConfig::load_enabled_plugins(&config_home);
         let reloaded_manager = PluginManager::new(reloaded_config);
-        let reloaded = reloaded_manager
-            .list_installed_plugins()
-            .expect("bundled plugins should still be listed");
+        let reloaded = reloaded_manager.list_plugins().expect("installed plugin should be listed");
         assert!(
             reloaded
                 .iter()
-                .any(|plugin| { plugin.metadata.id == "starter@bundled" && !plugin.enabled })
+                .any(|plugin| { plugin.metadata.id == install.plugin_id && !plugin.enabled }),
+            "禁用态应跨重载保留"
         );
 
         let _ = fs::remove_dir_all(config_home);
-        let _ = fs::remove_dir_all(bundled_root);
+        let _ = fs::remove_dir_all(source_root);
     }
 
     #[test]
-    fn validates_plugin_source_before_install() {
+    fn local_fixture_source_is_rejected_by_release_only_gate() {
         let _guard = env_guard();
         let config_home = temp_dir("validate-home");
         let source_root = temp_dir("validate-source");
         write_external_plugin(&source_root, "validator", "1.0.0");
         let manager = PluginManager::new(isolated_config(&config_home));
-        let manifest = manager
-            .validate_plugin_source(source_root.to_str().expect("utf8 path"))
-            .expect("manifest should validate");
-        assert_eq!(manifest.name, "validator");
+        let error = manager
+            .validate_release_source(source_root.to_str().expect("utf8 path"))
+            .expect_err("本地目录不能作为发布源");
+        assert!(matches!(error, PluginError::InvalidManifest(_)));
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(source_root);
-    }
-
-    #[test]
-    fn expected_source_hash_is_checked_before_install() {
-        let _guard = env_guard();
-        let config_home = temp_dir("expected-hash-home");
-        let source_root = temp_dir("expected-hash-source");
-        write_external_plugin(&source_root, "hash-validator", "1.0.0");
-
-        let expected = crate::manager::hash_plugin_directory(&source_root).expect("夹具目录可哈希");
-        let mut manager = PluginManager::new(isolated_config(&config_home));
-        let manifest = manager
-            .validate_plugin_source_verified(
-                source_root.to_str().expect("utf8 path"),
-                Some(expected.as_str()),
-            )
-            .expect("正确哈希应通过验证");
-        assert_eq!(manifest.name, "hash-validator");
-
-        let error = manager
-            .validate_plugin_source_verified(
-                source_root.to_str().expect("utf8 path"),
-                Some(&"0".repeat(64)),
-            )
-            .expect_err("错误哈希必须拒绝");
-        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
-
-        let error = manager
-            .install_verified(source_root.to_str().expect("utf8 path"), Some(""))
-            .expect_err("空白哈希不能当作跳过校验");
-        assert!(matches!(error, PluginError::IntegrityVerifyFailed(_)));
-
-        let outcome = manager
-            .install_verified(source_root.to_str().expect("utf8 path"), Some(expected.as_str()))
-            .expect("正确哈希应允许安装");
-        assert_eq!(outcome.plugin_id, "hash-validator@external");
-
-        let _ = fs::remove_dir_all(config_home);
-        let _ = fs::remove_dir_all(source_root);
-    }
-
-    #[test]
-    fn remote_sources_require_expected_hash_before_download() {
-        let mut manager = PluginManager::new(isolated_config(temp_dir("remote-hash-home")));
-
-        for source in ["https://example.com/plugin.git", "@scope/plugin", "openclaw:plugin"] {
-            // 安装门禁必须在任何下载/物化之前拒绝；这里只调用安装调用面，
-            // 避免测试自身先通过网络验证预览行为。
-            let error =
-                manager.install_verified(source, None).expect_err("远程源缺少哈希必须在下载前拒绝");
-            assert!(
-                matches!(error, PluginError::IntegrityVerifyFailed(_)),
-                "`{source}` 应报 IntegrityVerifyFailed，实际 {error:?}"
-            );
-        }
     }
 
     #[test]
@@ -1164,7 +1174,9 @@ mod tests {
         write_external_plugin(&source_root, "registry-demo", "1.0.0");
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
-        manager.install(source_root.to_str().expect("utf8 path")).expect("install should succeed");
+        manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("install should succeed");
         manager.disable("registry-demo@external").expect("disable should succeed");
 
         let registry = manager.plugin_registry().expect("registry should build");
@@ -1185,43 +1197,66 @@ mod tests {
         let _guard = env_guard();
         // given
         let config_home = temp_dir("report-home");
-        let external_root = temp_dir("report-external");
-        write_external_plugin(&external_root.join("valid"), "valid-report", "1.0.0");
-        write_broken_plugin(&external_root.join("broken"), "broken-report");
+        let valid_root = temp_dir("report-valid");
+        let broken_root = temp_dir("report-broken");
+        write_external_plugin(&valid_root, "valid-report", "1.0.0");
+        write_broken_plugin(&broken_root, "broken-report");
 
-        let mut config = isolated_config(&config_home);
-        config.external_dirs = vec![external_root.clone()];
-        let manager = PluginManager::new(config);
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let install = manager
+            .install_test_fixture(valid_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
+        let mut registry = manager.load_registry().expect("registry should load");
+        let record = registry.plugins.get(&install.plugin_id).expect("valid record").clone();
+        registry.plugins.insert(
+            "broken-report@external".to_string(),
+            InstalledPluginRecord {
+                kind: PluginKind::External,
+                id: "broken-report@external".to_string(),
+                name: "broken-report".to_string(),
+                version: "1.0.0".to_string(),
+                description: "broken report plugin".to_string(),
+                install_path: broken_root.clone(),
+                source: PluginInstallSource::LocalPath { path: broken_root.clone() },
+                installed_at_unix_ms: 1,
+                updated_at_unix_ms: 1,
+                integrity: None,
+            },
+        );
+        manager.store_registry(&registry).expect("store registry");
 
-        // when
-        let report = manager
-            .plugin_registry_report()
-            .expect("report should tolerate invalid external plugins");
+        // 外部目录中的同结构插件没有 registry 记录，必须保持不可见。
+        let orphan_root = temp_dir("report-orphan");
+        write_external_plugin(&orphan_root, "orphan-report", "1.0.0");
 
-        // then
-        assert!(report.registry().contains("valid-report@external"));
+        let report = manager.plugin_registry_report().expect("report should tolerate a bad record");
+        assert!(report.registry().contains(&install.plugin_id));
+        assert!(!report.registry().contains("orphan-report@external"));
         assert_eq!(report.failures().len(), 1);
         assert_eq!(report.failures()[0].kind, PluginKind::External);
-        assert!(report.failures()[0].plugin_root.ends_with(Path::new("broken")));
+        assert_eq!(report.failures()[0].plugin_root, broken_root);
         assert!(report.failures()[0].error().to_string().contains("does not exist"));
 
-        // UI 投影必须比严格注册表宽容：一个坏插件不能把整个插件页清空。
         let summaries =
             manager.list_plugin_marketplace_summaries().expect("UI 列表应容忍单个加载失败的插件");
-        assert!(summaries.iter().any(|p| p.summary.metadata.id == "valid-report@external"));
+        assert!(summaries.iter().any(|p| p.summary.metadata.id == install.plugin_id));
+        assert!(summaries.iter().all(|p| p.summary.metadata.id != "orphan-report@external"));
 
         let error =
             manager.plugin_registry().expect_err("strict registry should surface load failures");
         match error {
             PluginError::LoadFailures(failures) => {
                 assert_eq!(failures.len(), 1);
-                assert!(failures[0].plugin_root.ends_with(Path::new("broken")));
+                assert_eq!(failures[0].plugin_root, broken_root);
             },
             other => panic!("expected load failures, got {other}"),
         }
+        assert_eq!(record.id, install.plugin_id);
 
         let _ = fs::remove_dir_all(config_home);
-        let _ = fs::remove_dir_all(external_root);
+        let _ = fs::remove_dir_all(valid_root);
+        let _ = fs::remove_dir_all(broken_root);
+        let _ = fs::remove_dir_all(orphan_root);
     }
 
     #[test]
@@ -1229,28 +1264,47 @@ mod tests {
         let _guard = env_guard();
         // given
         let config_home = temp_dir("installed-report-home");
-        let bundled_root = temp_dir("installed-report-bundled");
+        let valid_root = temp_dir("installed-report-valid");
+        let broken_root = temp_dir("installed-report-broken");
         let install_root = config_home.join("plugins").join("installed");
-        write_external_plugin(&install_root.join("valid"), "installed-valid", "1.0.0");
-        write_broken_plugin(&install_root.join("broken"), "installed-broken");
+        fs::create_dir_all(&install_root).expect("install root");
+        write_external_plugin(&install_root.join("unregistered"), "unregistered", "1.0.0");
+        write_external_plugin(&valid_root, "installed-valid", "1.0.0");
+        write_broken_plugin(&broken_root, "installed-broken");
 
-        let mut config = isolated_config(&config_home);
-        config.bundled_root = Some(bundled_root.clone());
-        config.install_root = Some(install_root);
-        let manager = PluginManager::new(config);
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let install = manager
+            .install_test_fixture(valid_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
+        let mut registry = manager.load_registry().expect("registry should load");
+        registry.plugins.insert(
+            "installed-broken@external".to_string(),
+            InstalledPluginRecord {
+                kind: PluginKind::External,
+                id: "installed-broken@external".to_string(),
+                name: "installed-broken".to_string(),
+                version: "1.0.0".to_string(),
+                description: "broken installed plugin".to_string(),
+                install_path: broken_root.clone(),
+                source: PluginInstallSource::LocalPath { path: broken_root.clone() },
+                installed_at_unix_ms: 1,
+                updated_at_unix_ms: 1,
+                integrity: None,
+            },
+        );
+        manager.store_registry(&registry).expect("store registry");
 
-        // when
         let report = manager
             .installed_plugin_registry_report()
             .expect("installed report should tolerate invalid installed plugins");
-
-        // then
-        assert!(report.registry().contains("installed-valid@external"));
+        assert!(report.registry().contains(&install.plugin_id));
+        assert!(!report.registry().contains("unregistered@external"));
         assert_eq!(report.failures().len(), 1);
-        assert!(report.failures()[0].plugin_root.ends_with(Path::new("broken")));
+        assert_eq!(report.failures()[0].plugin_root, broken_root);
 
         let _ = fs::remove_dir_all(config_home);
-        let _ = fs::remove_dir_all(bundled_root);
+        let _ = fs::remove_dir_all(valid_root);
+        let _ = fs::remove_dir_all(broken_root);
     }
 
     #[test]
@@ -1263,17 +1317,16 @@ mod tests {
 
         let manager = PluginManager::new(isolated_config(&config_home));
 
-        // when
+        // 本地目录首先被 release-only 来源门禁拒绝，不会去读 manifest。
         let error = manager
-            .validate_plugin_source(source_root.to_str().expect("utf8 path"))
-            .expect_err("missing hook file should fail validation");
+            .validate_release_source(source_root.to_str().expect("utf8 path"))
+            .expect_err("本地目录不能作为发布源");
+        assert!(matches!(error, PluginError::InvalidManifest(_)));
 
-        // then
-        assert!(error.to_string().contains("does not exist"));
-
+        // 测试夹具入口仍要拒绝缺失的 hook 文件（缺路径校验不可被来源门禁掩盖）。
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let install_error = manager
-            .install(source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
             .expect_err("install should reject invalid hook paths");
         assert!(install_error.to_string().contains("does not exist"));
 
@@ -1291,17 +1344,16 @@ mod tests {
 
         let manager = PluginManager::new(isolated_config(&config_home));
 
-        // when
+        // 本地目录首先被 release-only 来源门禁拒绝，不会去读 manifest。
         let error = manager
-            .validate_plugin_source(source_root.to_str().expect("utf8 path"))
-            .expect_err("missing failure hook file should fail validation");
+            .validate_release_source(source_root.to_str().expect("utf8 path"))
+            .expect_err("本地目录不能作为发布源");
+        assert!(matches!(error, PluginError::InvalidManifest(_)));
 
-        // then
-        assert!(error.to_string().contains("does not exist"));
-
+        // 测试夹具入口仍要拒绝缺失的 failure hook 文件。
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let install_error = manager
-            .install(source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
             .expect_err("install should reject invalid failure hook paths");
         assert!(install_error.to_string().contains("does not exist"));
 
@@ -1318,11 +1370,19 @@ mod tests {
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
-            .install(source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
         let log_path = install.install_path.join("lifecycle.log");
 
         let registry = manager.plugin_registry().expect("registry should build");
+        let registered = registry.get(&install.plugin_id).expect("installed plugin is registered");
+        assert!(!registered.is_enabled(), "安装后默认 disabled");
+        registry.initialize().expect("init on disabled registry should succeed");
+        registry.shutdown().expect("shutdown on disabled registry should succeed");
+        assert!(!log_path.exists(), "未启用的插件不得执行 lifecycle hook");
+
+        manager.enable(&install.plugin_id).expect("显式启用");
+        let registry = manager.plugin_registry().expect("enabled registry should build");
         registry.initialize().expect("init should succeed");
         registry.shutdown().expect("shutdown should succeed");
 
@@ -1346,7 +1406,9 @@ mod tests {
         write_tool_plugin(&source_root, "tool-demo", "1.0.0");
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
-        manager.install(source_root.to_str().expect("utf8 path")).expect("install should succeed");
+        manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("install should succeed");
 
         let tools = manager.aggregated_tools().expect("tools should aggregate");
         assert_eq!(tools.len(), 1);
@@ -1377,8 +1439,10 @@ mod tests {
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
-            .install(source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
+
+        manager.enable(&install.plugin_id).expect("显式启用");
 
         // 可见面：plugin_list 的 summary 携带 commands 声明。
         let summaries = manager.list_plugins().expect("list should succeed");
@@ -1423,7 +1487,7 @@ mod tests {
 
         let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
-            .install(source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
 
         let output = manager
@@ -1444,59 +1508,66 @@ mod tests {
     fn list_installed_plugins_scans_install_root_without_registry_entries() {
         let _guard = env_guard();
         let config_home = temp_dir("installed-scan-home");
-        let bundled_root = temp_dir("installed-scan-bundled");
         let install_root = config_home.join("plugins").join("installed");
-        let installed_plugin_root = install_root.join("scan-demo");
+        let source_root = temp_dir("installed-scan-source");
         write_file(
-            installed_plugin_root.join(MANIFEST_FILE_NAME).as_path(),
+            install_root.join("scan-demo").join(MANIFEST_FILE_NAME).as_path(),
             r#"{
   "name": "scan-demo",
   "version": "1.0.0",
-  "description": "Scanned from install root"
+  "description": "Unregistered directory in install root"
 }"#,
         );
+        write_external_plugin(&source_root, "registered-demo", "1.0.0");
 
-        let mut config = isolated_config(&config_home);
-        config.bundled_root = Some(bundled_root.clone());
-        config.install_root = Some(install_root);
-        let manager = PluginManager::new(config);
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let install = manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
 
-        let installed =
-            manager.list_installed_plugins().expect("installed plugins should scan directories");
-        assert!(installed.iter().any(|plugin| plugin.metadata.id == "scan-demo@external"));
+        let installed = manager.list_installed_plugins().expect("installed list");
+        assert_eq!(installed.len(), 1);
+        assert_eq!(installed[0].metadata.id, install.plugin_id);
+        assert!(
+            installed.iter().all(|plugin| plugin.metadata.id != "scan-demo@external"),
+            "install root 里的裸目录不得凭 manifest 变成已安装插件"
+        );
 
         let _ = fs::remove_dir_all(config_home);
-        let _ = fs::remove_dir_all(bundled_root);
+        let _ = fs::remove_dir_all(source_root);
     }
 
     #[test]
     fn list_installed_plugins_scans_packaged_manifests_in_install_root() {
         let _guard = env_guard();
         let config_home = temp_dir("installed-packaged-scan-home");
-        let bundled_root = temp_dir("installed-packaged-scan-bundled");
         let install_root = config_home.join("plugins").join("installed");
-        let installed_plugin_root = install_root.join("scan-packaged");
+        let source_root = temp_dir("installed-packaged-source");
         write_file(
-            installed_plugin_root.join(MANIFEST_RELATIVE_PATH).as_path(),
+            install_root.join("scan-packaged").join(MANIFEST_RELATIVE_PATH).as_path(),
             r#"{
   "name": "scan-packaged",
   "version": "1.0.0",
-  "description": "Packaged manifest in install root"
+  "description": "Unregistered packaged manifest in install root"
 }"#,
         );
+        write_external_plugin(&source_root, "registered-packaged", "1.0.0");
 
-        let mut config = isolated_config(&config_home);
-        config.bundled_root = Some(bundled_root.clone());
-        config.install_root = Some(install_root);
-        let manager = PluginManager::new(config);
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let install = manager
+            .install_test_fixture(source_root.to_str().expect("utf8 path"))
+            .expect("fixture install should succeed");
 
-        let installed = manager
-            .list_installed_plugins()
-            .expect("installed plugins should scan packaged manifests");
-        assert!(installed.iter().any(|plugin| plugin.metadata.id == "scan-packaged@external"));
+        let installed = manager.list_installed_plugins().expect("installed list");
+        assert_eq!(installed.len(), 1);
+        assert_eq!(installed[0].metadata.id, install.plugin_id);
+        assert!(
+            installed.iter().all(|plugin| plugin.metadata.id != "scan-packaged@external"),
+            "install root 里的打包 manifest 目录也不得绕过 registry"
+        );
 
         let _ = fs::remove_dir_all(config_home);
-        let _ = fs::remove_dir_all(bundled_root);
+        let _ = fs::remove_dir_all(source_root);
     }
 
     /// Regression test for ROADMAP #41: verify that `CLAW_CONFIG_HOME` isolation prevents
@@ -1515,36 +1586,24 @@ mod tests {
         // exclusive access; the env var is restored/removed in cleanup.
         unsafe { std::env::set_var("CLAW_CONFIG_HOME", &config_home) };
 
-        // Create a test fixture plugin in the isolated config home
+        // 在隔离的 config home 里放一个只有目录、没有 registry 记录的插件。
         let install_root = config_home.join("plugins").join("installed");
-        let fixture_plugin_root = install_root.join("isolated-test-plugin");
         write_file(
-            fixture_plugin_root.join(MANIFEST_RELATIVE_PATH).as_path(),
+            install_root.join("isolated-test-plugin").join(MANIFEST_RELATIVE_PATH).as_path(),
             r#"{
   "name": "isolated-test-plugin",
   "version": "1.0.0",
-  "description": "Test fixture plugin in isolated config home"
+  "description": "Unregistered plugin in isolated config home"
 }"#,
         );
 
-        // Create PluginManager with isolated bundled_root - it should use the temp config_home, not host ~/.claw/
-        let mut config = isolated_config(&config_home);
-        config.bundled_root = Some(bundled_root.clone());
-        let manager = PluginManager::new(config);
-
-        // List installed plugins - should only see the test fixture, not host plugins
+        let manager = PluginManager::new(isolated_config(&config_home));
         let installed = manager.list_installed_plugins().expect("installed plugins should list");
-
-        // Verify we only see the test fixture plugin
-        assert_eq!(
-            installed.len(),
-            1,
-            "should only see the test fixture plugin, not host ~/.claw/plugins/"
+        assert!(
+            installed.is_empty(),
+            "host ~/.claw/plugins/ 与 install root 裸目录都不得泄漏进隔离实例"
         );
-        assert_eq!(
-            installed[0].metadata.id, "isolated-test-plugin@external",
-            "should see the test fixture plugin"
-        );
+        assert!(manager.load_registry().expect("registry should load").plugins.is_empty());
 
         // Cleanup
         // SAFETY: Same as above — test code with env_lock() guard ensuring exclusive access.
@@ -1586,13 +1645,18 @@ mod tests {
 
                 // Create PluginManager and install
                 let mut manager = PluginManager::new(isolated_config(&config_home));
-                let install_result = manager.install(source_root.to_str().expect("utf8 path"));
+                let install_result =
+                    manager.install_test_fixture(source_root.to_str().expect("utf8 path"));
 
                 match install_result {
                     Ok(install) => {
                         let log_path = install.install_path.join("lifecycle.log");
 
                         // Initialize and shutdown the registry to trigger lifecycle hooks
+                        manager
+                            .write_enabled_state(&install.plugin_id, Some(true))
+                            .expect("写启用态");
+                        manager.config.enabled_plugins.insert(install.plugin_id.clone(), true);
                         let registry = manager.plugin_registry();
                         match registry {
                             Ok(registry) => {

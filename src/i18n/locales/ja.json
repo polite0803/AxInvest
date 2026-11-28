@@ -1024,8 +1024,7 @@
         "eventStatsNone": "イベント購読なし",
         "install": "インストール",
         "installFailed": "インストールに失敗しました: {{error}}",
-        "installPlaceholder": "インストール: @scope/name または GitURL またはローカルパス",
-        "releasePlaceholder": "リリースアドレス: axagent-release+https://.../release.json",
+        "releasePlaceholder": "リリース URL（https://.../release.json）",
         "releaseHint": "リリースアドレスは HTTPS リリースマニフェストを読み込み、記載された SHA-256 で成果物を検証します。",
         "installSuccess": "{{id}} v{{version}} をインストールしました",
         "installTitle": "{{name}} をインストール",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "シーム ID / プラグイン ID で検索",
         "registrySeam": "シーム",
         "installSource": "インストール元",
-        "sha256Placeholder": "期待する SHA-256（16 進数 64 文字）",
-        "sha256Hint": "リモートソースには SHA-256 が必要です。ローカルソースは空欄にできますが、入力する場合は有効な値が必要です。",
-        "sha256Invalid": "SHA-256 は 16 進数 64 文字である必要があります",
-        "sha256Required": "このリモートソースはインストール前に SHA-256 が必要です",
-        "sha256FromRelease": "SHA-256 はリリースマニフェストから提供されます",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "インストール済みプラグインを名前 / ソース / 権限 / ページで検索",
         "listEmpty": "インストール済みプラグインはありません",
         "source": "ソース",
@@ -1068,8 +1061,6 @@
         "pages": "ページ",
         "sourceTypeFilter": "ソース種別",
         "sourceTypeAll": "すべて",
-        "sourceTypeRemote": "リモート",
-        "sourceTypeLocal": "ローカル",
         "sourceTypeRelease": "リリース",
         "enabledFilter": "有効状態",
         "enabledAll": "すべて",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} を更新しました",
         "updateFailed": "更新に失敗しました",
         "updateSourceMissing": "プラグインのインストール元を読み込めません",
-        "validate": "検証"
+        "validate": "検証",
+        "remoteOnlyHint": "HTTPS の release.json URL のみ対応しています。SHA-256 はアプリが自動検証するため入力不要です。",
+        "installAfterEnable": "HTTPS の release.json",
+        "installAfterEnableHint": "インストール後は既定で無効です。一覧から手動で有効化してください。"
       }
     },
     "preferences": "設定",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "プラグインのソースビルドに失敗しました",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "ディスク容量またはメモリが不足しているため、プラグインをビルドできません",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "利用可能な Rust ツールチェーンまたはターゲットがありません",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "プラグインソースの整合性を確認できませんでした。SHA-256 を確認してください",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "プラグインのソース検証に失敗しました。URL を確認するか再プレビューしてください。",
     "PLUGIN_UI_ACTION_FAILED": "プラグインがこの操作の実行に失敗しました",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "この操作にはプラグインの常駐プロセスが必要ですが、プラグインは実行されていません（worker 未宣言または無効）",
     "PROVIDER_ADAPTER_NOT_FOUND": "プロバイダーアダプターが見つかりません",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "コストまたはトークンクォータを超過しました",
     "BOT_SKILL_NOT_FOUND": "このBotのスキル割り当てが見つかりません",
     "BOT_SKILL_PRESET_INVALID": "スキルプリセットの形式が不正です",
-    "PLUGIN_ACCESS_DENIED": "プラグインのディレクトリがロックされているかアクセスできません。使用中のプログラムを閉じてから再試行してください。"
+    "PLUGIN_ACCESS_DENIED": "プラグインのディレクトリがロックされているかアクセスできません。使用中のプログラムを閉じてから再試行してください。",
+    "LOCAL_INFERENCE_DISABLED": "このビルドではローカル推論が有効になっていません。",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "このビルドではローカル微調整が有効になっていません。"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -5421,19 +5417,19 @@
       "disabled": "プラグインを無効化",
       "enabled": "プラグインを有効化",
       "install": "インストール",
-      "installFirst": "プラグインをインストールして始めましょう",
       "name": "名前",
       "noPlugins": "プラグインがインストールされていません",
-      "openPluginsFolder": "フォルダを開く",
       "panels": "パネル",
-      "pluginDirs": "プラグインディレクトリ",
-      "pluginDirsDescription": "プラグインディレクトリを管理",
       "refresh": "更新",
       "refreshSuccess": "プラグインを更新しました",
       "status": "ステータス",
       "title": "ダッシュボードプラグイン",
       "unload": "アンロード",
-      "unloaded": "プラグインをアンロード"
+      "unloaded": "プラグインをアンロード",
+      "releaseOnly": "HTTPS の release.json URL のみ対応しています。",
+      "installedNeedEnable": "インストールしました。手動で有効化してください。",
+      "releasePlaceholder": "リリース URL（https://.../release.json）",
+      "releaseHint": "SHA-256 と整合性は自動検証されます。インストール後は手動で有効化してください。"
     },
     "data": {
       "title": "データ管理"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "インストールに失敗しました：{{error}}",
       "loadFailed": "プラグインの読み込みに失敗しました：{{error}}",
-      "openFolderFailed": "フォルダを開けませんでした：{{error}}",
       "refreshFailed": "更新に失敗しました：{{error}}",
       "toggleFailed": "状態の切り替えに失敗しました：{{error}}",
       "unloadFailed": "アンロードに失敗しました：{{error}}",

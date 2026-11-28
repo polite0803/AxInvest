@@ -7,6 +7,15 @@ use axagent_agent_macro::agent_command;
 use axagent_search::model_downloader::{LocalModelInfo, ModelDownloader, PresetModel};
 use tauri::State;
 
+#[cfg(not(feature = "local-inference"))]
+fn local_inference_disabled<T>() -> Result<T, String> {
+    Err(String::from(
+        ErrorResponse::new(crate::commands::error_code::local_model::LOCAL_INFERENCE_DISABLED)
+            .with_category(ErrorCategory::Unrecoverable)
+            .with_detail("本地 Candle 推理未编译进当前构建"),
+    ))
+}
+
 #[agent_command(domain = model, safety = Safe, call_mode = StateOnly, description = "列出本地模型")]
 #[tauri::command]
 pub async fn list_local_models() -> Result<Vec<LocalModelInfo>, String> {
@@ -17,6 +26,12 @@ pub async fn list_local_models() -> Result<Vec<LocalModelInfo>, String> {
 #[agent_command(domain = model, safety = Caution, call_mode = StateInput, description = "下载模型")]
 #[tauri::command]
 pub async fn download_model(filename: String) -> Result<(), String> {
+    #[cfg(not(feature = "local-inference"))]
+    {
+        let _ = filename;
+        local_inference_disabled()
+    }
+    #[cfg(feature = "local-inference")]
     axagent_search::inference::download_and_load_model(&filename)
         .await
         .map_err(|e| String::from(ErrorResponse::from_error(e, ErrorCategory::Unrecoverable)))
@@ -25,6 +40,12 @@ pub async fn download_model(filename: String) -> Result<(), String> {
 #[agent_command(domain = model, safety = Dangerous, call_mode = StateInput, description = "删除模型")]
 #[tauri::command]
 pub async fn delete_model(filename: String) -> Result<(), String> {
+    #[cfg(not(feature = "local-inference"))]
+    {
+        let _ = filename;
+        local_inference_disabled()
+    }
+    #[cfg(feature = "local-inference")]
     axagent_search::inference::delete_and_unload_model(&filename)
         .await
         .map_err(|e| String::from(ErrorResponse::from_error(e, ErrorCategory::Unrecoverable)))
@@ -44,7 +65,10 @@ pub async fn get_preset_models() -> Result<Vec<PresetModel>, String> {
 #[tauri::command]
 pub async fn set_auto_load_models(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     // 更新运行时原子标志（立即生效）
+    #[cfg(feature = "local-inference")]
     axagent_search::inference::set_auto_load_models(enabled);
+    #[cfg(not(feature = "local-inference"))]
+    let _ = enabled;
 
     // 持久化到 DB settings
     axagent_dao::repo::settings::set_setting(

@@ -2483,7 +2483,10 @@ pub async fn collect_rag_context_with_pipeline_from_refs(
         .await;
     }
 
-    let engine: Arc<dyn InferenceEngine> = crate::inference::global_engine();
+    #[cfg(feature = "local-inference")]
+    let engine: Option<Arc<dyn InferenceEngine>> = Some(crate::inference::global_engine());
+    #[cfg(not(feature = "local-inference"))]
+    let engine: Option<Arc<dyn InferenceEngine>> = None;
 
     if sources.is_empty() {
         return RagContextResult { context_parts: vec![], source_results: vec![] };
@@ -2591,7 +2594,7 @@ pub async fn collect_rag_context_with_pipeline_from_refs(
                 };
             let pipeline = crate::rag_pipeline::RAGPipeline::new(
                 &cfg,
-                Some(engine.clone()),
+                engine.clone(),
                 api_key.clone(),
                 graph_provider,
             );

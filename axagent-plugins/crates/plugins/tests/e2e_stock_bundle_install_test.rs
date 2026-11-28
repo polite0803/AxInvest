@@ -66,7 +66,7 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
 
     let outcome = manager
-        .install(dir.to_str().expect("产物路径应是 UTF-8"))
+        .install_test_fixture(dir.to_str().expect("产物路径应是 UTF-8"))
         .expect("install 应成功：清单合法、整目录（含 bin/）被拷贝进安装根");
     // 拷贝必须带走 worker 产物 —— 只拷清单会让 enable 在 resolve_worker_program 处失败。
     assert!(

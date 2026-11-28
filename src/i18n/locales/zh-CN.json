@@ -1024,8 +1024,7 @@
         "eventStatsNone": "未订阅事件",
         "install": "安装",
         "installFailed": "安装失败: {{error}}",
-        "installPlaceholder": "安装: @scope/name 或 Git URL 或本地路径",
-        "releasePlaceholder": "发布地址: axagent-release+https://.../release.json",
+        "releasePlaceholder": "发布地址（https://.../release.json）",
         "releaseHint": "发布地址会读取 HTTPS 发布清单，并使用清单声明的 SHA-256 校验成品包。",
         "installSuccess": "已安装 {{id}} v{{version}}",
         "installTitle": "安装 {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "按接缝 ID / 插件 ID 搜索",
         "registrySeam": "接缝",
         "installSource": "安装来源",
-        "sha256Placeholder": "期望 SHA-256（64 位十六进制字符）",
-        "sha256Hint": "远程来源必须填写 SHA-256；本地来源可留空，填写后必须合法。",
-        "sha256Invalid": "SHA-256 必须是 64 位十六进制字符",
-        "sha256Required": "该远程来源在安装前必须填写 SHA-256",
-        "sha256FromRelease": "SHA-256 由发布清单提供",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "按名称 / 来源 / 权限 / 页面搜索插件",
         "listEmpty": "暂无已安装插件",
         "source": "来源",
@@ -1068,8 +1061,6 @@
         "pages": "页面",
         "sourceTypeFilter": "来源类型",
         "sourceTypeAll": "全部来源",
-        "sourceTypeRemote": "远程",
-        "sourceTypeLocal": "本地",
         "sourceTypeRelease": "发布来源",
         "enabledFilter": "启用状态",
         "enabledAll": "全部状态",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "更新成功：{{id}} v{{version}}",
         "updateFailed": "更新失败",
         "updateSourceMissing": "无法读取插件安装来源",
-        "validate": "验证"
+        "validate": "验证",
+        "remoteOnlyHint": "仅支持 HTTPS 发布地址，以 /release.json 结尾。SHA-256 由应用自动校验，无需填写。",
+        "installAfterEnable": "安装后启用",
+        "installAfterEnableHint": "安装后默认未启用，请在列表里手动启用。"
       }
     },
     "preferences": "偏好",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "插件源码编译失败",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "磁盘空间或内存不足，无法完成插件编译",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "缺少可用的 Rust 编译工具链或目标平台",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "插件来源完整性校验失败，请核对 SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "插件来源校验失败，请确认发布地址或重新预览。",
     "PLUGIN_UI_ACTION_FAILED": "插件执行该操作失败",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "该操作需要插件的后台进程，但该插件当前未运行（未声明 worker 或已被停用）",
     "PROVIDER_ADAPTER_NOT_FOUND": "提供商适配器未找到",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "超出费用或 Token 配额",
     "BOT_SKILL_NOT_FOUND": "未找到该 Bot 的技能归属",
     "BOT_SKILL_PRESET_INVALID": "技能预设格式不合法",
-    "PLUGIN_ACCESS_DENIED": "插件目录被占用或权限不足，请关闭占用该插件的程序后重试"
+    "PLUGIN_ACCESS_DENIED": "插件目录被占用或权限不足，请关闭占用该插件的程序后重试",
+    "LOCAL_INFERENCE_DISABLED": "当前构建未启用本地推理能力",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "当前构建不支持本地微调训练"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -5421,19 +5417,19 @@
       "disabled": "插件已禁用",
       "enabled": "插件已启用",
       "install": "安装",
-      "installFirst": "安装插件以开始使用",
       "name": "名称",
       "noPlugins": "暂无已安装的插件",
-      "openPluginsFolder": "打开文件夹",
       "panels": "面板",
-      "pluginDirs": "插件目录",
-      "pluginDirsDescription": "管理插件目录",
       "refresh": "刷新",
       "refreshSuccess": "插件已刷新",
       "status": "状态",
       "title": "仪表盘插件",
       "unload": "卸载",
-      "unloaded": "插件已卸载"
+      "unloaded": "插件已卸载",
+      "releaseOnly": "仅支持 HTTPS 发布地址（以 /release.json 结尾）。",
+      "installedNeedEnable": "已安装，请手动启用。",
+      "releasePlaceholder": "发布地址（https://.../release.json）",
+      "releaseHint": "SHA-256 与完整性由应用自动校验，安装后需手动启用。"
     },
     "data": {
       "title": "数据管理"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "安装失败：{{error}}",
       "loadFailed": "加载插件失败：{{error}}",
-      "openFolderFailed": "打开文件夹失败：{{error}}",
       "refreshFailed": "刷新失败：{{error}}",
       "toggleFailed": "切换状态失败：{{error}}",
       "unloadFailed": "卸载失败：{{error}}",

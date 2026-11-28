@@ -35,13 +35,13 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     create_app_state_with_resource_dir(db_result, None, None).await
 }
 
-/// 同 [`create_app_state`]，但允许传入**应用资源目录**（发布版用它定位内置插件）。
+/// 同 [`create_app_state`]，但接受应用句柄供启动期初始化使用。
 ///
-/// 为什么单开一个入口而不是改签名：`create_app_state` 另有 3 个非 Tauri 调用方
-/// （两个离线 bin 与 `server_main`），它们没有 `app` 句柄，传 `None` 即可保持原语义。
+/// `resource_dir` 形参保留为兼容既有 Tauri 调用点：远程-only 模型下它不再参与插件发现，
+/// 也不从应用资源目录安装任何内置插件。保留入口而不改签名，避免影响离线 bin 调用方。
 pub async fn create_app_state_with_resource_dir(
     db_result: DatabaseInitResult,
-    resource_dir: Option<PathBuf>,
+    _resource_dir: Option<PathBuf>,
     app: Option<tauri::AppHandle>,
 ) -> Result<AppState, String> {
     let t_start = std::time::Instant::now();
@@ -419,13 +419,10 @@ pub async fn create_app_state_with_resource_dir(
 
     let config_home = app_dir.clone();
     let mut plugin_config = PluginManagerConfig::new(config_home.clone());
-    // 禁用状态写在 `<config_home>/settings.json` 的 `enabledPlugins`：不在这里读回，重启后
-    // bundled 插件全部退回 `defaultEnabled=true`，侧栏会留下已禁用插件的入口，而它的
-    // worker / 能力并未启动（点进去即空壳或沙箱超时）。
+    // 禁用/启用状态写在 `<config_home>/settings.json` 的 `enabledPlugins`。远程-only 模型下
+    // 只有显式 enable 的已安装插件才参与启动；这里不再注入 bundled / external 目录，
+    // 避免旧版本残留的插件凭「目录里有 plugin.json」重新进入发现链。
     plugin_config.enabled_plugins = PluginManagerConfig::load_enabled_plugins(&config_home);
-    plugin_config.bundled_root =
-        Some(PluginManagerConfig::resolve_bundled_root(resource_dir.as_deref()));
-    plugin_config.external_dirs = axagent_kit::skill_dirs::all_skills_dirs();
     let npm_registry = Arc::new(axagent_npm::NpmRegistry::new());
     let plugin_manager = PluginManager::new(plugin_config)
         .with_npm_registry(npm_registry)

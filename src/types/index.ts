@@ -2129,9 +2129,9 @@ export interface PluginManifestDto {
   }[];
 }
 
-/** `plugin_validate_source` 的返回值：预览通过后冻结 expectedSha256，避免确认内容漂移。 */
+/** `plugin_validate_source` 的返回值：后端签发的预览 token，前端只原样回传。 */
 export interface PluginSourceValidationDto extends PluginManifestDto {
-  expectedSha256: string | null;
+  previewToken: string;
 }
 
 export interface InstallOutcomeDto {

@@ -7,7 +7,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "npm run build && node scripts/stage-plugin-bundles.mjs",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -43,8 +43,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "pricing.toml",
-      "plugins"
+      "pricing.toml"
     ],
     "icon": [
       "icons/32x32.png",

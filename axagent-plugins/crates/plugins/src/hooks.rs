@@ -610,11 +610,14 @@ mod tests {
         // stock/opc 的 dev 产物暂存到那里 ⇒ 计数类断言随盘上产物涨落，测试必须走隔离构造。
         let mut manager = PluginManager::new(isolated_config(&config_home));
         manager
-            .install(first_source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(first_source_root.to_str().expect("utf8 path"))
             .expect("first plugin install should succeed");
         manager
-            .install(second_source_root.to_str().expect("utf8 path"))
+            .install_test_fixture(second_source_root.to_str().expect("utf8 path"))
             .expect("second plugin install should succeed");
+        // 远程-only 模型下安装不等于启用；钩子只会从显式启用的插件聚合。
+        manager.enable("first@external").expect("启用 first");
+        manager.enable("second@external").expect("启用 second");
         let registry = manager.plugin_registry().expect("registry should build");
 
         let runner = HookRunner::from_registry(&registry).expect("plugin hooks should load");

@@ -1024,8 +1024,7 @@
         "eventStatsNone": "لا اشتراكات في الأحداث",
         "install": "تثبيت",
         "installFailed": "فشل التثبيت: {{error}}",
-        "installPlaceholder": "تثبيت: @scope/name أو Git URL أو مسار محلي",
-        "releasePlaceholder": "عنوان الإصدار: axagent-release+https://.../release.json",
+        "releasePlaceholder": "عنوان الإصدار (https://.../release.json)",
         "releaseHint": "يقرأ عنوان الإصدار بيان إصدار HTTPS ويتحقق من الحزمة باستخدام SHA-256 المُعلن.",
         "installSuccess": "تم تثبيت {{id}} v{{version}}",
         "installTitle": "تثبيت {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "ابحث حسب معرّف الوصلة / الإضافة",
         "registrySeam": "وصلة",
         "installSource": "مصدر التثبيت",
-        "sha256Placeholder": "SHA-256 المتوقع (64 حرفًا سداسيًا عشريًا)",
-        "sha256Hint": "تتطلب المصادر البعيدة SHA-256. يمكن ترك المصادر المحلية فارغة، وإذا تم إدخال قيمة فيجب أن تكون صالحة.",
-        "sha256Invalid": "يجب أن يتكون SHA-256 من 64 حرفًا سداسيًا عشريًا بالضبط",
-        "sha256Required": "يتطلب هذا المصدر البعيد SHA-256 قبل التثبيت",
-        "sha256FromRelease": "تم توفير SHA-256 بواسطة بيان الإصدار",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "ابحث عن الإضافات المثبتة بالاسم / المصدر / الإذن / الصفحة",
         "listEmpty": "لا توجد إضافات مثبتة",
         "source": "المصدر",
@@ -1068,8 +1061,6 @@
         "pages": "الصفحات",
         "sourceTypeFilter": "نوع المصدر",
         "sourceTypeAll": "كل المصادر",
-        "sourceTypeRemote": "بعيد",
-        "sourceTypeLocal": "محلي",
         "sourceTypeRelease": "الإصدار",
         "enabledFilter": "حالة التمكين",
         "enabledAll": "كل الحالات",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "تم تحديث {{id}} v{{version}}",
         "updateFailed": "فشل التحديث",
         "updateSourceMissing": "تعذرت قراءة مصدر الإضافة",
-        "validate": "التحقق"
+        "validate": "التحقق",
+        "remoteOnlyHint": "يُدعم فقط عنوان HTTPS ينتهي بـ /release.json. يتم التحقق من SHA-256 تلقائيًا ولا حاجة لإدخاله.",
+        "installAfterEnable": "يُدعم فقط عنوان HTTP",
+        "installAfterEnableHint": "بعد التثبيت تظل الإضافة معطلة ويجب تفعيلها يدويًا."
       }
     },
     "preferences": "التفضيلات",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "فشل بناء الشيفرة المصدرية للإضافة",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "مساحة القرص أو الذاكرة غير كافية لبناء الإضافة",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "سلسلة أدوات Rust أو النظام الأساسي الهدف غير متاح",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "تعذر التحقق من سلامة مصدر الإضافة؛ تحقق من SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "فشل التحقق من مصدر الإضافة؛ تحقق من عنوان الإصدار أو أعد المعاينة.",
     "PLUGIN_UI_ACTION_FAILED": "فشلت الإضافة في تنفيذ هذا الإجراء",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "يتطلب هذا الإجراء عملية الخلفية الخاصة بالإضافة، لكن الإضافة غير قيد التشغيل (لم يُعرَّف worker أو أنها معطّلة)",
     "PROVIDER_ADAPTER_NOT_FOUND": "محول الموفر غير موجود",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "تم تجاوز حصة التكلفة أو الرموز",
     "BOT_SKILL_NOT_FOUND": "لم يتم العثور على ربط مهارة الروبوت",
     "BOT_SKILL_PRESET_INVALID": "تنسيق الإعداد المسبق للمهارة غير صالح",
-    "PLUGIN_ACCESS_DENIED": "دليل الإضافة مقفل أو غير قابل للوصول. أغلق البرنامج الذي يستخدمه ثم أعد المحاولة."
+    "PLUGIN_ACCESS_DENIED": "دليل الإضافة مقفل أو غير قابل للوصول. أغلق البرنامج الذي يستخدمه ثم أعد المحاولة.",
+    "LOCAL_INFERENCE_DISABLED": "الاستدلال المحلي غير مفعّل في هذا البناء.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "الضبط الدقيق المحلي غير مفعّل في هذا البناء."
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -5421,19 +5417,19 @@
       "disabled": "تم تعطيل الإضافة",
       "enabled": "تم تفعيل الإضافة",
       "install": "تثبيت",
-      "installFirst": "ثبّت إضافة للبدء",
       "name": "الاسم",
       "noPlugins": "لا توجد إضافات مثبتة",
-      "openPluginsFolder": "فتح المجلد",
       "panels": "اللوحات",
-      "pluginDirs": "دلائل الإضافات",
-      "pluginDirsDescription": "إدارة دلائل الإضافات",
       "refresh": "تحديث",
       "refreshSuccess": "تم تحديث الإضافات",
       "status": "الحالة",
       "title": "إضافات لوحة المعلومات",
       "unload": "إلغاء التحميل",
-      "unloaded": "تم إلغاء تحميل الإضافة"
+      "unloaded": "تم إلغاء تحميل الإضافة",
+      "releaseOnly": "تُدعم فقط عناوين HTTPS التي تنتهي بـ /release.json.",
+      "installedNeedEnable": "تم التثبيت؛ فعّله يدويًا.",
+      "releasePlaceholder": "عنوان الإصدار (https://.../release.json)",
+      "releaseHint": "يتم التحقق من SHA-256 والسلامة تلقائيًا؛ فعّل الإضافة يدويًا بعد التثبيت."
     },
     "data": {
       "title": "إدارة البيانات"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "فشل التثبيت: {{error}}",
       "loadFailed": "فشل تحميل الإضافات: {{error}}",
-      "openFolderFailed": "فشل فتح المجلد: {{error}}",
       "refreshFailed": "فشل التحديث: {{error}}",
       "toggleFailed": "فشل تبديل الحالة: {{error}}",
       "unloadFailed": "فشل الإلغاء: {{error}}",

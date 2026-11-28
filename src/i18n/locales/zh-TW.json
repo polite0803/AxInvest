@@ -1024,8 +1024,7 @@
         "eventStatsNone": "未訂閱事件",
         "install": "安裝",
         "installFailed": "安裝失敗: {{error}}",
-        "installPlaceholder": "安裝: @scope/name 或 Git URL 或本機路徑",
-        "releasePlaceholder": "發布地址: axagent-release+https://.../release.json",
+        "releasePlaceholder": "發布地址（https://.../release.json）",
         "releaseHint": "發布地址會讀取 HTTPS 發布清單，並使用清單聲明的 SHA-256 校驗成品包。",
         "installSuccess": "已安裝 {{id}} v{{version}}",
         "installTitle": "安裝 {{name}}",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "依接縫 ID / 外掛 ID 搜尋",
         "registrySeam": "接縫",
         "installSource": "安裝來源",
-        "sha256Placeholder": "預期 SHA-256（64 位十六進位字元）",
-        "sha256Hint": "遠端來源必須填寫 SHA-256；本機來源可留空，填寫後必須合法。",
-        "sha256Invalid": "SHA-256 必須是 64 位十六進位字元",
-        "sha256Required": "此遠端來源在安裝前必須填寫 SHA-256",
-        "sha256FromRelease": "SHA-256 由發布清單提供",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "按名稱 / 來源 / 權限 / 頁面搜尋外掛",
         "listEmpty": "暫無已安裝外掛",
         "source": "來源",
@@ -1068,8 +1061,6 @@
         "pages": "頁面",
         "sourceTypeFilter": "來源類型",
         "sourceTypeAll": "全部來源",
-        "sourceTypeRemote": "遠端",
-        "sourceTypeLocal": "本機",
         "sourceTypeRelease": "發布來源",
         "enabledFilter": "啟用狀態",
         "enabledAll": "全部狀態",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "更新成功：{{id}} v{{version}}",
         "updateFailed": "更新失敗",
         "updateSourceMissing": "無法讀取外掛安裝來源",
-        "validate": "驗證"
+        "validate": "驗證",
+        "remoteOnlyHint": "僅支援 HTTPS 發布地址，且須以 /release.json 結尾。SHA-256 由應用程式自動校驗，無需填寫。",
+        "installAfterEnable": "安装后启用",
+        "installAfterEnableHint": "安裝後預設未啟用，請在清單中手動啟用。"
       }
     },
     "preferences": "偏好設定",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "外掛原始碼編譯失敗",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "磁碟空間或記憶體不足，無法完成外掛編譯",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "缺少可用的 Rust 編譯工具鏈或目標平台",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "外掛來源完整性校驗失敗，請核對 SHA-256",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "外掛來源校驗失敗，請確認發布地址或重新預覽。",
     "PLUGIN_UI_ACTION_FAILED": "外掛執行此操作失敗",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "此操作需要外掛的背景處理程序，但此外掛目前未執行（未宣告 worker 或已停用）",
     "PROVIDER_ADAPTER_NOT_FOUND": "提供者適配器未找到",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "超出費用或 Token 配額",
     "BOT_SKILL_NOT_FOUND": "未找到該 Bot 的技能歸屬",
     "BOT_SKILL_PRESET_INVALID": "技能預設格式不合法",
-    "PLUGIN_ACCESS_DENIED": "插件目錄被佔用或權限不足，請關閉佔用該插件的程式後重試"
+    "PLUGIN_ACCESS_DENIED": "插件目錄被佔用或權限不足，請關閉佔用該插件的程式後重試",
+    "LOCAL_INFERENCE_DISABLED": "目前組建未啟用本機推理能力",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "目前組建不支援本機微調訓練"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -5421,19 +5417,19 @@
       "disabled": "插件已停用",
       "enabled": "插件已啟用",
       "install": "安裝",
-      "installFirst": "安裝插件以開始使用",
       "name": "名稱",
       "noPlugins": "暫無已安裝的插件",
-      "openPluginsFolder": "開啟資料夾",
       "panels": "面板",
-      "pluginDirs": "插件目錄",
-      "pluginDirsDescription": "管理插件目錄",
       "refresh": "重新整理",
       "refreshSuccess": "插件已重新整理",
       "status": "狀態",
       "title": "儀表盤插件",
       "unload": "卸載",
-      "unloaded": "插件已卸載"
+      "unloaded": "插件已卸載",
+      "releaseOnly": "僅支援 HTTPS 發布地址（以 /release.json 結尾）。",
+      "installedNeedEnable": "已安裝，請手動啟用。",
+      "releasePlaceholder": "發布地址（https://.../release.json）",
+      "releaseHint": "SHA-256 與完整性由應用程式自動校驗，安裝後需手動啟用。"
     },
     "data": {
       "title": "數據管理"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "安裝失敗：{{error}}",
       "loadFailed": "載入外掛程式失敗：{{error}}",
-      "openFolderFailed": "開啟資料夾失敗：{{error}}",
       "refreshFailed": "重新整理失敗：{{error}}",
       "toggleFailed": "切換狀態失敗：{{error}}",
       "unloadFailed": "卸載失敗：{{error}}",

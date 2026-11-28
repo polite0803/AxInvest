@@ -36,11 +36,9 @@ next-env.d.ts
 
 # Build outputs
 dist/
-# 内置插件暂存区：`npm run plugin:bundle:stage` 把 worker 产物摆进
-# `src-tauri/plugins/bundled/`，供**发布版**打包进 resources。落点必须与
-# `tauri.conf.json` 的 `bundle.resources: ["plugins"]` 逐字对齐 —— Tauri 打包
-# 会保留相对配置目录的路径，多一层 `resources/` 宿主就找不到。
-# 二进制不入库（平台相关 + 体积），构建前由脚本生成。
+# 插件显式暂存区：`npm run plugin:bundle:stage` 把 worker 产物摆进
+# `src-tauri/plugins/bundled/`，仅用于本地验证/迁移；它不再进入 Tauri resources。
+# 二进制不入库（平台相关 + 体积），由显式插件发布/暂存脚本生成。
 src-tauri/plugins/
 # 开发期落点：`npm run plugin:bundle:dev` 把产物摆进 `plugins` crate 的 `bundled/`
 # （`PluginManager::bundled_root()` 的编译期默认值）。`tauri dev` 的 resource 目录里

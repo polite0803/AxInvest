@@ -77,6 +77,8 @@ description = "AxInvest - AI Desktop Client"
 
 [features]
 default = ["notification", "ui-automation"]
+# 本地 Candle/tokenizers 推理默认不进宿主；需要时显式启用并在调用方补齐对应命令实现。
+local-inference = ["axagent-search/local-inference"]
 notification = ["dep:tauri-plugin-notification"]
 browser-use = []
 ui-automation = ["axagent-kit/ui-automation", "axagent-providers/ui-automation"]
@@ -197,7 +199,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
-sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "mysql", "sqlite"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "sqlite"] }
 sysinfo = "0.39"
 tar = "0.4"
 tauri = { version = "2.11.5", features = ["tray-icon", "image-png", "protocol-asset"] }

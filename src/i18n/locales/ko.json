@@ -1024,8 +1024,7 @@
         "eventStatsNone": "이벤트 구독 없음",
         "install": "설치",
         "installFailed": "설치 실패: {{error}}",
-        "installPlaceholder": "설치: @scope/name 또는 Git URL 또는 로컬 경로",
-        "releasePlaceholder": "릴리스 주소: axagent-release+https://.../release.json",
+        "releasePlaceholder": "릴리스 주소(https://.../release.json)",
         "releaseHint": "릴리스 주소는 HTTPS 릴리스 매니페스트를 읽고 명시된 SHA-256으로 아티팩트를 검증합니다.",
         "installSuccess": "{{id}} v{{version}} 설치됨",
         "installTitle": "{{name}} 설치",
@@ -1051,12 +1050,6 @@
         "registrySearchPlaceholder": "시임 ID / 플러그인 ID로 검색",
         "registrySeam": "시임",
         "installSource": "설치 소스",
-        "sha256Placeholder": "예상 SHA-256(16진수 64자)",
-        "sha256Hint": "원격 소스에는 SHA-256이 필요합니다. 로컬 소스는 비워 둘 수 있지만 입력한 값은 유효해야 합니다.",
-        "sha256Invalid": "SHA-256은 16진수 64자여야 합니다",
-        "sha256Required": "이 원격 소스는 설치 전에 SHA-256이 필요합니다",
-        "sha256FromRelease": "SHA-256은 릴리스 매니페스트에서 제공됩니다",
-        "sha256Label": "SHA-256",
         "listSearchPlaceholder": "설치된 플러그인을 이름 / 소스 / 권한 / 페이지로 검색",
         "listEmpty": "설치된 플러그인이 없습니다",
         "source": "소스",
@@ -1068,8 +1061,6 @@
         "pages": "페이지",
         "sourceTypeFilter": "소스 유형",
         "sourceTypeAll": "모든 소스",
-        "sourceTypeRemote": "원격",
-        "sourceTypeLocal": "로컬",
         "sourceTypeRelease": "릴리스",
         "enabledFilter": "활성 상태",
         "enabledAll": "모두",
@@ -1087,7 +1078,10 @@
         "updateSuccess": "{{id}} v{{version}} 업데이트됨",
         "updateFailed": "업데이트 실패",
         "updateSourceMissing": "플러그인 소스를 읽을 수 없습니다",
-        "validate": "검증"
+        "validate": "검증",
+        "remoteOnlyHint": "HTTPS release.json 주소만 지원됩니다. SHA-256은 앱이 자동으로 검증하므로 직접 입력할 필요가 없습니다.",
+        "installAfterEnable": "HTTPS release.json 주",
+        "installAfterEnableHint": "설치 후에는 기본적으로 비활성화됩니다. 목록에서 직접 활성화하세요."
       }
     },
     "preferences": "환경설정",
@@ -2918,7 +2912,7 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "플러그인 소스 빌드에 실패했습니다",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "디스크 공간 또는 메모리가 부족하여 플러그인을 빌드할 수 없습니다",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "사용 가능한 Rust 툴체인 또는 대상 플랫폼이 없습니다",
-    "PLUGIN_SOURCE_INTEGRITY_FAILED": "플러그인 소스 무결성을 확인하지 못했습니다. SHA-256을 확인하세요",
+    "PLUGIN_SOURCE_INTEGRITY_FAILED": "플러그인 소스 검증에 실패했습니다. 릴리스 주소를 확인하거나 다시 미리보기를 실행하세요.",
     "PLUGIN_UI_ACTION_FAILED": "플러그인이 이 작업을 수행하지 못했습니다",
     "PLUGIN_UI_ACTION_UNAVAILABLE": "이 작업은 플러그인의 백그라운드 프로세스가 필요하지만, 플러그인이 실행 중이 아닙니다 (worker 미선언 또는 비활성화됨)",
     "PROVIDER_ADAPTER_NOT_FOUND": "제공자 어댑터를 찾을 수 없습니다",
@@ -3135,7 +3129,9 @@
     "BOT_COST_QUOTA_EXCEEDED": "비용 또는 토큰 할당량을 초과했습니다",
     "BOT_SKILL_NOT_FOUND": "해당 봇의 스킬 바인딩을 찾을 수 없습니다",
     "BOT_SKILL_PRESET_INVALID": "스킬 프리셋 형식이 올바르지 않습니다",
-    "PLUGIN_ACCESS_DENIED": "플러그인 디렉터리가 잠겨 있거나 접근할 수 없습니다. 해당 플러그인을 사용 중인 프로그램을 닫고 다시 시도하세요."
+    "PLUGIN_ACCESS_DENIED": "플러그인 디렉터리가 잠겨 있거나 접근할 수 없습니다. 해당 플러그인을 사용 중인 프로그램을 닫고 다시 시도하세요.",
+    "LOCAL_INFERENCE_DISABLED": "이 빌드에서는 로컬 추론이 활성화되지 않았습니다.",
+    "FINE_TUNE_LOCAL_INFERENCE_DISABLED": "이 빌드에서는 로컬 미세 조정이 활성화되지 않았습니다."
   },
   "errorBoundary": {
     "copied": "복사됨",
@@ -5421,19 +5417,19 @@
       "disabled": "플러그인이 비활성화되었습니다",
       "enabled": "플러그인이 활성화되었습니다",
       "install": "설치",
-      "installFirst": "플러그인을 설치하여 시작",
       "name": "이름",
       "noPlugins": "설치된 플러그인 없음",
-      "openPluginsFolder": "폴더 열기",
       "panels": "패널",
-      "pluginDirs": "플러그인 디렉토리",
-      "pluginDirsDescription": "플러그인 디렉토리 관리",
       "refresh": "새로고침",
       "refreshSuccess": "플러그인이 새로고침되었습니다",
       "status": "상태",
       "title": "대시보드 플러그인",
       "unload": "언로드",
-      "unloaded": "플러그인이 언로드되었습니다"
+      "unloaded": "플러그인이 언로드되었습니다",
+      "releaseOnly": "HTTPS release.json 주소만 지원됩니다.",
+      "installedNeedEnable": "설치되었습니다. 직접 활성화하세요.",
+      "releasePlaceholder": "릴리스 주소(https://.../release.json)",
+      "releaseHint": "SHA-256 및 무결성은 자동으로 검증됩니다. 설치 후 직접 활성화하세요."
     },
     "data": {
       "title": "데이터 관리"
@@ -5997,7 +5993,6 @@
     "plugins": {
       "installFailed": "설치 실패: {{error}}",
       "loadFailed": "플러그인 로드 실패: {{error}}",
-      "openFolderFailed": "폴더 열기 실패: {{error}}",
       "refreshFailed": "새로고침 실패: {{error}}",
       "toggleFailed": "상태 전환 실패: {{error}}",
       "unloadFailed": "언로드 실패: {{error}}",

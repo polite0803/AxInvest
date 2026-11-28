@@ -10,7 +10,9 @@ pub mod entity_graph;
 pub mod file_index;
 pub mod hybrid_search;
 pub mod incremental_indexer;
+#[cfg(feature = "local-inference")]
 pub mod inference;
+#[cfg(feature = "local-inference")]
 pub mod lora_trainer;
 pub mod model_downloader;
 pub mod query_enhancement;

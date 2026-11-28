@@ -6,6 +6,18 @@ import type { DashboardPluginInfoDto } from "@/types";
 import { onBrowserEvent } from "../browserEvents";
 import { handleCommand } from "../browserMock";
 
+const SOURCE = "axagent-release+https://example.com/release.json";
+
+async function previewAndInstall(): Promise<void> {
+  const preview = await handleCommand<{ previewToken: string }>("plugin_validate_source", {
+    source: SOURCE,
+  });
+  await handleCommand("plugin_install", {
+    source: SOURCE,
+    previewToken: preview.previewToken,
+  });
+}
+
 describe("browserMock 插件状态广播", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -17,7 +29,7 @@ describe("browserMock 插件状态广播", () => {
       events.push(payload as { pluginId: string; state: string });
     });
     try {
-      await handleCommand("plugin_install", { source: "local:///tmp/demo" });
+      await previewAndInstall();
       await handleCommand("plugin_disable", { pluginId: "plugin-1" });
       await handleCommand("plugin_enable", { pluginId: "plugin-1" });
       await handleCommand("plugin_uninstall", { pluginId: "plugin-1" });
@@ -33,9 +45,12 @@ describe("browserMock 插件状态广播", () => {
   });
 
   it("dashboard_list_plugins 与 plugin_list 读同一份 mock store", async () => {
-    await handleCommand("plugin_install", { source: "local:///tmp/demo" });
+    await previewAndInstall();
     const dashboard = await handleCommand<DashboardPluginInfoDto[]>("dashboard_list_plugins", {});
-    expect(dashboard).toMatchObject([{ id: "plugin-1", enabled: true }]);
+    expect(dashboard).toMatchObject([{ id: "plugin-1", enabled: false }]);
+    await handleCommand("plugin_enable", { pluginId: "plugin-1" });
+    const afterEnable = await handleCommand<DashboardPluginInfoDto[]>("dashboard_list_plugins", {});
+    expect(afterEnable[0]?.enabled).toBe(true);
     await handleCommand("plugin_disable", { pluginId: "plugin-1" });
     const afterDisable = await handleCommand<DashboardPluginInfoDto[]>("dashboard_list_plugins", {});
     expect(afterDisable[0]?.enabled).toBe(false);

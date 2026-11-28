@@ -28,13 +28,6 @@ fn main() {
     //              不会嵌入 manifest。
     //   参考: https://github.com/tauri-apps/tauri/issues/11028
     let ws_val = env::var("__TAURI_WORKSPACE__").unwrap_or_default();
-    // `bundle.resources` 声明了 `plugins`，但产物目录被 .gitignore 排除，CI/新 clone
-    // 里 tauri_build 会在解析配置时直接失败。此处只需一个存在的空目录即可通过校验；
-    // 真正产物仍由 `beforeBuildCommand` 的 stage-plugin-bundles 写入。测试构建
-    // (__TAURI_WORKSPACE__) 不调用 tauri_build::build()，不需要该目录。
-    if ws_val.is_empty() {
-        ensure_bundle_resources();
-    }
     let out_dir = env::var("OUT_DIR").unwrap();
     let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("common-controls.manifest");
     // manifest 先复制到 OUT_DIR 再交给链接器/tauri-build：
@@ -332,16 +325,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/knowledge_integration.rs");
     println!("cargo:rerun-if-changed=src/tray.rs");
     println!("cargo:rerun-if-changed=build.rs");
-}
-
-/// 确保 `bundle.resources` 中声明的插件目录存在（新 clone / CI 中该目录被 gitignore）。
-fn ensure_bundle_resources() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let plugins_dir = manifest_dir.join("plugins");
-    if let Err(e) = fs::create_dir_all(&plugins_dir) {
-        panic!("创建 Tauri 资源目录 {} 失败: {e}", plugins_dir.display());
-    }
-    println!("cargo:rerun-if-changed={}", plugins_dir.display());
 }
 
 /// 顶层 mod.rs 中的模块声明

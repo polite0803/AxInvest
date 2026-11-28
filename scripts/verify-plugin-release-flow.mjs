@@ -273,6 +273,21 @@ function verifyRustContract() {
     discoveryFunction.includes("for record in registry.plugins.values()"),
     "发现链未以 installed registry 为唯一真相源",
   );
+  assert(
+    manager.includes("fn release_only_registry("),
+    "缺少 installed registry 的 release-only 兼容性过滤器",
+  );
+  assert(
+    discoveryFunction.includes("release_only_registry(&loaded)"),
+    "发现链未清理旧的 bundled / LocalPath 注册表记录",
+  );
+  assert(
+    manager.includes("fn ensure_installed_plugin(")
+      && manager
+        .slice(manager.indexOf("pub fn enable("), manager.indexOf("pub fn disable("))
+        .includes("self.ensure_installed_plugin(plugin_id)"),
+    "启用链未把 installed registry 作为唯一门禁",
+  );
   const installFunction = manager.slice(
     manager.indexOf("fn install_staged_with_manifest("),
     manager.indexOf("/// 显式启用一个已安装插件"),

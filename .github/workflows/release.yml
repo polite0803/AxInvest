@@ -200,7 +200,7 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      # Linux x86_64 用默认 release profile（thin LTO）⇒ 2026-10-27 run 实测在
+      # Linux x86_64 用默认 release profile（体积优先 fat LTO）⇒ 2026-10-27 run 实测在
       # `Compiling axagent-runtime` 阶段被 OOM Killer 杀掉（日志仅表现为
       # "The runner has received a shutdown signal"）。ARM64 job 用 4GB 内存也能过，
       # 差别就在它开了「LTO off + jobs=1 + cgu=16」这套降内存参数。
@@ -240,6 +240,12 @@ jobs:
           #   AxInvest: code object is not signed at all
           #   In subcomponent: .../AxInvest.app/Contents/MacOS/axagent-batch-rerun
           echo "RUSTFLAGS=-C link-arg=-Wl,-adhoc_codesign" >> "$GITHUB_ENV"
+
+      # fat LTO + codegen-units=1 是体积优先配置。GitHub Windows runner 内存峰值更高，
+      # 用 jobs=2 压低并发峰值；Linux/macOS 仍保留各自已有的 LTO off/单并发覆盖。
+      - name: Keep fat LTO affordable (Windows)
+        if: runner.os == 'Windows'
+        run: echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
 
       - name: Build with Tauri
         uses: tauri-apps/tauri-action@v0.5

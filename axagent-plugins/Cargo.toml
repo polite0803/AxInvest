@@ -99,6 +99,6 @@ incremental = false
 # workspace 根生效，独立插件仓各自也要写一份；这里与 src-tauri 的 release 口径对齐。
 [profile.release]
 strip = true
-lto = "thin"
+lto = true
 opt-level = "s"
-codegen-units = 16
+codegen-units = 1

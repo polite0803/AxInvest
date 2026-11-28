@@ -166,6 +166,26 @@ fn parse_release_install_source_from(
     }
 }
 
+/// 远程-only 模型的注册表兼容性门禁。
+///
+/// 旧版本会把 bundled / 本地目录插件写进 installed registry；仅发现链 installed-only
+/// 不足以让升级用户看到一个空插件市场 —— 那些历史记录本身就是旧安装来源。这里在
+/// 每次读取 registry 时统一按 release 来源过滤，非 release 记录既不展示、也不可启停，
+/// 并在下一次写回时永久清理。
+fn release_only_registry(registry: &InstalledPluginRegistry) -> InstalledPluginRegistry {
+    let mut filtered = InstalledPluginRegistry::default();
+    filtered.plugins.extend(
+        registry
+            .plugins
+            .iter()
+            .filter(|(_, record)| {
+                matches!(record.source, PluginInstallSource::ReleaseManifestUrl { .. })
+            })
+            .map(|(id, record)| (id.clone(), record.clone())),
+    );
+    filtered
+}
+
 fn validate_release_artifact(
     artifact_url: &str,
     sha256: &str,
@@ -1814,6 +1834,7 @@ impl PluginManager {
         preview_token: &str,
     ) -> Result<UpdateOutcome, PluginError> {
         let mut registry = self.load_registry()?;
+        registry = release_only_registry(&registry);
         let record = registry.plugins.get(plugin_id).cloned().ok_or_else(|| {
             PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
         })?;
@@ -1857,7 +1878,11 @@ impl PluginManager {
     #[doc(hidden)]
     pub fn install_test_fixture(&mut self, source: &str) -> Result<InstallOutcome, PluginError> {
         let path = PathBuf::from(source);
-        let install_source = PluginInstallSource::LocalPath { path: path.clone() };
+        // 测试夹具也走 release 来源：生产 registry 只放行 ReleaseManifestUrl，
+        // 否则夹具装出的本地记录会在下一次发现/启用时被当旧来源清理。
+        let install_source = PluginInstallSource::ReleaseManifestUrl {
+            url: "https://example.com/fixture/release.json".to_string(),
+        };
         let manifest = load_plugin_from_directory(&path)?;
         self.install_staged_with_manifest(&install_source, &path, None, manifest)
     }
@@ -2315,7 +2340,11 @@ impl PluginManager {
     /// 不再按 manifest.default_enabled 兜底，也不从 bundled / external 发现链补插件；
     /// registry 中不存在的 enabledPlugins 条目一律视为孤儿并清理。
     pub fn start_enabled_plugins(&mut self) -> Result<Vec<String>, PluginError> {
-        let registry = self.load_registry()?;
+        let loaded = self.load_registry()?;
+        let registry = release_only_registry(&loaded);
+        if registry.plugins.len() != loaded.plugins.len() {
+            self.store_registry(&registry)?;
+        }
         self.prune_orphan_enabled_plugins(&registry);
 
         let mut enabled_ids: Vec<String> = self
@@ -2374,6 +2403,7 @@ impl PluginManager {
 
     pub fn uninstall(&mut self, plugin_id: &str) -> Result<(), PluginError> {
         let mut registry = self.load_registry()?;
+        registry = release_only_registry(&registry);
         let record = registry.plugins.remove(plugin_id).ok_or_else(|| {
             PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
         })?;
@@ -2528,7 +2558,11 @@ impl PluginManager {
     /// 绝不扫描安装目录下的其余目录 —— 手工放入的本地插件目录、旧版本残留目录、
     /// bundled/external 路径都不能凭“目录里有 plugin.json”变成可用插件。
     fn discover_installed_plugins_with_failures(&self) -> Result<PluginDiscovery, PluginError> {
-        let mut registry = self.load_registry()?;
+        let loaded = self.load_registry()?;
+        let mut registry = release_only_registry(&loaded);
+        if registry.plugins.len() != loaded.plugins.len() {
+            self.store_registry(&registry)?;
+        }
         let mut discovery = PluginDiscovery::default();
         let mut seen_ids = BTreeSet::<String>::new();
         let mut stale_registry_ids = Vec::new();
@@ -2623,7 +2657,8 @@ impl PluginManager {
         &self,
         plugin_id: &str,
     ) -> Result<InstalledPluginRecord, PluginError> {
-        let registry = self.load_registry()?;
+        let mut registry = self.load_registry()?;
+        registry = release_only_registry(&registry);
         registry
             .plugins
             .get(plugin_id)
@@ -7769,6 +7804,41 @@ mod release_source_tests {
             !manager.config.enabled_plugins.get(&outcome.plugin_id).copied().unwrap_or(false),
             "安装后必须默认 disabled"
         );
+        let _ = std::fs::remove_dir_all(&config_home);
+    }
+
+    #[test]
+    fn legacy_non_release_registry_records_are_purged() {
+        let config_home = temp_dir("legacy-registry-home");
+        let mut manager = PluginManager::new(isolated_config(&config_home));
+        let legacy = InstalledPluginRegistry {
+            plugins: BTreeMap::from([(
+                "stock@bundled".to_string(),
+                InstalledPluginRecord {
+                    kind: PluginKind::Bundled,
+                    id: "stock@bundled".to_string(),
+                    name: "stock".to_string(),
+                    version: "3.0.1".to_string(),
+                    description: "旧版内置插件".to_string(),
+                    install_path: config_home.join("legacy-stock"),
+                    source: PluginInstallSource::LocalPath {
+                        path: PathBuf::from(r"C:\Program Files\AxInvest\plugins\bundled\stock"),
+                    },
+                    installed_at_unix_ms: 1,
+                    updated_at_unix_ms: 1,
+                    integrity: None,
+                },
+            )]),
+        };
+        manager.store_registry(&legacy).expect("旧 registry 应可写入");
+
+        let reports = manager.plugin_registry_report().expect("发现链应吞掉旧记录");
+        assert!(reports.summaries().is_empty(), "旧 bundled 记录不得出现在可用列表");
+        let stored = manager.load_registry().expect("清理后的 registry 应可读");
+        assert!(stored.plugins.is_empty(), "旧 bundled 记录应被永久清理");
+        let error = manager.enable("stock@bundled").expect_err("旧 bundled 插件不得启用");
+        assert!(matches!(error, PluginError::NotFound(_)), "实际错误：{error:?}");
+
         let _ = std::fs::remove_dir_all(&config_home);
     }
 }
